@@ -81,10 +81,61 @@ export const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
  * therefore no default number of decimal places either — a "£12.50" box in
  * front of a yen sale is the same class of error as a dollar sign in front of a
  * dirham figure, and both read as considered.
+ *
+ * ── AND NULL WHEN THE "CURRENCY" IS NOT A CODE ────────────────────────────
+ *
+ * The paragraph above was the whole rule and, exactly as in `moneyIn` below, it
+ * only caught the EMPTY string. Everything else non-empty fell through to the
+ * two-place return, so `currencyDecimals('pounds')` was 2, and so were '£',
+ * 'GB' and 'Japanese yen'.
+ *
+ * That is not a formatting nicety, because this function is not only a
+ * formatter. `majorFromMinor`, `wholeFromMinor`, `minorFromWhole`,
+ * `minorFromDecimal`, `readMinorAmount` and `parseMoneyCents` all SCALE by
+ * `10 ** dp` and round the result, so a wrong `dp` is a wrong AMOUNT, not a
+ * wrong number of zeros: 5000 minor units read back as "50.00" whatever the
+ * money was, which is right for GBP, a hundredfold understatement in JPY and
+ * ten times the figure in KWD. Going the other way, a coach typing 82.505 into
+ * a box whose currency column says 'pounds' had it silently read as 8250 —
+ * a different amount, filed as a fact.
+ *
+ * It is reachable from a real row. `moneyIn` below lists the five money columns
+ * in this schema that carry no format check at all, so 'pounds', 'GB' and '£'
+ * all satisfy `not null` and arrive here intact.
+ *
+ * `/^[a-z]{3}$/` — the same three-letter test `normaliseCurrency` in
+ * ./gymRecord.ts and `moneyIn` below both apply, deliberately the same rule and
+ * not a stricter one. See the next paragraph for why it is not an allowlist.
+ *
+ * ── WHY A STATED-BUT-UNRECOGNISED CODE IS STILL 2, AND IS NOT A FALLBACK ──
+ *
+ * `currencyDecimals('zzz')` is 2, and that is an ANSWER rather than the silent
+ * default this change removes. Two places is correct for every ISO 4217
+ * currency outside the two lists above, and those two lists are Stripe's own
+ * and complete. So the only codes reaching that return are real currencies this
+ * build has not been told about by name — 'aed', 'chf', 'sek' — every one of
+ * which has two places. An allowlist would answer null for those and break a
+ * gym on a perfectly good currency, which is the opposite failure and a worse
+ * one: it drops real money rather than mis-spelling it.
+ *
+ * The silence that matters is the one where nobody stated a currency AT ALL, or
+ * stated something that is not one. That is what is now null, and null is never
+ * a zero and never a two.
+ *
+ * `adCurrencyDecimals` in ./adMatch.ts is a deliberate second copy (adMatch is
+ * loaded by three edge functions and Deno cannot resolve an extensionless
+ * relative specifier) and adMatch.test.ts asserts the two agree. It has NOT had
+ * this three-letter test applied — that file belongs to another lane — so the
+ * two now genuinely differ on a non-code, and the parity assertion does not see
+ * it because its list holds no non-code. Same fix, one line, stated here so it
+ * is written down rather than discovered.
  */
 export function currencyDecimals(currency: string | null | undefined): number | null {
   const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
+  // Empty and non-code answer alike, because they are the same answer: nobody
+  // has said how many places this money has. A `!cur` branch on its own is the
+  // half-rule this replaced.
+  if (!/^[a-z]{3}$/.test(cur)) return null;
   if (ZERO_DECIMAL.has(cur)) return 0;
   if (THREE_DECIMAL.has(cur)) return 3;
   return 2;
@@ -102,17 +153,60 @@ export function currencyDecimals(currency: string | null | undefined): number | 
  * white-labelled, so there is no fallback that is not simply wrong for half the
  * gyms running it, and an amount with the wrong code on it is worse than an
  * amount with no code, because it reads as a considered figure.
+ *
+ * ── AND NULL WHEN THE CURRENCY IS NOT A CURRENCY ──────────────────────────
+ *
+ * The paragraph above was the whole rule and it only caught the EMPTY string.
+ * Anything else non-empty was upper-cased and printed as though it were a code,
+ * so `moneyIn(6000, 'pounds', true)` rendered **POUNDS 60.00** — a figure with
+ * a made-up unit in front of it, on a coach's own takings screen, reading
+ * exactly as considered as `GBP 60.00` does.
+ *
+ * It is reachable from a real row. Five money columns in this schema carry no
+ * format check at all (`gym_passes`, `gym_pass_types`, `membership_plans`,
+ * `gym_invoices`, `gym_orders`, and `gym_payments` beside them), so `'pounds'`,
+ * `'GB'` and `'£'` all satisfy `not null` and arrive here intact. `money()` in
+ * src/lib/gymRecord.ts delegates straight to this function, so every gym screen
+ * in the product inherited it.
+ *
+ * `/^[A-Z]{3}$/` — the same test `normaliseCurrency` in ./gymRecord.ts now
+ * applies, and the one `priceBook.ts`, `coachCosts.ts`, `coachInvoice.ts`,
+ * `costBudgets.ts`, `coachReceipts.ts` and `csvImport.ts` already applied. A
+ * non-code is not a currency, so there is no amount to print and the answer is
+ * the same dash a missing currency gets. The AMOUNT is not lost by that: it is
+ * the caller's row, the caller still holds it, and every caller in this tree
+ * renders the dash beside a count rather than dropping the row — which is the
+ * rule, because an amount nobody can spell is still an amount somebody paid.
+ *
+ * The regex is kept here rather than left to `currencyDecimals` because this
+ * function needs the upper-cased CODE to print beside the figure, so it has to
+ * hold the string anyway. The two now apply the same rule, and `currencyDecimals`
+ * is the one that decides it.
+ *
+ * ── AND THE `?? 2` IS GONE ────────────────────────────────────────────────
+ *
+ * What stood here was `currencyDecimals(cur) ?? 2`, with a note that the
+ * fallback was unreachable because the regex above had already run. The note
+ * was true and the line was still wrong: a null coalesced into a 2 is the exact
+ * shape of the bug this whole family exists to prevent, sitting one relaxed
+ * regex away from being live again, and the comment saying it could not fire is
+ * what would keep anybody from looking at it. A refusal cannot be reintroduced
+ * by accident; an `?? 2` can.
  */
 export function moneyIn(amount: number | null | undefined, currency: string | null | undefined, minor: boolean): string | null {
   if (amount == null || !Number.isFinite(amount)) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
+  const code = (currency || '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) return null;
+  const cur = code.toLowerCase();
   // How many decimal places this money has — asked, never assumed. Two is the
   // answer for most of the world and it is the answer for none of Japan, Korea,
   // Vietnam or Kuwait.
-  const dp = currencyDecimals(cur) ?? 2;
+  const dp = currencyDecimals(cur);
+  // Not `?? 2`. There is no amount to print in a money nobody named, and the
+  // dash a missing currency gets is the same dash this gets.
+  if (dp == null) return null;
   const whole = minor ? amount / Math.pow(10, dp) : amount;
-  return `${cur.toUpperCase()} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+  return `${code} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
 
 /** A Stripe amount, in minor units. */
@@ -209,11 +303,136 @@ export function minorFromWhole(whole: number | null | undefined, currency: strin
   return Number.isSafeInteger(scaled) ? scaled : null;
 }
 
-export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined): TypedAmount {
+/**
+ * A decimal figure that came from SOMEWHERE ELSE, in minor units.
+ *
+ * The third door, and the reason there are three rather than one is that the
+ * three have different rights of refusal:
+ *
+ *   `readMinorAmount`   a person typed it. Refuses ambiguity outright — a
+ *                       thousands separator, a fraction longer than the money
+ *                       has places, a dinar figure Stripe could not charge —
+ *                       because the next thing that happens is a card being
+ *                       debited by it and a refusal is cheaper than a guess.
+ *   `minorFromWhole`    a number the database already holds in whole units.
+ *   `minorFromDecimal`  a decimal an OUTSIDE SYSTEM stated, and this one may
+ *                       not refuse the same things. Meta reports "1265.87",
+ *                       Google's micros arrive here as "12.345678", and a
+ *                       Kuwaiti ad account reports thousandths that Stripe's
+ *                       whole-ten rule has nothing to do with. Refusing those
+ *                       would drop a coach's real ad spend on the floor and
+ *                       report it as unknown, which is a hole in a figure they
+ *                       compare their revenue against.
+ *
+ * So this one ROUNDS the places the currency does not have, and rounds them on
+ * the digits: the fraction is padded, the places the money has are kept, and
+ * the first place beyond them decides whether the last kept one goes up. No
+ * float is multiplied at any point, so 12.345 in a two-place currency is 1235
+ * — not 1234.999999999999 truncated to 1234.
+ *
+ * Null when nobody said which money it is, and null is never a zero. Null too
+ * for anything that is not a plain non-negative decimal: an empty field, the
+ * word "unknown" and a negative are all "we do not know what this cost", and a
+ * zero would say the coach got it for free.
+ */
+export function minorFromDecimal(raw: string | number | null | undefined, currency: string | null | undefined): number | null {
+  const dp = currencyDecimals(currency);
+  if (dp == null || raw == null) return null;
+  const s = String(raw).trim().replace(/[,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const dot = s.indexOf('.');
+  const intPart = dot === -1 ? s : s.slice(0, dot);
+  // One place further than the money has, so the rounding digit is always there
+  // to read even when the source stated no fraction at all.
+  const frac = (dot === -1 ? '' : s.slice(dot + 1)).padEnd(dp + 1, '0');
+  const digits = intPart + frac.slice(0, dp);
+  if (digits.length > 15) return null;
+  const base = Number(digits);
+  if (!Number.isSafeInteger(base)) return null;
+  const out = frac.charCodeAt(dp) - 48 >= 5 ? base + 1 : base;
+  return Number.isSafeInteger(out) ? out : null;
+}
+
+/**
+ * `chargeable` is Stripe's whole-ten rule for the three-place currencies.
+ *
+ * Pass false where the figure is not a charge: a coach recording what they
+ * spent on an Instagram ad is stating a fact about their own bank statement,
+ * and a Kuwaiti account can perfectly well have billed them 12.345 KWD. Stripe
+ * has no opinion about that number and refusing it would drop a real cost out
+ * of the coach's own cost-per-client — which is a hole in the figure, not a
+ * safety.
+ *
+ * Every OTHER refusal still applies at both settings, because those are about
+ * whether the digits are an amount at all rather than about what may be
+ * charged.
+ *
+ * ── why the default is TRUE when most call sites pass false ────────────
+ *
+ * This paragraph used to say true was the default because "nearly every box
+ * this reads is a box whose value goes to Stripe". Nobody had counted, and it
+ * was the wrong way round. Seventeen boxes read this function. SIX are charges:
+ * the package price, the price edit beside it, the echo under it and the refund
+ * box, all on app/(trainer)/payments.tsx, plus the plan price and the pass price
+ * on the console's /money. The other ELEVEN are a record of money that has
+ * already moved — a supplier cost, a coach's hourly rate, a shift rate, a
+ * repair, an invoice the gym issues and settles against its own ledger, cash
+ * taken at the desk, the correction that takes it back off again, a returned
+ * code, a trainer's own cost sheet.
+ *
+ * Every one of those eleven was refusing an ordinary Bahraini, Jordanian,
+ * Kuwaiti, Omani or Tunisian figure. A member hands 82.505 KWD across the front
+ * desk in notes; `82505 % 10` is 5; the box says the last place must be a
+ * nought, and Stripe is not in the transaction at all. The only way forward was
+ * to record an amount nobody paid, which is the exact thing this flag was added
+ * to prevent.
+ *
+ * So the count says flip the default and pass `true` at the six. The count is
+ * not what a default is for. A default is what an UNMARKED call site gets, and
+ * the only question that matters is which way an unmarked one fails:
+ *
+ *   default TRUE, and somebody adds an unmarked COST box
+ *     The first gym in Kuwait to type 82.505 is refused — at the box, by a
+ *     sentence naming the currency and the rule, before anything is written.
+ *     Wrong, immediate, visible to the person who can report it, and nothing is
+ *     stored. The fix is one argument.
+ *
+ *   default FALSE, and somebody adds an unmarked CHARGE box
+ *     82.505 is accepted and filed. A plan price is what every member on it is
+ *     billed for ever and a pass price is COPIED onto every pass sold on it,
+ *     with no edit afterwards — so the figure has already spread by the time
+ *     anything notices. What notices is Stripe, refusing the charge, at a
+ *     checkout, in front of a member, possibly months later, and nothing on any
+ *     screen in this app points back at the box that caused it.
+ *
+ * One is a refusal a developer meets on the first run. The other is a member's
+ * payment failing on a price that is already everywhere. The default stays on
+ * the side that fails at the box, and the eleven say `false` in as many words.
+ *
+ * The shape that ends the argument is no default at all — a REQUIRED third
+ * argument, so an eighteenth call site cannot be unmarked in either direction
+ * and the compiler asks the question rather than a comment asking it. That is
+ * not done here only because three of the seventeen sites sit in files this
+ * change may not touch (app/(trainer)/payments.tsx, src/lib/codeReturn.ts and
+ * src/lib/coachInvoice.ts). It is the right end state and it is one argument
+ * per call site away, once one change can reach all of them.
+ */
+export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined, chargeable = true): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();
   const dp = currencyDecimals(currency);
-  if (!cur || dp == null) {
+  if (!cur) {
     return { ok: false, reason: 'No currency is recorded here, so an amount typed in would not be an amount of any money. Nothing can be worked out from it.' };
+  }
+  // A SECOND refusal, not a second wording of the first one. `currencyDecimals`
+  // now answers null for a stated-but-unreadable currency as well as an absent
+  // one, and the two are different situations for the person in front of the
+  // box: one has an empty field to fill in, the other has a field holding
+  // 'pounds' that reads as filled in and has to be found before anything else
+  // works. Telling the second person "no currency is recorded" sends them to a
+  // setting that already has a value in it.
+  if (dp == null) {
+    const shown = cur.length > 24 ? cur.slice(0, 24) + '…' : cur;
+    return { ok: false, reason: `The currency recorded here is “${shown}”, which is not a currency code, so there is no way to tell how many places an amount in it has. Set it to a three-letter code (GBP, JPY, KWD) and this will take an amount.` };
   }
   const raw = String(typed ?? '').trim().replace(/\s/g, '');
   if (!raw) return { ok: false, reason: 'Type an amount.' };
@@ -223,7 +442,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
   // different number from the one on the screen.
   if (!/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
     const shape = dp === 0 ? '500' : '12.' + '5'.padEnd(dp, '0');
-    return { ok: false, reason: `That is not an amount. Type the figure in digits — ${shape}, for instance — with no symbol and no spaces.` };
+    return { ok: false, reason: `That is not an amount. Type the figure in digits (${shape}, for instance) with no symbol and no spaces.` };
   }
   const sep = raw.search(/[.,]/);
   const intPart = sep === -1 ? raw : raw.slice(0, sep);
@@ -239,7 +458,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
     // it grew up on, and neither reading may be chosen on their behalf.
     return {
       ok: false,
-      reason: `${cur} has ${dp} decimal place${dp === 1 ? '' : 's'}, and that has ${fracPart.length}. Type the amount without a thousands separator — 1234.50 rather than 1,234.50.`,
+      reason: `${cur} has ${dp} decimal place${dp === 1 ? '' : 's'}, and that has ${fracPart.length}. Type the amount without a thousands separator: 1234.50 rather than 1,234.50.`,
     };
   }
   const digits = (intPart || '0') + fracPart.padEnd(dp, '0');
@@ -253,7 +472,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
   // Stripe's own rule for the thousandth-unit currencies: the amount is charged
   // in minor units and the last of the three must be a nought. Refused rather
   // than rounded, because rounding it is choosing an amount the coach did not.
-  if (dp === 3 && minorUnits % 10 !== 0) {
+  if (chargeable && dp === 3 && minorUnits % 10 !== 0) {
     return { ok: false, reason: `${cur} is charged in thousandths and the last place must be a nought. 12.340 is an amount; 12.345 is not one that can be charged.` };
   }
   return { ok: true, minorUnits };

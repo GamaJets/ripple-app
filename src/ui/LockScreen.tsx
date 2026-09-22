@@ -12,14 +12,13 @@ import { View, Text, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from './components';
 import { useAppLock } from './appLock';
-import { useAuth } from './auth';
+import { useSignOutAndSay } from './auth';
 import { Icon } from './Icon';
 import { sp, layout, radius, type as ty } from '../theme/scale';
 
 export function LockScreen() {
   const t = useTheme();
   const { unlock, label } = useAppLock();
-  const auth = useAuth();
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -35,6 +34,25 @@ export function LockScreen() {
   // rather than a tap and then a glance.
   useEffect(() => { void attempt(); /* eslint-disable-next-line */ }, []);
 
+  /**
+   * The way out for whoever is holding a phone that is not theirs.
+   *
+   * `useSignOutAndSay` and no `after`, which is the one thing this call site
+   * decides for itself: it navigates NOWHERE. This screen renders instead of
+   * the app rather than over it, the lock drops the moment `signedIn` goes
+   * false (src/ui/appLock.tsx), and each portal layout redirects a reader with
+   * no session to '/' — a gate whose own comment names this button as the
+   * reason it exists. A `router.replace` here would be a second opinion racing
+   * that one, from a screen that has already unmounted.
+   *
+   * What it no longer does is swallow the result. The provider's sign-out used
+   * to be called bare here, inside a `try` that could catch nothing, so one that
+   * never reached the server looked exactly like one that did — on the one
+   * screen in the app that exists for a phone in the wrong hands. What survives
+   * that failure is the stored session, which the next launch restores.
+   */
+  const leave = useSignOutAndSay('lockScreen');
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter, gap: sp.lg }}>
@@ -49,7 +67,7 @@ export function LockScreen() {
             : `Unlock with ${label} to see your training.`}
         </Text>
 
-        <Pressable onPress={attempt} disabled={busy} accessibilityRole="button"
+        <Pressable onPress={attempt} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button"
           accessibilityLabel={`Unlock with ${label}`}
           style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.xl, paddingVertical: 14, minWidth: 200, alignItems: 'center', opacity: busy ? 0.5 : 1 }}>
           <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>
@@ -58,9 +76,10 @@ export function LockScreen() {
         </Pressable>
 
         {/* The way out for whoever is holding a phone that is not theirs. It
-            ends the session, so the next person starts at sign-in. */}
-        <Pressable onPress={() => { try { auth.signOut(); } catch { /* the lock lifts either way */ } }}
-          hitSlop={8} accessibilityRole="button" accessibilityLabel="Sign out"
+            ends the session, so the next person starts at sign-in — and says so
+            when it could not establish that. See `leave` above. */}
+        <Pressable onPress={() => { void leave(); }}
+          hitSlop={8} accessibilityRole="button" accessibilityLabel="Sign Out"
           style={{ paddingVertical: sp.md }}>
           <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Sign Out</Text>
         </Pressable>

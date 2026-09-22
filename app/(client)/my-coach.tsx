@@ -45,20 +45,78 @@
 // keeps the right to write one; they simply reach it from the directory
 // instead, where their former coach's profile still is.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead, AttentionRow, TonedChip, Ring, DayBars, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, grown, fontScale, type as ty, value, numeric, font } from '../../src/theme/scale';
+// 44pt, and the one place the number lives. See the rating row below.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { useReadDeadline } from '../../src/ui/readDeadline';
+// The reader's locale, resolved once with a fallback — never a literal tag.
+import { appLocale } from '../../src/lib/locale';
+// Who this member is, for the one read on this screen that is keyed on THEM
+// rather than on their coach.
+import { useClientData } from '../../src/ui/clientData';
+// ── What the coach can see of the plan the member rewrote ─────────────────
+//
+// `client_plan_edits` (supabase/parts/204) had one reference in the whole repo
+// — the upsert in src/ui/planEdits.tsx — and the blob it writes was read back by
+// nobody, in any of the three apps. The member's own phone shows them their
+// edits out of its own storage; what nothing could tell them is whether the
+// copy their COACH reads ever arrived, which is the only reason the row exists.
+// `usePlanEdits.shared` cannot answer that: it is a flag about the last write
+// this session made on this handset, so a reinstall or a second phone left a
+// month of corrections unaccounted for.
+import { fetchSharedPlanEdits, type SharedPlanEdits } from '../../src/ui/planEditsShared';
+import { coachSeesPlanNote, planEditItemLine, planEditItems } from '../../src/lib/planEditsReadBack';
+import { editCount } from '../../src/lib/planEdits';
 import {
-  fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview, todayKey,
+  fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview,
 } from '../../src/ui/reviews';
+// ── Everything the member wrote, and everything the coach wrote to them ────
+//
+// Two things this screen was the natural home for and neither had one.
+//
+// `my_review_of(p_coach)` needs a coach id, and the only two places in the
+// client app that hold one are `my_coach_profile()` — which stops answering
+// when coaching ends — and a row of the directory, which lists opted-in coaches
+// only. So a review of a coach the member has LEFT, or of one who never ticked
+// "list me", was unreachable to its own author while the coach could still read
+// it and reply to it. supabase/parts/2790 adds the read that asks the question
+// the member actually has.
+//
+// `coach_feedback` had the opposite problem: readable, and shown one note at a
+// time. app/(client)/dashboard.tsx renders `coachNotes[0]` clipped at four
+// lines and nothing else in any of the three apps renders the rest.
+import { fetchMyReviews } from '../../src/ui/myReviews';
+import {
+  myReviewsNote, myReviewRatingLine, myReviewVisibilityLine, myReviewEditedLine,
+  type MyCoachReview,
+} from '../../src/lib/myReviews';
+import { CoachAdvice } from '../../src/ui/CoachAdvice';
+// The provider `CoachAdvice` reads. Mounted app-wide, so this is the same
+// instance and the same rows — nothing is read twice by asking for it here.
+// It is imported for its `reload` alone: see the pull handler below.
+import { useCoachFeedback } from '../../src/ui/feedback';
+import { useToday, useNow } from '../../src/ui/today';
+// The "Right Now" block: what is open between this member and their coach.
+// All three are reads the app already holds — see `checkinAsk` below.
+import { useCheckIns } from '../../src/ui/checkins';
+import { useOutbox } from '../../src/ui/outbox';
+import { unsentNote } from '../../src/lib/offlineQueue';
+import { daysAgo, checkInAge, rating as scoreOf, ratingLabel, RATING_MAX } from '../../src/lib/coachCheckins';
+import { isPending } from '../../src/lib/wellnessSync';
+import { dateParts } from '../../src/lib/localDate';
+import { fmtFullDay, fmtAxisDay } from '../../src/lib/format';
+import { coachedRemotely } from '../../src/lib/types';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
   credentialState, CLAIM_NOTE, type Credential,
@@ -66,6 +124,7 @@ import {
 import {
   reviewGate, reviewGateNote, writeOutcome, validateReview, draftProblemText,
   IDENTITY_NOTE, EDIT_NOTE, WITHDRAW_NOTE, MAX_BODY, MIN_RATING, MAX_RATING,
+  ownRatingLine,
   type MyReview,
 } from '../../src/lib/reviews';
 import { fetchClientCoachBrand, brandInputFor, type ClientCoachBrand } from '../../src/ui/coachBrand';
@@ -97,9 +156,38 @@ function monogram(name: string | null): string {
 export default function MyCoach() {
   const t = useTheme();
   const router = useRouter();
+  // Unread messages from the coach, counted on the server from the member's own
+  // read watermark (part 88, `client_unread_count`). Reading the count does not
+  // move the watermark, which is why it is this and not mounting the thread.
+  // Null until it answers, and null again on an error: no row is drawn then,
+  // because a failed count is not "nothing unread".
+  const [unread, setUnread] = useState<number | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase.rpc('client_unread_count');
+      if (!alive) return;
+      if (error) { reportError('myCoach.unread', error); setUnread(null); return; }
+      setUnread(typeof data === 'number' ? data : null);
+    })();
+    return () => { alive = false; };
+  }, []);
+  const cd = useClientData();
+  const ci = useCheckIns();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
-  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
-  const today = useMemo(() => todayKey(), []);
+  // Under a ceiling — see src/lib/readDeadline.ts. Nothing here can leave
+  // 'loading' without a request settling, and a captive portal settles none.
+  const [readStatus, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const status = useReadDeadline(readStatus);
+  // `useToday`, not `useMemo(() => todayKey(), [])`. That empty dependency list
+  // fixes the day for the life of the MOUNT, and nothing here unmounts when a
+  // phone goes in a pocket. This string is the second argument to every
+  // judgement below — `insuranceClaim`, `credentialState`, `expiryLine` — so a
+  // member who left this screen open overnight was shown "Insurance stated by
+  // the coach" about cover that lapsed at midnight, presented as a current
+  // fact about somebody they are about to pay to put them under a barbell.
+  const today = useToday();
 
   // `null` under 'error' rather than `[]`, so nothing downstream can turn a
   // refused read into "this coach has declared no insurance" — which is a
@@ -174,7 +262,9 @@ export default function MyCoach() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+    // `tick` too, so one gesture brings back the coach's branding along with
+    // everything else. It was read once at mount and never again.
+  }, [tick]);
 
   // A separate effect from the profile above, and keyed on the coach's id: the
   // three reads below are about a coach we may not have yet, and folding them
@@ -199,6 +289,88 @@ export default function MyCoach() {
     return () => { cancelled = true; };
   }, [coachId, tick]);
 
+  // ── the copy of the member's plan changes that their coach reads ─────────
+  //
+  // Keyed on the MEMBER, not the coach: the row is theirs and exists whether or
+  // not anybody is currently coaching them, and folding this into the effect
+  // above would make it wait on a coach id it does not need. `tick` so one pull
+  // brings it back with everything else.
+  const [planEdits, setPlanEdits] = useState<SharedPlanEdits | null>(null);
+  const [planEditStatus, setPlanEditStatus] = useState<LoadStatus>('loading');
+  const myId = cd.id;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPlanEditStatus('loading');
+      const out = await fetchSharedPlanEdits(myId);
+      if (cancelled) return;
+      setPlanEdits(out.shared);
+      setPlanEditStatus(out.status);
+    })();
+    return () => { cancelled = true; };
+  }, [myId, tick]);
+
+  // ── every review this member has written, not just the one above ────────
+  //
+  // Keyed on nobody. `my_coach_reviews()` (supabase/parts/2790) takes no
+  // argument — every row it returns was written by the caller — which is what
+  // makes it able to answer about coaches this screen has no id for: the ones
+  // the member has left, and the ones who never listed themselves.
+  //
+  // Its own effect rather than a fourth entry in the coach-keyed Promise.all
+  // above, and for the same reason that block exists: this read is about the
+  // MEMBER, it does not need a coach id, and behind one it would not run at all
+  // for the member who most needs it — somebody with no current coach, who is
+  // exactly the person holding reviews they cannot reach.
+  const [written, setWritten] = useState<MyCoachReview[]>([]);
+  const [writtenStatus, setWrittenStatus] = useState<LoadStatus>('loading');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setWrittenStatus('loading');
+      const r = await fetchMyReviews();
+      if (cancelled) return;
+      setWritten(r.rows);
+      setWrittenStatus(r.status);
+    })();
+    return () => { cancelled = true; };
+  }, [tick]);
+
+  // The current coach's review has its own block further up, with the form and
+  // the withdraw button on it. Showing it a second time in the list below would
+  // put the same words on one screen twice and give the member two places to
+  // change one thing. It is filtered out only where we actually KNOW who the
+  // current coach is: under a failed profile read `coachId` is null, the block
+  // above is not drawn at all, and nothing is hidden here to match a section
+  // that is not on screen.
+  const otherWritten = useMemo(
+    () => written.filter((r) => r.coachId !== coachId),
+    [written, coachId],
+  );
+
+  // The reads behind this screen: the coach's profile, their branding, their
+  // credentials, this member's own review and whether they may leave one, the
+  // plan changes their coach can see, and every review they have written.
+  // `tick` runs all but the first; `load` is the first.
+  //
+  // ── and the one the pull did not reach ────────────────────────────────
+  //
+  // What the coach has WRITTEN to this member is the largest block on the
+  // screen and it comes out of `CoachFeedbackProvider`, which is mounted at
+  // the root and keyed on nothing this screen owns — so `tick` could not move
+  // it. A member pulling this screen down after their coach said they had left
+  // a note got every other read refreshed and that one left exactly as it was,
+  // with no way short of killing the app to bring it in. `reload` is the
+  // provider's own, so this asks the same instance `CoachAdvice` is drawing
+  // from rather than opening a second reader with a second opinion.
+  const { reload: reloadAdvice } = useCoachFeedback();
+  const pull = usePullToRefresh(useCallback(() => {
+    // The check-ins too: the "Right Now" row's age is read out of that
+    // provider, and a pull that left it alone would re-read everything on this
+    // screen except the one line that says whether something is due.
+    void load(); setTick((n) => n + 1); reloadAdvice(); ci.reload();
+  }, [load, reloadAdvice, ci.reload]));
+
   const openForm = () => {
     setRating(mine && !mine.withdrawnAt ? mine.rating : null);
     setBody(mine && !mine.withdrawnAt ? (mine.body ?? '') : '');
@@ -219,15 +391,15 @@ export default function MyCoach() {
 
   const withdraw = () => {
     if (!coachId) return;
-    Alert.alert('Withdraw your review?', WITHDRAW_NOTE, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Withdraw Your Review?', WITHDRAW_NOTE, [
+      { text: 'Keep It', style: 'cancel' },
       {
         text: 'Withdraw', style: 'destructive', onPress: () => {
           void (async () => {
             const ok = await withdrawReview(coachId);
             if (!ok) {
               // Nothing changes on screen until the server has said it did.
-              Alert.alert('Not withdrawn', 'Your review is still on their profile. Try again in a moment.');
+              Alert.alert('Not Withdrawn', 'Your review is still on their profile. Try again in a moment.');
               return;
             }
             setTick((n) => n + 1);
@@ -238,6 +410,30 @@ export default function MyCoach() {
   };
 
   const go = (route: string) => router.push(route as never);
+
+  /**
+   * The day the member's plan changes last reached their coach, or null.
+   *
+   * Null and never a dash: `coachSeesPlanNote` writes a sentence with no date
+   * in it rather than one built around a hole — see scripts/check-prose.mjs.
+   * The locale is the READER's, and the parse is `Date.parse` on a timestamptz,
+   * which is a full instant rather than a bare `YYYY-MM-DD` compared as a
+   * string.
+   */
+  const sentOn = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  };
+
+  /** The changes themselves, listed only where the row was actually read and
+   *  actually parsed. An empty list under anything else is a silence, not an
+   *  answer — see src/ui/loadStatus.ts. */
+  const planEditRows = planEditStatus === 'ready' && planEdits?.readable
+    ? planEditItems(planEdits.edits)
+    : [];
 
   /**
    * Leave, and say why if you want to.
@@ -260,12 +456,34 @@ export default function MyCoach() {
       : await endCoaching(coach?.id ?? '');
     setLeaveBusy(false);
     if (!res.ok) {
-      Alert.alert('Not ended', `${res.reason}\n\nThey are still your coach and nothing has changed.`);
+      Alert.alert('Not Ended', `${res.reason}\n\nThey are still your coach and nothing has changed.`);
       return;
     }
     setLeaving(false);
+    // ── the member's own answer to how they are coached, kept in step ──────
+    //
+    // app/(client)/trainers.tsx does this on its own leave path and says why:
+    // "without this the AI coach would go on being told there is somebody in
+    // the room for their booked sessions." This screen was built to move the
+    // exit OFF that marketplace and onto the screen about the coach somebody
+    // actually has — and it moved the ending without moving this, so leaving
+    // from here left `coachingMode` at 'inperson' or 'hybrid' for good.
+    //
+    // It is not cosmetic and it is not one screen. `coachingMode` is a device
+    // preference, not a server fact: app/(client)/coach.tsx hands it to a
+    // language model as `coaching` and gets back "your coach is in the room
+    // for your booked sessions" about a coach who is not; the dashboard keeps
+    // `booksSessions` true; app/(client)/workouts.tsx keeps waiting on a
+    // program nobody is going to assign; and the Me hub keeps showing the
+    // rows `soloHide` exists to take away. Every one of those is a claim about
+    // a relationship the server has just ended.
+    //
+    // Only on the server's own `ok`, like everything else here — a refusal
+    // changes nothing, and `ended: false` still means the server is certain
+    // there is no live link.
+    cd.setCoachingMode('solo');
     Alert.alert(
-      res.ended ? 'You have left' : 'Nothing to end',
+      res.ended ? 'You Have Left' : 'Nothing to End',
       clientEndOutcomeLine(res.ended, reason != null, (res as { reasonStored?: boolean }).reasonStored === true),
       [{ text: 'Done', onPress: () => { setTick((n) => n + 1); void load(); } }],
     );
@@ -296,22 +514,123 @@ export default function MyCoach() {
   const applied = resolveClientBrand(brandInput);
   const brandNote = clientBrandNote(brandInput);
 
+  // ── the current ask ──────────────────────────────────────────────────────
+  //
+  // What the "Right Now" block under the head says. Every branch is a read this
+  // app already makes; nothing is asked of the server for it.
+  //
+  // The check-in row is drawn for anybody coached at a distance — the same gate
+  // the home screen uses for its own check-in row, so the two never disagree
+  // about who is expected to send one — and ALSO for anybody holding an unsent
+  // one, whatever their mode, because a check-in stuck on this phone is news to
+  // its author however they are coached.
+  //
+  // "Due" is a claim about the calendar, not about the coach: the screen it
+  // opens is the WEEKLY check-in, so seven days after the last one the server
+  // holds, this week's has not been sent. It is measured from `latestSent` and
+  // never from `latest` — a pending check-in is not one a coach could have
+  // read, and counting it would call the week done on the strength of a row
+  // nobody has received. Under a read that is not whole there is no age and no
+  // "none yet": the sentence says it could not be checked (rule 5).
+  const checkinAsk = useMemo<{ title: string; note: string; flagged: boolean } | null>(() => {
+    if (!coachedRemotely(cd.coachingMode) && ci.unsent <= 0) return null;
+    const waiting = unsentNote(ci.unsent, 'check-in', 'check-ins');
+    if (waiting) return { title: 'Weekly Check-in', note: `${waiting} Your coach cannot see it until then.`, flagged: true };
+    if (ci.status === 'loading') return { title: 'Weekly Check-in', note: 'Reading when you last sent one…', flagged: false };
+    if (!isWhole(ci.status)) {
+      return { title: 'Weekly Check-in', note: 'When you last sent one could not be checked just now. That is not a statement that none was sent.', flagged: false };
+    }
+    if (!ci.latestSent) return { title: 'Weekly Check-in', note: 'None sent yet. Your coach only sees how the week went if you send one.', flagged: false };
+    const days = daysAgo(ci.latestSent.at);
+    const age = checkInAge(ci.latestSent.at);
+    const last = `Last sent ${fmtFullDay(ci.latestSent.at)}${age ? ` · ${age.toLowerCase()}` : ''}`;
+    // The state goes in the title, where the row is scanned: "Due Today" on
+    // the seventh day, "Overdue by N Days" after it. Both are counted from the
+    // same whole days `daysAgo` gives the age line, so the two cannot disagree.
+    if (days == null || days < 7) return { title: 'Weekly Check-in', note: last, flagged: false };
+    const over = days - 7;
+    return {
+      title: over === 0 ? 'Check-in Due Today' : `Check-in Overdue by ${over} ${over === 1 ? 'Day' : 'Days'}`,
+      note: `${last}. This week’s has not been sent.`,
+      flagged: true,
+    };
+    // `today` so a screen left open over midnight re-ages the line.
+  }, [cd.coachingMode, ci.unsent, ci.status, ci.latestSent, today]);
+
+  // Words typed to the coach that are still on this phone. Counted from the
+  // outbox itself, as app/(trainer)/messages.tsx counts its own, and drawn only
+  // when there are some: an outbox that could not be read is not an empty one,
+  // and this says nothing at all rather than "everything has been sent".
+  // ── the rhythm of it, as a picture ───────────────────────────────────────
+  //
+  // The approved look wants evidence under the state, and the one series this
+  // screen already holds about the two of them is the check-ins: how many
+  // reached the coach in each of the last six weeks. No new read — it is
+  // `ci.checkins`, the list the row above already ages.
+  //
+  // SENT ones only, for `latestSent`'s reason: a pending check-in is on this
+  // phone, and a bar for it would show the coach holding a week they have never
+  // seen. And only off a WHOLE read — under 'partial' a week with no bar might
+  // be a week whose row was cut, so nothing is drawn and the card says why
+  // (null here). A zero under a whole read IS a fact, and draws the grey stub.
+  //
+  // Weeks are seven-day windows ending today, the same measure "Check-in Due"
+  // uses, counted in LOCAL calendar days so a check-in sent late on Sunday is
+  // not filed under Monday by UTC. `Math.round` on the day difference absorbs
+  // the hour a daylight-saving change adds or removes.
+  const WEEKS = 6;
+  const nowDate = useNow();
+  const rhythm = useMemo(() => {
+    if (!isWhole(ci.status)) return null;
+    const start = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+    const counts = Array.from({ length: WEEKS }, () => 0);
+    for (const c of ci.checkins) {
+      if (isPending(c.id)) continue;
+      const p = dateParts(c.at);
+      if (!p) continue;
+      const days = Math.round((start.getTime() - new Date(p[0], p[1], p[2]).getTime()) / 86_400_000);
+      const w = Math.floor(days / 7);
+      if (days >= 0 && w < WEEKS) counts[WEEKS - 1 - w] += 1;
+    }
+    const days = counts.map((n, i) => {
+      // The first day of the window, in the reader's own date order.
+      const from = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 7 * (WEEKS - 1 - i) - 6);
+      return { label: fmtAxisDay(from.getFullYear(), from.getMonth(), from.getDate()), value: n, tone: 'blue' as const };
+    });
+    return { days, weeksWith: counts.filter((n) => n > 0).length };
+  }, [ci.status, ci.checkins, nowDate]);
+  // The plan score on the last check-in the COACH holds, for the ring beside
+  // the bars. `scoreOf` (coachCheckins' `rating`, renamed here because this
+  // screen's review form already has a `rating`) refuses anything off the 1–5 scale — the 0 `rowToCI`
+  // coerces a missing score into included — so an unrated week is a bare track
+  // and a dash, not an empty ring.
+  const lastAdherence = isWhole(ci.status) && ci.latestSent ? scoreOf(ci.latestSent.adherence) : null;
+  const showRhythm = coachedRemotely(cd.coachingMode) || ci.checkins.length > 0;
+
+  const outbox = useOutbox();
+  const queuedWords = outbox ? outbox.countOf('message') : 0;
+  const queuedWordsNote = unsentNote(queuedWords, 'message', 'messages');
+  const showAsk = !!checkinAsk || !!queuedWordsNote || (unread != null && unread > 0);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Coach</Text>
-          </View>
-        </View>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
+        <PageHead title="Your Coach" />
 
         {status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl }}>Loading.</Text>
         ) : status === 'error' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl }}>
-            This could not be read just now. It is not a statement that you have no coach — try again when
+            This could not be read just now. It is not a statement that you have no coach. Try again when
             you have signal.
           </Text>
         ) : !coach ? (
@@ -333,7 +652,11 @@ export default function MyCoach() {
           </View>
         ) : (
           <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+            {/* ── the record's head, the board's way ──────────────────────
+                Centred, as the coach's own view of a client is (app/(trainer)/
+                client.tsx) and as Me is: the photo, the name under it, and the
+                one quiet line — what they trade as, or their tagline. */}
+            <View style={{ alignItems: 'center', marginTop: sp.md }}>
               {/* The coach's colour, where they have one and it applies. Drawn
                   as a ring rather than as a fill: the photo inside it is the
                   content, and a coloured plate behind a face is decoration
@@ -342,70 +665,86 @@ export default function MyCoach() {
                   carry a readable label, whoever wrote it and by whatever
                   route — so nothing downstream needs to check it again. */}
               <View style={{
-                width: 62, height: 62, borderRadius: 31, backgroundColor: t.surface2,
+                width: 84, height: 84, borderRadius: 42, backgroundColor: t.brandSoft,
                 alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                 borderWidth: applied.color ? 2 : 0, borderColor: applied.color ?? undefined,
               }}>
+                {/* The mockups' monogram: Sora initials in the accent's text
+                    colour on its pale plate, where this was grey on grey. */}
                 {coach.avatar
-                  ? <Image source={{ uri: coach.avatar }} style={{ width: 62, height: 62 }} />
-                  : <Text style={{ ...ty.head, color: t.ink3 }}>{monogram(coach.name)}</Text>}
+                  ? <Image source={{ uri: coach.avatar }} style={{ width: 84, height: 84 }} />
+                  : <Text style={{ ...value(28), color: t.brandText }}>{monogram(coach.name)}</Text>}
               </View>
-              <View style={{ flex: 1 }}>
-                {/* A name that could not be read renders as a dash. It is never
-                    replaced with "Your coach", which would look like a name and
-                    is not one. */}
-                <Text style={{ ...ty.head, color: t.ink }}>{coach.name ?? '—'}</Text>
-                {/* What they trade as, where that is not their own name. Only
-                    when the coach's brand is the one in effect: a gym member's
-                    app is the gym's, and printing the coach's business name in
-                    it anyway would be the override this screen just declined to
-                    make. */}
-                {applied.source === 'coach' && applied.name && applied.name !== coach.name ? (
-                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{applied.name}</Text>
-                ) : null}
-                {coach.tagline ? (
-                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{coach.tagline}</Text>
-                ) : null}
-              </View>
+              {/* A name that could not be read renders as a dash. It is never
+                  replaced with "Your coach", which would look like a name and
+                  is not one. */}
+              <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>{coach.name ?? '—'}</Text>
+              {/* What they trade as, where that is not their own name. Only
+                  when the coach's brand is the one in effect: a gym member's
+                  app is the gym's, and printing the coach's business name in
+                  it anyway would be the override this screen just declined to
+                  make. */}
+              {applied.source === 'coach' && applied.name && applied.name !== coach.name ? (
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: 3, textAlign: 'center' }}>{applied.name}</Text>
+              ) : null}
+              {coach.tagline ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{coach.tagline}</Text>
+              ) : null}
+              {/* The identity header's chips, as the approved client record
+                  draws them under a name. What they specialise in is the one
+                  thing on the profile that IS a set of short labels, so it
+                  moved up here from "About Them" rather than being said twice.
+                  The coach's own words, untouched — hence no case rule. */}
+              {coach.specialties.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: sp.sm, marginTop: sp.md }}>
+                  {coach.specialties.map((s) => <TonedChip key={s} label={s} tone="brand" />)}
+                </View>
+              ) : null}
             </View>
 
-            {/* One sentence, and only when there is something to say: either a
-                gym is overriding branding this coach has set, or these really
-                are the coach's colours and the client should be able to tell
-                them from the app's. Null the rest of the time — a screen that
-                explains an absence nobody noticed is noise. */}
-            {brandNote ? (
-              <Flag tone={applied.color ?? t.ink3} style={{ marginTop: sp.lg }}>{brandNote}</Flag>
-            ) : null}
 
-            {coach.bio ? (
-              <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, lineHeight: 22 }}>{coach.bio}</Text>
-            ) : null}
+            {/* ── what is open between the two of you, before anything else ──
+                The data-layout review's order for this screen is identity, then
+                the current ask, then the conversation — and this screen went
+                from the face straight to an index of seven rows, so a member
+                whose check-in had been sitting on their phone since Tuesday
+                read "Book a Session" before anything told them their coach had
+                never received it.
 
-            {coach.specialties.length ? (
-              <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>SPECIALISES IN</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {coach.specialties.map((s) => (
-                    <View key={s} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{s}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
+                Two facts, both already held above this screen and neither read
+                here before: the check-in provider's `latestSent`/`unsent`, and
+                the outbox's queued messages. Each is said BESIDE the thing it
+                is about (rule 6) — the check-in's state on the check-in row,
+                the unsent words on a row that opens the thread — rather than in
+                a banner.
 
-            {coach.offers.length ? (
-              <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>OFFERS</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {coach.offers.map((o) => (
-                    <View key={o} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{o}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+                The unread count comes from `client_unread_count()` (part 88),
+                which counts past the member's own watermark without moving it.
+                Mounting `useThread` here to count would have marked the thread
+                read from a screen that never showed it.
+
+                The kit's `AttentionRow`, which is this shape — subject, reason,
+                and a `SyncBadge` on the row where the row IS the queued write. */}
+            {showAsk ? (
+              <Section>
+                <SectionHead title="Right Now" />
+                {unread != null && unread > 0 ? (
+                  <AttentionRow icon="message" name={`${unread} Unread ${unread === 1 ? 'Message' : 'Messages'}`}
+                    reason="From your coach" tone={t.brand}
+                    onPress={() => go('/(client)/messages')} />
+                ) : null}
+                {checkinAsk ? (
+                  <AttentionRow icon="message" name={checkinAsk.title} reason={checkinAsk.note}
+                    tone={checkinAsk.flagged ? t.warn : undefined}
+                    sync={ci.unsent > 0 ? 'queued' : undefined} divider={unread != null && unread > 0}
+                    onPress={() => go('/(client)/checkin')} />
+                ) : null}
+                {queuedWordsNote ? (
+                  <AttentionRow icon="message" name="Messages to Your Coach" reason={queuedWordsNote}
+                    tone={t.warn} sync="queued" divider={!!checkinAsk || (unread != null && unread > 0)}
+                    onPress={() => go('/(client)/messages')} />
+                ) : null}
+              </Section>
             ) : null}
 
             {/* ── the one thing this screen is opened to do ───────────────
@@ -416,16 +755,221 @@ export default function MyCoach() {
                 the first screen. The row is still there and still says the same
                 words; this is the same destination at the top, where somebody
                 who tapped "Your Coach" in order to talk to them will find it.
-
                 Unconditional, like the standing-appointment row below and for
                 the same reason: the thread exists whether or not anything has
                 been said in it, and a control hidden on a failed read hides the
                 way to speak to the person whose profile is on screen. */}
+            {/* ── the evidence: a ring and six weeks of bars ───────────────
+                See `rhythm` above for what is counted and what is refused.
+                The figure leads and the picture backs it, as every card in
+                the approved look does; when the read is not whole there is no
+                picture and ONE line saying why, never six empty weeks. At
+                large text the ring stacks over its sentence so neither is
+                squeezed. */}
+            {showRhythm ? (
+              <Section>
+                <SectionHead title="Check-in Rhythm" note={`Last ${WEEKS} Weeks`} onPress={() => go('/(client)/checkin')} />
+                {rhythm ? (
+                  <>
+                    <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+                      <Ring size={104} tone="brand"
+                        value={lastAdherence == null ? null : lastAdherence / RATING_MAX}
+                        figure={ratingLabel(lastAdherence)} sub="Adherence"
+                        spoken={lastAdherence == null
+                          ? 'Plan adherence on your last sent check-in: not rated'
+                          : `Plan adherence on your last sent check-in: ${lastAdherence} out of ${RATING_MAX}`} />
+                      <Text style={{ ...ty.label, color: t.ink2, flex: fontScale >= 1.35 ? undefined : 1, minWidth: 0 }}>
+                        <Text style={{ ...value(26), ...numeric, color: t.ink }}>{rhythm.weeksWith}</Text>
+                        {` of the last ${WEEKS} weeks with a check-in sent`}
+                      </Text>
+                    </View>
+                    {/* Under the pair and the card's full width: six columns
+                        beside a ring are 34pt each, and "10 Aug" does not fit
+                        in 34pt. */}
+                    <View style={{ marginTop: sp.lg }}>
+                      <DayBars days={rhythm.days} h={52}
+                        spoken={`Check-ins your coach received in each of the last ${WEEKS} weeks, oldest first: ${rhythm.days.map((d) => d.value).join(', ')}`} />
+                    </View>
+                  </>
+                ) : (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {ci.status === 'loading'
+                      ? 'Reading your check-ins…'
+                      : 'Your check-ins could not be read in full, so no weeks are drawn. That is not a statement that none were sent.'}
+                  </Text>
+                )}
+              </Section>
+            ) : null}
+
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Message Coach" wide onPress={() => go('/(client)/messages')} />
             </View>
 
-            <Rule />
+            {/* ── everything else you do with them ─────────────────────────
+                Directly under the primary action, as the board's record pages
+                put their rows: the head, the one button, then the index. What
+                the coach has written follows, then the bio and the chips,
+                because a member who opened this screen to book or ask has found
+                what they came for by now. Only the rows that REACH the coach
+                are here; what was bought, agreed and signed is in "Your
+                Arrangement" further down. */}
+            <Section>
+              <SectionHead title="Reach Them" />
+              {/* "Message" on its own said what the row WAS rather than what
+                  tapping it does, on a screen where three other rows also reach
+                  this person. Reported by the product owner as wanting a
+                  "Message Coach" control on the coach screen, and the same
+                  words are on the button above so the two are recognisably one
+                  thing rather than two. It goes to the real thread —
+                  app/(client)/messages.tsx, keyed by `messages.client_id` with
+                  the coach named through `my_coach()` — and not to a second
+                  messaging surface. */}
+              <ListRow icon="message" tone="blue" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
+              <ListRow icon="calendar" tone="brand" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
+              {/* ── and the hour they have NOT opened ──────────────────────
+                  The row above books from what the coach has published, and
+                  the product owner's own report is about the half that leaves
+                  out: "i can't see my coach Dayne's availability and am not
+                  able to book a session or send a request for a booking."
+                  app/(client)/request-session.tsx is the answer to it and has
+                  been reachable from the calendar, the PT sessions screen and
+                  the standing-appointment screen — every screen about a DIARY,
+                  and not the one screen about the PERSON. So a member who
+                  opened "Your Coach" in order to ask their coach for Tuesday at
+                  seven found Message, Book, Packs, Standing and Documents, and
+                  the one control that does what they came to do was on none of
+                  them.
+
+                  Directly under Book a Session because the two are one
+                  decision: a member looks for an open time first and asks for
+                  one only when there is none. The note is what keeps them
+                  apart — asking is not booking, which is the rule that whole
+                  screen exists to hold. */}
+              <ListRow icon="clock" tone="teal" title="Ask for a Time" note="A time they haven’t opened. It asks; it doesn’t book" onPress={() => go('/(client)/request-session')} />
+            </Section>
+
+            {/* Moved up, above the bio and the qualifications: the review's
+                order for this screen is identity, the current ask, the
+                conversation, THEN what is shared between the two — and what a
+                coach wrote to this member last week is read far more often
+                than the paragraph the coach wrote about themselves once. */}
+            {/* ── what they have actually written to you ──────────────────
+                `coach_feedback` is the advice this coach leaves on this member,
+                and until now the member's whole view of it was one line on the
+                dashboard: `coachNotes[0]`, clipped at four lines. Note two and
+                everything before it were unreachable in all three apps, while
+                the coach kept reading the lot from their own client detail —
+                so neither side had any reason to think anything was missing.
+
+                Here rather than on the dashboard because a dashboard that grows
+                a noticeboard stops being a dashboard; that is the argument the
+                gym-notice block on that screen already makes for itself, and it
+                ends "the rest are one tap away in Notices". The coach's advice
+                had no Notices. This is it. */}
+            <CoachAdvice clientId={myId} coachName={coach.name} />
+
+            {/* Said here rather than left to be discovered. A client is
+                entitled to know what coaching costs them in privacy, and the
+                answers are not obvious: the injury document stays with the
+                client and only the extracted injury reaches the coach, and
+                blood sugar is invisible until the client turns sharing on.
+
+                Folded, with the short answer as the fold's own note: it is a
+                paragraph a member reads once, and the approved look takes
+                paragraphs off the page and leaves the way to them. Every word
+                of it is still here. */}
+            <Expandable title="What They Can See" note="Your log, check-ins, scans and any injury you disclosed">
+              <Text style={{ ...ty.label, color: t.ink2 }}>
+                Your training log, your check-ins, your scans and measurements, and any injury you have
+                disclosed. Not the document behind an injury, only what was read out of it. Not your blood
+                sugar, unless you turn sharing on yourself.
+              </Text>
+            </Expandable>
+
+            <Section>
+              <SectionHead title="Your Plan Changes" />
+
+              {/* ── and the plan you rewrote ──────────────────────────────
+                  The one thing in that list the member MADE, and the only one
+                  they had no way to check. Every swap, removal, addition and
+                  corrected set goes up to `client_plan_edits` the moment it is
+                  made (src/ui/planEdits.tsx) and nothing in any of the three
+                  apps has ever read the row back — so a member who reinstalled,
+                  or picked up a second handset, could not find out whether a
+                  month of corrections had arrived. This is the server's copy,
+                  not the phone's, which is what makes it an answer.
+
+                  Read-only on purpose. The plan screen owns the writing and
+                  holds its own copy in memory; an undo from here would be
+                  overwritten by that screen's next tap, silently, after the
+                  member had been told it was done. */}
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {coachSeesPlanNote(
+                  planEditStatus,
+                  planEdits ? editCount(planEdits.edits) : 0,
+                  planEdits ? planEdits.readable : true,
+                  sentOn(planEdits?.updatedAt ?? null),
+                )}
+              </Text>
+
+              {planEditRows.length > 0 ? (
+                <View style={{ marginTop: sp.md }}>
+                  {planEditRows.map((it) => (
+                    <Text key={it.id} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+                      {planEditItemLine(it)}
+                    </Text>
+                  ))}
+                  {/* Where the change was actually made, and the only place it
+                      can be undone. Said rather than implied: the list above
+                      names a day and a kind of change and deliberately does not
+                      name the movement, because the stored key is a slug and
+                      the program that would turn it into a name is on that
+                      screen and not on this one. */}
+                  <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                    <Ghost label="Open My Plan" onPress={() => go('/(client)/workouts')} />
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+
+            {/* ── who they are ────────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="About Them" />
+              {/* One sentence, and only when there is something to say: either a
+                gym is overriding branding this coach has set, or these really
+                are the coach's colours and the client should be able to tell
+                them from the app's. Null the rest of the time — a screen that
+                explains an absence nobody noticed is noise. */}
+              {brandNote ? (
+                <Flag tone={applied.color ?? t.ink3} style={{ marginBottom: sp.md }}>{brandNote}</Flag>
+              ) : null}
+
+              {/* A paragraph of somebody's own words, set a point looser than body's
+                21. `grown` keeps that choice and still tracks the reader: pinned, a
+                bio is the longest run of text on this screen and so the first thing
+                to overlap itself. */}
+              {coach.bio ? (
+                <Text style={{ ...ty.body, color: t.ink2, lineHeight: 22 }}>{coach.bio}</Text>
+              ) : null}
+              {/* Nothing to say about themselves yet: said, so the card is
+                  not an empty box under a heading. Not a claim about them. */}
+              {/* Their specialities are under their name now, so this is about
+                  the bio and the offers only — and says "about themselves"
+                  rather than "a profile", which a coach with three chips in
+                  the header plainly has some of. */}
+              {!coach.bio && !coach.offers.length && !brandNote ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coach.name ?? 'Your coach'} hasn’t written about themselves in {BRAND.label} yet.</Text>
+              ) : null}
+
+              {coach.offers.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Offers</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {coach.offers.map((o) => <TonedChip key={o} label={o} tone="blue" />)}
+                  </View>
+                </View>
+              ) : null}
+            </Section>
 
             {/* ── what they say they are qualified to do ──────────────────
                 Their own claim, said so on every line. The alternative — a
@@ -443,17 +987,17 @@ export default function MyCoach() {
                    failed, has been told something false about that coach. */
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   We couldn’t load this. It is not a statement that {coach.name ?? 'your coach'} has listed
-                  nothing — try again when you have signal.
+                  nothing. Try again when you have signal.
                 </Text>
               ) : (creds ?? []).length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   {coach.name ?? 'Your coach'} hasn’t listed any qualifications or insurance in {BRAND.label}. Ask
-                  them directly — it is a normal thing to ask.
+                  them directly. It is a normal thing to ask.
                 </Text>
               ) : (<>
                 {sortCredentials(creds ?? [], today).map((c, i) => (
                   <View key={c.id} style={{ paddingVertical: sp.sm, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.title}</Text>
                     {credentialLine(c) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{credentialLine(c)}</Text>
                     ) : null}
@@ -474,7 +1018,30 @@ export default function MyCoach() {
               ) : null}
             </Section>
 
-            <Rule />
+            {/* ── the arrangement itself ───────────────────────────────────
+                These three rows sat in "Reach Them", between Ask for a Time and
+                the bio. They are not ways of reaching anybody — they are what
+                has been bought, what has been agreed and what has been signed —
+                and the review's order puts relationship administration under
+                the conversation and what the coach has written, not beside the
+                booking controls. Same rows, same destinations, same notes. */}
+            <Section>
+              <SectionHead title="Your Arrangement" />
+              <ListRow icon="trophy" tone="orange" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              {/* A standing appointment is an agreement between these two
+                  people, which is what makes this the screen it belongs on —
+                  and part 135 is explicit that EITHER party may end one. The
+                  row is unconditional rather than shown only to members who
+                  have one: the read that would decide it can fail, and a row
+                  hidden on a failed read hides the way out from the member
+                  whose arrangement could not be confirmed. */}
+              <ListRow icon="clock" tone="brand" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
+              {/* On the screen about this coach, because that is the only place
+                  the answer to "whose waiver is this?" is already on the page.
+                  The same row is in the Me hub for the member who is looking
+                  for a form rather than for their coach. */}
+              <ListRow icon="pencil" tone="purple" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
+            </Section>
 
             {/* ── your review of them ─────────────────────────────────────
                 Gated on `can_review_coach()` rather than on the presence of a
@@ -503,14 +1070,18 @@ export default function MyCoach() {
                 const live = mine && !mine.withdrawnAt ? mine : null;
                 return (<>
                   {live ? (<>
+                    {/* The sentence is in src/lib/reviews.ts because it has three
+                        states and one of them is new: a rating that did not come back
+                        used to arrive here as a 0 and print "You rated them 0 out of
+                        5" over somebody's own words. */}
                     <Text style={{ ...ty.body, color: t.ink }}>
-                      You rated {coach.name ?? 'them'} {live.rating} out of {MAX_RATING}.
+                      {ownRatingLine(live.rating, coach.name ?? null)}
                     </Text>
                     {live.body ? (
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 6 }}>{live.body}</Text>
                     ) : null}
                     {live.coachReply ? (
-                      <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                      <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>THEIR REPLY</Text>
                         <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{live.coachReply}</Text>
                       </View>
@@ -535,17 +1106,40 @@ export default function MyCoach() {
                   {open ? (
                     <View style={{ marginTop: sp.lg }}>
                       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>YOUR RATING</Text>
-                      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-                        {[MIN_RATING, 2, 3, 4, MAX_RATING].map((n) => (
-                          <Pressable key={n} onPress={() => setRating(n)} accessibilityRole="button"
-                            accessibilityLabel={`${n} out of ${MAX_RATING}`}
-                            style={{
-                              flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: radius.sm,
-                              backgroundColor: rating === n ? t.brand : t.surface2,
-                            }}>
-                            <Text style={{ ...ty.body, color: rating === n ? t.bg : t.ink2 }}>{n}</Text>
-                          </Pressable>
-                        ))}
+                      {/* ── Which number is chosen, said three ways ──────────
+                          It used to be said once, in colour: the selected box
+                          took `t.brand` and the other four took `t.surface2`,
+                          and that was the whole of it. A screen reader was told
+                          "3 out of 5, button" about every one of the five, with
+                          nothing anywhere saying which was picked — so somebody
+                          reviewing their coach by voice could not tell what
+                          they were about to send, and someone who cannot
+                          separate the brand hue from the surface could not
+                          either. The tone is `radio`, because that is what a
+                          row of five where exactly one may be chosen IS, and
+                          `selected` is what turns the colour into something a
+                          screen reader can read out. The ring and the weight
+                          are the non-colour cue on screen, per the rule
+                          src/lib/hr.ts states about the zone palette: colour
+                          confirms what is already said, it never says it
+                          alone. */}
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }} accessibilityRole="radiogroup">
+                        {[MIN_RATING, 2, 3, 4, MAX_RATING].map((n) => {
+                          const on = rating === n;
+                          return (
+                            <Pressable key={n} onPress={() => setRating(n)} accessibilityRole="radio"
+                              accessibilityState={{ selected: on, checked: on }}
+                              accessibilityLabel={`${n} out of ${MAX_RATING}`}
+                              style={{
+                                flex: 1, paddingVertical: 12, minHeight: MIN_TARGET, justifyContent: 'center',
+                                alignItems: 'center', borderRadius: radius.sm,
+                                borderWidth: on ? 2 : hairline, borderColor: on ? t.ink : t.ring,
+                                backgroundColor: on ? t.brand : t.surface2,
+                              }}>
+                              <Text style={{ ...ty.body, ...font(on ? '700' : '400'), color: on ? t.brandInk : t.ink2 }}>{n}</Text>
+                            </Pressable>
+                          );
+                        })}
                       </View>
                       <TextInput
                         value={body}
@@ -574,37 +1168,6 @@ export default function MyCoach() {
               })()}
             </Section>
 
-            <Rule />
-
-            <Section>
-              <SectionHead title="Reach Them" />
-              {/* "Message" on its own said what the row WAS rather than what
-                  tapping it does, on a screen where three other rows also reach
-                  this person. Reported by the product owner as wanting a
-                  "Message Coach" control on the coach screen, and the same
-                  words are on the button above so the two are recognisably one
-                  thing rather than two. It goes to the real thread —
-                  app/(client)/messages.tsx, keyed by `messages.client_id` with
-                  the coach named through `my_coach()` — and not to a second
-                  messaging surface. */}
-              <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
-              <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
-              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
-              {/* A standing appointment is an agreement between these two
-                  people, which is what makes this the screen it belongs on —
-                  and part 135 is explicit that EITHER party may end one. The
-                  row is unconditional rather than shown only to members who
-                  have one: the read that would decide it can fail, and a row
-                  hidden on a failed read hides the way out from the member
-                  whose arrangement could not be confirmed. */}
-              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
-              {/* On the screen about this coach, because that is the only place
-                  the answer to "whose waiver is this?" is already on the page.
-                  The same row is in the Me hub for the member who is looking
-                  for a form rather than for their coach. */}
-              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
-            </Section>
-
             {/* ── the way out ────────────────────────────────────────────
                 The only `endCoaching` call in the client app was on
                 app/(client)/trainers.tsx — the marketplace — so a member who
@@ -622,22 +1185,67 @@ export default function MyCoach() {
                 <Ghost label="Leave This Coach" onPress={confirmLeave} />
               </View>
             </Section>
-
-            <Section>
-              <SectionHead title="What They Can See" />
-              {/* Said here rather than left to be discovered. A client is
-                  entitled to know what coaching costs them in privacy, and the
-                  answers are not obvious: the injury document stays with the
-                  client and only the extracted injury reaches the coach, and
-                  blood sugar is invisible until the client turns sharing on. */}
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your training log, your check-ins, your scans and measurements, and any injury you have
-                disclosed. Not the document behind an injury — only what was read out of it. Not your blood
-                sugar, unless you turn sharing on yourself.
-              </Text>
-            </Section>
           </>
         )}
+
+        {/* ── the reviews you have written ────────────────────────────────
+            OUTSIDE the ternary above, on purpose, and it is the whole reason
+            this block is worth having. Every branch of that ternary except the
+            last is a member with no readable coach — they are training alone,
+            or the profile read failed — and a member who has LEFT their coach
+            is precisely the person holding a review they had no way to reach.
+            Nested inside, this would have appeared only for people who did not
+            need it.
+
+            It says nothing about a coach on its own account: every sentence
+            comes from src/lib/myReviews.ts, where the three visibility states
+            are asserted on, because "on their public profile" said about a
+            review that is not on one is a claim about who is reading somebody's
+            words. */}
+        <Section>
+          <SectionHead title="Coaches You Have Reviewed" />
+          <Text style={{ ...ty.label, color: t.ink3 }}>
+            {myReviewsNote(
+              // `isWhole`, not `!== 'error'`. Under 'loading' the list is empty
+              // because nothing has arrived, and under 'partial' it is a prefix
+              // — and the figure in this sentence is a count.
+              writtenStatus,
+              isWhole(writtenStatus) ? otherWritten.length : 0,
+              // Whether the block further up is already showing one of these.
+              // Without it, a member whose only review is of their current
+              // coach would be told they have never reviewed anybody, six
+              // inches under their own words.
+              coachId != null && written.some((r) => r.coachId === coachId),
+            )}
+          </Text>
+
+          {/* Drawn whenever any came back, 'partial' included: reviews that
+              arrived are real reviews, and withholding them would hide somebody
+              from their own words. It is the sentence above that declines to
+              say how many there are. */}
+          {otherWritten.map((r, i) => (
+            <View key={r.id} style={{ paddingVertical: sp.md, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{myReviewRatingLine(r)}</Text>
+              {r.body ? (
+                <Text style={{ ...ty.body, color: t.ink2, marginTop: 6, lineHeight: 22 }}>{r.body}</Text>
+              ) : null}
+              {r.coachReply ? (
+                <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>THEIR REPLY</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{r.coachReply}</Text>
+                </View>
+              ) : null}
+              {/* Who can read it. Three states and three sentences, and the
+                  colour is `t.ink3` rather than `t.warn` even for a withdrawn
+                  one: a withdrawn review is a thing the member chose, not a
+                  warning, and warn ink fails the contrast gate as text. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{myReviewVisibilityLine(r)}</Text>
+              {myReviewEditedLine(r) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{myReviewEditedLine(r)}</Text>
+              ) : null}
+            </View>
+          ))}
+        </Section>
       </ScrollView>
 
       {/* The same sheet the coach's side uses, with the member's own wording
@@ -647,7 +1255,7 @@ export default function MyCoach() {
       <Modal visible={leaving} animationType="slide" onRequestClose={() => setLeaving(false)}>
         <EndReasonSheet
           name={coach?.name || 'your coach'}
-          heading="Why you are leaving"
+          heading="Why You Are Leaving"
           verb={leaveBusy ? 'Leaving…' : 'Leave and Tell Them Why'}
           explainer={CLIENT_END_EXPLAINER}
           notePlaceholder="Anything you want them to know, in your own words."

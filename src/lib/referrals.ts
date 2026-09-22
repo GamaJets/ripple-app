@@ -33,6 +33,8 @@ import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RawReferral } from './referralCredit';
+import { referralFate, referralSettled, type ReferralFate } from './referralFate';
+import { reportError } from './reportError';
 
 const PENDING_KEY = 'repple.pendingRef';
 
@@ -40,11 +42,51 @@ const PENDING_KEY = 'repple.pendingRef';
  *
  *  The server resolves the code to a referrer, refuses a self-referral, and
  *  keeps the FIRST code recorded for a user — somebody arrived once, and which
- *  invitation brought them is not a thing they get to revise later. */
-export async function recordReferral(code: string): Promise<void> {
+ *  invitation brought them is not a thing they get to revise later.
+ *
+ *  Returns what the attempt ESTABLISHED, because the caller that stashed a code
+ *  has to know whether it may stop holding it. This used to be
+ *  `try { await supabase.rpc(…); } catch { }` returning void: the error was
+ *  discarded, nothing was recorded anywhere, and `flushPendingReferral` deleted
+ *  the code on the strength of a promise that had resolved. `supabase.rpc`
+ *  resolves `{ data, error }` and does not reject on a refusal, so that catch
+ *  never caught anything in the first place — see ./referralFate, which is
+ *  where the three outcomes are told apart and tested.
+ *
+ *  A code that did not land is STASHED here rather than only by the caller that
+ *  happened to have one. The confirm-by-email path stashes before it records
+ *  and the flush keeps its stash on an unreached server — but `app/welcome.tsx`
+ *  has a second path, the direct signup with confirmation off, which records
+ *  the typed code with nothing stashed at all. On that path an unreached server
+ *  lost the referral exactly as permanently as the deleted stash did, and
+ *  fixing only the flush would have left half the defect standing. Stashing
+ *  here makes "it did not land, so it survives to the next sign-in" true of
+ *  every caller, including ones not yet written.
+ *
+ *  Nothing is shown to the person: see the note on `flushPendingReferral`. */
+export async function recordReferral(code: string): Promise<ReferralFate> {
   const c = (code || '').trim();
-  if (!USE_SUPABASE || !c) return;
-  try { await supabase.rpc('record_referral', { p_code: c }); } catch { /* ignore */ }
+  if (!USE_SUPABASE || !c) return 'not-asked';
+  try {
+    const { error, status } = await supabase.rpc('record_referral', { p_code: c });
+    const fate = referralFate({ error, status });
+    if (fate === 'unreached') await stashPendingReferral(c);
+    // A refusal is the one outcome that spends somebody's referral for good,
+    // and the person is deliberately not interrupted about it, so it has to be
+    // written down SOMEWHERE or it is exactly as silent as the swallow this
+    // replaces. An unreached server stays quiet: it is ordinary, it retries
+    // itself at the next sign-in, and the sink it would be reported to is the
+    // one that is down.
+    if (fate === 'refused') reportError('referrals.record', error, { referralCode: c });
+    return fate;
+  } catch (e) {
+    // postgrest-js turns a dead fetch into a resolved `{ status: 0 }` rather
+    // than a rejection, so this is the client itself coming apart. Nothing was
+    // established either way, so the code is kept for the next sign-in.
+    reportError('referrals.record', e);
+    await stashPendingReferral(c);
+    return 'unreached';
+  }
 }
 
 /** Stash a code entered during a confirm-by-email signup, to record on first sign-in. */
@@ -65,7 +107,9 @@ export async function stashPendingReferral(code: string): Promise<void> {
  * Not consumed here, because being SHOWN a code is not the same as having spent
  * it — somebody who opens the form, gets distracted and comes back tomorrow must
  * still be attributed. `flushPendingReferral` is the only thing that clears it,
- * and only after a sign-in.
+ * and only after a sign-in AND only once the server has answered — a durability
+ * claim that the swallowed error in `recordReferral` used to break, because the
+ * code was removed whether or not anything had been recorded.
  */
 export async function peekPendingReferral(): Promise<string | null> {
   try {
@@ -74,13 +118,62 @@ export async function peekPendingReferral(): Promise<string | null> {
   } catch { return null; }
 }
 
-/** After a successful sign-in, record any code stashed at signup, then clear it. */
-export async function flushPendingReferral(): Promise<void> {
-  if (!USE_SUPABASE) return;
+/**
+ * After a successful sign-in, record any code stashed at signup — and clear it
+ * only if the server answered.
+ *
+ * ── why nothing is shown to the person ────────────────────────────────────
+ *
+ * This runs at the first sign-in, which is the busiest moment a new account
+ * has, and the thing it might announce is that a FRIEND'S invitation could not
+ * be filed. Weigh the two outcomes it could report:
+ *
+ *   · `'unreached'` — the code is still here and the next sign-in tries again.
+ *     A modal would interrupt somebody to tell them about a retry that has
+ *     already been scheduled, and the only action it could offer is the one
+ *     they were about to take anyway.
+ *   · `'refused'` — the code is spent. There is nothing the person can do, and
+ *     nothing they were promised: `REWARD_NOTE` in ./referralCredit says out
+ *     loud that no referral has ever been worth a discount, a free session or a
+ *     balance, because nobody has decided what one is worth. A first-launch
+ *     alert about the loss of a thing that was never on offer is a worse
+ *     sentence than silence.
+ *
+ * So the screen stays quiet and the failure stops being silent to US instead —
+ * `recordReferral` reports a refusal, which is a second recorded fact rather
+ * than an erasure. The behaviour this replaces was neither: the referral was
+ * deleted and nobody, on either side of the glass, was told.
+ *
+ * Returns the fate so a caller that wants to say something can; none does yet.
+ */
+export async function flushPendingReferral(): Promise<ReferralFate> {
+  if (!USE_SUPABASE) return 'not-asked';
+  let stashed: string | null = null;
   try {
-    const c = await AsyncStorage.getItem(PENDING_KEY);
-    if (c) { await recordReferral(c); await AsyncStorage.removeItem(PENDING_KEY); }
-  } catch { /* ignore */ }
+    stashed = await AsyncStorage.getItem(PENDING_KEY);
+  } catch (e) {
+    // A storage read that failed is not "there is no code". Nothing is removed
+    // and nothing is claimed; the next sign-in asks again.
+    reportError('referrals.flush.read', e);
+    return 'not-asked';
+  }
+  const c = (stashed || '').trim();
+  if (!c) return 'not-asked';
+
+  const fate = await recordReferral(c);
+  // The defect this whole file was reopened for. `removeItem` used to run on
+  // the next line whatever `recordReferral` had done — including nothing at all
+  // — so one sign-in with no signal lost the referral for good.
+  if (!referralSettled(fate)) return fate;
+  try {
+    await AsyncStorage.removeItem(PENDING_KEY);
+  } catch (e) {
+    // The referral is recorded; the stash is not cleared. That is harmless in
+    // the direction that matters: `record_referral` keeps the first code per
+    // user, so tomorrow's retry is a no-op rather than a second attribution.
+    reportError('referrals.flush.clear', e);
+  }
+  return fate;
 }
 
 /**
@@ -111,6 +204,28 @@ export async function myReferralCode(): Promise<string | null> {
  * an empty array here means the code has genuinely brought nobody in yet, and
  * those two must not share a rendering. See src/ui/loadStatus.ts.
  */
+/**
+ * The ceiling `my_referrals()` takes, mirrored here so a read that came back at
+ * it can be reported as a prefix rather than as the whole guest list.
+ *
+ * It is written INSIDE the function (supabase/parts/128-a-cohort-and-a-credit
+ * .sql, `limit 200`), which is what makes it invisible from this side:
+ * src/lib/rowCap.ts works by asking for one row more than it will accept, and
+ * the server can never answer with 201 no matter what `.limit()` says. So
+ * `capped()`, `assertWhole()` and `isTruncated()` are all blind to it and a
+ * cut list arrives looking exactly like a complete one.
+ *
+ * src/ui/coachReferrals.ts has mirrored this same number as `ROW_CAP` for the
+ * coach half of this feature since it was written — its comment even says "it
+ * is the same limit `my_referrals()` uses" — and the member half never got it.
+ * The test is `>= cap` and not the `> cap` used everywhere else, because 200
+ * rows back from a `limit 200` is already the ceiling: there is no probe row to
+ * find. That over-reports the member who has exactly two hundred, and telling
+ * them their list may go on when it does not is the small wrong. The big one is
+ * the other way round.
+ */
+export const REFERRAL_ROW_CAP = 200;
+
 export async function myReferrals(): Promise<RawReferral[] | null> {
   if (!USE_SUPABASE) return null;
   try {

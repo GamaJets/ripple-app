@@ -96,7 +96,15 @@
 // its own, and every caller in this repo does.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { liabilityFrom, accountTypeFor, chargeModelFor } from '../../../src/lib/directCharges.ts';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -145,12 +153,38 @@ Deno.serve(async (req) => {
 
   let body: any = {};
   try { body = await req.json(); } catch { /* optional */ }
-  const refreshUrl = String(body.refresh_url || 'https://www.repplefitness.com/connect-refresh');
-  const returnUrl = String(body.return_url || 'https://www.repplefitness.com/connect-return');
+  // The return addresses, checked rather than passed straight through. Each
+  // used to be `String(body.x || 'default')` with nothing between a request
+  // body and a payments API. src/lib/redirectTarget.ts holds the rule and
+  // says what it is and is not: an unset REDIRECT_ALLOW still refuses the
+  // four schemes that are never a redirect target, and setting it makes the
+  // list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  const refreshBack = checkRedirect(body.refresh_url, 'https://www.repplefitness.com/connect-refresh', redirectAllow);
+  if (!refreshBack.ok) return json({ error: refreshBack.reason }, 400);
+  const returnBack = checkRedirect(body.return_url, 'https://www.repplefitness.com/connect-return', redirectAllow);
+  if (!returnBack.ok) return json({ error: returnBack.reason }, 400);
+  const refreshUrl = refreshBack.url;
+  const returnUrl = returnBack.url;
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
+      + 'Nothing about your payout account has changed. Try again in a moment.' }, 503);
+  }
   const userId = auth?.user?.id;
   const email = auth?.user?.email || undefined;
   if (!userId) return json({ error: 'no user' }, 401);
@@ -172,6 +206,25 @@ Deno.serve(async (req) => {
     // connect-checkout reads those columns before it will take a direct charge.
     try {
       const acct = await stripe.accounts.retrieve(acctId);
+      // no-count-ok: zero rows here cannot be reported to anybody who could act
+      // on it, and is already reported to somebody who can.
+      //
+      // `existing.stripe_account_id` came off this very row a few lines above,
+      // under the service role, and nothing else filters this update — so zero
+      // rows means the coach's `connect_accounts` row was deleted between that
+      // read and this write. That is not a stale capability column, which is
+      // all this write is for: it is a coach with NO connect row at all, and
+      // connect-checkout already refuses a sale on exactly that state, by name,
+      // to the client trying to pay — `if (!acct?.stripe_account_id ||
+      // !acct.charges_enabled) … 'This trainer is not set up to take payments
+      // yet.'` The gap is visible where it costs money, which is where it can
+      // be acted on.
+      //
+      // And the write itself is not the record: `account.updated` in
+      // stripe-webhook writes these same columns and is the path that matters,
+      // because a coach who finishes Stripe's hosted flow may never come back
+      // through this function at all. This is the catch-up for a coach from
+      // before part 161, on the way to the link they actually came for.
       const { error: updErr } = await service.from('connect_accounts').update(accountState(acct)).eq('trainer_id', userId);
       // Not fatal. The link below is what the coach came for, and the webhook
       // writes the same columns. Losing this refresh delays a capability
@@ -215,7 +268,25 @@ Deno.serve(async (req) => {
 
     let acct: Stripe.Account;
     try {
-      acct = await stripe.accounts.create(params);
+      // ── the second connected account ─────────────────────────────────────
+      //
+      // Read the note under the upsert below before changing this. Stripe
+      // creates the account; the row that is the only link between it and this
+      // coach fails; the next call finds no row and CREATES ANOTHER ONE. The
+      // note calls that outcome "a real connected account that this database
+      // has never heard of" and then lets the next call happen anyway.
+      //
+      // It is worse here than for a Customer, because an account's type is
+      // permanent and its KYC is a person's passport and bank details. A coach
+      // who ends up with two has to be told which of them to finish, and
+      // nothing in the app can tell them.
+      //
+      // Keyed on the coach, so a repeat inside Stripe's 24-hour idempotency
+      // window returns the FIRST account rather than making a second — and that
+      // window is the one that matters: it is the coach tapping "Set up
+      // payments" again on the same afternoon. Only reached when no row exists,
+      // so it can never collide with the reuse path above.
+      acct = await stripe.accounts.create(params, { idempotencyKey: `repple-connect-account:${userId}` });
     } catch (e) { return stripeError('account creation', e); }
     acctId = acct.id;
 

@@ -30,7 +30,8 @@
 // document people have already signed — a re-issue is a new document and a
 // retirement of the old one, which the immutability trigger in part 135
 // enforces whatever a screen believes.
-import { fmtDay } from './format';
+import { fmtDay, num1 } from './format';
+import { BRAND } from './brands';
 
 /** Matches the bucket's `file_size_limit` and `coach_documents_bytes_chk`. The
  *  device checks it BEFORE uploading, because a 413 from storage arrives as an
@@ -148,7 +149,7 @@ export function sizeLabel(bytes: number | null | undefined): string {
   if (!b) return '—';
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${num1(b / (1024 * 1024))} MB`;
 }
 
 /* ── The documents themselves ─────────────────────────────────────────────── */
@@ -165,6 +166,8 @@ export interface RawCoachDoc {
   retired: boolean;
   created_at: string;
   accepted_at: string | null;
+  /** Part 3290. Absent on rows read before it, which are all paperwork. */
+  kind?: string | null;
 }
 
 export interface CoachDoc {
@@ -180,6 +183,21 @@ export interface CoachDoc {
   /** When this reader accepted it, or null. On the coach's own list this is
    *  always null — a coach does not accept their own paperwork. */
   acceptedAt: string | null;
+  kind: DocKind;
+}
+
+/** What a document is (part 3290): paperwork to read or accept, a nutrition
+ *  guide, or reading a coach hands out. Set once, at upload. */
+export type DocKind = 'paperwork' | 'nutrition' | 'education';
+export const DOC_KINDS: readonly { key: DocKind; label: string; plural: string }[] = [
+  { key: 'paperwork', label: 'Paperwork', plural: 'Paperwork' },
+  { key: 'nutrition', label: 'Nutrition Guide', plural: 'Nutrition Guides' },
+  { key: 'education', label: 'Client Education', plural: 'Learn' },
+];
+/** Anything unrecognised is paperwork: that is what every row was before the
+ *  column, and it keeps a document visible rather than dropping it. */
+export function docKindOf(v: unknown): DocKind {
+  return v === 'nutrition' || v === 'education' ? v : 'paperwork';
 }
 
 export function shapeDocs(rows: RawCoachDoc[] | null | undefined): CoachDoc[] {
@@ -196,6 +214,7 @@ export function shapeDocs(rows: RawCoachDoc[] | null | undefined): CoachDoc[] {
       retired: !!r.retired,
       createdAt: String(r.created_at),
       acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
+      kind: docKindOf(r.kind),
     }))
     // Outstanding paperwork first, then what is merely on file. Within each,
     // newest first, because the thing a coach just issued is the thing being
@@ -237,7 +256,7 @@ export function docLine(d: CoachDoc): string {
     case 'must-accept':
       return 'Your coach asks you to read and accept this';
     case 'optional':
-      return 'For you to read — no acceptance needed';
+      return 'For you to read · no acceptance needed';
     case 'withdrawn':
       return 'Withdrawn by your coach';
   }
@@ -252,17 +271,20 @@ export function docLine(d: CoachDoc): string {
  */
 export const COACH_DOC_ACCEPT_RULE =
   'Accepting records the date against your name for your coach to see. It can’t be edited or withdrawn '
-  + 'afterwards, by you or by them — that permanence is what makes it worth anything.';
+  + 'afterwards, by you or by them. That permanence is what makes it worth anything.';
 
-/** The distinction that must never blur. */
+/** The distinction that must never blur — and it blurs the moment the sentence
+ *  names a company that is not on the member's phone. Same reason as
+ *  `NOT_REPPLE` in src/lib/gymSigning.ts: this paragraph exists to say who is
+ *  responsible, so it has to name the party the member actually has. */
 export const COACH_DOC_NOT_REPPLE =
-  'This is your coach’s own paperwork, not Repple’s. Repple doesn’t write it, check it, or advise on it, '
+  `This is your coach’s own paperwork, not ${BRAND.label}’s. ${BRAND.label} doesn’t write it, check it, or advise on it, `
   + 'and the liability release you signed when you joined is a separate thing that your coach cannot read.';
 
 /** What a coach is told about editing. */
 export const COACH_DOC_IMMUTABLE_NOTE =
   'A document can’t be edited once it’s here, because people may already have accepted it. Changed the '
-  + 'wording? Upload the new version and retire the old one — everyone who accepted the old one keeps that '
+  + 'wording? Upload the new version and retire the old one. Everyone who accepted the old one keeps that '
   + 'record, and can still read what they agreed to.';
 
 /** Who can open the file. Said plainly, because a coach uploading a document is
@@ -284,9 +306,71 @@ export const COACH_DOC_IMMUTABLE_NOTE =
  *  told their leavers keep the paperwork they signed. They do not, and the
  *  acceptance RECORD that does survive is a document id and a timestamp. */
 export const COACH_DOC_REACH_NOTE =
-  'Only you and the clients you currently coach can open these. Nobody else at the gym can — and if a '
+  'Only you and the clients you currently coach can open these. Nobody else at the gym can, and if a '
   + 'client moves to another coach they lose access to all of it, including anything they accepted. '
   + 'Their record of having accepted it stays.';
+
+/**
+ * The same fact, said to the person it happens to.
+ *
+ * `COACH_DOC_REACH_NOTE` above has exactly one importer, and it is the COACH's
+ * screen. On the member's own screen the only permanence they were told about
+ * was `COACH_DOC_ACCEPT_RULE` — that their acceptance cannot be withdrawn — and
+ * nothing at all about losing the ability to read the thing they accepted.
+ *
+ * `can_read_coach_doc` has no acceptance branch, so the grant follows
+ * `clients.trainer_id`: the day a member switches coach, every waiver, health
+ * questionnaire and policy they agreed to disappears from their app, while
+ * `coach_document_acceptances` keeps a document id and a timestamp against
+ * their name. They are left holding proof they agreed to something they can no
+ * longer read — the worst possible half of a record to keep, and the half
+ * nobody warned them about.
+ *
+ * It sits beside the acceptance rule rather than replacing it, because the two
+ * facts are what make each other matter: the acceptance is permanent and the
+ * access is not.
+ */
+export const COACH_DOC_ACCESS_ENDS_NOTE =
+  'You can open these while this coach is your coach. If you move to another coach, or your coaching '
+  + 'ends, they stop opening for you, including anything you have accepted, which is why it is worth '
+  + 'saving a copy of anything you may need later. Your record of having accepted it stays either way.';
+
+/**
+ * What to say instead of a count, when the acceptance read came back at its
+ * row limit.
+ *
+ * `standingLine` is not a number on a dashboard. "All 12 of your clients have
+ * accepted this" is a claim about a signed waiver, and a read that stopped at
+ * the cap (src/lib/rowCap.ts) can produce it out of twelve rows of nineteen —
+ * so the coach trains the other seven believing they are covered. A truncated
+ * read is strictly worse than a failed one, and this is the screen where that
+ * is most true, so nothing is counted over it.
+ */
+/**
+ * The ceiling `coach_document_standing()` takes, mirrored here because nothing
+ * on the client can see it.
+ *
+ * The limit is written inside the function body
+ * (supabase/parts/135-a-coachs-own-paperwork.sql), and that is what defeats
+ * src/lib/rowCap.ts: `capped()` finds truncation by asking for one row more
+ * than it will accept, and the server cannot answer with 501 however the
+ * request is phrased. The `.limit(capLimit())` on the call site is therefore
+ * asking for 1001 rows from a function that stops at 500 — it has been reading
+ * a full page as a whole set the entire time.
+ *
+ * `>= cap` rather than the `> cap` used elsewhere, for the reason
+ * src/lib/challenges.ts gives: 500 rows back from a `limit 500` IS the ceiling
+ * and there is no probe row to find. The coach with exactly five hundred
+ * clients is told the count cannot be stated when it could. That is the small
+ * wrong, and STANDING_TRUNCATED_NOTE is what they get instead — which, on a
+ * screen whose sentence is "all 12 of your clients have accepted this waiver",
+ * is the side to be wrong on.
+ */
+export const STANDING_ROW_CAP = 500;
+
+export const STANDING_TRUNCATED_NOTE =
+  'You have more clients than this list could bring back, so how many have accepted cannot be stated here. '
+  + 'The names below are real but they are not all of them. Do not read this as everybody being covered.';
 
 /** "4 of 9 have accepted" — the coach's summary for one document.
  *

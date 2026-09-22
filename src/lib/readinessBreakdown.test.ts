@@ -27,7 +27,8 @@ import {
   deviceSleepTrust, readinessBreakdown,
   type ReadinessBreakdownInput, type ReadinessSource,
 } from './readinessBreakdown';
-import type { Readiness, ReadinessSleep } from './readiness';
+import type { Readiness, ReadinessSignal, ReadinessSleep } from './readiness';
+import { readinessDirection } from './readinessDirection';
 import { readinessScore } from './readiness';
 
 const errors: string[] = [];
@@ -49,6 +50,8 @@ const sleepOf = (d: number, t: number): ReadinessSleep => {
     nights,
     fromDevice: d,
     fromTyped: t,
+    windowNights: 3,
+    state: nights.length ? 'scored' : 'none',
   };
 };
 
@@ -140,7 +143,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(b.absence, null, 'there is a score, so there is no reason for its absence');
   eq(b.lines.length, 4, 'four signals, four rows — always, even the ones that were not scored');
   eq(b.lines.map((l) => l.key).join(','), 'sleep,recovery,hydration,load', 'in scale order, which is order of weight');
-  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Device Recovery,Hydration,Recent Sessions',
+  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Device Recovery,Hydration,Recent Training',
     'titles are Title Case, per the house rule for a label beside a value');
   // "Device Recovery" rather than "Recovery": this breakdown renders on a
   // screen called Recovery, under a hero called Readiness, and a third bare
@@ -183,7 +186,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const untracked = br({ hydrationGoal: false, hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(untracked, 'hydration');
   eq(h.state, 'not-tracked', 'no goal set is not a failure');
-  eq(h.detail, 'not in the scale — you have not set a daily water goal',
+  eq(h.detail, 'not in the scale: you have not set a daily water goal',
     'and it says the signal LEFT the scale, because a member reading a lower number will assume they were docked for it');
   eq(untracked.status, 'ready', 'an untracked signal does not make the read incomplete');
   eq(untracked.caveats.length, 0, 'nor does it warrant a warning');
@@ -192,7 +195,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const unread = br({ hydrationStatus: 'error', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(unread, 'hydration');
   eq(h.state, 'unread', 'a goal that exists and a count that could not be read is a FAILED read, not an untracked one');
-  eq(h.detail, "not in the scale — today's count could not be read", 'said as what it is');
+  eq(h.detail, "not in the scale: today's count could not be read", 'said as what it is');
   eq(unread.status, 'partial', 'and it makes the score partial');
   eq(unread.caveats[0], "Today's water count could not be read, so hydration is not in the scale.",
     'with a sentence, because 0 cups over a goal they DID set is thirty points for a network blip');
@@ -212,10 +215,16 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 
 // ── recent sessions ───────────────────────────────────────────────────────
 {
-  eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').detail, 'no sessions in the last two days',
-    'zero sessions is a fact and reads as one');
-  eq(lineFor(br({ workoutsLast2Days: 1 }), 'load').detail, '1 session in the last two days', 'one is singular');
-  eq(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail, '2 sessions in the last two days', 'two is not');
+  // DAYS, never sessions. `workoutsLast2Days` is a Set of local day keys —
+  // src/ui/readiness.ts: "three sets on Monday are one day of training" — so
+  // "1 session in the last two days", which is what this row used to print,
+  // is a false statement to a member who trained twice yesterday.
+  eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').detail, 'no training logged in the last two days',
+    'nothing logged is a fact and reads as one');
+  eq(lineFor(br({ workoutsLast2Days: 1 }), 'load').detail, 'training logged on 1 day in the last two', 'one is singular');
+  eq(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail, 'training logged on 2 days in the last two', 'two is not');
+  ok(!/session/.test(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail),
+    'and the word "session" is not in it at all — the log cannot count them');
   eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').state, 'scored',
     'and nought is scored, never mistaken for unread — the two are opposite ends of the scale');
 }
@@ -229,7 +238,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 
   // The training log first, because it is the only absence that is never theirs.
   const log = br({ ...noScore, workoutsLast2Days: null, sleep: sleepOf(3, 0), readiness: null });
-  eq(log.absence, 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.',
+  eq(log.absence, 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.',
     'an unread log outranks every other reason, even with three good nights on file');
   eq(log.status, 'error', 'and the absence is ours, so it is an error rather than an empty answer');
   eq(lineFor(log, 'load').state, 'unread', 'the row says so too');
@@ -242,7 +251,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(typedLoading.absence, 'Reading the nights you have logged…', 'and so does the typed half');
 
   const devErr = br({ ...noScore, sources: [{ name: 'WHOOP', status: 'error', nights: 0 }], readiness: null });
-  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.',
+  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.',
     'a device that did not answer is not a bad night');
   eq(devErr.status, 'error', 'and no score plus a failed read is an error');
 
@@ -250,7 +259,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   // empty cache used to reach the home screen as "log a night of sleep" — a
   // claim about what the member has done, built out of a read that failed.
   const typedErr = br({ ...noScore, typedStatus: 'error', sources: [], readiness: null });
-  eq(typedErr.absence, 'We could not read your sleep log just now, so there is no readiness to show — it does not mean you have not logged a night.',
+  eq(typedErr.absence, 'We could not read your sleep log just now, so there is no readiness to show. It does not mean you have not logged a night.',
     'an unread sleep log must never be reported as an unlogged one');
   eq(typedErr.status, 'error', 'it is our read that failed, not their week');
   eq(lineFor(typedErr, 'sleep').state, 'unread', 'and the sleep row says unread, not no-record');
@@ -274,6 +283,99 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
     'Health Connect cannot report sleep, so it does not count as a device that looked');
 }
 
+// ── a log that stopped, which is the sixth absence ────────────────────────
+//
+// Until `readinessSleep` was given a window there was no such state: a member
+// whose last logged night was six weeks old had those nights averaged and
+// scored, and this file printed "over the last 3 nights" about them. With the
+// window, the nights are dropped and the score is withheld — and the sentence
+// that arrives in their place must not be either of the two that already
+// existed. "No sleep on record" is false of a log that holds thirty nights,
+// and "Log a night of sleep" reads as a claim that they never have.
+{
+  const stale: ReadinessSleep = { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'stale' };
+  const noScore = { readiness: null, sleep: stale } as Partial<ReadinessBreakdownInput>;
+
+  const withWatch = br({ ...noScore, readiness: null });
+  eq(withWatch.absence, 'Nothing on record for the last 3 nights. The most recent night you have is older than that.',
+    'A LOG THAT STOPPED IS NAMED AS ONE, not as a log that is empty');
+  eq(withWatch.status, 'ready',
+    'and nothing failed, so it is a complete answer — "stale" must never be dressed up as a broken read');
+  eq(lineFor(withWatch, 'sleep').state, 'no-record', 'there is no record IN THE WINDOW, which is the only span this row speaks about');
+  eq(lineFor(withWatch, 'sleep').detail, 'nothing recorded for the last 3 nights; the most recent night you have is older than that',
+    'and the row says which, rather than implying nothing was ever logged');
+
+  const noWatch = br({ ...noScore, sources: [], readiness: null });
+  eq(noWatch.absence, 'The most recent night you logged is older than the last 3 nights, so there is no readiness to show yet.',
+    'a member with no watch is told about their log, not sent to connect a device they may not want');
+
+  // A read that failed still outranks it: a device we could not reach may be
+  // holding last night, and "your log has stopped" would be a claim we cannot
+  // make while we have not managed to look.
+  const devErr = br({ ...noScore, sources: [{ name: 'WHOOP', status: 'error', nights: 0 }], readiness: null });
+  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.',
+    'an unreachable device outranks a stale log, because it may be holding the night that would have refuted it');
+  eq(lineFor(devErr, 'sleep').state, 'unread', 'and the row is unread rather than no-record');
+}
+
+// ── a window that could not be drawn ──────────────────────────────────────
+//
+// 'unknown' is the clock's failure and not the member's, and the cost of
+// folding it into 'none' is a screen telling somebody to log a night when the
+// problem is that we could not work out which nights count as recent.
+{
+  const unknown: ReadinessSleep = { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'unknown' };
+  const b = br({ readiness: null, sleep: unknown });
+  eq(lineFor(b, 'sleep').state, 'unread', 'AN UNDRAWABLE WINDOW IS UNREAD, NOT NO-RECORD');
+  eq(lineFor(b, 'sleep').detail, 'we could not work out which nights to read, so we cannot say what you have recorded',
+    'and says whose failure it was');
+  eq(b.absence, 'We could not work out which nights to read just now, so there is no readiness to show. It does not mean you slept badly.',
+    'the absence refuses to blame the member');
+  eq(b.status, 'error', 'and it is an error, because the absence is ours');
+}
+
+// ── the span is the window the AVERAGE was taken over ─────────────────────
+//
+// The sentence and the arithmetic used to be two copies of one number: the
+// window came from the caller and the nights came from `readinessSleep`, and
+// when the second had no window at all the first went on naming one. The span
+// is now built from `sleep.windowNights`, which is the run the mean was
+// actually taken from.
+{
+  // The caller's `windowNights` disagrees with the sleep read's. The answer
+  // that did the averaging wins.
+  const overSeven: ReadinessSleep = {
+    avgHours: 7.5,
+    nights: [{ night: '2026-08-30', hours: 7.5, from: 'device' }, { night: '2026-08-29', hours: 7.5, from: 'device' }],
+    fromDevice: 2, fromTyped: 0, windowNights: 7, state: 'scored',
+  };
+  const b = br({ sleep: overSeven, windowNights: 3 });
+  eq(lineFor(b, 'sleep').detail, '7h 30m a night over 2 of the last 7 nights, all measured by a device',
+    'A TWO-NIGHT MEAN OVER A SEVEN-NIGHT WINDOW IS SAID AS ONE — the caller’s 3 is not allowed to rename the span');
+
+  // Filled window: no "n of" clause, and the number is still the sleep read's.
+  const filled: ReadinessSleep = {
+    avgHours: 8,
+    nights: [0, 1, 2, 3, 4, 5, 6].map((k) => ({ night: `2026-08-${String(30 - k).padStart(2, '0')}`, hours: 8, from: 'device' as const })),
+    fromDevice: 7, fromTyped: 0, windowNights: 7, state: 'scored',
+  };
+  eq(lineFor(br({ sleep: filled, windowNights: 3 }), 'sleep').detail,
+    '8h a night over the last 7 nights, all measured by a device',
+    'and a full window drops the "n of" rather than inventing a shorter one');
+
+  // The shape the whole change exists to stop, asserted from the other side:
+  // more nights averaged than the window names. It cannot come out of
+  // readinessSleep any more, and if it ever does the sentence tells the truth.
+  const tooMany: ReadinessSleep = {
+    avgHours: 8,
+    nights: [0, 1, 2, 3, 4].map((k) => ({ night: `2026-08-${String(30 - k).padStart(2, '0')}`, hours: 8, from: 'typed' as const })),
+    fromDevice: 0, fromTyped: 5, windowNights: 3, state: 'scored',
+  };
+  eq(lineFor(br({ sleep: tooMany }), 'sleep').detail,
+    '8h a night over the last 5 nights, all from the nights you logged',
+    'FIVE NIGHTS ARE NEVER DESCRIBED AS THREE — a span must be one the average was really taken over');
+}
+
 // ── a figure that is not a figure ─────────────────────────────────────────
 //
 // `readinessSleep` cannot produce any of these — it returns a null average
@@ -285,17 +387,17 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 {
   const oneNight = { night: '2026-08-30', hours: 7.5, from: 'device' as const };
 
-  const zero = br({ sleep: { avgHours: 0, nights: [oneNight], fromDevice: 1, fromTyped: 0 }, readiness: null });
+  const zero = br({ sleep: { avgHours: 0, nights: [oneNight], fromDevice: 1, fromTyped: 0, windowNights: 3, state: 'scored' }, readiness: null });
   eq(lineFor(zero, 'sleep').state, 'no-record',
     'an average of nought hours is the absence of a night, not a night of no sleep');
 
   // The other side of the same guard: half an hour IS a figure and must survive.
-  const half = br({ sleep: { avgHours: 0.5, nights: [oneNight], fromDevice: 1, fromTyped: 0 } });
+  const half = br({ sleep: { avgHours: 0.5, nights: [oneNight], fromDevice: 1, fromTyped: 0, windowNights: 3, state: 'scored' } });
   eq(lineFor(half, 'sleep').state, 'scored', 'and a short night is still a night');
   eq(lineFor(half, 'sleep').detail, '0h 30m a night over 1 of the last 3 nights, measured by a device',
     'shown as what the device reported');
 
-  const noNights = br({ sleep: { avgHours: 7.5, nights: [], fromDevice: 0, fromTyped: 0 }, readiness: null });
+  const noNights = br({ sleep: { avgHours: 7.5, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'scored' }, readiness: null });
   eq(lineFor(noNights, 'sleep').state, 'no-record',
     'an average with no nights under it cannot say how many nights it ran over, so it does not claim to');
 }
@@ -310,7 +412,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const nan = br({ workoutsLast2Days: NaN, readiness: null });
   eq(lineFor(nan, 'load').state, 'unread', 'NaN sessions is an unread log, not a count');
   eq(lineFor(nan, 'load').detail, 'we could not read your training log', 'and reads as one');
-  eq(nan.absence, 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.',
+  eq(nan.absence, 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.',
     'the absence names it as the read it is');
   eq(nan.status, 'error', 'and it is our error, not their empty week');
 }
@@ -353,11 +455,50 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(silent.state, 'unread',
     'a connected strap with no figure today IS unread — that is the one the member can act on');
   ok(silent.detail !== noStrap.detail, 'the two absences must never share a sentence');
+  ok(/has not reported/.test(silent.detail),
+    'and it is a statement about the device, which is only sayable because the device walk came back');
+
+  // ── the fourth absence: we did not manage to ask ────────────────────────
+  //
+  // This row took the input alone and never looked at the device walk, so a
+  // failed walk fell into the sentence above and told a member their strap had
+  // stayed quiet when the truth was that we never reached it. That sends them
+  // into the WHOOP app after a sync that is sitting there perfectly fine.
+  const walkFailed = lineFor(
+    br({ recoveryPct: null, recoveryDeviceConnected: true, deviceStatus: 'error' }),
+    'recovery',
+  );
+  eq(walkFailed.state, 'unread', 'a walk that failed leaves the signal out of the scale');
+  ok(!/has not reported/.test(walkFailed.detail),
+    'and says nothing about what the device did, because we did not manage to ask it');
+  ok(/could not read your devices/.test(walkFailed.detail), 'it says whose failure it was');
+
+  // A walk where SOME provider failed is no better placed to speak for the
+  // strap: `ReadinessSource` carries a name and no id, so there is no telling
+  // whether the one that failed was the one that scores recovery.
+  const walkShort = lineFor(br({
+    recoveryPct: null, recoveryDeviceConnected: true,
+    sources: [
+      { name: 'Oura Ring', status: 'error', nights: 0 },
+      { name: 'Apple Health', status: 'ready', nights: 3 },
+    ],
+  }), 'recovery');
+  ok(!/has not reported/.test(walkShort.detail),
+    'a partial walk does not get to state that a device stayed quiet either');
+
+  const walkLoading = lineFor(
+    br({ recoveryPct: null, recoveryDeviceConnected: true, deviceStatus: 'loading' }),
+    'recovery',
+  );
+  ok(/still reading/i.test(walkLoading.detail),
+    'and a walk still in flight says so rather than reporting a silence it has not established');
 
   // Neither absence is a deduction, and both say so, for the same reason the
   // hydration row does: a member reading "no recovery score" under a lower
   // number will assume they were marked down for it.
-  for (const l of [noStrap, silent]) ok(/not in the scale/.test(l.detail), 'an absent signal says it left the scale rather than scoring zero');
+  for (const l of [noStrap, silent, walkFailed, walkShort, walkLoading]) {
+    ok(/not in the scale/.test(l.detail), 'an absent signal says it left the scale rather than scoring zero');
+  }
 }
 
 // ── the breakdown never contradicts the score ─────────────────────────────
@@ -381,6 +522,61 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
       }
     }
   }
+}
+
+// ── the direction, where it joins the caveats and where it must not ───────
+//
+// src/lib/readinessDirection.ts decides which way the score has moved and which
+// of the four ways of not knowing this is. The only thing this file owns is
+// where that answer lands: a sentence in `caveats`, and — the part that is easy
+// to get wrong — NOT a contribution to `status`.
+//
+// Asserted here rather than only in readinessDirection.test.ts because this
+// suite is the one wired into `npm test`, and the defect it guards is a
+// completely-read score being coloured as an incomplete one.
+{
+  const yesterday = '2026-09-13';
+  const same: ReadinessSignal[] = [...scored.from];
+
+  const failed = readinessDirection(scored, { status: 'error', score: null }, new Date(2026, 8, 14, 9));
+  ok(failed != null && failed.state === 'unread', 'a yesterday that could not be read is unread');
+  const withFailed = br({ direction: failed });
+  eq(withFailed.caveats.length, 1, "an unread yesterday puts one sentence in the hero's flags");
+  eq(withFailed.caveats[0], failed!.caveat, 'and it is the direction sentence, verbatim');
+  eq(withFailed.status, 'ready',
+    "but today's own read is still whole — a missing yesterday takes nothing out of today's scale");
+
+  const absent = readinessDirection(scored, { status: 'ready', score: null }, new Date(2026, 8, 14, 9));
+  eq(absent?.state, 'no-record', 'a yesterday that is simply not there is no-record');
+  eq(br({ direction: absent }).caveats.length, 0,
+    'and it raises no flag — an ordinary absence dressed as a short read is how a warning stops being read');
+
+  const moved = readinessDirection(
+    scored, { status: 'ready', score: { day: yesterday, score: scored.score - 9, from: same } },
+    new Date(2026, 8, 14, 9),
+  );
+  eq(moved?.state, 'scored', 'a same-scale yesterday gives a direction');
+  eq(br({ direction: moved }).caveats.length, 0, 'and a direction that worked out is not a caveat');
+
+  const mismatched = readinessDirection(
+    scored, { status: 'ready', score: { day: yesterday, score: 62, from: ['sleep', 'load'] } },
+    new Date(2026, 8, 14, 9),
+  );
+  eq(mismatched?.state, 'not-comparable', 'a yesterday out of another denominator is not comparable');
+  eq(mismatched?.delta, null, 'and is never subtracted');
+  const withMismatch = br({ direction: mismatched });
+  eq(withMismatch.caveats.length, 1, 'it can be said out loud');
+  eq(withMismatch.status, 'ready', 'and still does not make today a partial read');
+
+  // Behind everything that says a figure IN the score may be missing.
+  const both = br({ typedStatus: 'error', direction: failed });
+  ok(both.caveats.length === 2 && both.caveats[1] === failed!.caveat,
+    'the direction sentence is last, behind the ones about the score\'s own inputs');
+
+  // And never under a hero showing a dash, where `absence` is the whole answer.
+  const none = br({ readiness: null, sleep: sleepOf(0, 0), direction: failed });
+  eq(none.caveats.length, 0, 'no score, no direction caveat');
+  ok(none.absence != null, 'the absence is what speaks there');
 }
 
 if (errors.length) {

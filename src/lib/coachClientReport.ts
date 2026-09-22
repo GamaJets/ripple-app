@@ -78,9 +78,11 @@
 //
 // Pure, framework-free and asserted against under plain `node`.
 
-import type { LoadStatus } from '../ui/loadStatus';
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 import { weightIn, lengthIn, volumeIn, convertedNote, type WeightUnit, type LengthUnit } from './units';
 import { progressChangeLines, progressSpanLabel, figure, dayLabel } from './progressExport';
+import { localDate } from './localDate';
+import { isoDay } from './weekStart';
 // The coach's own mark, on the coach's own document. `logoImgHtml` returns the
 // empty string for anything it cannot validate, so a logo that could not be
 // read produces the report this module produced before logos existed.
@@ -150,7 +152,61 @@ export interface SessionTally {
   lastDay: string | null;
 }
 
-const dayOf = (iso: string): string => String(iso ?? '').slice(0, 10);
+/**
+ * The LOCAL calendar day a session falls on.
+ *
+ * `sessions.starts_at` is a `timestamptz`, and PostgREST serialises it in UTC,
+ * so `String(iso).slice(0, 10)` read GREENWICH's calendar day and not the
+ * reader's. A session run at 18:00 on 4 March in California came back as
+ * `2026-03-05T02:00:00Z`, and the period line on a document a coach hands to
+ * the next coach said "From 5 Mar" — a day that client was never in the gym.
+ *
+ * `localDate()` keeps the instant, `isoDay()` reads its LOCAL parts. A bare
+ * `YYYY-MM-DD` — a `date` column, if one is ever passed here — still comes
+ * back unchanged, because `localDate()` builds it at local midnight.
+ */
+const dayOf = (iso: string): string => {
+  const d = localDate(iso);
+  return d ? isoDay(d) : '';
+};
+
+/**
+ * How many rows there are, or null because that is not a thing this read can
+ * say.
+ *
+ * ── Why a function for `rows.length` ──────────────────────────────────────
+ *
+ * Because `rows.length` is not the number of rows. It is the number of rows
+ * THAT CAME BACK, and under 'partial' those are different — src/lib/rowCap.ts
+ * exists for that difference and `sessionTally` below restates the rule two
+ * dozen lines down: "a truncated read may be LISTED and may not be COUNTED".
+ *
+ * The document already keeps that rule everywhere. The PREVIEW panel on
+ * app/(trainer)/client-report.tsx did not, in two of its six rows, and the two
+ * it missed are the two whose figure is not computed by a module that owns the
+ * rule — they read `.rows.length` straight off the state. So a client with a
+ * long measurement history was previewed as
+ *
+ *     Body-composition scans            1000
+ *     Days with tape measurements        417
+ *
+ * while the document those numbers describe printed neither total and said, on
+ * its own front page, that what it holds is not all of it. The coach reads the
+ * panel, not the front page: they are looking at "What will be on it" to decide
+ * whether to send it. `measurements` is one row per site per day, so a client
+ * measured across ten sites reaches the cap in about a hundred measuring days,
+ * which is two years of a fortnightly tape — an ordinary client, not a
+ * pathological one.
+ *
+ * Loading is null too, and the caller says '…' for it. This only answers the
+ * question "may this be counted"; which of the three silences to print is the
+ * screen's to choose, exactly as it already chooses between 'not read', '—' and
+ * 'more than could be read' for the rows that were right all along.
+ */
+export function countableRows(rows: readonly unknown[] | null | undefined, status: LoadStatus): number | null {
+  if (!isWhole(status) || rows == null) return null;
+  return rows.length;
+}
 
 /**
  * Tally the sessions, or refuse to.
@@ -164,6 +220,14 @@ export function sessionTally(rows: readonly CoachSessionRow[] | null, status: Lo
     state: 'unreadable', booked: null, completed: null, noShow: null,
     cancelled: null, lateCancelled: null, unrecorded: null, firstDay: null, lastDay: null,
   };
+  // whole-ok: this guard is the "nothing came back" half and 'partial' is
+  // answered fifteen lines below with its own return, because it is a different
+  // answer rather than a worse one. A truncated sessions read still has two real
+  // sessions at its ends, so `firstDay` and `lastDay` are stated — those are
+  // facts about rows that exist. Every TALLY is left null under it: booked,
+  // completed, no-shows, cancellations. Sending an `isWhole` here instead would
+  // collapse 'partial' onto 'unreadable' and lose the span with it, telling the
+  // coach nothing about a client whose history is merely longer than one page.
   if (rows == null || status === 'error' || status === 'loading') return empty;
 
   const days = rows.map((r) => dayOf(r.startsAt)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
@@ -274,7 +338,7 @@ export interface CoachClientReportDoc {
  */
 export const COACH_REPORT_PROVENANCE = [
   'This is a record of what was entered in this app about the person named above, printed by their coach.',
-  'Sessions are the ones booked in this app and the outcome their coach recorded against each. Training is what was logged, by the client or by their coach. Body-composition figures are transcribed from body-composition machine printouts — read automatically from a photograph, or typed in by hand — and are not measured by this app. Tape measurements are taken by hand.',
+  'Sessions are the ones booked in this app and the outcome their coach recorded against each. Training is what was logged, by the client or by their coach. Body-composition figures are transcribed from body-composition machine printouts (read automatically from a photograph, or typed in by hand) and are not measured by this app. Tape measurements are taken by hand.',
   'Dates are the dates recorded against each entry. Where something was not recorded it is shown as a dash, never as a zero.',
 ];
 
@@ -293,7 +357,7 @@ export const COACH_REPORT_LIMITS =
  *  coach, which a forwarded file would quietly turn into a share with
  *  everybody. */
 export const COACH_REPORT_NO_PHOTOS =
-  'No photographs are included. Progress photographs are shared by the client with one coach at a time and are never attached to a document. Documents a client uploaded about an injury are likewise not included — only the injury they recorded from them.';
+  'No photographs are included. Progress photographs are shared by the client with one coach at a time and are never attached to a document. Documents a client uploaded about an injury are likewise not included, only the injury they recorded from them.';
 
 /**
  * Why there is no attendance percentage on this page.
@@ -394,7 +458,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   // ground and would vanish into it.
   H.push(logoImgHtml(input.logoDataUri));
   H.push(`<div class="h"><h1>Coaching record</h1><p>${escapeHtml(who)} · prepared ${escapeHtml(dayLabel(input.generatedOn))} · ${escapeHtml(brand)}</p></div>`);
-  T.push(`${who} — coaching record`);
+  T.push(`${who} · coaching record`);
   T.push(`Prepared ${dayLabel(input.generatedOn)} · ${brand}`);
 
   /* ── who prepared it ───────────────────────────────────────────────────── */
@@ -407,7 +471,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   T.push('', 'WHO PREPARED THIS');
   if (!coachRead) {
     H.push(unreadableBlock('The name of the coach preparing this'));
-    T.push('Not read — the name of the coach preparing this could not be read. This document is NOT an assessment produced by the app.');
+    T.push('Not read: the name of the coach preparing this could not be read. This document is NOT an assessment produced by the app.');
   } else if (!coach) {
     H.push(emptyBlock('The coach preparing this has not recorded a name on their account.'));
     T.push('The coach preparing this has not recorded a name on their account.');
@@ -445,7 +509,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'SESSIONS BOOKED IN THIS APP');
     if (st === 'unreadable' || tally.state === 'unreadable') {
       H.push(unreadableBlock('Sessions'));
-      T.push('Not read — sessions could not be read. This is not a statement that none were booked.');
+      T.push('Not read: sessions could not be read. This is not a statement that none were booked.');
     } else if (tally.state === 'none') {
       H.push(emptyBlock('No sessions were booked with this coach in this app. Sessions arranged any other way are not recorded here.'));
       T.push('No sessions were booked with this coach in this app. Sessions arranged any other way are not recorded here.');
@@ -497,7 +561,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'TRAINING LOGGED');
     if (st === 'unreadable' || b.state === 'unreadable') {
       H.push(unreadableBlock('Logged training'));
-      T.push('Not read — logged training could not be read. This is not a statement that none was logged.');
+      T.push('Not read: logged training could not be read. This is not a statement that none was logged.');
     } else if (!b.days.length && b.undatedCount < 1) {
       H.push(emptyBlock('No training sessions are logged in this app.'));
       T.push('No training sessions are logged in this app.');
@@ -556,7 +620,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'BODY COMPOSITION');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Body-composition scans'));
-      T.push('Not read — body-composition scans could not be read. This is not a statement that there are none.');
+      T.push('Not read: body-composition scans could not be read. This is not a statement that there are none.');
     } else if (!scans.length) {
       H.push(emptyBlock('No body-composition scans are recorded.'));
       T.push('No body-composition scans are recorded.');
@@ -588,8 +652,8 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
           H.push(`<p>First reading to latest: ${escapeHtml(lines.join(' · '))}</p>`);
           T.push('First reading to latest: ' + lines.join(' · '));
         } else {
-          H.push('<p class="lede">One reading of each figure so far — a change needs two.</p>');
-          T.push('One reading of each figure so far — a change needs two.');
+          H.push('<p class="lede">One reading of each figure so far. A change needs two.</p>');
+          T.push('One reading of each figure so far. A change needs two.');
         }
       } else {
         // The text fallback carries the WHOLE sentence, not a shortened one.
@@ -611,7 +675,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'TAPE MEASUREMENTS');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Tape measurements'));
-      T.push('Not read — tape measurements could not be read. This is not a statement that there are none.');
+      T.push('Not read: tape measurements could not be read. This is not a statement that there are none.');
     } else if (!entries.length || !cols.length) {
       H.push(emptyBlock('No tape measurements are recorded.'));
       T.push('No tape measurements are recorded.');
@@ -646,7 +710,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'INJURIES DISCLOSED IN THE APP');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Disclosed injuries'));
-      T.push('Not read — disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
+      T.push('Not read: disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
     } else if (!items.length) {
       H.push(emptyBlock('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.'));
       T.push('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.');
@@ -659,10 +723,10 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
       const body = items.map((i) => `<tr><td>${escapeHtml(i.label)}</td>`
         + `<td>${escapeHtml(i.severity)}</td>`
         + `<td>${escapeHtml(i.status)}</td>`
-        + `<td>${escapeHtml(dayLabel(String(i.at).slice(0, 10)))}</td>`
+        + `<td>${escapeHtml(dayLabel(i.at))}</td>`
         + `<td>${escapeHtml(i.note || '—')}</td></tr>`).join('');
       H.push(`<table><tr><th>Area</th><th>Severity as recorded</th><th>State</th><th>Recorded on</th><th>Their note</th></tr>${body}</table>`);
-      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(String(i.at).slice(0, 10))}${i.note ? ' — "' + i.note + '"' : ''}`);
+      for (const i of items) T.push(`  ${i.label} · ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ' · "' + i.note + '"' : ''}`);
       const grading = 'Severity and state are as the person themselves recorded them, in the app’s own three-step wording. They are not a clinical grading and the coach did not assign them.';
       H.push(`<p class="lede">${escapeHtml(grading)}</p>`);
       T.push(grading);
@@ -697,7 +761,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   /* ── foot ──────────────────────────────────────────────────────────────── */
   const foot = complete
     ? `Every section of this document was read successfully on ${dayLabel(input.generatedOn)}. Generated by ${brand}.`
-    : `PARTS OF THIS DOCUMENT COULD NOT BE READ — see "This record is incomplete" above. Generated by ${brand}.`;
+    : `PARTS OF THIS DOCUMENT COULD NOT BE READ. See "This record is incomplete" above. Generated by ${brand}.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 

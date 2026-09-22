@@ -1,0 +1,665 @@
+// Client · Ask your coach for a time they have not opened.
+//
+// ── What was missing ──────────────────────────────────────────────────────
+//
+// The product owner tested the app and reported: "i can't see my coach Dayne's
+// availability and am not able to book a session or send a request for a
+// booking." A client is never shown a coach's weekly availability — that table
+// is coach-side on purpose — and what they CAN see is generated open slots on
+// app/(client)/calendar.tsx. So a member whose coach had not published Tuesday
+// at seven had nothing at all to tap. This screen is the missing half.
+//
+// ── The one rule this screen exists to keep ───────────────────────────────
+//
+// A REQUEST IS NOT A BOOKING, and the member must never be able to read one as
+// though it were. That is not a copy preference; it is the harm this feature can
+// actually do — somebody arranging their evening around a question nobody has
+// answered. Four separate things enforce it here:
+//
+//  · The sentence is on the screen before the button. `NOT_A_BOOKING` sits
+//    above the ask, not in a confirmation somebody dismisses.
+//  · The lapse rule is on the screen before it is relied on. `EXPIRY_RULE` says
+//    what happens to a request nobody answers, at the moment the member is
+//    deciding whether to count on the hour — not on a screen they reach after
+//    being let down.
+//  · Every outcome gets its OWN sentence. `outcomeLine` writes five of them and
+//    src/lib/sessionRequests.test.ts asserts they are five, and asserts that the
+//    four which are not sessions never say booked or confirmed.
+//  · A request kept on this phone is not shown as asked. The list is the
+//    server's answer; a queued intent is counted separately and said out loud,
+//    exactly as a queued coach-document acceptance is, because the difference
+//    between "your coach has been asked" and "your coach has not been asked" is
+//    the whole point.
+//
+// ── Money is not on this screen ───────────────────────────────────────────
+//
+// No price, no credit, no fee, no currency. A question costs nothing, and an
+// accepted one becomes a session paid for by the route that already exists:
+// part 740 leaves `sessions.booking_drew_credit_at` null, so part 370 draws the
+// credit at DELIVERY, off whatever the member actually holds, exactly as it
+// does for a session a coach books into their own diary. There is no second
+// path and this screen would be the wrong place to build one.
+//
+// ── Offline ───────────────────────────────────────────────────────────────
+//
+// Kept, and 'session-request' is an outbox kind. src/lib/outbox.ts argues why
+// this one is admitted where BOOKING a slot is refused: the exclusion is about
+// scarcity, and a request holds nothing that anybody else could take first.
+import { useCallback, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead, KpiRow, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
+import { appLocale } from '../../src/lib/locale';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { useClientData } from '../../src/ui/clientData';
+import { useSessions } from '../../src/ui/sessions';
+import { useThreadPeerName } from '../../src/ui/messaging';
+import { peerHeading } from '../../src/lib/threadPeer';
+import { useOutbox } from '../../src/ui/outbox';
+import { useToday, useNow } from '../../src/ui/today';
+import { outboxNote } from '../../src/lib/outbox';
+import { keptOnPhoneNote, notKeptNote, sessionRequestExpiry } from '../../src/lib/recordQueue';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { fetchMyRequests, askForSession, withdrawRequest, type MySessionRequest } from '../../src/ui/sessionRequests';
+import {
+  EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL, REQUEST_NOTE_MAX,
+  askBlocker, askRefusalNote, askedConfirmation, myRequests, outcomeLine, outcomeOf,
+  ownDiaryNote, isLive, type RequestOutcome,
+} from '../../src/lib/sessionRequests';
+// Who settled this request, and when. `answered_by` has been written by all
+// three paths in supabase/parts/740 since the feature existed and read by
+// nobody, so "Your Coach Said No" stood on this screen with no name and no date
+// on it — indistinguishable at a glance whether it happened this morning or in
+// March, and on an account that has changed coach, silent about which of the two
+// people said it.
+import { answeredByLine, answererOf } from '../../src/lib/requestAnswerer';
+
+/** How far ahead the day strip offers. Four weeks is as far as anybody plans a
+ *  gym session; the horizon that actually governs is REQUEST_HORIZON_DAYS and
+ *  `askBlocker` is what enforces it. */
+const DAYS_OFFERED = 28;
+
+/** The hours a coach might be asked for. A list rather than a free field: this
+ *  is a request for an appointment, and 06:17 is not one somebody means. */
+const HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+
+/** The lengths offered. Sixty first, because it is what almost every one-to-one
+ *  in this app is, and the others are beside it rather than behind a picker. */
+const LENGTHS = [30, 45, 60, 90];
+
+/**
+ * A local instant from a local day and a local hour.
+ *
+ * `new Date(y, m, d, h)` and never a string slice. A `${iso}T${hh}:00:00Z`
+ * would be UTC and would move a 7pm request by hours for most of the world;
+ * this is the same discipline `dateParts` exists for elsewhere in this app.
+ */
+const instantAt = (day: Date, hour: number, minute = 0): string =>
+  new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0).toISOString();
+
+/** The quarters a session can start on, matching the coach's own Add Session
+ *  grid and the slots a range generates. A client who can only ask on the hour
+ *  cannot ask for the 07:15 their coach actually offers. */
+const REQUEST_MINUTES = [0, 15, 30, 45];
+
+// One tone per outcome, for the chip on each request row. See the row.
+const OUTCOME_TONE: Record<RequestOutcome, Tone> = {
+  asked: 'amber', accepted: 'brand', declined: 'red', withdrawn: 'neutral', expired: 'neutral',
+};
+
+export default function RequestSessionScreen() {
+  const t = useTheme();
+  const router = useRouter();
+  const cd = useClientData();
+  // `status` as well as the rows. `myBusy` below is built out of this list and
+  // is the only check of the member's OWN calendar anywhere in this feature —
+  // see `ownDiaryNote`. Taking the sessions without the status is how a read
+  // that failed becomes a diary with nothing in it.
+  const { sessions, status: sessionsStatus, refresh: refreshSessions } = useSessions();
+  const outbox = useOutbox();
+
+  // The coach's name where it can be read, and a sentence that works without
+  // one where it cannot. No policy on `profiles` runs client → coach for most
+  // accounts (src/lib/threadPeer.ts), so "no name" is the ordinary case here
+  // rather than the exception.
+  const peer = useThreadPeerName('client', null);
+  const head = peerHeading(peer, 'coach');
+  const coachName = head.isName ? head.text : null;
+
+  const [rows, setRows] = useState<MySessionRequest[]>([]);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [busy, setBusy] = useState(false);
+
+  const [dayIdx, setDayIdx] = useState(1);
+  const [hour, setHour] = useState(18);
+  const [minute, setMinute] = useState(0);
+  const [length, setLength] = useState(60);
+  const [note, setNote] = useState('');
+
+  const waitingToSend = outbox?.countOf('session-request') ?? 0;
+
+  /**
+   * A KNOWN absence of a coach, which is a different thing from an unread one.
+   *
+   * `coachLinked` is `boolean | null` and its own header says so: "null means
+   * unread, never 'no coach'". Only the explicit false closes this screen down;
+   * under null the ask is still offered, because withdrawing the one route to a
+   * coach on the strength of a read that did not land costs the member more
+   * than the wasted tap it would save.
+   */
+  const noCoach = cd.coachLinked === false;
+
+  const load = useCallback(async () => {
+    const out = await fetchMyRequests();
+    setRows(out.rows);
+    setStatus(out.status);
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // The requests already sent — including one the coach has just answered —
+  // and the booked sessions the picker greys out against.
+  const pull = usePullToRefresh(useCallback(() => {
+    void load(); void refreshSessions();
+  }, [load, refreshSessions]));
+
+  /** Today at midnight, local, and the days after it. Built from the device's
+   *  own calendar rather than by adding 86,400,000 to an instant, so a day that
+   *  is 23 or 25 hours long across a clock change is still one day. */
+  // Keyed on `today`, which `useToday` moves at the next local midnight and on
+  // every return to the foreground. The empty dependency list this had pinned
+  // the strip to the moment of MOUNT, and this screen sits in a gym bag with
+  // the phone: opened again the next morning, the first pill was yesterday, the
+  // first thing the member tapped was refused by `askBlocker` with nothing on
+  // the strip explaining it, and the twenty-eight days they were offered had
+  // quietly become twenty-seven.
+  const today = useToday();
+  const days = useMemo(() => {
+    const now = new Date();
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Array.from({ length: DAYS_OFFERED }, (_, i) =>
+      new Date(base.getFullYear(), base.getMonth(), base.getDate() + i));
+  }, [today]);
+
+  const chosen = days[dayIdx] ?? days[0];
+  const startsAt = chosen ? instantAt(chosen, hour, minute) : '';
+
+  const dayLabel = (d: Date) => d.toLocaleDateString(appLocale(), { weekday: 'short' });
+  const dateLabel = (d: Date) => d.toLocaleDateString(appLocale(), { day: 'numeric' });
+  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
+  /** The whole time, for the quarter pills' spoken label. ":15" on its own tells
+   *  a screen-reader user nothing about what they are choosing. */
+  const timeLabel = (h: number, m: number) =>
+    new Date(2000, 0, 1, h, m).toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
+  /**
+   * The day an answer was given, or null.
+   *
+   * A date rather than the full instant `whenLabel` writes: what the member
+   * needs from `answered_at` is how long ago somebody said no, and the minute
+   * they said it is noise beside that. Null for anything that will not parse,
+   * and `answeredByLine` then writes a sentence with no date in it rather than
+   * one built around a hole — see scripts/check-prose.mjs.
+   */
+  const answeredOn = (iso: string | null) => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  };
+
+  /** The hour a sentence is about, written out. Never assembled around a value
+   *  that might not be there — a caller with no readable instant does not draw
+   *  the row at all. */
+  const whenLabel = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d.toLocaleString(appLocale(), {
+      weekday: 'long', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+    });
+  };
+
+  /** The member's own booked sessions, which their app can see. Asking across
+   *  one is a mistake worth catching here — the server checks the COACH's
+   *  diary, and the member's own is theirs. */
+  const myBusy = useMemo(
+    () => sessions.filter((s) => s.status === 'booked' && s.clientId === cd.id)
+      .map((s) => ({ startsAt: s.startsAt, durationMin: s.durationMin })),
+    [sessions, cd.id],
+  );
+
+  /** Said where the button is when that list is not the member's whole diary.
+   *  Null under a whole read, which is the only state in which the absence of a
+   *  clash is a fact rather than a silence. */
+  const diaryNote = ownDiaryNote(sessionsStatus);
+
+  /* The instant a request stops being a live question, and it is IN the
+   * dependency list below. `isLive` defaults its second argument to
+   * `Date.now()`, so leaving it off read the clock inside a memo keyed
+   * `[rows]` — and `rows` moves when the SERVER answers, not when a request
+   * lapses. `askBlocker` re-filters with its own `now`, so the cap it enforces
+   * was never wrong; the SENTENCE was. `live.length` is printed at the foot of
+   * this screen as "N requests are waiting on your coach", and a request whose
+   * hour had come and gone went on being counted there for as long as the app
+   * lived, because this screen is reached from a tab and is never unmounted. */
+  const nowMs = useNow().getTime();
+  const live = useMemo(() => rows.filter((r) => isLive(r, nowMs)), [rows, nowMs]);
+  const blocker = askBlocker(startsAt, length, nowMs, { myBusy, live });
+
+  async function ask() {
+    if (blocker) { Alert.alert('Not Sent', blocker); return; }
+    const when = whenLabel(startsAt);
+    if (!when) { Alert.alert('Not Sent', 'That time could not be read. Pick the day and the time again.'); return; }
+    setBusy(true);
+    const words = note.trim() || null;
+    const res = await askForSession(startsAt, length, words);
+    setBusy(false);
+
+    if (!res.ok) {
+      // A refusal the server actually made is final: the same bytes get the
+      // same answer, so it is not queued and the sentence does not pretend
+      // otherwise. Only an unanswered write is kept.
+      if (res.reason) { Alert.alert('Not Sent', askRefusalNote(res.reason)); await load(); return; }
+      if (!outbox) { Alert.alert('Not Sent', notKeptNote('request', 'unavailable')); return; }
+      const { result } = await outbox.enqueue(
+        'session-request',
+        { startsAt, durationMin: length, note: words },
+        // The hour it asks for. The same boundary the server enforces and the
+        // same one EXPIRY_RULE states — see src/lib/recordQueue.ts.
+        { expiresAt: sessionRequestExpiry(startsAt) },
+      );
+      if (result !== 'queued') {
+        Alert.alert('Not Sent', notKeptNote('request', result === 'full' ? 'full' : 'unavailable'));
+        return;
+      }
+      // Deliberately NOT followed by a reload that would draw it in the list
+      // below. That list is the server's answer, and a row there says the coach
+      // has been asked — which is exactly what has not happened.
+      Alert.alert('Saved on This Phone', keptOnPhoneNote('request'));
+      return;
+    }
+
+    setNote('');
+    await load();
+    // 'bookings', so a coach who has muted chat still hears about this one —
+    // the same category the booking push uses, because it is the same part of
+    // their working day. `sendPushChecked` rather than `sendPush`, because a
+    // screen built on the latter can only ever claim success.
+    // The coach the SERVER says was asked, not one this screen worked out.
+    // `request_session` resolves `clients.trainer_id` itself, and a phone that
+    // guessed — from a session on the calendar, say — could page somebody who
+    // was never asked anything.
+    const push = res.trainerId
+      ? await sendPushChecked([res.trainerId], 'A session request',
+        `A client asked about ${when}.`, { route: '/(trainer)/sessions' }, 'bookings')
+      : { ok: false };
+    const lines = [askedConfirmation(when, coachName)];
+    if (!push.ok) {
+      lines.push('We couldn’t send them a notification, so they may not see it until they open the app. Message them if it’s soon.');
+    }
+    Alert.alert('Request Sent', lines.join('\n\n'), [{ text: 'OK' }]);
+  }
+
+  function takeBack(r: MySessionRequest) {
+    const when = whenLabel(r.startsAt);
+    if (!when) return;
+    Alert.alert(
+      'Take Back This Request?',
+      `Your coach will no longer be asked about ${when}. Nothing was booked, so nothing is being cancelled and no session comes off your account.`,
+      [
+        { text: 'Leave It', style: 'cancel' },
+        {
+          text: 'Take It Back',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await withdrawRequest(r.id);
+            await load();
+            if (!res.ok) {
+              Alert.alert(
+                'Not Taken Back',
+                res.reason === 'gone'
+                  ? 'That isn’t a live request any more. Your coach may have just answered it. The list has been refreshed.'
+                  : 'That could not be taken back just now, so your coach is still being asked. Try again in a moment.',
+              );
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  const listed = myRequests(rows);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
+
+        {/* "With your coach" is a claim, and for a member with no coach
+            linked it is a false one this screen can prove is false before
+            it makes it. `coachLinked` is `boolean | null` and only the
+            explicit false is acted on — see the gate below. */}
+        <PageHead title="Ask for a Time"
+          subtitle={coachName ? `With ${coachName}` : noCoach ? 'Nobody to ask yet' : 'With your coach'} />
+
+        {!USE_SUPABASE ? (
+          <Section>
+            <Flag tone={t.ink3}>
+              This build is running without the server, so there is nobody to ask. Your coach’s answer
+              would come back over it.
+            </Flag>
+          </Section>
+        ) : noCoach ? (
+          /* ── nobody to ask ──────────────────────────────────────────────
+             `request_session` refuses this too, and `askRefusalNote('no-coach')`
+             is the sentence for that refusal — but it arrives only after
+             somebody has picked a day, an hour and a length, typed a note and
+             tapped a button headed "Ask My Coach". The absence of a coach is
+             already known on launch (`clients.trainer_id`, surfaced as
+             `coachLinked`), so it is said first instead.
+
+             Gated on `=== false` and never on falsiness. `coachLinked` is null
+             while unread, and hiding the only route to a coach on the strength
+             of a read that did not land is the same mistake pointing the other
+             way — and the more expensive one, because the member who most needs
+             this screen is the one whose reads are failing. */
+          <>
+            <Section>
+              <Notice kicker="BEFORE YOU CAN ASK" title="You Don’t Have a Coach Yet" note={NO_COACH_TO_ASK} />
+            </Section>
+            <Section>
+              <Cta label="Find a Coach" onPress={() => router.push('/(client)/trainers')} wide
+                a11yLabel="Find a coach to work with" />
+            </Section>
+          </>
+        ) : (
+          <>
+            {/* ── the page's figures, before the form ──────────────────────
+                What has become of what was already asked, as two tiles on the
+                ground: amber for what is still waiting on the coach, the accent
+                for what ended up in the calendar. It is the count the card at
+                the foot of this screen used to say in a sentence. Only over a
+                whole read — a count off a truncated or failed one is a figure
+                about an unknown fraction of the set (see isWhole) — and a dash
+                rather than a nought otherwise. */}
+            <KpiRow tiles items={[
+              { label: 'Waiting on Your Coach', tone: 'amber', value: isWhole(status) ? fig(live.length) : fig(null) },
+              { label: 'In Your Calendar', tone: 'brand', value: isWhole(status) ? fig(listed.filter((r) => outcomeOf(r) === 'accepted').length) : fig(null) },
+            ]} />
+
+            <Section>
+              <Notice kicker="WHAT THIS DOES" title="It Asks, It Doesn’t Book" note={NOT_A_BOOKING} />
+            </Section>
+
+            {/* ── the day ─────────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="Day" />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm }}>
+                {days.map((d, i) => {
+                  const on = i === dayIdx;
+                  return (
+                    <Pressable
+                      key={d.toISOString()}
+                      onPress={() => setDayIdx(i)}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={d.toLocaleDateString(appLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}
+                      style={{
+                        minWidth: MIN_TARGET, minHeight: MIN_TARGET,
+                        paddingHorizontal: sp.md, paddingVertical: sp.sm,
+                        borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: on ? t.brand : t.surface2,
+                      }}
+                    >
+                      <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink3 }}>{dayLabel(d)}</Text>
+                      <Text style={{ ...ty.body, ...font('600'), color: on ? t.brandInk : t.ink }}>{dateLabel(d)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Section>
+
+            {/* ── the hour ────────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="Time" />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, paddingVertical: sp.sm }}>
+                {HOURS.map((h) => {
+                  const on = h === hour;
+                  return (
+                    <Pressable
+                      key={h}
+                      onPress={() => setHour(h)}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={hourLabel(h)}
+                      style={{
+                        minWidth: MIN_TARGET + 24, minHeight: MIN_TARGET,
+                        alignItems: 'center', justifyContent: 'center',
+                        paddingHorizontal: sp.sm, borderRadius: radius.sm,
+                        backgroundColor: on ? t.brand : t.surface2,
+                      }}
+                    >
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>{hourLabel(h)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* ── the quarters ────────────────────────────────────────────
+                  Hours alone could not ask for the 07:15 a coach actually
+                  offers: a range generates slots on every quarter and the
+                  coach's own Add Session grid has had these since it was
+                  written, so a client restricted to the hour could only ever
+                  ask for a quarter of the times that exist. */}
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                {REQUEST_MINUTES.map((m) => {
+                  const on = m === minute;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => setMinute(m)}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      // The WHOLE time, not ":15" — a row of four pills each
+                      // announcing a bare minute tells a screen-reader user
+                      // nothing about what they are choosing.
+                      accessibilityLabel={timeLabel(hour, m)}
+                      style={{
+                        flex: 1, minHeight: MIN_TARGET,
+                        alignItems: 'center', justifyContent: 'center',
+                        borderRadius: radius.sm,
+                        backgroundColor: on ? t.brand : t.surface2,
+                      }}
+                    >
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>
+                        :{String(m).padStart(2, '0')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Section>
+
+            {/* ── how long ────────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="How Long" />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, paddingVertical: sp.sm }}>
+                {LENGTHS.map((m) => {
+                  const on = m === length;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => setLength(m)}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`${m} minutes`}
+                      style={{
+                        minWidth: MIN_TARGET + 24, minHeight: MIN_TARGET,
+                        alignItems: 'center', justifyContent: 'center',
+                        paddingHorizontal: sp.sm, borderRadius: radius.sm,
+                        backgroundColor: on ? t.brand : t.surface2,
+                      }}
+                    >
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>{m} min</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Section>
+
+            {/* ── their own words ─────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="Anything to Add" note="Optional" />
+              <TextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="Legs, if you have the rack free"
+                placeholderTextColor={t.ink3}
+                multiline
+                maxLength={REQUEST_NOTE_MAX}
+                accessibilityLabel="A note for your coach"
+                style={{
+                  ...ty.body, color: t.ink, backgroundColor: t.surface2,
+                  borderRadius: radius.sm,
+                  padding: sp.md, minHeight: 88, textAlignVertical: 'top',
+                }}
+              />
+            </Section>
+
+            <Section>
+              {/* The refusal is shown where the button is, in a sentence about
+                  what the member did — not as an alert after the tap. */}
+              {blocker ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{blocker}</Flag> : null}
+              {/* The clash check above is the only one of the member's own
+                  calendar that exists — part 740 refuses on the COACH's diary
+                  and deliberately says nothing about the client's. So a
+                  sessions read that failed makes `myBusy` empty and turns that
+                  check into silence, which reads exactly like "you are free".
+                  Said here rather than swallowed, because the cost is two
+                  sessions at one hour and two credits drawn at delivery. */}
+              {diaryNote ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{diaryNote}</Flag> : null}
+              <Cta
+                label={busy ? 'Sending…' : 'Ask My Coach'}
+                onPress={ask}
+                disabled={busy || !!blocker}
+                wide
+                a11yLabel="Ask your coach for this time"
+              />
+            </Section>
+
+            {/* Folded: the rule is read once, and its one-line answer is the
+                fold's own note. Every word of it is still here. */}
+            <Expandable title="If Nobody Answers" note="It lapses on its own">
+              <Text style={{ ...ty.label, color: t.ink2 }}>{EXPIRY_RULE}</Text>
+            </Expandable>
+
+            {/* ── what has become of the ones already asked ───────────── */}
+            <Section>
+              <SectionHead title="Your Requests" />
+
+              {/* A request on this phone that the server has not taken. It has
+                  to be SAID, because the list below cannot show it: a row there
+                  means the coach has been asked, and a queued one means they
+                  have not. */}
+              {outboxNote(waitingToSend, 'session-request') ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                  {outboxNote(waitingToSend, 'session-request')} Until then your coach has not been asked, and it is not in the list below.
+                </Flag>
+              ) : null}
+
+              {/* Loading, failed and empty are three different sentences. An
+                  unread list rendered as "you haven't asked for anything" is
+                  the failure this whole codebase keeps having to take back. */}
+              {status === 'error' ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                  Your requests could not be read just now, so this is not a list of what you have asked
+                  for. Check again when you have signal.
+                </Flag>
+              ) : status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Reading what you have asked for.</Text>
+              ) : listed.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                  You haven’t asked your coach for a time yet.
+                </Text>
+              ) : (
+                <>
+                  {status === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      There are more requests than fitted in one read, so this is the most recent of them
+                      rather than all of them.
+                    </Flag>
+                  ) : null}
+                  {listed.map((r, i) => {
+                    const when = whenLabel(r.startsAt);
+                    // No readable hour, no row. A sentence assembled around a
+                    // dash is worse than a row that is not drawn.
+                    if (!when) return null;
+                    const o = outcomeOf(r);
+                    // Who settled it and when, off the two ids the row already
+                    // carries. Nothing here asks the server who the coach is:
+                    // `answered_by` is compared against this request's own
+                    // `trainer_id`, so a member who has since changed coach is
+                    // never told their CURRENT coach refused something an
+                    // earlier one refused.
+                    const byLine = answeredByLine(o, answererOf(r), coachName, answeredOn(r.answeredAt));
+                    return (
+                      <View key={r.id}>
+                        {i ? <Rule /> : null}
+                        <View style={{ paddingVertical: sp.md }}>
+                          {/* The outcome as a chip: amber is waiting, the
+                              accent is booked, red is a no, and the two that
+                              are nobody's verdict — taken back, lapsed — are
+                              neutral. The words are OUTCOME_LABEL's. */}
+                          <TonedChip label={OUTCOME_LABEL[o]} tone={OUTCOME_TONE[o]} />
+                          <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 6 }}>{when}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{outcomeLine(r, when)}</Text>
+                          {/* A refusal has to say who made it and when, and this
+                              record has both. Without it "Your Coach Said No"
+                              reads the same on the day it happened and six
+                              months later. */}
+                          {byLine ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{byLine}</Text>
+                          ) : null}
+                          {r.note ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You said: {r.note}</Text>
+                          ) : null}
+                          {o === 'asked' ? (
+                            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                              <Ghost label="Take It Back" onPress={() => takeBack(r)} />
+                            </View>
+                          ) : null}
+                          {o === 'accepted' ? (
+                            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                              <Ghost label="See It on My Calendar" onPress={() => router.push('/(client)/calendar')} />
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </Section>
+
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}

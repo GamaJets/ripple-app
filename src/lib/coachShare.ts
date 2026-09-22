@@ -17,13 +17,23 @@
 //
 // ── The injury note is the part that breaks a written rule ─────────────────
 //
-// `candidateNote` in src/lib/injuryExtract.ts seeds a proposed injury's note
-// with `c.evidence` — THE LINE OFF THE DOCUMENT. A member who photographs a
-// physiotherapy report, taps Add This, and never edits the note has the
-// report's own words stored in `clients.injuries[].note`. That is intended for
-// the coach, who the member chose. It was then also being posted to a language
-// model, which they did not, and src/ui/injuryDocs.ts states the rule it
-// breaks: the coach sees the extracted injury, never the document.
+// An injury note can contain the words off a member's medical document, and for
+// a long time it did so BY DEFAULT: `candidateNote` in src/lib/injuryExtract.ts
+// seeded a proposed injury's note with `c.evidence`, the line lifted off the
+// document, so a member who photographed a physiotherapy report, tapped Add
+// This and never touched the field had the report's own words stored in
+// `clients.injuries[].note`. That default is gone — `candidateNote` returns ''
+// and argues at length why — but the FIELD has not changed: the evidence is
+// still printed above it on app/(client)/injury-doc.tsx, because the member is
+// being asked to agree with a reading of their own document and must see the
+// reading, and copying any of it across is one gesture away.
+//
+// So a note is still the one part of an injury that may carry a clinician's
+// sentence, and it is now there because the member PUT it there — for their
+// coach, who they chose. Posting it to a language model is still the same
+// breach of the same written rule, and src/ui/injuryDocs.ts states it: the
+// coach sees the extracted injury, never the document. The note not going is
+// not contingent on what `candidateNote` happens to return this month.
 //
 // So the injury summary sent to a model is area and severity and nothing else.
 // `sharedInjuries` below is that summary. There is no toggle for the note; it
@@ -55,6 +65,7 @@
 // in src/lib/coach.ts, which will not call the function without an answer.
 
 import { activeInjuries, areaLabel, type Injury } from './injuries';
+import { ALLERGENS, allergenLabel, type Allergen } from './meals';
 
 /**
  * Has this member agreed to send their health details to the model?
@@ -110,6 +121,28 @@ export function consentFromStored(raw: string | null | undefined): 'yes' | 'no' 
 /** What is written back. A shape rather than a bare boolean so a later field —
  *  the date they answered, say — can be added without invalidating the answer
  *  already on every device. */
+/**
+ * The answer to use, given the account's record (part 2940) and this phone's.
+ *
+ *   · the account has an answer   → it wins; the phone is brought into line
+ *   · the account has none, the phone does → use the phone's, and carry it up
+ *     as an undated 'device' row (the phone never stored when it was given)
+ *   · the account could not be read → the phone's answer, as before part 2940
+ *
+ * `server` is null for "read, and no row", 'error' for "could not read".
+ */
+export function resolveConsent(
+  server: { share: boolean } | null | 'error',
+  local: 'yes' | 'no' | 'unasked',
+): { consent: 'yes' | 'no' | 'unasked'; carryUp: boolean; syncLocal: 'yes' | 'no' | null } {
+  if (server === 'error') return { consent: local, carryUp: false, syncLocal: null };
+  if (server) {
+    const a = server.share ? 'yes' : 'no';
+    return { consent: a, carryUp: false, syncLocal: a === local ? null : a };
+  }
+  return { consent: local, carryUp: local !== 'unasked', syncLocal: null };
+}
+
 export function storedConsent(answer: 'yes' | 'no'): string {
   return JSON.stringify({ shareHealth: answer === 'yes' });
 }
@@ -145,11 +178,21 @@ export const FITNESS_KEYS = [
  * `injuries` is in here AND is redacted before it arrives — see
  * `sharedInjuries`. Consent gates whether the injury goes at all; it does not
  * unlock the note, which never goes.
+ *
+ * `allergens` is here too, and it is the one that costs something to gate. An
+ * allergy is a medical condition, which is health information by any reading,
+ * and the member is in the room to be asked; the rule for this side is that
+ * such a thing waits for their yes, and safety does not buy an exception when
+ * the person entitled to decide can simply be asked. What makes that safe is
+ * the prompt, not the tier: coach-chat tells the model that NO allergy line
+ * means it does not know their allergies, never that they have none, so a
+ * member who said no gets a coach that asks before naming a food rather than
+ * one that assumes an all-clear nobody gave. See `allergenFact`.
  */
 export const HEALTH_KEYS = [
   'weightKg', 'bodyFatPct', 'muscleKg',
   'readiness', 'readinessGaps', 'sleep',
-  'injuries', 'focusAreas',
+  'injuries', 'focusAreas', 'allergens',
 ] as const;
 
 export type FitnessKey = typeof FITNESS_KEYS[number];
@@ -184,6 +227,27 @@ export function sharedInjuries(injs: Injury[] = []): string {
 export function sharedAreas(list: readonly { area: string; severity: string }[] = []): string {
   if (!list.length) return '';
   return list.map((i) => `${areaLabel(i.area)} (${i.severity})`).join('; ');
+}
+
+/**
+ * The allergy line as a model may see it, off the COMBINED list.
+ *
+ * Takes the union, `excludedAllergens(avoid, coach_avoid)` in src/lib/meals.ts,
+ * never the member's half alone: a coach's note is as binding on a suggestion
+ * as the member's own chip. `undefined` when that union is unknown (either
+ * half unread, or a client with no account to have been asked), so the field
+ * is dropped and coach-chat's rule for an absent allergy line applies: it does
+ * not know, it asks. A partial list would read as a complete one.
+ *
+ * An empty known list says what it covers. The app records six allergens, so
+ * "none" is a statement about those six and not about sesame.
+ */
+export function allergenFact(avoid: readonly Allergen[] | null | undefined): string | undefined {
+  if (avoid == null) return undefined;
+  if (!avoid.length) {
+    return `none declared by them or noted by their coach, among the ones this app records (${ALLERGENS.map((a) => allergenLabel(a.id)).join(', ')})`;
+  }
+  return avoid.map(allergenLabel).join(', ');
 }
 
 /**
@@ -242,12 +306,39 @@ export const ALWAYS_SENT: string[] = [
 
 export const SENT_WITH_PERMISSION: string[] = [
   'your weight, body fat and skeletal muscle',
-  'your sleep — the hours, how many nights, and how many a device measured',
+  'your sleep: the hours, how many nights, and how many a device measured',
   'your readiness score and what it could not see',
   'your injuries, as the area and how bad it is',
+  'your allergies, from your own list and what your coach has noted',
   'the focus areas read off your progress photos',
 ];
 
+/**
+ * What never reaches the model, and the scope of that word.
+ *
+ * "Never sent" here means never sent TO THE AI COACH, which is what this whole
+ * module is about and what the screen printing this list is asking permission
+ * for. It is true: `shareableContext` builds from the allowlists above and no
+ * branch of it can reach a document, a photograph or a printout.
+ *
+ * It is NOT a claim about the app as a whole, and for a while the app made it
+ * read like one. There are four other doors, each with a different recipient, a
+ * different purpose and therefore a question of its own — and every one of them
+ * had none until somebody went looking:
+ *
+ *   an uploaded injury document  → OCR.space   src/lib/injuryDocConsent.ts
+ *   a photo of a gym machine     → Anthropic   src/lib/photoAI.ts
+ *   a photo of a meal            → Anthropic   src/lib/photoAI.ts
+ *   a body-composition printout  → both        src/lib/scanSheetConsent.ts
+ *
+ * Until each had a consent question of its own, a member could reasonably have
+ * taken this line as covering it. They all have one now, asked before anything
+ * leaves. None of those answers is this one and this one is none of theirs.
+ *
+ * The wording stays as it is because it is accurate about the thing it is
+ * printed under. Anything added here must be true of THIS destination and must
+ * not be worded so that it sounds like a promise about every destination.
+ */
 export const NEVER_SENT: string[] = [
   'your name, your email or anything else that says who you are',
   'the words of an injury note, or anything from a document you uploaded',
@@ -262,7 +353,7 @@ export const WHERE_IT_GOES =
 export const CONSENT_TITLE = 'Before your coach can use your numbers';
 
 export const CONSENT_BODY =
-  'The AI coach answers better when it knows your body, your sleep and your injuries. That is health information, so it does not go anywhere until you say it can. You can change this at any time, and either answer lets you use the coach.';
+  'The AI coach answers better when it knows your body, your sleep, your injuries and your allergies. That is health information, so it does not go anywhere until you say it can. You can change this at any time, and either answer lets you use the coach.';
 
 /**
  * What the coach loses when the answer is no. Specific, and not softened.
@@ -273,7 +364,7 @@ export const CONSENT_BODY =
  * does not train around it, and the member needs to know that before choosing.
  */
 export const WITHHELD_NOTE =
-  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one — check anything it gives you against your own limitations, or turn this back on.';
+  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one, and it will not know your allergies, so it will ask before naming a food. Check anything it gives you against your own limitations, or turn this back on.';
 
 /* ── the Weekly Report's half of the same door ─────────────────────────────
  *
@@ -313,8 +404,46 @@ export function weeklyFacts(
 ): string[] | null {
   if (consent !== 'yes' && consent !== 'no') return null;
   const lines = consent === 'yes' ? [...fitness, ...health] : [...fitness];
-  return lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+  const out = lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+  // The withholding is SAID, not left to be inferred. See the constant below.
+  //
+  // Only when there is something to summarise. `askAboutMyWeek` refuses to ask
+  // for a paragraph written from no facts at all, and it decides that by asking
+  // whether this list is empty — a list holding nothing but an instruction is
+  // not empty, and would turn that refusal into a request for prose about a
+  // week the model has been told nothing about.
+  if (consent === 'no' && out.length) out.push(WITHHELD_FACTS_INSTRUCTION);
+  return out;
 }
+
+/**
+ * What the model is told when the health half did not come.
+ *
+ * WEEKLY_SUMMARY_PROMPT ends "Do not invent anything the facts do not state",
+ * and on its own that is not enough, because it describes the failure without
+ * naming the shape of it. A summariser handed a short list and asked for warm
+ * prose in the second person writes the sentence it expects to be there — the
+ * weigh-in, the check-in, the line about sleep — because that is what a weekly
+ * summary looks like in every text it has read. The generic rule is a rule
+ * about honesty; this is a list of the specific sentences that were about to be
+ * written.
+ *
+ * Silence is not an instruction. A member who declined does not appear to the
+ * model as somebody who declined — the withheld lines are simply absent, and
+ * absence has no author. So the withholding is stated: what is missing, that it
+ * must not be reconstructed, and that it must not be pointed at either.
+ *
+ * The last clause is the one that is easy to leave out and matters as much as
+ * the rest. "I don't have your weigh-ins this week" is a sentence about the
+ * member's privacy setting written into a paragraph they opened to read about
+ * their training, and it makes the decision they made feel like a fault in the
+ * report. `REPORT_WITHHELD_NOTE` is where that is explained, in the app's own
+ * voice, next to the switch that changes it.
+ */
+export const WITHHELD_FACTS_INSTRUCTION =
+  'Their body figures, their sleep, their tape measurements and their scans were withheld and are not among the facts above. '
+  + 'Do not mention their weight, their body fat, their muscle, their measurements, their sleep, their recovery or a check-in. '
+  + 'Do not guess at any of them, and do not remark on their absence. Write only from the training facts you were given.';
 
 /** What the member is told the weekly summary loses when the answer is no.
  *  Specific, like `WITHHELD_NOTE`: the report is still written, from the
@@ -346,18 +475,30 @@ export const NOT_MEDICAL_ADVICE =
  *
  * ── What was already going out ────────────────────────────────────────────
  *
- * Two coach screens call `askCoach`, the unfiltered door, and both of them
- * name the client:
+ * Two places on app/(trainer)/dashboard.tsx CALLED `askCoach` — the unfiltered
+ * door, which took a free-form context object and no consent argument — and
+ * both of them named the client:
  *
- *   app/(trainer)/dashboard.tsx · draftNudge   { name, goal, adherence, reason }
- *   app/(trainer)/dashboard.tsx · genSummary   { name, goal, adherence,
- *                                                recentMeals, composition }
+ *   draftNudge   { name, goal, adherence, reason }
+ *   genSummary   { name, goal, adherence, recentMeals, composition }
  *
- * `composition` is `visceralFat`, `inbodyScore`, `leanMassKg`, `fatMassKg` and
- * a left/right limb imbalance — a body-composition scan — and `recentMeals` is
+ * `composition` was `visceralFat`, `inbodyScore`, `leanMassKg`, `fatMassKg` and
+ * a left/right limb imbalance — a body-composition scan — and `recentMeals` was
  * a list of what a named person ate. Nothing on either screen said any of this
  * was leaving the phone. The member answered a consent question about their own
- * coach chat, on their own device, and it has never governed this path.
+ * coach chat, on their own device, and it never governed this path.
+ *
+ * `askCoach` NO LONGER EXISTS. It was deleted rather than left in place for
+ * some future caller, and src/lib/coach.ts says why at length: a door with no
+ * filter and no consent parameter, kept "for its remaining callers", is a
+ * fourth caller waiting to be written. Both call sites now go through
+ * `askAboutClient`, which cannot be reached except through `clientAskContext`
+ * below — so the name, the composition and the meal list are dropped by an
+ * allowlist rather than by whoever last edited the screen.
+ *
+ * The rest of this half is therefore a description of the RULE, not of a
+ * defect still standing. It is kept because the rule is the thing that is easy
+ * to undo, and the argument for it is the only reason not to.
  *
  * ── The difference, and why it decides the design ─────────────────────────
  *
@@ -373,8 +514,11 @@ export const NOT_MEDICAL_ADVICE =
  * can send their own, and does — but because the only person entitled to answer
  * is not being asked. If the answer is ever moved to a column both sides can
  * read, `clientAskContext` gains a consent parameter and `COACH_CLIENT_HEALTH`
- * below becomes reachable; until then it is documented and unused, which is a
- * better record of the decision than an absent list.
+ * below becomes reachable; until then it is NEVER SENT and exists only to be
+ * asserted against, which is a better record of the decision than an absent
+ * list. src/lib/coachAsk.test.ts states that every key in it survives no filter
+ * — a much stronger claim than silence, and one that fails the day somebody
+ * adds one of them to `COACH_CLIENT_KEYS` without reading this header.
  *
  * ── And the name does not go at all, in any state ─────────────────────────
  *
@@ -387,10 +531,12 @@ export const NOT_MEDICAL_ADVICE =
  * than two.
  *
  * The injury NOTE does not go either, by the same rule and for the stronger
- * reason: `candidateNote` seeds it with the line off the member's uploaded
- * document, and src/ui/injuryDocs.ts states the rule — the coach sees the
- * extracted injury, never the document. A coach forwarding that to a model is
- * the document leaving by a second door.
+ * reason: a note may carry the line off the member's uploaded document — no
+ * longer as a default, since `candidateNote` returns '', but because the
+ * evidence is shown beside the field and copying it across is one gesture — and
+ * src/ui/injuryDocs.ts states the rule, that the coach sees the extracted
+ * injury and never the document. A coach forwarding that to a model is the
+ * document leaving by a second door.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 /**
@@ -406,11 +552,47 @@ export const NOT_MEDICAL_ADVICE =
  * code the amounts are in so it does not write dollars at a coach in Dubai.
  * Amounts with no currency are passed as the string the screen composes
  * ("unknown — the gym has not set one"), never as a bare number.
+ *
+ * ── Three fields the prompt was written around and never received ─────────
+ *
+ * An allowlist has one failure mode and this was it: the Monday digest on
+ * app/(trainer)/analytics.tsx composed `takenThisMonth`, `sessionsStillUnmarked`
+ * and `howTheyCoach`, wrote three sentences of prompt rules about them, and
+ * none of the three was declared here — so `businessAskContext` dropped all
+ * three on the way out and the model was asked to quote a figure it had never
+ * been given.
+ *
+ * That is not a harmless omission in either direction. The rule about
+ * `sessionsStillUnmarked` exists so a coach with nine unrecorded sessions is
+ * not congratulated on a quiet month; with the field gone the rule could never
+ * fire. The rule about `howTheyCoach` says not to suggest anything needing a
+ * room to a coach who works entirely online; same. And the digest was told to
+ * lead on takings for an online coach while the takings were not in the object.
+ * A model given a rule about an absent field does not decline — it writes
+ * around the gap, in prose, where no formatter and no dash can catch it.
+ *
+ * All three are facts about the coach's own business and none of them names,
+ * counts or characterises any individual client:
+ *
+ *   takenThisMonth        a formatted amount in the coach's own currency, or
+ *                         the LEDGER'S OWN reason there is no figure —
+ *                         `ledger()` composes that sentence out of strand
+ *                         labels ("sales", "renewals"), never out of a payer.
+ *   sessionsStillUnmarked a count of the coach's own hours.
+ *   howTheyCoach          'entirely online' or 'in person, or both in person
+ *                         and remotely'. The coach's delivery model, off their
+ *                         own settings.
+ *
+ * The two clients-shaped counts already here — `clients`, `atRiskClients` — are
+ * the precedent and the boundary: a count of people is the coach's business, a
+ * list of them is not, and `COACH_CLIENT_HEALTH` is asserted against this list
+ * so nothing about one person can be added to it by accident.
  */
 export const COACH_BUSINESS_KEYS = [
-  'sessionsDeliveredThisMonth', 'revenueAtOwnRate', 'currency',
+  'sessionsDeliveredThisMonth', 'sessionsStillUnmarked', 'revenueAtOwnRate',
+  'takenThisMonth', 'currency',
   'clients', 'avgAdherence', 'atRiskClients', 'onTrack', 'watch', 'atRiskLow',
-  'newClientsThisMonth', 'endedThisMonth', 'unreadThreads',
+  'newClientsThisMonth', 'endedThisMonth', 'unreadThreads', 'howTheyCoach',
 ] as const;
 
 /**
@@ -429,12 +611,20 @@ export const COACH_BUSINESS_KEYS = [
  * answer that loads an injured knee is the failure this whole feature would be
  * judged on — and the AREA is what stops it. The note adds nothing to that
  * decision and is the part that came off a medical document.
+ *
+ * `allergens` is here for the same reason, and is health-tier on the member's
+ * side: a coach asking what a client should eat and getting peanut butter for
+ * a nut allergy is that failure on a plate. It is `allergenFact` output, six
+ * category words off the combined list, and carries no note because the
+ * columns hold none. The member's side can ask; this side cannot, and the one
+ * thing that stops the harm is the list itself.
  */
 export const COACH_CLIENT_KEYS = [
   'goal', 'coachedMode', 'adherence', 'lastActive', 'joinedMonthsAgo',
   'programTitle', 'programFocus', 'nextLift', 'lastTrained', 'streak',
   'sessionsLast30', 'unread', 'injuryAreas', 'reason',
   'kcal', 'protein', 'carbs', 'fat', 'eatenToday', 'mealsLoggedCount', 'diet',
+  'allergens',
 ] as const;
 
 /**
@@ -527,7 +717,7 @@ export function fillName(text: string, name: string | null | undefined, coach?: 
 /** What the coach is told about their assistant, on the screen. Sentence case;
  *  it is prose under a heading. */
 export const COACH_ASK_WHAT_GOES =
-  'Your own figures go — sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured.';
+  'Your own figures go: sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured, and the allergies they or you have recorded.';
 
 export const COACH_ASK_WHAT_NEVER_GOES =
   'No name, no email and nothing that says who anybody is. No weight, body fat, scan, sleep or recovery figure. Nothing written in an injury note or read off a document, and nothing from your messages. Replies come back saying {name} and this screen fills it in.';

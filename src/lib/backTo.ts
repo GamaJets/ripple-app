@@ -28,10 +28,37 @@
 /** The screens a detail view can be opened from, by the key they pass. */
 export const BACK_TO = {
   clientLibrary: '/(client)/library',
+  // The platform program library. It opens the exercise detail from inside an
+  // opened program, several days down a long page, and the member's filters
+  // and scroll position are on the screen behind it — which is exactly the path
+  // the tab history reorders away, because a member reads three movements out
+  // of one workout in a row.
+  clientPrograms: '/(client)/programs',
+  // The workout a member built for themselves by picking muscles. Same path as
+  // the program library above and the same reason: the movements are opened
+  // from a generated day, and behind them is a screen holding the targets the
+  // member chose — which is not state a navigator's history can restore.
+  clientBuildWorkout: '/(client)/build-workout',
   clientWorkouts: '/(client)/workouts',
   ownerLibrary: '/(owner)/library',
   trainerBuilder: '/(trainer)/builder',
+  // The five screens that send a coach INTO the builder. The builder is also
+  // the Programs tab root, so it cannot simply draw a Back arrow the way a
+  // detail screen does: tapped from the tab bar there is nowhere behind it,
+  // and an arrow that pops the tab history would land on whatever screen the
+  // history last reordered to the front. Carrying the origin is what lets the
+  // arrow exist only on the paths where somebody was actually sent here.
+  trainerClient: '/(trainer)/client',
+  trainerClientTraining: '/(trainer)/client-training',
+  trainerDashboard: '/(trainer)/dashboard',
+  trainerGroup: '/(trainer)/group',
   trainerLibrary: '/(trainer)/library',
+  // The coach's template library, whose Platform Programs section opens the
+  // exercise detail from inside an expanded program. Without a carried
+  // origin, Back from that movement lands on whichever screen the tab history
+  // last reordered to the front — and the coach loses the program they had
+  // open, several days down a long page.
+  trainerTemplates: '/(trainer)/templates',
 } as const;
 
 export type BackToKey = keyof typeof BACK_TO;

@@ -12,7 +12,7 @@
  * The rest used when nobody has said, in seconds.
  *
  * 90 because that is the number the runner has always passed to `startRest`
- * since it was written, so an existing programme's behaviour does not change
+ * since it was written, so an existing program's behaviour does not change
  * the day per-exercise rest lands. It is a FALLBACK and is labelled as one
  * everywhere it is shown: it is not a recommendation, and this file is not
  * entitled to make one about somebody else's training.
@@ -63,13 +63,13 @@ export type RestRead =
   | { ok: false; reason: string };
 
 /**
- * Read the rest field on the programme builder.
+ * Read the rest field on the program builder.
  *
  * Refused rather than coerced, exactly like `readLift` in src/lib/units.ts and
  * for the same reason: `parseInt(text, 10) || 0` is what a field like this gets
  * written with, and a mistyped rest silently becoming 0 does not look like an
  * error to anybody — it looks like an exercise the coach chose not to set a
- * rest for, which is a different sentence about their programme than the one
+ * rest for, which is a different sentence about their program than the one
  * they meant.
  *
  * An EMPTY field is `{ ok: true, seconds: null }` and that is not the same as a
@@ -90,15 +90,15 @@ export function readRestSeconds(text: string | null | undefined): RestRead {
   }
   if (n === 0) {
     // Said, not accepted. A coach who means "no rest" and a coach who has not
-    // decided both end up with the same programme, and only one of them would
+    // decided both end up with the same program, and only one of them would
     // recognise it later.
-    return { ok: false, reason: 'Leave the rest empty rather than setting it to 0 — an empty rest uses the app default of 90 seconds.' };
+    return { ok: false, reason: 'Leave the rest empty rather than setting it to 0. An empty rest uses the app default of 90 seconds.' };
   }
   if (n < MIN_REST_SEC) {
     return { ok: false, reason: `A rest under ${MIN_REST_SEC} seconds is not long enough to time. Leave it empty if you do not want a rest timer.` };
   }
   if (n > MAX_REST_SEC) {
-    return { ok: false, reason: `That is over ${Math.round(MAX_REST_SEC / 60)} minutes. Check the number — the box is in seconds, so three minutes is 180.` };
+    return { ok: false, reason: `That is over ${Math.round(MAX_REST_SEC / 60)} minutes. Check the number: the box is in seconds, so three minutes is 180.` };
   }
   return { ok: true, seconds: n };
 }
@@ -212,6 +212,21 @@ export function restSoundConsent(): SoundConsent { return soundAnswer; }
  *  answer. Nothing may put the process back into 'unknown', because that would
  *  silence the timer for the rest of the session. */
 export function recordRestSoundConsent(answer: 'yes' | 'no'): void { soundAnswer = answer; }
+
+/**
+ * Un-know the answer, because the person it belonged to has signed out.
+ *
+ * The counterpart of `forgetPushConsent` in src/lib/pushConsent.ts, and the same
+ * reasoning: the rule above is about a live session, and a sign-out ends the
+ * only session this answer was ever about. SettingsProvider sits at the root of
+ * app/_layout.tsx and outlives it, so without this the previous member's 'no'
+ * silences — or their 'yes' un-silences — the next member's rest timer.
+ *
+ * Silencing for the moments before the next read lands costs nobody a cue: a
+ * rest period begins minutes into a session, which is the argument
+ * `restSoundConsent` already makes for refusing while unknown.
+ */
+export function forgetRestSoundConsent(): void { soundAnswer = 'unknown'; }
 
 /**
  * Which phone the note is describing.

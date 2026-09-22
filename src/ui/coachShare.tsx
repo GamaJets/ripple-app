@@ -7,21 +7,17 @@
 // launch path of all three apps to serve one route. The rules it applies are in
 // src/lib/coachShare.ts, which is pure and tested; this file is only the store.
 //
-// ── Why the answer is device-local, and what that costs ───────────────────
+// ── Where the answer lives ─────────────────────────────────────────────────
 //
-// It is in AsyncStorage under its own key, not in `clients` and not in the
-// 'repple.settings' blob. Two reasons, and the second is the honest one:
-//
-//   · The settings blob is device settings, and a settings migration that
-//     rewrites it must never be able to silently clear an answer somebody gave
-//     about their medical data. Its own key cannot be collateral damage.
-//   · Following the account would need a column and a migration, and this
-//     change is not permitted to apply SQL. So it is device-local for now, and
-//     the cost is real and specific: a member who reinstalls, or who signs in
-//     on a second handset, is ASKED AGAIN. That is the right failure — being
-//     asked twice costs a tap, and inheriting a "yes" onto a device where the
-//     question was never put would be the defect this replaces, pointing the
-//     other way.
+// On the account since part 2940 (applied 22 Sep 2026): an append-only log,
+// one row per answer, readable only by the member. The newest row wins, so a
+// reinstall or a second phone gets the answer already given instead of asking
+// again. The phone keeps its own copy under its own key, outside the
+// 'repple.settings' blob, so a settings migration can never clear it; when the
+// account cannot be read, the phone's copy is what applies. A phone answer the
+// account has never seen is carried up once, UNDATED, because the phone never
+// recorded when it was given. `resolveConsent` in src/lib/coachShare.ts is the
+// rule, and its tests are the cases.
 //
 // ── Why 'unknown' is a state and not a default ────────────────────────────
 //
@@ -35,7 +31,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reportError } from '../lib/reportError';
-import { COACH_SHARE_KEY, consentFromStored, storedConsent, type ShareConsent } from '../lib/coachShare';
+import { COACH_SHARE_KEY, consentFromStored, storedConsent, resolveConsent, type ShareConsent } from '../lib/coachShare';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 
 export interface CoachShare {
   /** 'unknown' until the stored answer has been read. Nothing goes out on it. */
@@ -67,7 +65,29 @@ export function useCoachShare(): CoachShare {
         reportError('coachShare.read', e);
       }
       if (!alive || answered.current) return;
-      setConsent(consentFromStored(raw));
+      const local = consentFromStored(raw);
+      // The account's record (part 2940): newest answer on the account wins,
+      // so a reinstall or a second phone gets the same answer the member gave.
+      let server: { share: boolean } | null | 'error' = 'error';
+      if (USE_SUPABASE) {
+        try {
+          const { data, error } = await supabase.rpc('my_ai_coach_health_consent');
+          if (error) reportError('coachShare.readAccount', error);
+          else {
+            const row = Array.isArray(data) ? data[0] : data;
+            server = row && typeof row.share_health === 'boolean' ? { share: row.share_health } : null;
+          }
+        } catch (e) { reportError('coachShare.readAccount', e); }
+      }
+      if (!alive || answered.current) return;
+      const r = resolveConsent(server, local);
+      setConsent(r.consent);
+      if (r.syncLocal) AsyncStorage.setItem(COACH_SHARE_KEY, storedConsent(r.syncLocal)).catch((e) => reportError('coachShare.write', e));
+      // Undated on purpose: the phone never stored when the answer was given.
+      if (r.carryUp && r.consent !== 'unasked') {
+        const { error } = await supabase.rpc('record_ai_coach_health_consent', { p_share: r.consent === 'yes', p_carried_over: true });
+        if (error) reportError('coachShare.carryUp', error);
+      }
     })();
     return () => { alive = false; };
   }, []);
@@ -77,6 +97,11 @@ export function useCoachShare(): CoachShare {
     setConsent(a);
     AsyncStorage.setItem(COACH_SHARE_KEY, storedConsent(a))
       .catch((e) => reportError('coachShare.write', e));
+    // And on the account, dated now: this is the moment the member answered.
+    if (USE_SUPABASE) {
+      void supabase.rpc('record_ai_coach_health_consent', { p_share: a === 'yes', p_carried_over: false })
+        .then(({ error }) => { if (error) reportError('coachShare.record', error); });
+    }
   }, []);
 
   return { consent, answer };

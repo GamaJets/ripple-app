@@ -22,6 +22,8 @@ import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import { draftMinorUnits } from '../lib/coachInvoice';
 import { costBlockers, type CoachCost, type CostDraft } from '../lib/coachCosts';
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 
 const COST_COLS = 'id, description, category, amount_cents, currency, paid_on, note, created_at';
 
@@ -115,9 +117,28 @@ export async function recordCost(draft: CostDraft): Promise<RecordCostResult> {
   const minor = draftMinorUnits(draft.amountText, currency);
   if (minor == null) return { ok: false, error: 'That amount could not be read as money.' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { ok: false, error: 'Not signed in.' };
+    // ── "Not signed in." was said to signed-in coaches, and it was a lie ────
+    //
+    // This was `const { data: auth } = await supabase.auth.getUser()` with the
+    // error discarded. getUser() does not reject when the auth server cannot be
+    // reached: it RESOLVES with `{ data: { user: null }, error }`, and
+    // `lib/fetch.js` brands a dead fetch AND every 5xx as an
+    // AuthRetryableFetchError, which is an AuthError and so never throws. See
+    // src/lib/authReadFate.ts.
+    //
+    // So a coach standing in their own gym on a bad connection, signed in, tapped
+    // Record and was told flatly that they were not signed in — a statement
+    // about THEM, on the screen where the remedy on offer is to go and sign in
+    // again with a password that was never the problem. The sentence is now
+    // whichever of the two is true, and the outage one says it is our end.
+    //
+    // The write is below this line, not above it, so `authGateMessage`'s
+    // "nothing has been changed" is true on both fates: no cost row is inserted
+    // by a failed check, and in particular none is inserted with a `coach_id`
+    // nobody could establish.
+    const who = await signedInUid('coachCosts.record');
+    if (who.fate !== null) return { ok: false, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const { data, error } = await supabase
       .from('coach_costs')
       .insert({
@@ -139,7 +160,7 @@ export async function recordCost(draft: CostDraft): Promise<RecordCostResult> {
     // body, and a coach told their rent is on record when it is not will not
     // record it again.
     const row = ((data ?? []) as unknown as CostRow[])[0];
-    if (!row?.id) return { ok: false, error: 'That cost was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That cost was not recorded. Nothing came back from the server.' };
     return { ok: true, cost: toCost(row) };
   } catch (e) {
     reportError('coachCosts.record', e);

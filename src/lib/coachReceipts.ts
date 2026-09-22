@@ -62,6 +62,10 @@ import { sumTaken, type Taken, type TakenRow } from './coachMoney';
 // not get two different amounts out, and getting the zero-decimal rule wrong
 // charges somebody a hundred times too much.
 import { draftAmount } from './coachInvoice';
+// A date-only column read as the day it says rather than as UTC midnight. See
+// `receiptTakenRows` below for what going without it costs a coach in the
+// Americas on the first of every month.
+import { localDate } from './localDate';
 
 /* ── how the money arrived ────────────────────────────────────────────────── */
 
@@ -168,7 +172,7 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
   // one thing this app refuses to let a coach do anywhere.
   const me = String(d.coachId ?? '').trim();
   if (me && String(d.clientId ?? '').trim() === me) {
-    out.push('You cannot record a payment from yourself. This is for money a client has paid you, not for your own pay — nothing in this app lets you write down what you are owed by anybody.');
+    out.push('You cannot record a payment from yourself. This is for money a client has paid you, not for your own pay. Nothing in this app lets you write down what you are owed by anybody.');
   }
 
   // Currency before amount, because without one the amount cannot be
@@ -176,7 +180,7 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
   // problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
   } else {
@@ -215,11 +219,45 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
  * Sunday's month, and `since()` and `splitByPeriod()` both read this field.
  */
 export function receiptsTaken(rows: readonly CoachReceipt[]): Taken {
-  return sumTaken(rows.map((r): TakenRow => ({
+  return sumTaken(receiptTakenRows(rows));
+}
+
+/**
+ * Receipts as summable rows, dated at LOCAL midnight on the day the coach says
+ * they were paid.
+ *
+ * ── Why this is a function and not three lines at each call site ──────────
+ *
+ * `receivedOn` is a Postgres `date` and arrives as a bare `YYYY-MM-DD`. It
+ * means a calendar day. Everything downstream that WINDOWS these rows —
+ * `since()` in coachMoney.ts, `splitByPeriod()` in coachStatement.ts — reads
+ * `created_at` with `Date.parse`, and `Date.parse('2026-09-01')` is UTC
+ * midnight while every month bound in this app (`monthStart`, `monthToDate`,
+ * `periodRange`) is LOCAL midnight. West of Greenwich the first is EARLIER than
+ * the second, so `t >= fromMs` is false and every cash payment a coach recorded
+ * as received on the FIRST of the month falls out of the month that names it.
+ *
+ * It does not fall out loudly. `sumTaken` never sees the row, so it is in no
+ * `unlabelled` and no `unpriced` count either — the figure is simply short, and
+ * the status beside it still says 'ready'. Invisible in the UTC+4 gym this was
+ * written for; present every month for every coach in the Americas.
+ *
+ * app/(trainer)/money.tsx found this and fixed it in its own memo. Then
+ * app/(trainer)/analytics.tsx composed the same three strands through the same
+ * `since()` and did not — which is what a rule written at a call site looks
+ * like just before it becomes two rules. It lives here now, once, and
+ * `receiptsTaken` above goes through it so the all-time figure and the monthly
+ * one cannot disagree about which day a payment was on.
+ *
+ * A day that will not read passes a value that will not parse, which keeps the
+ * payment out of every period rather than sweeping it into this one.
+ */
+export function receiptTakenRows(rows: readonly CoachReceipt[]): TakenRow[] {
+  return rows.map((r): TakenRow => ({
     amount_cents: r.amountCents,
     currency: r.currency,
-    created_at: r.receivedOn,
-  })));
+    created_at: localDate(r.receivedOn)?.toISOString() ?? 'unknown',
+  }));
 }
 
 /* ── the sentences that keep the screen honest ────────────────────────────── */
@@ -243,7 +281,7 @@ export const RECEIPT_IS_YOUR_WORD =
  * direction the money moved, and it is worth one sentence.
  */
 export const RECEIPT_IS_NOT_PAY =
-  'This is for money a client has already paid you. It is not a record of pay you are owed by a gym and nothing here is read by anybody who pays you — where a gym employs you, what they owe you is theirs to state and you cannot write it down yourself.';
+  'This is for money a client has already paid you. It is not a record of pay you are owed by a gym and nothing here is read by anybody who pays you. Where a gym employs you, what they owe you is theirs to state and you cannot write it down yourself.';
 
 /**
  * That a receipt and a Stripe sale can be the same money.
@@ -255,7 +293,7 @@ export const RECEIPT_IS_NOT_PAY =
  * pretending to.
  */
 export const RECEIPT_MAY_DOUBLE_COUNT =
-  'Record only what did NOT go through this app. A payment Stripe took is already counted under sales and renewals, and a receipt written for the same money would count it twice — nothing can tell that the two are the same payment, because they share nothing this app can read.';
+  'Record only what did NOT go through this app. A payment Stripe took is already counted under sales and renewals, and a receipt written for the same money would count it twice. Nothing can tell that the two are the same payment, because they share nothing this app can read.';
 
 /**
  * That the client has not been told.
@@ -266,7 +304,7 @@ export const RECEIPT_MAY_DOUBLE_COUNT =
  * A coach who wants the client to have a record is pointed at that.
  */
 export const RECEIPT_IS_NOT_A_DOCUMENT =
-  'Nobody but you can see these and nobody is notified about one. If the person who paid you needs something for it, issue an invoice marked as received — that is a numbered document you can send them, and it says on its own face what it is.';
+  'Nobody but you can see these and nobody is notified about one. If the person who paid you needs something for it, issue an invoice marked as received. That is a numbered document you can send them, and it says on its own face what it is.';
 
 /**
  * The sentence under an empty list, which depends entirely on the read.

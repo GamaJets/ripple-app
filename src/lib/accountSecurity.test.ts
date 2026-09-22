@@ -11,7 +11,7 @@
 // their sign-in address is something it is not.
 import {
   MIN_PASSWORD, authErrorNote, changeEmail, changePassword, classifyEmailChange,
-  emailProblem, looksLikeEmail, passwordProblem, pendingEmail,
+  emailProblem, endOtherSessions, looksLikeEmail, passwordProblem, pendingEmail,
   type AuthLike, type AuthUserLike,
 } from './accountSecurity';
 
@@ -121,6 +121,10 @@ const stub = (over: Partial<AuthLike> & { user?: AuthUserLike | null } = {}): Au
     signInWithPassword: over.signInWithPassword ?? (async () => { seen.push('verify'); return { error: null }; }),
     updateUser: over.updateUser ?? (async () => { seen.push('update'); return { error: null }; }),
     getUser: over.getUser ?? (async () => { seen.push('read'); return { data: { user: over.user ?? null }, error: null }; }),
+    // Left undefined unless a case supplies one, which is the case that
+    // matters: an older supabase-js has no `signOut` taking a scope, and the
+    // screen must get a sentence rather than a crash.
+    signOut: over.signOut,
   };
 };
 
@@ -171,6 +175,38 @@ const stub = (over: Partial<AuthLike> & { user?: AuthUserLike | null } = {}): Au
   ok(!e4.ok, 'an address somebody else holds is a failure');
   ok(!e4.ok && /another account/i.test(e4.note), 'explained in words a member can act on');
   eq(taken.seen.includes('read'), false, 'and no pointless read-back after a refusal');
+
+  /* ── ending the other sessions ──────────────────────────────────────────
+   *
+   * A password change does not evict anybody. This is the act that does, and
+   * the two are reported separately on purpose: a member who has just changed
+   * their password because they think somebody else is in their account must
+   * not be told the eviction worked when it did not.
+   */
+  {
+    let asked: unknown = null;
+    const ended = stub({ signOut: async (o) => { asked = o; return { error: null }; } });
+    const s1 = await endOtherSessions(ended);
+    ok(s1.ok, 'ending the other sessions succeeds');
+    eq(JSON.stringify(asked), JSON.stringify({ scope: 'others' }),
+      'and asks for others ONLY — signing this phone out would leave the member staring at a sign-in screen wondering whether the change took');
+
+    const refused = stub({ signOut: async () => ({ error: { message: 'not allowed' } }) });
+    const s2 = await endOtherSessions(refused);
+    ok(!s2.ok, 'a refusal is a failure, not a quiet success');
+    ok(!s2.ok && /not ended/i.test(s2.note), 'and says plainly that the other sessions are still live');
+
+    const threwOut = stub({ signOut: async () => { throw new Error('offline'); } });
+    const s3 = await endOtherSessions(threwOut);
+    ok(!s3.ok, 'so is a thrown network error');
+
+    // No `signOut` at all: an older client library. Not a crash on the one
+    // screen somebody reaches by searching "hacked".
+    const oldClient = stub();
+    const s4 = await endOtherSessions(oldClient);
+    ok(!s4.ok, 'a client that cannot do it says so');
+    ok(!s4.ok && !/undefined|not a function/i.test(s4.note), 'in words, not in a stack trace');
+  }
 
   if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
   console.log(`accountSecurity: ok (current password verified before the new one is set, email outcome read back not assumed, min ${MIN_PASSWORD})`);

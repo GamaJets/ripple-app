@@ -21,17 +21,33 @@
 // rest day has the messaging thread, and the disagreement is shown to both of
 // them rather than settled behind one of their backs.
 //
-// ── Nothing here is a record ──────────────────────────────────────────────
+// ── NO MARKED DAY IS EVER DRAWN AS SOMETHING THAT HAPPENED ────────────────
 //
-// Every judgement is src/lib/dayPlan.ts's and every sentence comes from
-// src/lib/coachWeek.ts, which puts `planOutcome` and `planConflict` into the
-// coach's voice and can be tested without a database. This screen reads no
-// training log and says so out loud on every day that has passed — see the
-// header of coachWeek.ts for why reading one honestly would need the client's
-// timezone, which the schema does not store. So there is no path through this
-// file that draws a plan as something that happened: no tick, no percentage, no
-// "completed", and past days are drawn quieter than future ones rather than
-// resolved.
+// Every judgement about a marked day is src/lib/dayPlan.ts's and every sentence
+// comes from src/lib/coachWeek.ts, which puts `planOutcome` and `planConflict`
+// into the coach's voice and can be tested without a database. No row in either
+// list carries a tick, a percentage or the word "completed", and past days are
+// drawn quieter than future ones rather than resolved. The reason is in the
+// header of coachWeek.ts: `workouts.performed_at` is an INSTANT and this schema
+// holds no client timezone, so deciding that a logged set landed on their
+// Tuesday is a guess, and a guess rendered as a tick beside somebody's own plan
+// is the worst version of it.
+//
+// ── And the one thing that IS read against the record ─────────────────────
+//
+// n=44. This screen used to read no training log at all, which meant a coach
+// could see what a client intended and nothing whatever about what they did —
+// the plan and the record were two screens and the reconciliation was performed
+// by a human being with a thumb.
+//
+// `src/lib/planVsActual.ts` is the module that can answer that WITHOUT breaking
+// the refusal above, and its own header names this file as the precedent it is
+// preserving. It works over a WINDOW OF DAYS and never over a named weekday, it
+// produces no percentage, and it answers 'unknown' rather than 'not logged'
+// whenever the read did not actually cover the window. So the section it feeds
+// sits on its own, below the two lists, and says which prescribed MOVEMENTS
+// were logged in the last four weeks. It never touches a row in Ahead or
+// Already Gone, and no day on this screen has gained a mark.
 //
 // ── Whose today ───────────────────────────────────────────────────────────
 //
@@ -50,8 +66,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, DayBars, IconPlate, Expandable, type Tone } from '../../src/ui/kit';
+import { weekdayNameShort } from '../../src/lib/format';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -59,28 +77,60 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { fetchClientPlannedDays } from '../../src/lib/plannedDays';
 import { scheduledFocus } from '../../src/lib/checklist';
+import { programWeeks, weekCount, weekLabel } from '../../src/lib/programBlock';
+import { blockPosition } from '../../src/lib/programStart';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useToday } from '../../src/ui/today';
+import { clientWeek } from '../../src/lib/clientBlock';
 import { isoToday, DAY_TYPE_LABEL, type PlannedDay, type PlannedDayType } from '../../src/lib/dayPlan';
+// ── the record, against the plan ──────────────────────────────────────────
+//
+// n=44. The one module that can compare the two without claiming a session
+// happened on a named weekday, which is the refusal this screen is built
+// around — see the file header and the header of planVsActual.ts, which names
+// this file as the precedent it preserves.
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
+import { capLimit, capped } from '../../src/lib/rowCap';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import type { WorkoutEntry } from '../../src/lib/mockData';
+import { dayKeyOf } from '../../src/lib/entryEdit';
+import {
+  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, loadLine, loadTally, planVsActual,
+} from '../../src/lib/planVsActual';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
   coachWeek, planWindow, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
-  programmeCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
+  programCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
+
+// The `workouts` column list is imported from src/lib/workoutRow.ts rather
+// than copied. It was written out here because scripts/check-schema.mjs could
+// only resolve a select list declared in the file that used it; the gate now
+// follows one import hop, so a copy buys a blind spot and nothing else. The
+// note on WORKOUT_COLS says what the three copies cost — three coach screens
+// reading a client's training without `bw`, `timed` or `tempos`.
 
 /** A day type's mark colour. A mark beside ink-coloured text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
  *  AA as type. Training and deload are both sessions and read as the brand;
  *  the two days without one are deliberately quiet. */
-function markFor(type: PlannedDayType, t: ReturnType<typeof useTheme>): string {
-  switch (type) {
-    case 'training': return t.brand;
-    case 'deload': return t.s3;
-    case 'rest': return t.ink3;
-    case 'off': return t.ink3;
-  }
-}
+const TYPE_TONE: Record<PlannedDayType, Tone> = { training: 'brand', deload: 'amber', rest: 'neutral', off: 'neutral' };
+const TYPE_ICON = { training: 'dumbbell', deload: 'trending', rest: 'moon', off: 'calendar' } as const;
+/** How tall a marked day stands in the week's bars. Not a quantity — a
+ *  session, a lighter session, and no session: a rest or an off day is the
+ *  kit's grey stub, which is "known to be nothing" and exactly what it is. */
+const TYPE_BAR: Record<PlannedDayType, number> = { training: 1, deload: 0.55, rest: 0, off: 0 };
 
 export default function ClientWeek() {
   const t = useTheme();
+  // Movement names here come out of the client's LOG and out of the program
+  // JSON, both of which store the English identity. A German coach reads the
+  // library in German and would otherwise read this section in English.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const r = useRoster();
   const ap = useAssignedPrograms();
@@ -88,16 +138,58 @@ export default function ClientWeek() {
   // at somebody lands on that person rather than on a picker.
   const { clientId } = useLocalSearchParams<{ clientId?: string; name?: string }>();
 
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
   // Null is "we do not know", never "they have marked nothing" — the whole
   // point of the three states below.
   const [days, setDays] = useState<PlannedDay[] | null>(null);
   const [skipped, setSkipped] = useState(0);
   const [status, setStatus] = useState<LoadStatus>('ready');
-  // Fixed at the moment of the read rather than recomputed on every render, so
-  // a screen left open over midnight cannot re-sort itself under the coach's
-  // hands halfway through reading it. Reopening the client re-reads and moves.
+  /**
+   * The day every list, every window and the BLOCK WEEK on this screen is cut
+   * on — fixed at the moment of the read rather than recomputed on every
+   * render, so a screen left open over midnight cannot re-sort itself under the
+   * coach's hands halfway through reading it.
+   *
+   * ── and why "reopening the client re-reads and moves" was not true ───────
+   *
+   * That is what the comment here used to say, and it is the half of this the
+   * `useState` initialiser could not deliver. This screen is registered
+   * `href: null` in app/(trainer)/_layout.tsx, so it MOUNTS ONCE and is never
+   * torn down, and the effect that calls `load` depends on `[picked, askable,
+   * load]` — all three stable for one client. Coming back to the SAME client
+   * re-renders and re-reads nothing, so `todayISO` stayed at whatever day the
+   * screen was first opened on.
+   *
+   * That is not only a sort order. `blockPosition(startsOn, todayISO, …)` picks
+   * WHICH WEEK OF THE BLOCK the marked days and the logged movements are
+   * compared against. A coach who opened Amy's week on Sunday and came back on
+   * Monday — when the block had rolled to week 7 — read her marks against week
+   * 6 while her own Train tab showed her week 7, under a line saying "compared
+   * against week 6, which is the week Amy is on". Comparing a record against a
+   * week nobody was shown is the exact failure src/lib/clientBlock.ts exists to
+   * prevent, and this screen was committing it silently.
+   *
+   * `useToday` is the resolution and it gives up nothing: it is NOT a ticking
+   * clock — it moves at the next local midnight and when the app comes back to
+   * the foreground, and compares before it sets — so it cannot re-sort anything
+   * under a coach who is reading, because the only moment it moves is the
+   * moment the answer changed. It is in the dependency list of BOTH reads
+   * below, so the planned-day window, the four weeks of log and the day they
+   * are judged against are always cut on one instant rather than drifting
+   * apart. See src/ui/today.ts.
+   */
+  const today = useToday();
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
 
   // The client whose read is allowed to reach the screen. Tapping through a
@@ -106,13 +198,42 @@ export default function ClientWeek() {
   // name of the person tapped second — one client's plans shown as another's.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setStatus('loading');
     setDays(null); setSkipped(0);
     const today = isoToday(new Date());
     const w = planWindow(today);
     if (!w) { setStatus('error'); return; } // unreachable; isoToday cannot fail to parse
+    /* A client the coach typed in by hand has a `coach_clients` row and no user
+     * account, so nothing server-backed is asked for them.
+     *
+     * `askable` was already on this screen and this read was the one it did not
+     * reach: it was passed to `loadLog` below and not to this, and the docstring
+     * beside it reasons only about `workouts`. `planned_days_coach_read` is
+     * `using (public.is_my_client(client_id))`, and `is_my_client` is an EXISTS
+     * over `clients` — false for a `coach_clients` row. `coach_clients.id` is
+     * `uuid DEFAULT gen_random_uuid()`, so the id passed every shape test, the
+     * read ran, RLS answered it with zero rows and NO error, and this screen
+     * printed:
+     *
+     *     "The read came back and {who} has marked no days between … That is
+     *      about them rather than about the connection — most clients never
+     *      open the planner, so an empty fortnight is the ordinary answer and
+     *      not a problem to solve."
+     *
+     * A sentence about somebody's own intentions, and it goes out of its way to
+     * tell the coach the connection is fine, for a person who has never had the
+     * app the planner is in.
+     *
+     * 'error' so that nothing downstream — `weekBoard`, `planConflict` — can
+     * compute over an empty list it would otherwise call whole. The render does
+     * NOT draw that as a failed read: `!askable` has its own branch, because
+     * "they have no account" is a THIRD answer and collapsing it into "the read
+     * failed" is the same flattening src/lib/coachWellness.ts keeps a
+     * `not-asked` kind apart from `unreadable` for.
+     */
+    if (!askable) { setDays(null); setSkipped(0); setStatus('error'); return; }
     const read = await fetchClientPlannedDays(id, w.fromISO, w.toISO);
     if (wanted.current !== id) return;
     setTodayISO(today);
@@ -120,6 +241,28 @@ export default function ClientWeek() {
     setSkipped(read.skipped);
     setStatus(read.days == null ? 'error' : read.truncated ? 'partial' : 'ready');
   }, []);
+
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  const who = client?.name.split(' ')[0] ?? 'They';
+  /**
+   * Whether the server may be asked about this person at all.
+   *
+   * A client typed into the book by hand has a `coach_clients` row and no user
+   * account, so `workouts` holds nothing for them — and the read would come
+   * back with zero rows and NO error, which this screen would otherwise draw as
+   * a person who has trained none of their program. The roster is the only
+   * thing that knows which table the row came from; see
+   * src/lib/clientRecord.ts. `handAdded` undefined is "the roster has not
+   * said", which goes on asking — only an explicit true withholds.
+   *
+   * It travels with BOTH reads on this screen. It used to travel with the log
+   * alone, and `planned_days_coach_read` is `is_my_client(client_id)` exactly
+   * as the workouts policy is — so the planner half went on asking and went on
+   * answering, in a sentence about what the client had intended. It is computed
+   * above the effects rather than below them so that neither read can be
+   * started without it.
+   */
+  const askable = clientIsQueryable(picked, client?.handAdded);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -130,22 +273,118 @@ export default function ClientWeek() {
       setDays(null); setSkipped(0); setStatus('ready');
       return;
     }
-    void load(picked);
-  }, [picked, load]);
+    void load(picked, askable);
+    // `today` in the list, not only `picked`: see the note on it above. The day
+    // turning is a new window and a possibly new week of the block, and this
+    // screen has no focus refresh to catch it.
+  }, [picked, askable, today, load]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
-  const who = client?.name.split(' ')[0] ?? 'They';
+  /* ── what they actually logged ─────────────────────────────────────────
+   *
+   * n=44. Its own read and its own status, because it fails on its own: a
+   * refused log read must never be drawn as a client who did none of it, and
+   * `planVsActual` answers 'unknown' rather than 'not-logged' for exactly that.
+   * Null under 'error' is what lets it — an empty array must not be able to
+   * arrive there meaning two things.
+   *
+   * The window is `WINDOW_DAYS` and NOT the planned-day window above. They are
+   * two different questions — a fortnight of intentions, four weeks of record —
+   * and the section prints its own span rather than borrowing the other's.
+   */
+  const [log, setLog] = useState<WorkoutEntry[] | null>(null);
+  const [logStatus, setLogStatus] = useState<LoadStatus>('loading');
+  /** The client this log is allowed to land under. Same guard as `wanted`
+   *  above: a slow answer for the first client tapped must not be drawn under
+   *  the second client's name, and on this screen that would be one person's
+   *  training reported as another's. */
+  const wantedLog = useRef<string | null>(null);
+  const loadLog = useCallback(async (id: string | null, ask: boolean) => {
+    wantedLog.current = id;
+    if (!id) { setLog(null); setLogStatus('ready'); return; }
+    if (!ask) { setLog(null); setLogStatus('error'); return; }
+    setLogStatus('loading'); setLog(null);
+    // Newest first, and `id` settles the ties: one session writes every exercise
+    // with the SAME `performed_at`, so an order on the timestamp alone has ties
+    // in it by construction and the server may break them differently on each
+    // read. The window is a filter on the QUERY rather than on what came back,
+    // so a client with years of history is read under the cap instead of being
+    // truncated into 'partial' for ever.
+    const { data, error } = await supabase
+      .from('workouts')
+      .select(WORKOUT_COLS)
+      .eq('user_id', id)
+      .gte('performed_at', new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString())
+      .order('performed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(capLimit());
+    if (wantedLog.current !== id) return;
+    if (error) {
+      reportError('clientWeek.workouts', error);
+      setLog(null); setLogStatus('error');
+      return;
+    }
+    const page = capped((data ?? []) as unknown as WorkoutRow[]);
+    setLog(page.rows.map(rowToEntry));
+    setLogStatus(page.truncated ? 'partial' : 'ready');
+  }, []);
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    void loadLog(picked, askable);
+    // Re-read on the day turning for the same reason as the planned days above,
+    // and in step with them: `planVsActual` compares this log against `todayISO`
+    // over a window ending now, so a log read on Sunday judged against Monday
+    // would answer "not logged" over a day the read never covered.
+  }, [picked, askable, today, loadLog]);
 
-  // The programme this coach has assigned them, or null. Null covers three
-  // different situations — none assigned, the read failed, and a programme
+  // Four reads: the client's planned days, the roster the picker and the
+  // header come off, the program assignments — which decide which week of a
+  // block is on screen, so a refresh that moved the days and left the
+  // assignment would lay this week's plan out against last week's block — and
+  // the training log the last section compares that same week against.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(ap.reload()),
+    ...(picked ? [load(picked, askable), loadLog(picked, askable)] : []),
+  ]), [r, ap, picked, load, loadLog, askable]));
+
+  // The program this coach has assigned them, or null. Null covers three
+  // different situations — none assigned, the read failed, and a program
   // assigned by a different coach, which `assigned_programs_coach_rw` will not
-  // show this one — and none of the three is "their programme schedules
-  // nothing". So a null programme feeds `undefined` into planConflict, which
+  // show this one — and none of the three is "their program schedules
+  // nothing". So a null program feeds `undefined` into planConflict, which
   // claims no conflict on an unknown, and the caveat below says so in words.
-  const programme = picked ? ap.getProgram(picked) : null;
+  const program = picked ? ap.getProgram(picked) : null;
+  /**
+   * The week of the block this client's own phone is showing them.
+   *
+   * This screen compared the days they had marked against `program.days` —
+   * week one, by construction (see `ProgramWeek` in src/lib/programs.ts) —
+   * whichever week the client was actually standing in. On a twelve-week block
+   * that made every conflict after week one a comparison against a session
+   * nobody was doing: a rest day marked in week six read as clashing with week
+   * one's Monday, and week six's Monday went unmentioned.
+   *
+   * Read through `clientWeek`, which is the same function the client's Train
+   * tab and app/(trainer)/client-training.tsx read, rather than worked out
+   * again here. Two implementations of "which week" is how a coach ends up
+   * comparing a record against a week their client was never shown, which is
+   * what src/lib/clientBlock.ts exists to prevent.
+   *
+   * `isoToday` reads the COACH's device — the header of this file argues that
+   * boundary at length, and a start date is a bare date counted in the reader's
+   * own days.
+   */
+  const startsOn = picked ? (ap.startsOn[picked] ?? null) : null;
+  const shownWeek = useMemo(() => {
+    if (!program) return null;
+    const weeks = programWeeks(program);
+    if (!weeks.length) return null;
+    const pos = blockPosition(startsOn, todayISO, weekCount(program));
+    const w = clientWeek(pos, weeks.length);
+    return { days: (weeks[w.index] ?? weeks[0]).days, at: w, label: weekLabel(weeks[w.index] ?? weeks[0], w.index + 1) };
+  }, [program, startsOn, todayISO]);
   const focusOn = useCallback<ScheduledFocus>(
-    (weekday) => (programme ? scheduledFocus(programme.days, weekday) : undefined),
-    [programme],
+    (weekday) => (shownWeek ? scheduledFocus(shownWeek.days, weekday) : undefined),
+    [shownWeek],
   );
 
   const board = useMemo(
@@ -153,7 +392,48 @@ export default function ClientWeek() {
     [status, days, todayISO, focusOn],
   );
 
-  const caveat = ap.status === 'loading' ? null : programmeCaveat(!!programme, who);
+  /**
+   * The oldest day the log read actually reached.
+   *
+   * This is what lets a TRUNCATED read still say a movement was not logged.
+   * `capped()` hands back the newest rows, so a client whose four weeks crossed
+   * the cap has their last fortnight read in full and only the start of the
+   * window missing — and `planVsActual` downgrades to 'unknown' only when the
+   * read stops INSIDE the window rather than refusing everybody with a long
+   * history. Null when nothing came back carrying a readable timestamp, which
+   * is itself "not known" and never "the window was covered".
+   */
+  const oldestLogged = useMemo(() => {
+    if (!log || !log.length) return null;
+    let oldest: string | null = null;
+    for (const e of log) {
+      const d = dayKeyOf(e.t);
+      // A bare `YYYY-MM-DD` compared as a string, which is exactly what it is
+      // for. Nothing here parses one as an instant.
+      if (d && (oldest == null || d < oldest)) oldest = d;
+    }
+    return oldest;
+  }, [log]);
+
+  /**
+   * The prescribed week against the record.
+   *
+   * `shownWeek` and not week one — the same week every conflict above is
+   * computed against, so the two halves of this screen cannot be talking about
+   * different Mondays. Null log under 'error', which is the only way the
+   * comparison can answer 'unknown' rather than 'not-logged'.
+   */
+  const pva = useMemo(() => planVsActual({
+    days: shownWeek?.days ?? null,
+    programStatus: ap.status,
+    log: logStatus === 'error' ? null : log,
+    logStatus,
+    todayISO,
+    oldestDay: oldestLogged,
+  }), [shownWeek, ap.status, logStatus, log, todayISO, oldestLogged]);
+  const loads = useMemo(() => loadLine(loadTally(pva.movements), who), [pva, who]);
+
+  const caveat = ap.status === 'loading' ? null : programCaveat(!!program, who);
 
   // The span actually asked for, so the empty-week sentence can name its own
   // edges rather than describe a fortnight in the abstract.
@@ -164,9 +444,56 @@ export default function ClientWeek() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's week and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* `isWhole`, not `!== 'error'`. The error case already has its own
+          Notice above, so the status this gate was really letting
+          through was 'loading': a coach opening this screen with a full
+          book was told "Nobody is on your book yet" for as long as the
+          roster took to arrive. An empty list is a claim, and it may
+          only be made once the read has finished and come back whole. */}
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there are no weeks to look at" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   /** One marked day. Past days are drawn quieter than future ones; that is the
    *  only difference, because it is the only difference we can honestly draw —
    *  a day that has gone is still nothing more than what they intended. */
+  // Today and the six days after it, each with the mark they put on it (or
+  // none). Built off `board.ahead`, the same rows the list below draws.
+  const [ty0, tm0, td0] = todayISO.split('-').map(Number);
+  const nextSeven = Array.from({ length: 7 }, (_, i) => {
+    const at = new Date(ty0, tm0 - 1, td0 + i);
+    const mark = board.ahead.find((d) => d.plan.dateISO === isoToday(at))?.plan.type ?? null;
+    return {
+      label: weekdayNameShort(at.getDay()),
+      value: mark ? TYPE_BAR[mark] : null,
+      tone: mark ? TYPE_TONE[mark] : undefined,
+      said: mark ? DAY_TYPE_LABEL[mark].toLowerCase() : 'not marked',
+    };
+  });
+
   const dayRow = (d: CoachPlanDay, i: number) => {
     const past = d.side === 'gone';
     const note = planNote(d);
@@ -175,9 +502,9 @@ export default function ClientWeek() {
         <Text style={{ ...ty.micro, color: t.ink3 }}>
           {dayHeading(d.plan.dateISO)} · {whenLabel(d.plan.dateISO, todayISO)}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xs }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: markFor(d.plan.type, t) }} />
-          <Text style={{ ...ty.body, fontWeight: '600', color: past ? t.ink2 : t.ink }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.xs }}>
+          <IconPlate icon={TYPE_ICON[d.plan.type]} tone={past ? 'neutral' : TYPE_TONE[d.plan.type]} size={38} />
+          <Text style={{ ...ty.head, color: past ? t.ink2 : t.ink, flex: 1, minWidth: 0 }}>
             {DAY_TYPE_LABEL[d.plan.type]}
           </Text>
         </View>
@@ -203,24 +530,17 @@ export default function ClientWeek() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Week</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          The days a client has marked ahead of time — training, rest, a deload, or a note about
-          being away. Every line here is what they intend, never a record of what they did, and
-          none of it is yours to change.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Their Week" subtitle={client?.name || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Planned days live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have marked none." />
           </Section>
         ) : (
@@ -228,65 +548,77 @@ export default function ClientWeek() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>
-                  Nobody is on your book yet, so there are no weeks to look at.
-                </Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ──────────────────────────────────────────
+                 It takes the WHOLE body rather than one section of it, because
+                 every section below — the planner, the conflicts, the plan
+                 against the record — is the same absent record said a different
+                 way, and each of them has its own sentence about the person.
+                 A notice on top of four of those is still four of those.
+
+                 This is not "they marked nothing" and it is not "the read
+                 failed". There is no app for them to have opened a planner in:
+                 nothing was refused, because nothing was ever entitled to be
+                 asked. The same distinction `wellnessPanel`'s `not-asked` kind
+                 keeps apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No Account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                    note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no app for them to plan a week in and no training of theirs to compare a plan against. That is not an empty fortnight and not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
                 {/* The three states, kept apart. Each is a different fact about
-                    this person and each starts a different conversation. */}
+                    this person and each starts a different conversation. The
+                    fourth — no account at all — is the branch above, and does
+                    not reach here. */}
                 {status === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their planned days&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their planned days could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has marked nothing — that is a different answer, and this screen cannot tell you which one you are looking at until the read succeeds.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has marked nothing. That is a different answer, and this screen cannot tell you which one you are looking at until the read succeeds.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Week'} note="nothing marked" />
+                    <SectionHead title={client?.name ?? 'Their Week'} note="Nothing Marked" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has marked no days between{' '}
                       {dayHeading(window?.fromISO ?? '')} and {dayHeading(window?.toISO ?? '')}.
                       That is about them rather than
-                      about the connection — most clients never open the planner, so an empty
+                      about the connection. Most clients never open the planner, so an empty
                       fortnight is the ordinary answer and not a problem to solve.
                     </Text>
                   </Section>
                 ) : (
                   <>
                     {/* Conflicts first, and only the ones still ahead. A day
-                        their programme and their own mark disagree about is
+                        their program and their own mark disagree about is
                         worth a message while it can still be settled; the same
                         disagreement on a day already gone is an argument about
                         the past, so it stays on its row and out of here. */}
                     {board.conflicts.length ? (
                       <Section>
-                        <SectionHead title="Worth Raising" note={`${board.conflicts.length}`} />
+                        {/* Gated like the count twenty-seven lines below it,
+                            which has been right all along. This is the list a
+                            coach works through before a check-in call: clear
+                            three clashes over a truncated window, believe the
+                            week is straight, and the fourth was cut off the
+                            page. */}
+                        <SectionHead title="Worth Raising"
+                          note={isWhole(status) ? `${board.conflicts.length}` : undefined} />
                         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
-                          Days where {who}&rsquo;s mark and the programme you assigned them say
+                          Days where {who}&rsquo;s mark and the program you assigned them say
                           different things. Neither has been changed by the other, and nothing on
                           this screen will change either.
                         </Text>
@@ -305,26 +637,43 @@ export default function ClientWeek() {
                       </Section>
                     ) : null}
 
+                    {/* ── the seven days from today, as a picture ────────────
+                        The page opens on it. A marked training day stands
+                        full, a deload lower, a rest or off day is the grey
+                        stub, and a day they have not marked draws NOTHING —
+                        unmarked is not rest. Only from a whole read: under a
+                        truncated one a missing bar could be a mark that was
+                        cut off, and the rows below still show what arrived. */}
+                    {isWhole(status) ? (
+                      <Section>
+                        <SectionHead title="Next Seven Days" />
+                        <DayBars days={nextSeven} max={1}
+                          spoken={`The next seven days: ${nextSeven.map((d) => `${d.label} ${d.said}`).join(', ')}`} />
+                      </Section>
+                    ) : null}
+
                     <Section>
                       <SectionHead
                         title="Ahead"
                         // A count is a figure, so it is only printed when the
                         // read is known to be the whole window. Under 'partial'
                         // it would be a subtotal presented as a total.
-                        note={isWhole(status) ? `${board.ahead.length} marked` : undefined}
+                        note={isWhole(status) ? `${board.ahead.length} Marked` : undefined}
                       />
+                      <Expandable title="What Ahead Covers">
                       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                         Today and the next {DAYS_AHEAD - 1} days. Far enough out to hold the whole of
-                        next week, which is where a deload or a week away needs catching — after it
-                        starts is too late to reprogramme it.
+                        next week, which is where a deload or a week away needs catching. After it
+                        starts is too late to reprogram it.
                       </Text>
+                      </Expandable>
                       {board.ahead.length ? board.ahead.map(dayRow) : (
                         // Reaching here means the board is 'planned' and Ahead
                         // is empty, so everything it holds is behind today —
                         // which is why this may say they use the planner.
                         <Text style={{ ...ty.body, color: t.ink2 }}>
                           Nothing marked from today on. {who} did mark days in the week just gone,
-                          so they do use the planner — this fortnight is simply empty.
+                          so they do use the planner. This fortnight is simply empty.
                         </Text>
                       )}
                     </Section>
@@ -333,7 +682,7 @@ export default function ClientWeek() {
                       <>
                         <Rule />
                         <Section>
-                          <SectionHead title="Already Gone" note={`last ${DAYS_BEHIND} days`} />
+                          <SectionHead title="Already Gone" note={`Last ${DAYS_BEHIND} Days`} />
                           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                             What {who} meant to do, on days that have passed. Still only intentions:
                             this screen does not read their training log, so nothing below says
@@ -346,9 +695,137 @@ export default function ClientWeek() {
                   </>
                 )}
 
+                {/* ── the plan against the record ──────────────────────────
+                    n=44. Everything above this line is what the client INTENDED.
+                    This is the only part of the screen that reads what they
+                    actually logged, and it is deliberately not attached to any
+                    of those days: `planVsActual` works over a window of days
+                    and never over a named weekday, because `performed_at` is an
+                    instant and this schema holds no client timezone. Its own
+                    header names this file as the precedent for that refusal.
+
+                    So: no tick beside a marked day, no percentage, and
+                    'unknown' rather than 'not logged' wherever the read did not
+                    cover the window. `WINDOW_IS_NOT_A_WEEKDAY` says all of that
+                    on the screen rather than only in this comment. */}
+                {logStatus === 'loading' ? (
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading what they logged&hellip;</Text></Section>
+                ) : (
+                  <Section>
+                    <SectionHead title="Plan Against Record" note={`Last ${WINDOW_DAYS} Days`} />
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{coverageLine(pva, WINDOW_DAYS, who)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{WINDOW_IS_NOT_A_WEEKDAY}</Text>
+
+                    {pva.state === 'ready' ? pva.days.map((d, di) => (
+                      <View key={`${d.day}-${di}`} style={{ marginTop: sp.md, paddingTop: di ? sp.md : 0, borderTopWidth: di ? hairline : 0, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>{d.day}{d.focus ? ` · ${d.focus}` : ''}</Text>
+                        {d.movements.map((m) => (
+                          <View key={m.slug || m.name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 4 }}>
+                            {/* A 6pt dot, and the state spelled out in ink at
+                                the end of the same row. The tone is never the
+                                text colour: `t.warn` and `t.good` are tuned to
+                                the 3:1 a mark needs and are 3.87-4.08:1 as type
+                                on the light palettes. Colour is the second
+                                channel here and never the only one. */}
+                            <View style={{ width: 14, alignItems: 'center' }}>
+                              <View style={{
+                                width: 6, height: 6, borderRadius: 3,
+                                backgroundColor: m.coverage === 'logged' ? t.good
+                                  : m.coverage === 'not-logged' ? t.warn : t.ring,
+                              }} />
+                            </View>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{movement(m.name)}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {m.coverage === 'logged'
+                                ? `logged ${m.daysLogged} day${m.daysLogged === 1 ? '' : 's'}`
+                                : m.coverage === 'not-logged' ? 'not logged' : 'could not be answered'}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )) : null}
+
+                    {/* The load, as counts. No figure is printed here and that
+                        is not an omission: a load belongs in the CLIENT's own
+                        unit — app/(trainer)/client-training.tsx resolves whose
+                        through `unitFor` and prints them there — and this
+                        screen reads no unit. A count needs none. */}
+                    {pva.state === 'ready' && loads ? (
+                      <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed Load Against What Was Lifted</Text>
+                        <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{loads}</Text>
+                      </View>
+                    ) : null}
+
+                    {/* The other half of the conversation: work they logged that
+                        this program does not name. Spelled as they typed it. */}
+                    {pva.offPlan.length ? (
+                      <View style={{ marginTop: sp.lg }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.map(movement).join(' \u00b7 ')}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                          Work outside the program is not a fault; it is the part of {who}&rsquo;s training the
+                          plan does not describe.
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {logStatus === 'partial' ? (
+                      <View style={{ marginTop: sp.md }}>
+                        <Flag tone={t.warn}>
+                          Their logged training came back at the row limit, so the four weeks above are
+                          read from the most recent end. A movement shown as not logged was answered
+                          against the part of the window the read reached.
+                        </Flag>
+                      </View>
+                    ) : null}
+                  </Section>
+                )}
+
+                {/* ── whose copy of the program every clash above was drawn
+                    against ──────────────────────────────────────────────────
+                    `getProgram` consults this device's cache when no read has
+                    landed, and serves it under 'error' — deliberately, and the
+                    header of src/ui/assignedPrograms.tsx argues why. What it
+                    does NOT do is make anything 'ready'. So on a failed read
+                    `program` is non-null, `programCaveat` returns null
+                    because a program IS known, and every clash on this screen
+                    was computed against whatever was on the phone. The horizon
+                    on that cache is thirty days: a coach who rewrote the block
+                    a fortnight ago reads last month's Thursday against this
+                    week's marks and goes to argue about a session nobody has.
+
+                    `ap.cachedNote` exists for exactly this and carries the age.
+                    It is non-null for precisely as long as the cache is what is
+                    being served — `mayServeCached` decides that — so it needs
+                    no gate of its own and disappears the moment a live read
+                    lands. app/(client)/week.tsx :194 renders it in the same
+                    position over the same program; this screen is the coach's
+                    view of that week and had nothing. */}
+                {ap.cachedNote ? (
+                  <Section><Flag tone={t.warn}>{ap.cachedNote}</Flag></Section>
+                ) : null}
+
                 {/* Three things the lists above cannot say for themselves. */}
                 {caveat && board.state !== 'unreadable' ? (
                   <Section><Flag tone={t.ink3}>{caveat}</Flag></Section>
+                ) : null}
+                {/* Which week of the block the clashes were counted against.
+                    Only on a block, and only because a conflict reported
+                    against a week the client is not doing is worse than no
+                    conflict at all — it sends the coach to change a session
+                    nobody has. Null on a one-week program, where a week
+                    number would be counting something that does not exist. */}
+                {shownWeek && shownWeek.at.count > 1 && board.state !== 'unreadable' ? (
+                  <Section>
+                    <Flag tone={t.ink3}>
+                      Compared against {shownWeek.label.toLowerCase()}, which is the week {who} is on:
+                      week {shownWeek.at.index + 1} of {shownWeek.at.count}
+                      {shownWeek.at.reason === 'no-date' ? ', because no start date is set on this block' : ''}
+                      {shownWeek.at.reason === 'unreadable' ? ', because the start date stored on this block cannot be read' : ''}
+                      {shownWeek.at.reason === 'ended' ? ', which is where their plan stays until you write the next block' : ''}.
+                    </Flag>
+                  </Section>
                 ) : null}
                 {status === 'partial' ? (
                   <Section>
@@ -369,8 +846,18 @@ export default function ClientWeek() {
                 ) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the week, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          The days a client has marked ahead of time: training, rest, a deload, or a note about
+          being away. Every line here is what they intend, never a record of what they did, and
+          none of it is yours to change.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

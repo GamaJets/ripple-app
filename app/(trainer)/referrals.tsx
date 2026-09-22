@@ -27,15 +27,17 @@
 // And joined is never converted. A signup, a first session and a first payment
 // are three different promises; the database can keep the middle one, and both
 // halves are always on the row so that neither can be read as the other.
-import { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { useCallback, useMemo } from 'react';
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, KpiRow, Meter } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachReferrals } from '../../src/ui/coachReferrals';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   coachSummaryLine, referrerLine, CONVERSION_RULE,
   COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE,
@@ -46,12 +48,14 @@ export default function CoachReferrals() {
   const router = useRouter();
   const r = useRoster();
   const { status, rows, reload } = useCoachReferrals();
-  const [refreshing, setRefreshing] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try { await reload(); } finally { setRefreshing(false); }
-  }, [reload]);
+  // Was four hand-written lines of refreshing state. The shared hook is the
+  // same read with the second-pull guard and the minimum spinner the local
+  // copy never had — and the roster is refreshed alongside it, because the
+  // names on these rows come from there.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reload(), r.refresh()]),
+    [reload, r],
+  ));
 
   /**
    * The coach's own name for this client, where the roster has one.
@@ -78,22 +82,31 @@ export default function CoachReferrals() {
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={t.ink3} />}
+        refreshControl={pull}
       >
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Who Brings You Clients</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{summary}</Text>
+        <PageHead title="Who Brings You Clients" subtitle="Your book" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{summary}</Text>
+
+        {/* ── the funnel, as three tiles ──────────────────────────────────
+            Round five. Who referred, how many joined on their codes, how many
+            of those started training — counts of people, which may be added.
+            ONLY under 'ready': on a short read these would be sums over
+            whoever came back, stated as the book's, and under a failed one
+            they would be three noughts about a read that never happened. The
+            list below is still drawn on a short read, under its notice. */}
+        {status === 'ready' && rows && rows.length ? (
+          <KpiRow tiles items={[
+            { label: 'Referrers', value: num(rows.length), tone: 'purple' },
+            { label: 'Joined', value: num(rows.reduce((n, x) => n + x.joined, 0)), tone: 'blue' },
+            { label: 'Started Training', value: num(rows.reduce((n, x) => n + x.converted, 0)), tone: 'brand' },
+          ]} />
+        ) : null}
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t check who has been referring"
-              note="Nobody is listed below because the read did not come back. This is not a book on which nobody has referred anybody — pull down to try again.">
+            <Notice tone={t.crit} kicker="Not Read" title="We Couldn’t Check Who Has Been Referring"
+              note="Nobody is listed below because the read did not come back. This is not a book on which nobody has referred anybody. Pull down to try again.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void reload(); }} /></View>
             </Notice>
           </Section>
@@ -103,10 +116,9 @@ export default function CoachReferrals() {
           <Section><PartialRead what="clients" shown={rows?.length ?? 0} onPress={() => { void reload(); }} /></Section>
         ) : null}
 
-        <Rule />
 
         <Section>
-          <SectionHead title="Your referrers" note={status === 'ready' && rows ? `${rows.length}` : undefined} />
+          <SectionHead title="Your Referrers" note={status === 'ready' && rows ? `${rows.length}` : undefined} />
 
           {/* What "started training" means, said before anybody reads the second
               number as a payment or a renewal. */}
@@ -120,7 +132,7 @@ export default function CoachReferrals() {
             // under 'error', and the branch above is what keeps it out.
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody on your book has brought somebody in with their code yet. Their code is on their
-              own Invite screen — most clients have never opened it, and asking is free.
+              own Invite screen. Most clients have never opened it, and asking is free.
             </Text>
           ) : (
             rows.map((row, i) => {
@@ -130,16 +142,23 @@ export default function CoachReferrals() {
                   accessible accessibilityRole="text"
                   accessibilityLabel={`${name}. ${referrerLine(row)}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.data.purpleSoft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.data.purpleInk }}>
                       {name.split(' ').map((x) => x[0]).join('')}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{name}</Text>
                     {/* Both counts, always. Neither is derived from the other and
                         neither is a score. */}
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{referrerLine(row)}</Text>
+                    {/* The same two counts as a bar: of the people this client
+                        brought in, how many have started. It is a share of
+                        THEIR referrals and of nobody else's, so a client who
+                        brought one person who trains reads as full, which is
+                        true of them. The row's spoken label already says both. */}
+                    <Meter label="Started Training" val={row.converted} target={row.joined} tone="brand"
+                      note={`${num(row.converted)} of ${num(row.joined)}`} />
                   </View>
                   {/* The count they brought in, and no second figure beside it
                       pretending to be what it was worth. */}
@@ -150,10 +169,9 @@ export default function CoachReferrals() {
           )}
         </Section>
 
-        <Rule />
 
         <Section>
-          <SectionHead title="Thanking them" />
+          <SectionHead title="Thanking Them" />
           <Text style={{ ...ty.label, color: t.ink3 }}>{COACH_REWARD_NOTE}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COACH_REFERRAL_PRIVACY_NOTE}</Text>
           <View style={{ marginTop: sp.lg }}>

@@ -7,6 +7,12 @@
 // beside ink text where "Waitlist" used to be status-coloured type. Every
 // provider, conditional and route is unchanged.
 //
+// Round five (the look the owner approved): the page opens on three tiles —
+// PT sessions, classes, class waitlists, each in its session type's colour and
+// each a dash unless both reads were whole — and every row has a toned plate,
+// its state as a chip and its actions under the words. Still no invented
+// figure: the tiles count exactly what the list below them shows.
+//
 // ── TF-32: "PT with <the reader's own name>" ───────────────────────────────
 //
 // The personal-training rows were titled from `useCoachProfile().name`. That
@@ -29,18 +35,38 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PageHead, KpiRow, IconPlate, TonedChip, fig } from '../../src/ui/kit';
 // What pays for each of these, read once for the whole list. See
 // supabase/parts/370 and src/lib/sessionCredits.ts: the choice of entitlement
 // is made in one place, so this screen and the ledger cannot describe the same
 // credit two ways.
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
-import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledgerStateOf,
+import { deviceZone } from '../../src/lib/quietHours';
+import { bookableCredits, ledgerStateOf,
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
+import { withDeadline } from '../../src/lib/readDeadline';
+import { packDeadline, drawsBy } from '../../src/lib/packDeadline';
+import { closingPack, otherWindowsNote } from '../../src/lib/closingPack';
+// Whether a booking is still ahead of the member, and the hour of grace on the
+// answer. One copy of a comparison this file held three of, all three of them
+// against a clock that had stopped at mount — see the header of that file.
+import { isUpcoming } from '../../src/lib/upcomingWindow';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+// One definition of "today, locally", shared with the membership screen and
+// with the pass code itself — see the note on `todayISO` below.
+import { useToday, useNow } from '../../src/ui/today';
+// When the free window on a booking closes, and what changes when it does.
+// The notice period existed only inside the Cancel confirmation, and the Move
+// control simply disappeared at the boundary with nothing saying why. See
+// src/lib/cancelDeadline.ts.
+import { cancelDeadline, freeUntil } from '../../src/lib/cancelDeadline';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+// A class the gym called off. This screen listed one under Upcoming as a
+// confirmed booking and wrote it into the member's own phone calendar, where
+// nothing in this app can ever take it out again.
+import { isCancelled } from '../../src/lib/gymSchedule';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
@@ -48,6 +74,7 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 // for why a move never charges and why one made inside the coach's notice
 // window is refused rather than priced.
 import { canOfferMove, moveConfirm, noSlotsLine, rescheduleLines, rescheduleRefusalLine } from '../../src/lib/reschedule';
+import { useClientReminders } from '../../src/ui/clientReminders';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
 import type { TrainingSession } from '../../src/lib/types';
@@ -101,13 +128,15 @@ const dayLabel = (iso: string) => fmtRelativeDay(iso);
 // the note asked for was a shared helper, and `cancelBookedSession` in
 // src/ui/sessions.tsx is it, called by both screens with the same arguments in
 // the same order. This screen keeps only the wording of its own alerts.
-type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; onCancel: () => Promise<boolean>; pt?: TrainingSession };
+type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; /** The gym called this class off. The row stays — the member booked it and
+ *  has to be told — and it is neither counted as a booking nor exported. */
+  cancelled?: boolean; onCancel: () => Promise<boolean>; pt?: TrainingSession };
 
 export default function Bookings() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, cancel: cancelClass, cachedNote: classCachedNote } = useClasses();
-  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking, rescheduleMyBooking, cachedNote: sessionCachedNote } = useSessions();
+  const { classes, myStatus, status: classStatus, cancel: cancelClass, cachedNote: classCachedNote, refresh: refreshClasses } = useClasses();
+  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking, rescheduleMyBooking, cachedNote: sessionCachedNote, refresh: refreshSessions } = useSessions();
   // Whether this phone can reach us. It decides the second half of every
   // failure sentence on this screen.
   const reach = useReachability();
@@ -116,7 +145,12 @@ export default function Bookings() {
   // once already — see the long note above `Item` — and a hardcoded 24 hours in
   // one of them was how a coach's 48-hour policy would have gone unmentioned
   // here and mentioned there.
-  const { policy: cancelPolicy } = useCancellationPolicy();
+  // `status` is taken as well as the policy now, and the two say different
+  // things. A failed reload leaves whatever was already there in `policy`, so
+  // the object in hand under 'error' is a figure from before the failure and is
+  // not evidence of anybody's current terms — `cancelDeadline` refuses to quote
+  // it, and says so, rather than printing a fee it cannot confirm.
+  const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
   // What this member is waiting for. `session_waitlist_client_r` shows them
   // their own row and nobody else's, so a position can only come from the
   // server: read from the app the queue is a set of one and everybody is first.
@@ -125,7 +159,20 @@ export default function Bookings() {
   // way to ask again was the Try Again button inside the failure notice, and
   // there is no such button on a screen that merely went stale. Pull to refresh
   // is the gesture people already try — see src/ui/pullToRefresh.tsx.
-  const pull = usePullToRefresh(useCallback(() => { reloadWait(); }, [reloadWait]));
+  //
+  // It asked for the WAITLIST and nothing else. Everything this screen is
+  // actually about — the classes booked, the PT sessions, the cancellation
+  // policy printed beside each one, and the packs and passes paying for them —
+  // was left at whatever the first read returned, so a member who cancelled on
+  // another device pulled this screen down and watched the booking stay. Six
+  // reads make this screen and the gesture now asks for all six.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadWait();
+    void refreshClasses();
+    void refreshSessions();
+    reloadPolicy();
+    setEntitlementTick((n) => n + 1);
+  }, [reloadWait, refreshClasses, refreshSessions, reloadPolicy]));
   // Either read failing makes this list a fragment, and a fragment must not be
   // announced as "you have nothing booked" — the member then turns up to
   // nothing, or fails to turn up to something.
@@ -148,6 +195,12 @@ export default function Bookings() {
   const coachName = head.isName ? head.text : null;
   const cd = useClientData();
   const { appName } = useBrand();
+  // The "Session in 1 hour" banner, armed AND disarmed off this screen's own
+  // read of the diary — see src/ui/clientReminders.ts. Run here as well as on
+  // the calendar because either screen may be the one a member opens, and the
+  // two cannot collide: the pass is serialised per account. `'unknown'` is
+  // `cd.id` before the auth read has landed and is not an account.
+  useClientReminders(cd.id === 'unknown' ? null : cd.id, sessions, sessionStatus, coachName);
 
   // ── what is going to pay for these ────────────────────────────────────
   //
@@ -157,36 +210,191 @@ export default function Bookings() {
   const [packs, setPacks] = useState<PackBalance | null | undefined>(undefined);
   const [ptPasses, setPtPasses] = useState<PtPassRow[] | null | undefined>(undefined);
   const [credits, setCredits] = useState<CreditSession[] | null | undefined>(undefined);
+  /** Bumped by the pull. These three were read once at mount and never again —
+   *  on a TAB, which stays mounted for the life of the app, so a pack drawn
+   *  down this morning was still shown at its old balance tonight. */
+  const [entitlementTick, setEntitlementTick] = useState(0);
   useEffect(() => {
     let live = true;
     (async () => {
-      const [p, g, c] = await Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]);
+      // Under a ceiling. All three of these swallow their own failures and hand
+      // back null, so the only way they stay at `undefined` is a request that
+      // never SETTLES — and no request in this app carries a timeout
+      // (src/lib/readDeadline.ts). `undefined` is what silences `creditLineFor`
+      // entirely: a member on a captive-portal wifi was shown their bookings
+      // with no line under them at all, which reads as "nothing to pay",
+      // instead of the sentence this screen already has for a credit it could
+      // not read.
+      const got = await withDeadline(Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]));
       if (!live) return;
+      if (!got.answered) {
+        // Only where there was nothing to lose. A pull that stalls over
+        // balances already on screen must not blank them — src/lib/staleRead.ts
+        // makes that argument, and this is what pays for somebody's sessions.
+        setPacks((v) => (v === undefined ? null : v));
+        setPtPasses((v) => (v === undefined ? null : v));
+        setCredits((v) => (v === undefined ? null : v));
+        return;
+      }
+      const [p, g, c] = got.value;
       setPacks(p); setPtPasses(g); setCredits(c);
     })();
     return () => { live = false; };
-  }, []);
+  }, [entitlementTick]);
 
   // The day a gym pass has to be live on, taken locally: a pass expires on a
   // date at the gym, not at an instant in UTC.
-  const todayISO = useMemo(() => {
-    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-  }, []);
-  const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
-  const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
-  const creditRoute = useMemo(
-    () => chooseRoute(coachLines == null ? null : coachLines.length > 0,
-                      gymLines == null ? null : gymLines.length > 0),
-    [coachLines, gymLines]);
-  const creditsRemaining = useMemo(
-    () => creditsLeft(payingLines(creditRoute, coachLines, gymLines)), [creditRoute, coachLines, gymLines]);
+  //
+  // Recomputed on every render rather than memoised on an empty dependency
+  // array. `useMemo(..., [])` froze "today" at the moment this screen mounted,
+  // and this screen is a TAB — it stays mounted for the life of the app. So a
+  // phone left open overnight, which is most phones, went on filtering passes
+  // against yesterday: a pass that expired at midnight stayed listed as paying
+  // for a session the gym would refuse at the door.
+  // app/(client)/membership.tsx argues the identical point about the identical
+  // value — "the screen can be open across midnight, and a membership that
+  // expired at 00:00 should not still read Active because the component has not
+  // re-rendered for a new day" — and the two are the same question about the
+  // same member at the same desk.
+  //
+  // ── and the half of that argument the fix was missing ──────────────────
+  //
+  // Moving the call out of the `useMemo` and into the render body was only half
+  // of it, and the comment above says which half by accident: "because the
+  // component has not re-rendered for a new day". Nothing here made it. A value
+  // recomputed per render is right at the moment something else happens to
+  // redraw, and a screen sitting untouched at 23:59 — or a phone pocketed on
+  // Friday and opened on Monday, which is the ordinary case — redraws for
+  // nothing. The frozen `useMemo` was a value stuck at MOUNT; this was a value
+  // stuck at the LAST RENDER, which on a screen nobody is touching is the same
+  // pass listed as live on the same expired day.
+  //
+  // `useToday` (src/ui/today.ts) is what closes it: state, re-read on the next
+  // local midnight and again whenever the app comes back to the foreground, so
+  // a day that has actually changed causes the render that this line was
+  // already written to be correct in.
+  const todayISO = useToday();
+  /**
+   * The clock the notice window is measured against.
+   *
+   * `useToday` is a calendar day and cannot answer this: a deadline is an hour,
+   * and a member sitting on this screen at 06:55 the morning before a 07:00
+   * session watches a window close. `useNow` re-reads on the next local
+   * midnight and on every foreground, which is the same guarantee, at the
+   * grain this needs.
+   */
+  const nowMs = useNow().getTime();
+  // The route and the balance, through `bookableCredits` — the same call
+  // app/(client)/session-credits.tsx, packages.tsx and pt-sessions.tsx make.
+  // This screen had the composition right and had it written out longhand,
+  // which is a fifth copy of a rule that had already been got wrong on two of
+  // the five. The rule lives in src/lib/sessionCredits.ts now and nowhere else.
+  const book = useMemo(
+    () => bookableCredits(packs === undefined ? null : (packs?.lines ?? null),
+                          ptPasses === undefined ? null : ptPasses, todayISO),
+    [packs, ptPasses, todayISO]);
+  const creditRoute = book.route;
+  const creditsRemaining = book.left;
   const creditNote = useMemo(() => bookingCreditNote(creditRoute, creditsRemaining), [creditRoute, creditsRemaining]);
+
+  // ── a pack with a closing window, and whether this diary covers it ─────
+  //
+  // The same question `app/(client)/session-credits.tsx` answers, asked on the
+  // screen where the diary is. `expiryLine` in src/lib/packExpiry.ts says when
+  // a pack ends and is printed on Memberships & Packs; what a member wants to
+  // know while looking at their bookings is whether the ones in front of them
+  // are enough to use it up. Both halves are already on this screen.
+  //
+  // `bookedByThen` is null unless exactly ONE pack has a window — an upcoming
+  // session is not attributed to a pack until it draws, so with two windows in
+  // play no honest attribution exists. See src/lib/packDeadline.ts.
+  //
+  // What this screen did with that was return null and say NOTHING, which is a
+  // different rule and a worse one: the member holding two closing packs has
+  // the most at stake and the least chance of working it out unaided, and
+  // `packDeadline` was written for them — "the caller passes null there, and
+  // this says the deadline without claiming anything about coverage". Nothing
+  // was passing null, so the sentence that branch exists for had no caller.
+  // `closingPack` picks the pack that closes FIRST and says whether the diary
+  // may be counted against it; the early return is gone.
+  const payingEntitlements = book.lines;
+  const closing = useMemo(() => closingPack(payingEntitlements, todayISO), [payingEntitlements, todayISO]);
+  // Declared BEFORE the deadline below, which reads it. A `useMemo` body runs
+  // where it is written, so the deadline reaching backwards for this would have
+  // been a temporal-dead-zone crash on first render rather than a stale value.
   const creditById = useMemo(() => {
     const m = new Map<string, CreditSession>();
     for (const c of credits ?? []) m.set(c.id, c);
     return m;
   }, [credits]);
+  const deadline = useMemo(() => {
+    if (!closing) return null;
+    // Only the member's own PT bookings, and only when BOTH reads that make
+    // this list landed. A short diary counted as a whole one would report
+    // coverage that is not there — `bookingsWhole` is the same gate the empty
+    // state on this screen is already held to.
+    //
+    // `nowMs` and not `Date.now()`, and it is IN the dependency list. The bare
+    // call was evaluated in the memo body against a list holding no clock, on a
+    // screen `app/(client)/_layout.tsx` registers `href: null` — mounted once
+    // and never torn down — so the comparison was frozen at the moment the
+    // member first opened My Bookings. Every session that has been TAKEN since
+    // then went on counting as one still booked before the pack expires, and
+    // the line under this told the member their remaining credits were covered
+    // when they were not. See src/lib/upcomingWindow.ts.
+    //
+    // ── and the bookings that have already been paid for are not counted ──
+    //
+    // The list alone is the wrong count, and it was costing the member money.
+    // `closing.pack.left` is `sessions_total - sessions_used`, and a one-off the
+    // member booked THEMSELVES has already come off `sessions_used`:
+    // `book_session` stamps `sessions.booking_drew_credit_at` and the app then
+    // calls `redeem_pack_session`, which does `sessions_used = sessions_used + 1`
+    // on the spot. Subtracting those bookings again took the same credit off
+    // twice — a ten-pack with eight self-booked hours read `left: 2`,
+    // `booked: 8`, `toBook: -6`, and the line under this said "nothing here is
+    // going to be lost" about two credits nothing was booked against, which
+    // then expired unrefunded.
+    //
+    // Which bookings those are is not on `sessions` — `TrainingSession` carries
+    // no credit columns — so it comes from the same place the caption under
+    // each row comes from, `mySessionCredits` via `creditById`, judged by
+    // `ledgerStateOf`. A booking with no credit row is not assumed to be
+    // unpaid: it is `willDraw: null`, and `drawsBy` turns any such row INSIDE
+    // the window into no count at all rather than into a number. This screen
+    // already refuses to guess about one of these on the row itself
+    // ("We could not read what pays for this session"); it must not go on to
+    // quietly guess about the same session in a sentence about the whole pack.
+    //
+    // The gym-pass route is untouched by any of this: a pass only ever draws at
+    // delivery, so `ledgerStateOf` never returns 'reserved' under it and every
+    // upcoming booking still counts, exactly as before.
+    //
+    // ── and only when a booking can be attributed to this pack at all ─────
+    //
+    // `closing.attributable` is false when the member holds a second pack with
+    // a window on it. An upcoming booking is not tied to a pack until it draws,
+    // so nothing on this phone can say which of the two a Thursday session is
+    // going to spend — and the count that would be produced anyway is the one
+    // that reads "nothing here is going to be lost", which is the single
+    // sentence on this screen that could talk somebody out of acting.
+    const booked = bookingsWhole && closing.attributable
+      ? drawsBy(
+          sessions
+            .filter((x) => x.clientId === cd.id && x.status === 'booked' && isUpcoming(x.startsAt, nowMs))
+            .map((x) => {
+              const c = creditById.get(x.id);
+              if (!c) return { startsAt: x.startsAt, willDraw: null };
+              const st = ledgerStateOf(c, creditRoute, nowMs);
+              // 'reserved' and 'drawn' are credits already off the pack;
+              // 'expected_none' is a member with no pack to draw on. Only
+              // 'expected' is still to come off this one.
+              return { startsAt: x.startsAt, willDraw: st === 'unknown' ? null : st === 'expected' };
+            }),
+          closing.pack.expiresOn)
+      : null;
+    return packDeadline({ left: closing.pack.left, expiresOn: closing.pack.expiresOn, today: todayISO, bookedByThen: booked });
+  }, [closing, sessions, cd.id, bookingsWhole, todayISO, nowMs, creditById, creditRoute]);
   /**
    * The one sentence under a PT row saying what pays for it.
    *
@@ -212,16 +420,52 @@ export default function Bookings() {
     });
   };
 
+  /**
+   * Of the two "saved on this phone" sentences, the one that describes the
+   * OLDER copy.
+   *
+   * The class list and the PT list are cached by two independent providers and
+   * go stale independently, and only one sentence fits above the rows. The
+   * comment at the call site has always said which one belongs there — "if both
+   * are, the older sentence is the one that matters" — and the code took the
+   * class note whenever it existed. So classes cached ten minutes ago over PT
+   * sessions cached three days ago printed "Saved on this phone 10 minutes ago"
+   * above a PT list three days old, and the PT rows are the ones carrying
+   * Cancel, Move and the line saying what pays for each session.
+   *
+   * The age is read back out of the sentence because the age is all this screen
+   * is given: `useClasses` and `useSessions` both publish `cachedNote` and keep
+   * `cachedAt` to themselves. `cachedAtLine` in src/lib/readCache.ts is the one
+   * writer of both strings and its shape is "<n> minutes|hours|days ago", with
+   * "a moment ago" under two minutes; anything that does not match is treated as
+   * the youngest possible copy, so an unparsed sentence can never displace one
+   * whose age we actually read.
+   */
+  const staleNote = useMemo(() => {
+    const ageMins = (note: string): number => {
+      const m = /(\d+)\s+(minute|hour|day)s?\s+ago/.exec(note);
+      if (!m) return 0; // "a moment ago", or wording this does not recognise
+      const n = Number(m[1]);
+      if (!Number.isFinite(n)) return 0;
+      return m[2] === 'minute' ? n : m[2] === 'hour' ? n * 60 : n * 1440;
+    };
+    if (!classCachedNote) return sessionCachedNote ?? null;
+    if (!sessionCachedNote) return classCachedNote;
+    // Ties go to the PT sentence: two copies of the same age are equally stale,
+    // and the PT rows are the ones carrying the money.
+    return ageMins(classCachedNote) > ageMins(sessionCachedNote) ? classCachedNote : sessionCachedNote;
+  }, [classCachedNote, sessionCachedNote]);
+
   const items = useMemo(() => {
     const out: Item[] = [];
     for (const c of classes) {
       const st = myStatus[c.id];
-      if (st && Date.parse(c.startsAt) > Date.now() - 3600_000) {
-        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', onCancel: () => cancelClass(c.id) });
+      if (st && isUpcoming(c.startsAt, nowMs)) {
+        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', cancelled: isCancelled(c), onCancel: () => cancelClass(c.id) });
       }
     }
     for (const s of sessions) {
-      if (s.clientId === cd.id && s.status === 'booked' && Date.parse(s.startsAt) > Date.now() - 3600_000) {
+      if (s.clientId === cd.id && s.status === 'booked' && isUpcoming(s.startsAt, nowMs)) {
         // "PT session" rather than "PT with —". The title is the row's whole
         // identity and it is what the ICS export writes into the calendar, and
         // a booking named after a piece of punctuation is worse in both places
@@ -234,11 +478,31 @@ export default function Bookings() {
         // whichever screen the member cancelled from. `onCancel` stays as the
         // release the helper itself performs, so a class row and a PT row still
         // share one shape.
-        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id), pt: s });
+        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT Session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id), pt: s });
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  }, [classes, myStatus, sessions, coachName]);
+    // `cd.id` is IN the dependency list, and its absence was the whole defect.
+    // src/ui/clientData.tsx settles it to the literal 'unknown' until the auth
+    // read lands, so every `s.clientId === cd.id` above compared against a
+    // string no session carries — and if `sessions` had already settled, the
+    // memo had no reason to run again when the real id arrived. The member
+    // opened My Bookings, saw their classes and none of their personal
+    // training, and it stayed that way until an unrelated class change
+    // retriggered it. There is no sentence for that state because the code did
+    // not know it was in it: the list is not short, it is confidently complete
+    // and wrong.
+    //
+    // `nowMs` is in it for the same class of reason, found the same way. The two
+    // filters above compared against `Date.now()` evaluated in this body, and
+    // this list is the whole of Upcoming — on a screen registered `href: null`
+    // and therefore mounted once for the life of the app. So the window was
+    // frozen at whenever the member first opened it, and a class that finished
+    // six hours ago was still listed as upcoming with a live Cancel button on
+    // it. Cancelling a class you have already attended is not a no-op:
+    // src/lib/classCancel.ts says plainly that the gym decides whether a late
+    // cancellation is charged and that this app cannot see that policy.
+  }, [classes, myStatus, sessions, coachName, cd.id, nowMs]);
 
   // The session being moved, or null. Held whole because the picker below has
   // to know whose coach's slots to offer and what the old time was.
@@ -258,11 +522,14 @@ export default function Bookings() {
   const openSlots = useMemo(() => {
     const from = moveFor;
     if (!from) return [] as TrainingSession[];
-    const now = Date.now();
+    // `nowMs`, the same clock the rest of this screen reads. A bare `Date.now()`
+    // here was fixed at whichever render last changed `moveFor` — so a picker
+    // left open goes on offering a slot whose time has passed, and the move the
+    // member taps is one the server will refuse.
     return sessions
-      .filter((s) => s.status === 'available' && s.trainerId === from.trainerId && s.id !== from.id && Date.parse(s.startsAt) > now)
+      .filter((s) => s.status === 'available' && s.trainerId === from.trainerId && s.id !== from.id && Date.parse(s.startsAt) > nowMs)
       .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  }, [sessions, moveFor]);
+  }, [sessions, moveFor, nowMs]);
 
   /**
    * Move one session into one slot.
@@ -287,7 +554,7 @@ export default function Bookings() {
         if (!r.moved) {
           // Every refusal names the state of the world afterwards, because a
           // refusal is indistinguishable from a loss unless somebody says so.
-          Alert.alert('Not moved', rescheduleRefusalLine(r, timeLabel(from.startsAt)), [{ text: 'OK' }]);
+          Alert.alert('Not Moved', rescheduleRefusalLine(r, timeLabel(from.startsAt)), [{ text: 'OK' }]);
           return;
         }
         setMoveFor(null);
@@ -320,10 +587,10 @@ export default function Bookings() {
     // what sends them to ring the gym, which is the thing that actually saves
     // them the no-show fee. See src/lib/outbox.ts.
     const failed = () => Alert.alert(
-      it.waitlist ? 'Still on the waitlist' : 'Not cancelled',
+      it.waitlist ? 'Still on the Waitlist' : 'Not Cancelled',
       it.waitlist
-        ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
-        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
+        ? `You are still on the waitlist for ${it.title}. That did not save, so nothing has changed. ${retryLine(reach)}`
+        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked. That did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
       [{ text: 'OK' }],
     );
     const doCancel = async () => {
@@ -355,31 +622,31 @@ export default function Bookings() {
     const warn = it.pt ? cancelWarningFor(it.startsAt, cancelPolicy, asked) : null;
     if (warn?.late) {
       Alert.alert(
-        'Cancelling late',
+        'Cancelling Late',
         `${warn.line}\n\n${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}. Continue?`,
-        [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
+        [{ text: 'Keep It', style: 'cancel' }, { text: 'Cancel Anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
       );
       return;
     }
     if (warn) {
-      Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}\n\n${warn.line}`, [
-        { text: 'Keep it', style: 'cancel' },
+      Alert.alert('Cancel This Booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}\n\n${warn.line}`, [
+        { text: 'Keep It', style: 'cancel' },
         { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
       ]);
       return;
     }
-    Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Cancel This Booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
 
   const confirmLeave = (q: { sessionId: string; startsAt: string }) => {
     Alert.alert(
-      'Leave this waitlist?',
+      'Leave This Waitlist?',
       `You’ll lose your place in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}. If it frees up after that, it goes to whoever is in the queue instead of you.`,
       [
-        { text: 'Stay in line', style: 'cancel' },
+        { text: 'Stay in Line', style: 'cancel' },
         {
           text: 'Leave',
           style: 'destructive',
@@ -390,67 +657,124 @@ export default function Bookings() {
             // otherwise, a member walks away still in a queue that can book
             // them into a session they no longer want.
             if (!res.ok) {
-              Alert.alert('Still on the waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(q.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
+              Alert.alert('Still on the Waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(q.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
               return;
             }
-            Alert.alert('Left the waitlist', `You’re no longer in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}.`, [{ text: 'OK' }]);
+            Alert.alert('Left the Waitlist', `You’re no longer in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}.`, [{ text: 'OK' }]);
           },
         },
       ],
     );
   };
 
+  /**
+   * Everything the member has actually BOOKED, as calendar events.
+   *
+   * ── What this used to export ─────────────────────────────────────────────
+   *
+   * `items` includes the classes this member is on the WAITLIST for — that is
+   * what `waitlist: st === 'waitlist'` is for, and the row draws a dot and
+   * offers "Leave" rather than "Cancel" because of it. This function mapped the
+   * whole list. So a place in a queue was written into the member's real
+   * calendar, on their phone, as an event at a time, indistinguishable from the
+   * spin class they hold a seat for — and calendar entries outlive the app:
+   * once it is in there nothing here ever corrects it, and a member who is
+   * never offered the place turns up for a class they were never in.
+   *
+   * The heading two hundred lines down states the rule this broke, about the
+   * other kind of queue: "A PT waitlist is not a booking and is never listed as
+   * one." A class waitlist is not a different kind of thing.
+   *
+   * So the export is confirmed bookings only, and it SAYS how many places were
+   * left out rather than dropping them silently — a member who exports four
+   * rows and finds three in their calendar is owed the reason.
+   */
   const addToCalendar = async () => {
-    if (items.length === 0) return;
-    const evts: IcsEvent[] = items.map((it) => ({
+    // A class the gym called off is not exported either, and for the harder
+    // version of the same reason: a waitlist place might still become a
+    // booking, and a cancelled class never will. Once it is in the member's
+    // real diary nothing here can remove it.
+    const booked = items.filter((it) => !it.waitlist && !it.cancelled);
+    const queued = items.filter((it) => it.waitlist && !it.cancelled).length;
+    const calledOff = items.filter((it) => it.cancelled).length;
+    if (booked.length === 0) {
+      Alert.alert(
+        'Nothing to Add',
+        queued > 0
+          ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar. If one comes to you, it appears here as a booking and you can add it then.`
+          : calledOff > 0
+          ? `${calledOff === 1 ? 'The class you had booked has' : `The ${calledOff} classes you had booked have`} been called off by the gym, so there is nothing to add to your calendar.`
+          : 'You have nothing booked yet, so there is nothing to add to your calendar.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    const evts: IcsEvent[] = booked.map((it) => ({
       start: it.startsAt,
       durationMin: it.durationMin || 60,
       title: `${appName} · ${it.title}`,
       location: it.location,
       notes: it.sub,
     }));
-    await shareIcs(buildIcs(evts, `${appName} — My bookings`), 'my-bookings.ics', 'Add to calendar');
+    await shareIcs(buildIcs(evts, `${appName} · My Bookings`), 'my-bookings.ics', 'Add to Calendar');
+    if (queued > 0 || calledOff > 0) {
+      const left: string[] = [];
+      if (queued > 0) left.push(`the ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for (a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run)`);
+      if (calledOff > 0) left.push(`${calledOff === 1 ? 'the class the gym called off' : `the ${calledOff} classes the gym called off`} (${calledOff === 1 ? 'it is' : 'they are'} not running)`);
+      Alert.alert(
+        'What Went into the File',
+        `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in it. Left out: ${left.join('; and ')}.`,
+        [{ text: 'OK' }],
+      );
+    }
   };
 
   const G = layout.gutter;
+  const zone = deviceZone();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>My Bookings</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
+        <PageHead title="My Bookings" subtitle="Your upcoming classes and personal-training sessions" />
 
-        <Rule />
-
-        {/* ── book something ─────────────────────────────────────────────── */}
-        <Section>
-          <View style={{ flexDirection: 'row', gap: sp.md }}>
-            <View style={{ flex: 1 }}><Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} /></View>
-            <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
-          </View>
-          {items.length > 0 ? (
-            <View style={{ marginTop: sp.md }}>
-              <Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} />
-            </View>
-          ) : null}
-        </Section>
-
-        <Rule />
+        {/* ── the page's figures, before its rows ──────────────────────────
+            What the list below adds up to, by session type and in each type's
+            own colour — the accent for an hour with your coach, purple for a
+            class, amber for a place in a queue, which is NOT a booking and is
+            counted apart for that reason (see the note on the heading below).
+            Same gate as that heading: a figure only when both reads answered
+            in full, and a dash — never a nought — when they did not. A class
+            the gym called off is in none of the three. */}
+        <KpiRow tiles items={[
+          { label: 'PT Sessions', tone: 'brand', value: bookingsWhole ? fig(items.filter((it) => it.kind === 'pt' && !it.waitlist && !it.cancelled).length) : fig(null) },
+          { label: 'Classes', tone: 'purple', value: bookingsWhole ? fig(items.filter((it) => it.kind !== 'pt' && !it.waitlist && !it.cancelled).length) : fig(null) },
+          { label: 'Class Waitlists', tone: 'amber', value: bookingsWhole ? fig(items.filter((it) => it.waitlist && !it.cancelled).length) : fig(null) },
+        ]} />
 
         {/* ── what you have booked ───────────────────────────────────────── */}
         <Section>
           {/* The count was gated only on non-emptiness, so under 'partial' it
               printed a subtotal as a total. It stays on `bookingsWhole` — a
               figure is only a figure when both reads answered in full. */}
-          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.length} booked` : undefined} />
+          {/* Cancelled classes are listed and are not counted as bookings —
+              the figure says "booked", and a class the gym called off is not
+              one. */}
+          {/* Nor is a place in a QUEUE, and that half was missing: the filter
+              excluded cancelled rows and let every waitlist place through, so a
+              member holding one seat and queuing for two read "3 booked" and
+              arranged three evenings around one confirmed place. `addToCalendar`
+              in this same file already spells the predicate correctly —
+              `!it.waitlist && !it.cancelled` — and argues it twice in prose: "A
+              place in a queue is not a booking, so it is not written into your
+              calendar", and, over the PT list two hundred lines down, "A PT
+              waitlist is not a booking and is never listed as one". A class
+              waitlist is not a different kind of thing, and the count under the
+              heading is where the member reads it. The queued rows stay ON the
+              list — they are real and they are theirs — they are simply not
+              what the word "booked" counts. */}
+          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.waitlist && !it.cancelled).length} Booked` : undefined} />
           {/* Above the rows, not below them: the rows are what makes the list
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}
@@ -461,29 +785,60 @@ export default function Bookings() {
               promise is worded once. Null for a member who holds nothing, who
               needs no sentence about packs at all. */}
           {creditNote ? <Flag tone={t.brand} style={{ marginBottom: sp.md }}>{creditNote}</Flag> : null}
+          {/* Sessions already paid for that this diary is not going to use.
+              Under the balance rather than over it, because the balance is what
+              the sentence is about. A 'covered' answer is drawn quietly — it is
+              reassurance, not a warning. */}
+          {deadline && deadline.text ? (<>
+            {deadline.urgent
+              ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{deadline.text}</Flag>
+              : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{deadline.text}</Text>}
+            {/* Which pack that sentence is about. "3 sessions left on this
+                pack" reads, to somebody holding two, as everything they have —
+                and the pack named here is deliberately only the one that closes
+                first. Null in the ordinary case, so a member with one pack is
+                not told there are no others. */}
+            {closing && otherWindowsNote(closing.otherWindows) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                {otherWindowsNote(closing.otherWindows)}
+              </Text>
+            ) : null}
+          </>) : null}
           {/* One of the two lists came off this phone rather than off the
               server. Said above the rows for the same reason the gap notice is:
               a member who reads a cached booking as a confirmed one turns up to
               a session that was moved. The class list and the PT list can be in
               that state independently, so whichever is stale says so — and if
-              both are, the older sentence is the one that matters. */}
-          {classCachedNote || sessionCachedNote
-            ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{classCachedNote ?? sessionCachedNote}</Flag>
-            : null}
+              both are, the older sentence is the one that matters, which is
+              what `staleNote` above picks. It used to be `classCachedNote ??
+              sessionCachedNote`, which is "the class one whenever there is
+              one". */}
+          {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{it.kind === 'pt' ? 'Personal training' : 'Class'}</Text>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{it.title}</Text>
+              {/* The approved row: a plate in the session type's colour, the
+                  words, the STATE as a chip, and the row's actions under the
+                  words rather than squeezed beside them — two buttons at the
+                  trailing edge left a long class title a third of the width,
+                  and at large text none. */}
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                <IconPlate icon={it.kind === 'pt' ? 'dumbbell' : 'calendar'} tone={it.kind === 'pt' ? 'brand' : 'purple'} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{it.kind === 'pt' ? 'Personal Training' : 'Class'}</Text>
+                  <Text style={{ ...ty.head, color: t.ink, marginTop: 3 }}>{it.title}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{dayLabel(it.startsAt)} · {timeLabel(it.startsAt)} · {it.sub}</Text>
-                  {it.waitlist ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>On the waitlist</Text>
-                    </View>
-                  ) : null}
+                  {/* The gym called it off. Said on the row, in the list the
+                      member opens to decide where to be this evening — this
+                      screen used to show it under Upcoming as confirmed. Red,
+                      amber and the accent are the three states, each in words
+                      on its chip. */}
+                  <View style={{ marginTop: 6, gap: 4 }}>
+                    <TonedChip
+                      label={it.cancelled ? 'Cancelled by the Gym' : it.waitlist ? 'On the Waitlist' : 'Booked'}
+                      tone={it.cancelled ? 'red' : it.waitlist ? 'amber' : 'brand'} />
+                    {it.cancelled ? <Text style={{ ...ty.caption, color: t.ink2 }}>This class is not running.</Text> : null}
+                  </View>
                   {/* What pays for this hour, said on the row rather than left
                       to be inferred from a balance on another screen. Worded
                       as an expectation where it is one: nothing comes off a
@@ -492,7 +847,41 @@ export default function Bookings() {
                   {it.kind === 'pt' && creditLineFor(it.pt?.id ?? null) ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{creditLineFor(it.pt?.id ?? null)}</Text>
                   ) : null}
-                </View>
+                  {/* ── when this stops being free to change ────────────────
+                      The notice period lived in exactly one place, and that
+                      place was the Alert raised by the Cancel button — so the
+                      member read it after they had decided rather than while
+                      they were deciding. And below, `canOfferMove` removes the
+                      Move control at the boundary with nothing anywhere saying
+                      why it went.
+
+                      PT only. A class belongs to the gym's own timetable, its
+                      cancellation terms are the gym's and this app does not
+                      hold them (see `CLASS_POLICY_UNKNOWN_NOTE`), and a coach's
+                      notice period has nothing to do with it.
+
+                      The deadline instant comes from `freeUntil` and is
+                      formatted here, by the same two helpers every other time
+                      on this screen goes through, so it is in the member's own
+                      locale and timezone. */}
+                  {it.pt && !it.cancelled ? (() => {
+                    const until = freeUntil(it.startsAt, cancelPolicy);
+                    const d = cancelDeadline({
+                      startsAt: it.startsAt,
+                      policy: cancelPolicy,
+                      policyStatus,
+                      now: nowMs,
+                      when: until ? `${dayLabel(until)} at ${timeLabel(until)}` : null,
+                    });
+                    if (d.kind === 'silent') return null;
+                    // Marked, never coloured: a status hue as text ink does not
+                    // clear the 4.5:1 that words need, and the sentence already
+                    // carries the meaning on its own.
+                    return d.kind === 'closed' || (d.kind === 'open' && d.closingSoon)
+                      ? <Flag tone={t.warn} style={{ marginTop: 6 }}>{d.note}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{d.note}</Text>;
+                  })() : null}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                 {/* "Cancel, button" told a screen reader nothing about WHICH
                     booking, on a screen that is a list of them. The visible
                     label can lean on the row above it; the spoken one is read
@@ -514,15 +903,46 @@ export default function Bookings() {
                 <Ghost label={it.waitlist ? 'Leave' : 'Cancel'}
                   a11yLabel={`${it.waitlist ? 'Leave the waitlist for' : 'Cancel'} ${it.title}, ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)}`}
                   onPress={() => confirmCancel(it)} />
+                </View>
+                </View>
               </View>
             </View>
           ))}
+          {/* Whose clock these hours are on, under the hours. `fmtTime` draws
+              in the handset's zone and nothing said so; the same sentence is on
+              the PT calendar and the class timetable, so all three describe
+              their times one way. Unnamed rather than guessed where the runtime
+              cannot name the zone — `deviceZone()` returns null, not UTC. */}
+          {items.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {zone ? `Times are in your phone’s time zone, ${zone.replace(/_/g, ' ')}.` : 'Times are in your phone’s own time zone.'}
+            </Text>
+          ) : null}
           {items.length === 0 ? (
             // 'partial' used to land on the literal string "Loading." — which
             // never stopped being displayed and was never true: both reads had
             // finished, and one of them had come back short.
             <Text style={{ ...ty.label, color: t.ink3 }}>{emptyBookingsLine(classStatus, sessionStatus)}</Text>
           ) : null}
+        </Section>
+
+        {/* ── book something ─────────────────────────────────────────────── */}
+        {/* UNDER what is already booked, not over it. The data-layout review's
+            order for scheduling is upcoming first, then choose a type — and
+            this block used to open the screen, so a member who came to check
+            where they had to be tonight read two booking buttons before the
+            one booking they had. Same three controls, same routes. */}
+        {/* One full-width primary, as the board gives every screen, and the
+            quiet ways under it. The two used to share a line, which made the
+            class button half a button and the PT button its equal. */}
+        <Section>
+          <Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} />
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+            <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
+            {items.length > 0 ? (
+              <View style={{ flex: 1 }}><Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} /></View>
+            ) : null}
+          </View>
         </Section>
 
         {/* ── the queues this member is in ────────────────────────────────
@@ -534,27 +954,43 @@ export default function Bookings() {
             nobody can be beaten to it by a faster phone. */}
         {waitStatus === 'error' || myQueue.length > 0 ? (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
+              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not Read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} Slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
               {waitStatus === 'error' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  We couldn’t read your waitlists. This is not a statement that you are on none — any place you hold still stands, and a slot that frees can still be booked for you.
+                  We couldn’t read your waitlists. This is not a statement that you are on none. Any place you hold still stands, and a slot that frees can still be booked for you.
                 </Text>
               ) : (
                 myQueue.map((q, i) => (
                   <View key={q.sessionId}>
                     {i > 0 ? <Rule /> : null}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{dayLabel(q.startsAt)} · {timeLabel(q.startsAt)}</Text>
+                      <IconPlate icon="clock" tone="amber" />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Personal Training</Text>
+                        <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 3 }}>{dayLabel(q.startsAt)} · {timeLabel(q.startsAt)}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {/* A slot that is no longer taken and did not come to
                               this member is worth saying plainly: the queue
                               moved past them, or the coach opened the hour up
                               rather than it being cancelled into the list. */}
-                          {q.stillTaken ? waitlistLine(q.position, q.waiting) : 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'}
+                          {!q.stillTaken
+                            ? 'This slot is open again and did not come to you. Book it from the Book screen if you still want it.'
+                            : q.position == null
+                              /* `MyWaitlistRow.position` is `number | null` in
+                                 src/ui/sessions.tsx now, and the mapper there
+                                 reads it with `toNum(r.queue_position)` and no
+                                 `?? 0`. The settled 0 was a contradiction on
+                                 this row in particular — the row exists BECAUSE
+                                 this member is on that queue, and 0 is the
+                                 value `waitlistLine` reads as "not on this
+                                 queue" — which is why this field was widened
+                                 ahead of the others. This arm is what carries
+                                 the unknown, and it is reachable today: it is
+                                 what a member sees when the row came back and
+                                 the place in it did not. */
+                              ? 'You’re on the waitlist for this hour. Your place in the queue didn’t come back, so we can’t say where in it you are. It still stands, in the order you joined.'
+                              : waitlistLine(q.position, q.waiting)}
                         </Text>
                       </View>
                       <Ghost label="Leave" onPress={() => confirmLeave(q)} />
@@ -578,10 +1014,11 @@ export default function Bookings() {
           no other open times" is a claim about their calendar, and a failed
           read may not make it. */}
       <Modal visible={!!moveFor} transparent animationType="slide" onRequestClose={() => setMoveFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
           {moveFor ? (<>
-            <Text style={{ ...ty.title, color: t.ink }}>Move to another time</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Move to Another Time</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {dayLabel(moveFor.startsAt)} at {timeLabel(moveFor.startsAt)} becomes whichever of these you pick. Nothing is charged and no session comes off your pack.
             </Text>
@@ -601,7 +1038,7 @@ export default function Bookings() {
                         accessibilityLabel={`Move to ${dayLabel(sl.startsAt)} at ${timeLabel(sl.startsAt)}`}
                         accessibilityState={{ disabled: moveBusy }}
                         style={{ paddingVertical: sp.md, opacity: moveBusy ? 0.5 : 1 }}>
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                        <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>
                           {dayLabel(sl.startsAt)} at {timeLabel(sl.startsAt)}
                         </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sl.durationMin} min</Text>
@@ -613,7 +1050,7 @@ export default function Bookings() {
               <Pressable onPress={() => setMoveFor(null)} accessibilityRole="button"
                 accessibilityLabel="Close without moving anything"
                 style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
               </Pressable>
             </ScrollView>
           </>) : null}

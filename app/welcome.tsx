@@ -9,7 +9,7 @@
 // label above, and the notice is ink text beside a coloured dot rather than
 // coloured text.
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
@@ -18,36 +18,32 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { openLegalDoc } from '../src/ui/legal';
 import { USE_SUPABASE } from '../src/lib/config';
-import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
+import { VARIANT } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
-import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH } from '../src/ui/emailOtp';
-import { Card, Cta } from '../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
+import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
+import { Card, Cta, CtaBright, HeroCard, Segmented } from '../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../src/theme/scale';
+import { BrandMark, BrandWordmark, useMarkSignal } from '../src/ui/BrandMark';
+import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
 
-function Ripple({ size, color }: { size: number; color: string }) {
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: color, opacity: 0.35 }} />
-      <View style={{ position: 'absolute', width: size * 0.6, height: size * 0.6, borderRadius: size, borderWidth: 2.5, borderColor: color, opacity: 0.65 }} />
-      <View style={{ width: size * 0.24, height: size * 0.24, borderRadius: size, backgroundColor: color }} />
-    </View>
-  );
-}
 
 /** What this build signs you up as, said plainly, plus where to go if the
  *  reader has the wrong one of the three apps. */
 const ROLE_NOTE: Record<typeof VARIANT, string> = {
   client: 'Signing up to track your own training. Coaching clients instead? Get Repple Coach.',
-  trainer: 'Signing up as a coach — your clients use the Repple app, and gym owners use Repple Studio.',
+  trainer: 'Signing up as a coach. Your clients use the Repple app, and gym owners use Repple Studio.',
   owner: 'Signing up as a gym owner. Your coaches use Repple Coach and your members use Repple.',
 };
 
 export default function Welcome() {
   const t = useTheme();
+  const markSignal = useMarkSignal();
   const router = useRouter();
   const auth = useAuth();
   const { appName } = useBrand();
+  // The door, then the form. See the note above the door below.
+  const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<'in' | 'up'>('up');
   const [name, setName] = useState('');
   // Not state, and not a choice: the build decides. A trainer who signs up
@@ -159,8 +155,104 @@ export default function Welcome() {
   };
   // One field style, shared with <PasswordField> (which lifts the marginBottom
   // onto its wrapper so the eye toggle stays centred on the input itself).
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
-  const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
+  // The approved look's field: a 52pt pill of `surface2` on the card, at the
+  // card's own corner, so a thumb finds it and the label above it stays quiet.
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md, marginBottom: sp.md } as const;
+  const lab = { ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 } as const;
+
+  /* ── the door ───────────────────────────────────────────────────────────
+     The approved board opens every app on a product door — the mark, the
+     app's name, its strapline, and two buttons — not on a registration form.
+     The door lives in this component so every authentication branch below
+     is untouched: it only decides which mode the form opens in. The client
+     app leads with Get Started (most people arriving at it are new); the
+     coach and studio apps lead with Sign In (most people arriving at them
+     were invited and already have an account).
+
+     NIGHT, full screen, in light mode and dark alike: the approved look opens
+     every app on the same near-black the hero cards are cut from, and a door
+     that was white by day was a different product from the screens behind it.
+     Still the theme's own tokens and never a fixed hex — `t.night` is derived
+     per palette, and `brandBright` is the accent only where the accent clears
+     3:1 on it and white where it does not — so a white-label brand's palette
+     holds here exactly as it holds on a hero. The wordmark is drawn in
+     `nightInk` with its three bars in `brandBright`.
+
+     Composed to board page 1: nothing above the lockup, the mark over the
+     wordmark over the one word that tells Coach and Studio apart, the
+     strapline under that, and the two buttons stacked at the foot. The
+     small tile-and-name row that used to sit top-left is gone from the
+     door — it named the app twice on a screen whose whole content is the
+     app's name — and the form below still opens with it. */
+  if (!showForm) {
+    const clientBuild = VARIANT === 'client';
+    const primaryMode: 'in' | 'up' = clientBuild ? 'up' : 'in';
+    const secondaryMode: 'in' | 'up' = clientBuild ? 'in' : 'up';
+    const primaryLabel = clientBuild ? 'Get Started' : 'Sign In';
+    const secondaryLabel = clientBuild ? 'Sign In' : 'Create Account';
+    const strap = VARIANT === 'client'
+      ? 'A healthier, happier, stronger you.'
+      : VARIANT === 'trainer'
+        ? 'Empower people. Change lives.'
+        : 'Run your gym from one connected system.';
+    const openForm = (nextMode: 'in' | 'up') => {
+      setMode(nextMode);
+      setNotice(null);
+      setShowForm(true);
+    };
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.night }}>
+        <Stack.Screen options={{ headerShown: false }} />
+        {/* The clock and the battery, in white while this screen is up: the
+            ground is night whatever the phone's own appearance is. */}
+        <StatusBar barStyle="light-content" />
+        <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingVertical: sp.xl, justifyContent: 'space-between' }}>
+          {/* Nothing above the lockup but ground, as the board leaves it. */}
+          <View />
+
+          {/* The lockup, centred. The variant word is upper-cased and tracked
+              the same way the wordmark is — it is part of the lockup, not a
+              label — and set in the bright accent as the board sets it. */}
+          <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
+            {/* The house brand's door carries the board's wordmark — the word
+                IS the logo, so it is drawn rather than typeset: white letters,
+                bright bars. A white-label tenant has no such drawing: its door
+                says its own name in Sora, the display face, under the mark
+                in its own accent as it is drawn on night. */}
+            {BRAND_ID === DEFAULT_BRAND_ID ? (
+              <View accessible accessibilityRole="header" accessibilityLabel={appName}>
+                <BrandWordmark width={236} ink={t.nightInk} signal={markSignal} />
+              </View>
+            ) : (
+              /* The hero step's -1.5 tracking is an optical correction for a
+                 44pt NUMBER and would close a word's letters into each other,
+                 so it is opened up here. Wraps rather than shrinks: a gym's
+                 name is the one thing on this screen that must be legible. */
+              <>
+                <BrandMark size={84} ink={t.nightInk} signal={markSignal} />
+                <Text accessibilityRole="header" style={{ ...ty.hero, color: t.nightInk, letterSpacing: 0, textAlign: 'center', marginTop: sp.lg }}>{appName}</Text>
+              </>
+            )}
+            {VARIANT !== 'client' ? (
+              <Text style={{ ...ty.eyebrow, color: t.brandBright, letterSpacing: 5, marginTop: sp.md }}>{(VARIANT === 'trainer' ? 'Coach' : 'Studio').toUpperCase()}</Text>
+            ) : null}
+            <Text style={{ ...ty.title, color: t.nightInk, textAlign: 'center', maxWidth: 300, marginTop: sp.xxl }}>{strap}</Text>
+          </View>
+
+          <View style={{ gap: sp.sm }}>
+            <CtaBright label={primaryLabel} onPress={() => openForm(primaryMode)} />
+            {/* The quiet one: words on the night, no fill, still a 48pt
+                target. The kit's `Ghost` is a `surface2` pill and would be a
+                grey slab on this ground. */}
+            <Pressable onPress={() => openForm(secondaryMode)} accessibilityRole="button" accessibilityLabel={secondaryLabel}
+              style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ ...ty.button, color: t.nightInk2 }}>{secondaryLabel}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -168,27 +260,31 @@ export default function Welcome() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
-          {/* ── the brand mark ──────────────────────────────────────────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-            {/* The tile the user just tapped on their home screen — teal for
-                Repple, indigo for Coach, amber for Studio. */}
-            <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <Ripple size={28} color="#ffffff" />
-            </View>
-            <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
-          </View>
-          <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-            {pendingEmail ? 'One step left — the six digits we just emailed you.'
-              : mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}
-          </Text>
+          {/* ── the night head ──────────────────────────────────────────
+              The door's ground carried onto the form as a hero card: whose app
+              this is, what this step is in Sora, and the one line that says
+              what happens next. It replaced a tile-and-name row whose tile was
+              two hardcoded hexes. */}
+          <HeroCard eyebrow={appName.toUpperCase()}
+            title={pendingEmail ? 'One Step Left' : mode === 'up' ? 'Create Your Account' : 'Welcome Back'}
+            meta={pendingEmail ? `The ${spellDigits(EMAIL_OTP_LENGTH)} digits we just emailed you.`
+              : mode === 'up' ? 'A minute, and you are in.' : 'Sign in to continue.'} />
 
+          {/* The form — or the code boxes — on a surface card over the ground. */}
           {pendingEmail ? (
-            /* The confirmation code, in the same six boxes the phone door uses.
+            /* The confirmation code, in the same boxes the phone door uses —
+               though NOT necessarily the same number of them: the email length
+               is a project setting and the phone length is a different one, so
+               each side reads its own constant. Assuming they matched is what
+               drew six boxes for an eight-digit code and made signing in by
+               email impossible.
+
                A code and not a link on purpose: a link in a confirmation email
                is fetched, and spent, by the recipient's own mail scanner before
                they ever see the message — the failure that had email
-               confirmation switched off in the first place. Six digits give a
+               confirmation switched off in the first place. Digits give a
                scanner nothing to press. See src/ui/emailOtp.ts. */
+            <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
             <OtpCodeEntry
               title="Confirm Your Email"
               sentTo={pendingEmail}
@@ -201,8 +297,8 @@ export default function Welcome() {
               // coming at all: an address that already has a confirmed account
               // gets nothing sent to it, and signUp cannot tell us that without
               // telling anybody who asks which addresses are registered.
-              note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder — and if you already have an account at this address, go back and sign in instead."
-              changeLabel="Wrong address? Go back"
+              note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder. If you already have an account at this address, go back and sign in instead."
+              changeLabel="Wrong Address? Go Back"
               onChange={() => {
                 // Back to the form with the address still in the field. The
                 // account that was just created keeps that address — it is not
@@ -213,16 +309,17 @@ export default function Welcome() {
                 setNotice(`Nothing has been sent anywhere else. If ${pendingEmail} is wrong, correct it and create the account again.`);
               }}
             />
+            </View>
           ) : (
           <>
-          {/* Sign in / Sign up toggle */}
-          <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginBottom: sp.xl }}>
-            {([['up', 'Create Account'], ['in', 'Sign In']] as const).map(([m, label]) => (
-              <Pressable key={m} onPress={() => { setMode(m); setNotice(null); }} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: mode === m ? t.brand : 'transparent' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: mode === m ? t.brandInk : t.ink3 }}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
+          {/* Sign in / Sign up — the kit's Segmented, so the selected state,
+              the tab roles and what the bar does at large text are its. The
+              handler is the one the hand-built toggle had: switch, and clear
+              whatever the last attempt said. */}
+          <Segmented style={{ marginBottom: sp.xl }} value={mode}
+            onChange={(m) => { setMode(m); setNotice(null); }}
+            options={[{ key: 'up', label: 'Create Account' }, { key: 'in', label: 'Sign In' }] as const} />
 
           {notice ? (
             <Card tone={t.brand} style={{ marginBottom: sp.md }}>
@@ -242,21 +339,21 @@ export default function Welcome() {
               has none of those failure modes. Email and password stay below,
               because an existing member has no phone on their account yet. */}
           <Pressable onPress={() => router.push('/phone-signin')} accessibilityRole="button"
-            accessibilityLabel="Continue with your phone number"
+            accessibilityLabel="Continue with Your Phone Number"
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
-              backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 14,
+              backgroundColor: t.surface2, borderRadius: radius.md, minHeight: 52, paddingVertical: sp.md,
               marginBottom: sp.lg,
             }}>
-            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Continue with your phone number</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Continue with Your Phone Number</Text>
           </Pressable>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
             <Text style={{ ...ty.caption, color: t.ink3 }}>or</Text>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
           </View>
-          <Text style={lab}>Full name</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full name" />
+          <Text style={lab}>Full Name</Text>
+              <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full Name" />
             </>
           ) : null}
           {mode === 'up' ? (
@@ -280,19 +377,20 @@ export default function Welcome() {
           {mode === 'up' ? <PasswordRules value={pw} /> : null}
           {mode === 'up' ? (
             <>
-              <Text style={lab}>Referral code (optional)</Text>
-              <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral code (optional)" />
+              <Text style={lab}>Referral Code (Optional)</Text>
+              <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral Code (Optional)" />
             </>
           ) : null}
           {mode === 'in' ? (
-            <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot password" hitSlop={8} style={{ alignSelf: 'flex-end', marginTop: -4, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Forgot password?</Text>
+            <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot Password" hitSlop={8} style={{ alignSelf: 'flex-end', marginTop: -4, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Forgot Password?</Text>
             </Pressable>
           ) : null}
 
           <View style={{ marginTop: sp.sm }}>
             <Cta wide disabled={!canGo || busy} onPress={go}
               label={busy ? 'Please Wait…' : mode === 'up' ? 'Create Account' : 'Sign In'} />
+          </View>
           </View>
 
           {/* There is no "Continue with Apple" or "Continue with Google" here,
@@ -334,15 +432,15 @@ export default function Welcome() {
             <View style={{ marginTop: sp.xl }}>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
                 Your account is securely stored. By continuing you agree to the{' '}
-                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                <Text accessibilityRole="link" style={{ color: t.brandText, textDecorationLine: 'underline' }}
                   onPress={() => { void openLegalDoc('terms'); }}>Terms of Service</Text>
                 {' '}and the{' '}
-                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                <Text accessibilityRole="link" style={{ color: t.brandText, textDecorationLine: 'underline' }}
                   onPress={() => { void openLegalDoc('privacy'); }}>Privacy Policy</Text>.
               </Text>
             </View>
           ) : (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Not connected to {appName} — any email/password works and stays on this device. Real accounts activate when the backend is connected.</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Not connected to {appName}. Any email/password works and stays on this device. Real accounts activate when the backend is connected.</Text>
           )}
           </>
           )}

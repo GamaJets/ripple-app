@@ -1,0 +1,407 @@
+// Coach · Your Code. The six characters a coach reads out to somebody standing
+// in front of them.
+//
+// ── Why this screen exists ─────────────────────────────────────────────────
+//
+// Asked "where is the coach's code to give to clients?", the honest answer was:
+// open the Clients tab, press Invite a Client, and read it off a modal sheet
+// whose title is about adding a client. Nothing on any screen said the sheet
+// held it. The two other places that render the same codes — /(trainer)/money
+// and /(trainer)/ad-spend — answer a different question entirely: what each code
+// RETURNED. That is a question asked at a desk with a coffee. This one is asked
+// on a gym floor with a person waiting, and it needed a screen of its own.
+//
+// It is one tap from the coach's home tab (the first chip in SHORTCUTS on
+// app/(trainer)/dashboard.tsx), it is in TRAINER_NAV so Explore finds it, and it
+// is declared `href: null` in app/(trainer)/_layout.tsx.
+//
+// ── What this file is allowed to decide ────────────────────────────────────
+//
+// Almost nothing. Every sentence below comes from src/lib/handOutCode.ts, which
+// is pure and is asserted on under `npm test` with no device and no network.
+// This file reads, draws and shares. The one rule worth repeating here because
+// it is the reason both files exist:
+//
+//   AN UNREAD CODE IS NOT A MISSING ONE.
+//
+// `my_join_code()` allocates on first ask and is stable after, so a signed-in
+// coach with a trainer profile always HAS a code. A screen that cannot show one
+// is describing itself, not the coach — and a screen that says "you have no code
+// yet" sends a coach to press New Code, which ROTATES: the string on their
+// printed cards and in the hands of everybody they met last week stops working,
+// to fix what was a dropped request. `codeToGive` never produces that sentence
+// and src/lib/handOutCode.test.ts holds it shut.
+//
+// ── The QR code ────────────────────────────────────────────────────────────
+//
+// This header used to say there was no QR, because there was no encoder in
+// package.json and adding one was thought to mean a native bundle change. Half
+// of that was right. `qrcode-generator` is pure JavaScript with no dependencies
+// and no native code, so it ships over the air like any other module, and
+// react-native-svg — which draws the result — has been a dependency for far
+// longer than this screen has existed. The rules are src/lib/joinQr.ts's.
+//
+// It is drawn BESIDE the six characters and never instead of them. A QR is
+// useless over a phone call, on a poster photographed badly, to somebody whose
+// camera is broken, and to anybody reading this screen with VoiceOver. The
+// typed code, the link, the share sheet and the QR are four ways out of the
+// same fact and the screen offers all four.
+//
+// The states are the load-bearing part. `joinQr` takes the value `codeToGive`
+// already produced rather than a code, so the picture and the sentence beside
+// it read one decision: there is no expression on this screen that draws a
+// scannable symbol over a code the words are calling unread. That matters more
+// here than anywhere else on the screen, because a mistyped code fails in front
+// of the person who typed it and a wrong QR does not fail at all.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, ScrollView, Alert } from 'react-native';
+import Svg, { Path, Rect } from 'react-native-svg';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useTheme } from '../../src/ui/components';
+import { Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag, PageHead, IconPlate } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { fetchMyJoinCode, fetchMyJoinCodes, fetchJoinCodeStats, type JoinCodesRead } from '../../src/ui/joinCode';
+import { shareText } from '../../src/lib/exportShare';
+import { HAS_NATIVE_CLIPBOARD, copyToClipboard } from '../../src/ui/nativeModules';
+import {
+  codeToGive, codesToHandOut, namedCodesLine, handOut,
+  copyBlockedNote, copiedNote, copyFailedNote,
+  HOW_THEY_USE_IT, codeUptakeLine, uptakeNeedsAnswering, type CodeRead,
+} from '../../src/lib/handOutCode';
+import { codeCountLine } from '../../src/lib/joinCodes';
+import { joinQr, qrPath, QR_QUIET_ZONE } from '../../src/lib/joinQr';
+
+/**
+ * The QR's two colours, which are deliberately not theme tokens.
+ *
+ * Everything else on this screen follows the reader's light or dark setting.
+ * This must not. A scanner is measuring reflectance between adjacent modules,
+ * and while many readers cope with an inverted symbol, the specification's
+ * symbol is dark-on-light and the cheap camera stacks that do not cope are
+ * exactly the ones a coach meets on a gym floor. Drawing a coach's invite in
+ * ink-on-surface would make it theme-correct and, for some fraction of the
+ * people pointing a phone at it, unscannable — which is a failure nobody in the
+ * room could diagnose.
+ *
+ * So the tile is white and the modules are black in both themes, and the white
+ * tile also supplies the contrast the quiet zone needs against a dark
+ * background. See QR_QUIET_ZONE in src/lib/joinQr.ts.
+ */
+const QR_LIGHT = '#FFFFFF';
+const QR_DARK = '#000000';
+
+/** Drawn size in points. Big enough to scan across a gym-floor arm's length,
+ *  and small enough to leave the six characters above it the hero. */
+const QR_SIZE = 200;
+
+export default function CoachJoinCode() {
+  const t = useTheme();
+  const router = useRouter();
+
+  // The coach's own code, and the named codes beside it, are two separate
+  // reads and are held as two separate states on purpose: one of them failing
+  // must not be reported as the other failing. `namedCodesLine('error', …)`
+  // says outright that the code above is unaffected, and it can only be true
+  // if the two are never collapsed into one status.
+  const [read, setRead] = useState<CodeRead>({ status: 'loading' });
+  const [codes, setCodes] = useState<JoinCodesRead>({ status: 'loading', rows: [] });
+  /**
+   * What the code has brought in, and who is waiting on this coach.
+   *
+   * A third read, and a third state, for the same reason the two above are
+   * kept apart: `fetchJoinCodeStats` resolves null on a failure, and null here
+   * prints "could not be read" rather than a zero. `undefined` is the state
+   * before it has been asked, which is not the same thing and must not print
+   * the failure sentence on open.
+   *
+   * `my_join_code_stats` has existed since the join-code feature shipped and
+   * nothing called it — the dead-export ratchet carried `fetchJoinCodeStats`
+   * with the note "the coach Join Code screen is where it belongs". The pending
+   * half is the reason it belongs here: a coach reading their code out has no
+   * way of knowing three people are already in a queue, and the only surface
+   * that ever said so is a push notification that fires once, on insert.
+   *
+   * WHAT IT COUNTS IS EVERY CODE, not the one drawn above it. The function
+   * filters `coach_requests` on `source = 'code'` and never reads `via_code`;
+   * my_join_codes()'s own comment in setup.sql records that its per-code rows
+   * "sum to my_join_code_stats()". This line used to sit under the main code
+   * calling that total "this code", which read a coach's whole intake back to
+   * them as the takings of the six characters in their hand. `codeUptakeLine`
+   * now says "your codes" and its header carries the argument for why widening
+   * the words beats narrowing the figure — the per-code split is already on the
+   * named rows below, through `codeCountLine`.
+   */
+  const [uptake, setUptake] = useState<{ joined: number; pending: number } | null | undefined>(undefined);
+
+  const load = useCallback(async () => {
+    const r = await fetchMyJoinCode();
+    setRead(r.ok ? { status: 'ready', code: r.code } : { status: 'error', reason: r.reason });
+    setCodes(await fetchMyJoinCodes());
+    setUptake(await fetchJoinCodeStats());
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const pull = usePullToRefresh(load);
+
+  /**
+   * ONE decision, read by both the words and the picture.
+   *
+   * Memoised on `read` rather than recomputed, because `joinQr` below is keyed
+   * on this value and a fresh object every render would encode a QR on every
+   * scroll frame. `read` is state and changes only when the read does.
+   */
+  const give = useMemo(() => codeToGive(read), [read]);
+  /**
+   * The QR, from the SAME value. `joinQr` takes `give` rather than `read` or a
+   * code string on purpose — see the header. There is no argument this call
+   * could be given that would draw a symbol the sentence beside it contradicts.
+   */
+  const qr = useMemo(() => joinQr(give), [give]);
+  /** The path is the expensive half of drawing, and it depends on nothing else. */
+  const qrD = useMemo(() => (qr.show ? qrPath(qr.matrix) : ''), [qr]);
+  const named = codesToHandOut(codes.rows);
+  const namedLine = namedCodesLine(codes.status, codes.rows);
+  const clipboardNote = copyBlockedNote(HAS_NATIVE_CLIPBOARD);
+
+  /**
+   * The bare link onto the clipboard, and the destination sentence after it.
+   *
+   * Both halves are src/lib/handOutCode.ts's, and they are the same two
+   * sentences app/(trainer)/dashboard.tsx has always shown — held in one place
+   * so the two screens cannot drift into telling a coach different things about
+   * where a paid ad must point.
+   */
+  const copyLink = useCallback(async (code: string, label: string) => {
+    const link = handOut(code).link;
+    if (!(await copyToClipboard(link))) {
+      Alert.alert('Not Copied', copyFailedNote(link), [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert('Link Copied', copiedNote(label), [{ text: 'Done' }]);
+  }, []);
+
+  /** The whole invite, into whichever app the coach is about to use. Core React
+   *  Native, so it is there on every build this OTA can land on. */
+  const shareInvite = useCallback((code: string) => {
+    void shareText(handOut(code).message, 'Join me on Repple');
+  }, []);
+
+  const G = layout.gutter;
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={pull}
+      >
+        <PageHead title="Your Code" subtitle="Bring somebody in" />
+
+        {/* ── the code itself ─────────────────────────────────────────────── */}
+        <Section>
+          {give.give ? (<>
+            {/* Read out loud, so it is set at the size somebody can read across
+                an arm's length, and labelled one character at a time for
+                VoiceOver — "K7M2QX" is otherwise announced as a word, and this
+                is a string whose entire purpose is being transcribed correctly
+                by somebody who cannot see it. */}
+            <View
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`Your coaching code, ${give.hand.spoken}`}
+              // The night plate, the look's hero surface: the code is the one
+              // thing this page exists to show, in the hero's own inks.
+              style={{
+                backgroundColor: t.night, borderRadius: radius.xl,
+                paddingVertical: sp.xl, paddingHorizontal: sp.lg, alignItems: 'center', ...elevation.hero,
+              }}
+            >
+              <Text style={{ ...ty.eyebrow, color: t.nightInk3, marginBottom: sp.sm }}>Your Main Code</Text>
+              <Text selectable adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.5} style={{ ...value(40), color: t.nightInk, letterSpacing: 6 }}>
+                {give.hand.code}
+              </Text>
+            </View>
+
+            {/* ── the same code, for a camera ──────────────────────────────
+                Below the characters, never in place of them. `qr.show` can only
+                be true under `give.give`, so this cannot draw over a code the
+                block above is calling unread — but the three not-shown cases
+                still have to be handled, and they are, underneath. */}
+            {qr.show ? (
+              <View style={{ alignItems: 'center', marginTop: sp.lg }}>
+                {/* One element, one label. A screen reader meets "QR code for
+                    your coaching code…" rather than an unnamed image, and the
+                    six characters stay separately reachable in the box above —
+                    the label deliberately does not repeat them. */}
+                <View
+                  accessible
+                  accessibilityRole="image"
+                  accessibilityLabel={qr.a11yLabel}
+                  style={{ borderRadius: radius.md, overflow: 'hidden' }}
+                >
+                  {/* The quiet zone is in the viewBox, not in padding, so it is
+                      exactly four modules at any rendered size. The Rect paints
+                      it: without a light margin a scanner often never finds the
+                      symbol at all. */}
+                  <Svg
+                    width={QR_SIZE}
+                    height={QR_SIZE}
+                    viewBox={`${-QR_QUIET_ZONE} ${-QR_QUIET_ZONE} ${qr.matrix.count + QR_QUIET_ZONE * 2} ${qr.matrix.count + QR_QUIET_ZONE * 2}`}
+                  >
+                    <Rect
+                      x={-QR_QUIET_ZONE}
+                      y={-QR_QUIET_ZONE}
+                      width={qr.matrix.count + QR_QUIET_ZONE * 2}
+                      height={qr.matrix.count + QR_QUIET_ZONE * 2}
+                      fill={QR_LIGHT}
+                    />
+                    <Path d={qrD} fill={QR_DARK} />
+                  </Svg>
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+                  They point a camera at this, or type the code above. Both land in the same place.
+                </Text>
+              </View>
+            ) : qr.why === 'unencodable' ? (
+              // The code was read and is good; only the picture could not be
+              // made. Said in its own words so it cannot be mistaken for the
+              // block above, which is about the code itself. The other two
+              // cases — still reading, and could not be read — are already
+              // stated there, and saying them twice would be the screen
+              // apologising twice for one fact.
+              <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{qr.note}</Flag>
+            ) : null}
+
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Share the Invite" wide onPress={() => shareInvite(give.hand.code)} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+              {HAS_NATIVE_CLIPBOARD ? (
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Copy the Link" onPress={() => { void copyLink(give.hand.code, 'your main code'); }} />
+                </View>
+              ) : null}
+              <View style={{ flex: 1 }}>
+                <Ghost label="What It Brought In" onPress={() => router.push('/(trainer)/money')} />
+              </View>
+            </View>
+
+            {/* No clipboard on this build: the address goes on the screen as
+                selectable text rather than behind a button that does nothing.
+                Same answer the Clients sheet already gives. */}
+            {clipboardNote ? (
+              <View style={{ marginTop: sp.lg }}>
+                <Text selectable style={{ ...ty.body, ...numeric, color: t.ink2 }}>{give.hand.link}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{clipboardNote}</Text>
+              </View>
+            ) : null}
+          </>) : give.why === 'reading' ? (
+            // Still in flight. Not a failure, and deliberately not the same
+            // sentence as one — a coach told the read failed while it is still
+            // coming retries something that was going to arrive.
+            <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg }}>
+              <Text style={{ ...ty.head, color: t.ink }}>{give.head}</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{give.note}</Text>
+            </View>
+          ) : (
+            // The whole reason this module exists. `give.note` states what is
+            // NOT true — that the code is gone — and names what pressing New
+            // Code would cost. There is deliberately no rotate button anywhere
+            // on this screen: the one place it is offered is the Clients sheet,
+            // where the read that would justify it has succeeded.
+            <Notice tone={t.crit} kicker="Not Read" title={give.head} note={give.note}>
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label="Try Again" onPress={() => { void load(); }} />
+              </View>
+            </Notice>
+          )}
+        </Section>
+
+
+        {/* ── what the person in front of them does next ──────────────────── */}
+        <Section>
+          <SectionHead title="What They Do with It" />
+          <Text style={{ ...ty.label, color: t.ink2 }}>{HOW_THEY_USE_IT}</Text>
+          {/* Above the button, because it is the reason to press it. Held back
+              until the read has happened at all: `undefined` is "not asked",
+              and printing the could-not-be-read sentence on open would be the
+              screen describing its own first frame. */}
+          {uptake !== undefined ? (
+            uptakeNeedsAnswering(uptake) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{codeUptakeLine(uptake)}</Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{codeUptakeLine(uptake)}</Text>
+            )
+          ) : null}
+          <View style={{ marginTop: sp.lg }}>
+            <Ghost label="Coaching Requests" onPress={() => router.push('/(trainer)/notifications')} />
+          </View>
+        </Section>
+
+
+        {/* ── the named codes, live ones only ─────────────────────────────── */}
+        <Section>
+          <SectionHead title="Your Named Codes" note={codes.status === 'ready' ? `${named.length}` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{namedLine}</Text>
+
+          {codes.status === 'partial' ? (
+            <View style={{ marginBottom: sp.md }}>
+              <PartialRead what="codes" shown={named.length} onPress={() => { void load(); }} />
+            </View>
+          ) : null}
+
+          {named.map((r, i) => (
+            <View
+              key={r.code}
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${r.label}. Code ${handOut(r.code).spoken}. ${codeCountLine(codes.status, r)}`}
+              style={{
+                paddingVertical: sp.md,
+                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <IconPlate icon="share" tone="purple" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{r.label}</Text>
+                  <Text selectable style={{ ...ty.head, ...numeric, color: t.ink2, letterSpacing: 2, marginTop: 2 }}>{r.code}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{codeCountLine(codes.status, r)}</Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Share" a11yLabel={`Share the invite for ${r.label}`} onPress={() => shareInvite(r.code)} />
+                </View>
+                {HAS_NATIVE_CLIPBOARD ? (
+                  <View style={{ flex: 1 }}>
+                    <Ghost label="Copy Link" a11yLabel={`Copy the link for ${r.label}`} onPress={() => { void copyLink(r.code, r.label); }} />
+                  </View>
+                ) : null}
+              </View>
+              {/* Without a clipboard the address is written out instead of
+                  hidden — press and hold to select it. */}
+              {clipboardNote ? (
+                <Text selectable style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>{handOut(r.code).link}</Text>
+              ) : null}
+            </View>
+          ))}
+
+          {/* Making one lives on the Clients tab, in the sheet that already
+              creates them. Named rather than duplicated, because two screens
+              that both create a code are two screens that can disagree about
+              the cap. */}
+          <View style={{ marginTop: sp.lg }}>
+            <Ghost label="Make a Named Code" onPress={() => router.push('/(trainer)/dashboard')} />
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            On the Clients tab, under Invite a Client.
+          </Text>
+        </Section>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}

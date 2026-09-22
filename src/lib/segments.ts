@@ -101,7 +101,7 @@ export const COMPUTED_SEGMENTS: readonly SegmentDef[] = [
   {
     key: 'no-record', source: 'drift', object: 'who has nothing on record',
     title: 'Nothing Recorded',
-    note: 'No pattern to judge — nothing read of theirs in the window. That is not the same as fine, and it is not the same as gone; it is a thing to find out.',
+    note: 'No pattern to judge: nothing read of theirs in the window. That is not the same as fine, and it is not the same as gone; it is a thing to find out.',
   },
   {
     key: 'pack-run-out', source: 'packs', object: 'whose pack has run out',
@@ -116,7 +116,7 @@ export const COMPUTED_SEGMENTS: readonly SegmentDef[] = [
   {
     key: 'never-checked-in', source: 'roster', object: 'who has never checked in',
     title: 'Never Checked In',
-    note: 'Nobody has a check-in on record for them, so there is no adherence figure to read. New clients are in here too — it is who to ask, not who to worry about.',
+    note: 'Nobody has a check-in on record for them, so there is no adherence figure to read. New clients are in here too. It is who to ask, not who to worry about.',
   },
 ];
 
@@ -136,8 +136,19 @@ export interface ClientFacts {
   /** From `assessDrift`. Null when this client was never asked about — which is
    *  every hand-added client, and is not an assessment. */
   drift: StatusLevel | null;
-  /** The fewest sessions left on any paid pack they hold. Null when they hold
-   *  none, which is a different fact from a pack with zero left. */
+  /**
+   * Sessions left across every PAID pack they hold, summed. Null when they hold
+   * none, which is a different fact from a pack with zero left.
+   *
+   * The person and not the row. This said "the fewest left on any pack", which
+   * is the question a payments screen listing packs asks; the question here is
+   * whether the CLIENT has a session to draw on, and somebody holding one
+   * exhausted pack and one they bought yesterday has plenty. Addressing them as
+   * "you are nearly out" would be wrong about the person on the strength of a
+   * fact about a row. app/(trainer)/broadcast.tsx has summed per person since
+   * these segments landed; only this sentence was left describing the other
+   * rule.
+   */
   packLeft: number | null;
   /** True when a paid pack of theirs has nothing left on it. */
   packRunOut: boolean;
@@ -190,12 +201,29 @@ export function unassessed(def: SegmentDef, facts: readonly ClientFacts[]): stri
  * Null when there are none, because a standing sentence about an empty set is
  * furniture. Said at all because the alternative is a count that is quietly
  * smaller than the coach's book with nothing anywhere explaining the gap.
+ *
+ * ── `sourceWhole`, and the sentence it stops ─────────────────────────────
+ *
+ * `unassessed` counts clients whose `drift` is null, and null means UNKNOWN.
+ * Before the read lands, or after it fails, EVERY client's drift is null — so
+ * the count was the size of the coach's whole book and this sentence told them
+ * all forty of their clients "were added by you by hand and have no account".
+ * They were not; the read had simply not happened. That is a claim about real
+ * people made out of a read's own status, which is the failure this whole file
+ * is written against, and it was on screen for the four queries the drift read
+ * takes and permanently whenever it failed.
+ *
+ * The third argument is `isWhole(sourceStatus)` at the call site, spelled the
+ * same way `equipmentGapNote` takes it. Under anything else the screen already
+ * carries the guard's own sentence, which says the send is held and why —
+ * which is a truthful account of the same moment.
  */
-export function unassessedNote(def: SegmentDef, count: number): string | null {
+export function unassessedNote(def: SegmentDef, count: number, sourceWhole: boolean): string | null {
+  if (!sourceWhole) return null;
   if (count <= 0) return null;
   return `${count} ${count === 1 ? 'client is' : 'clients are'} not in this list and could not be: they were added by you `
     + 'by hand and have no account, so nothing of theirs can be read and there is no thread to write into. '
-    + `They are not being counted as ${def.key === 'no-record' ? 'having nothing recorded' : 'outside the segment'} — they were never asked about.`;
+    + `They are not being counted as ${def.key === 'no-record' ? 'having nothing recorded' : 'outside the segment'}. They were never asked about.`;
 }
 
 /**

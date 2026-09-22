@@ -22,7 +22,13 @@
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` conflated "nobody is signed in" with "we could not ask".
+// See src/lib/authReadFate.ts. Both sites below already took the cautious
+// branch; what they did not do was record which of the two had happened.
+import { signedInUid } from '../lib/signedInUid';
 import { useAuthRevision } from './authRevision';
+
 import { useCallback, useEffect, useState } from 'react';
 import type { LoadStatus } from './loadStatus';
 import { quietFromRow, type QuietHours } from '../lib/quietHours';
@@ -47,9 +53,22 @@ export async function fetchQuietHours(): Promise<QuietHoursRead> {
   // does not apply, rather than having failed to be looked up.
   if (!USE_SUPABASE) return { quiet: null, enforced: false, status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { quiet: null, enforced: null, status: 'error' };
+    // 'error' for BOTH fates, and that is not a shrug. `QuietHoursRead` has no
+    // third answer, and the other one available — 'ready' with `quiet: null` —
+    // is this module telling a coach they have set no quiet window, which is
+    // the invented-empty this whole file is written against. One wasted Try
+    // Again for a genuinely signed-out reader is the cheaper of the two errors.
+    //
+    // What changes here is that the outage stops being invisible: `signedInUid`
+    // hands `authGateFault` to `reportError` under this context for an
+    // unreadable read and stays quiet for a real sign-out, so the two are
+    // distinguishable in the logs even though the screen cannot tell them apart.
+    //
+    // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+    const who = await signedInUid('quietHours.read');
+    if (who.fate !== null) return { quiet: null, enforced: null, status: 'error' };
+    const uid = who.uid;
+
 
     // The rollout first, because it decides whether the window is worth
     // drawing. Read separately rather than joined: they are two questions —
@@ -103,10 +122,29 @@ export async function fetchQuietHours(): Promise<QuietHoursRead> {
 export async function saveQuietHours(q: QuietHours | null): Promise<boolean> {
   if (!USE_SUPABASE) return false;
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return false;
+    // A WRITE gate, and it stays shut on both fates. `false` is honest for
+    // each: nothing below this line runs, so no row is deleted and none is
+    // upserted, and both callers' sentences — "The server did not take that, so
+    // your quiet hours are exactly as they were" on the coach's screen, and
+    // `quietSaveNote({ server: false })` on the client's — are true of an
+    // outage as well as of a sign-out. Nothing is stamped under a missing
+    // user id.
+    //
+    // The defect was the silence around it: a `false` returned because
+    // `getUser()` could not reach the server was indistinguishable, in the
+    // logs, from one returned because nobody was signed in. Now the first is
+    // reported and the second is not.
+    //
+    // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+    const who = await signedInUid('quietHours.write');
+    if (who.fate !== null) return false;
+    const uid = who.uid;
+
     if (!q) {
+      // no-count-ok: a delete that matched nothing is the ASKED-FOR outcome
+      // here and nowhere else in this file — the coach asked for no quiet
+      // hours and there are none. Counting rows would report the one case
+      // that is already correct as a failure. See the sentence below.
       const { error } = await supabase
         .from('notify_quiet_hours').delete().eq('user_id', uid);
       if (error) { reportError('quietHours.clear', error); return false; }

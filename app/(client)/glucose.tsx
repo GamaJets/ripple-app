@@ -31,38 +31,95 @@
 // again in a minute; and an empty window is a real answer. `importNote` below
 // is the one place that maps them, so no two of them can end up sharing a
 // wording.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Cta, Ghost, fig, Ring, Spark, ChartShell, KpiRow, TonedChip, Segmented } from '../../src/ui/kit';
+import { sp, layout, hairline, radius, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useGlucose } from '../../src/ui/glucoseData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
-  band, formatGlucose, parseTyped, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
+  band, formatGlucose, parseTyped, mmolToMgdl, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
   type GlucoseUnit, type GlucoseBand, type GlucoseReadStatus,
 } from '../../src/lib/glucose';
 import { glucoseSource } from '../../src/lib/wearables/glucoseSource';
+// The shared date and clock, in the reader's own locale — see `when` below for
+// what this screen was printing instead.
+import { fmtDay, fmtTime } from '../../src/lib/format';
 
 const UNITS: GlucoseUnit[] = ['mmol/L', 'mg/dL'];
 
+/**
+ * When a reading was taken — "Mon 24 Aug · 08:14".
+ *
+ * The weekday and the clock were the whole of it, inside a FOURTEEN-DAY window.
+ * Two Mondays fit in fourteen days, so a member looking at their list saw two
+ * rows both reading "Mon 08:14" with different numbers on them and no way to
+ * tell which was this week's — on the screen whose entire purpose is watching a
+ * figure move over time. Worse where it matters most: an 11.2 and a 5.8 an hour
+ * after the same breakfast are the before and after of a change that worked,
+ * and unlabelled they are a contradiction.
+ *
+ * `fmtDay` carries the date and the weekday in the reader's own locale;
+ * `fmtTime` carries their own clock, so a 12-hour phone stops being handed a
+ * 24-hour reading. The NaN guard stays — a dash is what an unreadable timestamp
+ * is worth, and "Invalid Date" beside a blood sugar figure reads as the figure
+ * being wrong.
+ */
 function when(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return `${fmtDay(iso)} · ${fmtTime(iso)}`;
 }
 
 export default function Glucose() {
   const t = useTheme();
-  const router = useRouter();
   const g = useGlucose();
   const [unit, setUnit] = useState<GlucoseUnit>('mmol/L');
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
+  // The way back from a failed read, which this screen did not have.
+  // `useGlucose` has exposed `refresh` from the start and nothing called it:
+  // the provider reads once when the signed-in id settles, there is no retry
+  // inside it, and there was no gesture and no button here — so a single
+  // refused read left "could not be read" on screen for the whole session, on
+  // the one screen where that sentence must not be mistaken for "your sensor
+  // recorded nothing". Pull-to-refresh is the gesture people already try; the
+  // button below is for the person who does not.
+  const pull = usePullToRefresh(useCallback(() => { void g.refresh(); }, [g]));
+
+  /**
+   * Take one reading back off the record.
+   *
+   * Asked first, because a reading is a measurement and there is no undo on the
+   * other side of this. Reported afterwards on the delete's OWN answer:
+   * `remove` resolves false for a refusal AND for a delete that matched no rows
+   * — PostgREST calls neither an error — so "removed" is said only when the
+   * server confirmed a row went.
+   */
+  const confirmRemove = (id: string, valueLabel: string, whenLabel: string) => {
+    Alert.alert(
+      'Remove This Reading?',
+      `${valueLabel} from ${whenLabel} would be taken off your record, and off your average, your highest and your in-range figure with it. Your coach would stop seeing it too. This cannot be undone.`,
+      [
+        { text: 'Keep It', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const gone = await g.remove(id);
+            if (!gone) {
+              Alert.alert('It Is Still There', 'That reading could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+            }
+          },
+        },
+      ],
+    );
+  };
 
   // A band is a position on a scale, not a verdict, so the colours stay the
   // theme's neutral accents rather than a green/amber/red that reads as marking.
@@ -85,10 +142,10 @@ export default function Glucose() {
 
   /** The alert's title. Four outcomes, four titles, never one shared word. */
   const importTitle = (status: GlucoseReadStatus, added: number): string => {
-    if (status === 'unsupported') return 'Nothing to read from';
-    if (status === 'denied') return `${BRAND.label} has not been given access`;
-    if (status === 'error') return 'Could not be read';
-    return added > 0 ? 'Imported' : 'Up to date';
+    if (status === 'unsupported') return 'Nothing to Read From';
+    if (status === 'denied') return `${BRAND.label} Has Not Been Given Access`;
+    if (status === 'error') return 'Could Not Be Read';
+    return added > 0 ? 'Imported' : 'Up to Date';
   };
 
   const doImport = async () => {
@@ -112,7 +169,7 @@ export default function Glucose() {
     // nothing. `openStore` is null on iOS, where there is nowhere to send them.
     if (r.status === 'denied' && src.openStore) {
       Alert.alert(importTitle(r.status, r.added), text, [
-        { text: 'Not now', style: 'cancel' },
+        { text: 'Not Now', style: 'cancel' },
         { text: `Open ${src.storeName}`, onPress: src.openStore },
       ]);
       return;
@@ -125,56 +182,105 @@ export default function Glucose() {
     if (mmol == null) {
       // Refused rather than rounded — a mg/dL number typed under mmol/L would
       // otherwise land four times too high and sit on every chart forever.
-      Alert.alert('That is not a reading', `Enter a value in ${unit}.`);
+      Alert.alert('That Is Not a Reading', `Enter a value in ${unit}.`);
       return;
     }
     setBusy(true);
     const ok = await g.addManual(mmol);
     setBusy(false);
-    if (!ok) { Alert.alert('Not saved', 'That reading could not be saved. Try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Saved', 'That reading could not be saved. Try again in a moment.'); return; }
     setTyped(''); setTyping(false);
   };
 
   const toggleShare = async (on: boolean) => {
     const ok = await g.setShared(on);
-    if (!ok) Alert.alert('Not saved', 'That could not be changed. Try again in a moment.');
+    if (!ok) Alert.alert('Not Saved', 'That could not be changed. Try again in a moment.');
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Blood Sugar</Text>
-          </View>
-        </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Blood Sugar" />
 
-        <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
-          note={`${BRAND.label} shows what your monitor recorded. It does not tell you what to eat, and the range shown (${TYPICAL_LOW_MMOL}–${TYPICAL_HIGH_MMOL} mmol/L) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
+        {/* The quoted range, in the unit the reader picked. It was typed as
+            "3.9–7.8 mmol/L" whatever the toggle below said, so somebody
+            reading in mg/dL — every reading on this screen a three-figure
+            number, every band drawn against it — was given the one number
+            that explains the colours in a unit they had just chosen not to
+            use, and had to convert it in their head to check a reading
+            against it. `formatGlucose` is the same function the readings go
+            through, so the range and the figures it judges cannot come out in
+            two different units again. */}
+        <Notice tone={t.s3} kicker="Not Medical Advice" title="Readings, not recommendations"
+          note={`The range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
           <SectionHead title="Last 14 Days"
-            note={unreadable ? 'Could not be read' : known ? undefined : g.status === 'partial' ? 'More readings than shown' : undefined} />
+            note={unreadable ? 'Could Not Be Read' : known ? undefined : g.status === 'partial' ? 'More Readings Than Shown' : undefined} />
           {unreadable ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Your readings could not be read just now. This is not the same as having none — nothing below is confirmed.
-            </Text>
-          ) : null}
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            {[
-              { label: 'Latest', v: known && g.summary.latest ? formatGlucose(g.summary.latest.mmol, unit) : null },
-              { label: 'Average', v: known ? formatGlucose(g.summary.averageMmol, unit) : null },
-              { label: 'Highest', v: known ? formatGlucose(g.summary.highestMmol, unit) : null },
-              { label: 'In range', v: known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}%` : null },
-            ].map((k) => (
-              <View key={k.label} style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{k.label}</Text>
-                <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>{fig(k.v)}</Text>
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                Your readings could not be read just now. That is not the same as having none.
+              </Text>
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Try Again" onPress={() => { void g.refresh(); }} />
               </View>
-            ))}
+            </>
+          ) : null}
+          {/* The figure card: the share in range as a ring — it is the one
+              figure here that is a fraction of something — beside the latest
+              reading and the word for where it sits. Every value is null
+              unless the read is whole (`known`), and the ring is null again
+              below the floor the summary sets, so it draws a bare track and a
+              dash rather than "100%" off two samples. */}
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.md }}>
+            <Ring size={120}
+              value={known && g.summary.inTypicalPct != null ? g.summary.inTypicalPct / 100 : null}
+              figure={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}%` : null}
+              sub="in range"
+              spoken={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}% of readings within the quoted range` : 'Share of readings in range, not shown'} />
+            <View style={{ flex: 1, minWidth: 0, gap: sp.xs }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Latest</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...value(34), color: t.ink, flexShrink: 1 }}>
+                  {fig(known && g.summary.latest ? formatGlucose(g.summary.latest.mmol, unit) : null)}
+                </Text>
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text>
+              </View>
+              {/* Descriptive, never a verdict: green is "within the quoted
+                  range", amber is outside it, and the words are the lib's. */}
+              {known && g.summary.latest && bandWord(band(g.summary.latest.mmol)) ? (
+                <TonedChip tone={band(g.summary.latest.mmol) === 'typical' ? 'brand' : 'amber'} label={bandWord(band(g.summary.latest.mmol))} />
+              ) : null}
+            </View>
+          </View>
+          <View style={{ marginTop: sp.md }}>
+            <KpiRow items={[
+              { label: 'Average', value: fig(known ? formatGlucose(g.summary.averageMmol, unit) : null), unit },
+              { label: 'Highest', value: fig(known ? formatGlucose(g.summary.highestMmol, unit) : null), unit },
+            ]} />
+          </View>
+          {/* The fortnight as the area chart, oldest first, in the reader's
+              unit. ChartShell decides whether there is a chart at all: a
+              failed or partial read draws nothing, one reading is a sentence.
+              The quoted range rides under it as words — the chart has no band
+              drawn on it, and a band that is not there is not described.
+              ponytail: every reading is a point — a whole read tops out at the
+              row cap (a CGM's fortnight is past it and reads 'partial', so it
+              is not drawn). Downsample here if a denser source ever reads whole. */}
+          <View style={{ marginTop: sp.lg }}>
+            <ChartShell status={g.status} points={g.readings.length}
+              emptyLine="No readings in the last 14 days, so there is no trend to draw."
+              errorLine="Your readings could not be read, so no trend is drawn.">
+              <Spark area tone="pink" unit={` ${unit}`}
+                data={[...g.readings].reverse().map((r) => (unit === 'mg/dL' ? Math.round(mmolToMgdl(r.mmol)) : Math.round(r.mmol * 10) / 10))}
+                labels={[...g.readings].reverse().map((r) => r.at)} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Quoted range {formatGlucose(TYPICAL_LOW_MMOL, unit)}–{formatGlucose(TYPICAL_HIGH_MMOL, unit)} {unit}
+              </Text>
+            </ChartShell>
           </View>
           {/* The percentage is withheld below a floor rather than computed from
               a handful of readings — "100% in range" off two samples is a
@@ -184,11 +290,10 @@ export default function Glucose() {
               Too few readings to give a share in range.
             </Text>
           ) : null}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-            {UNITS.map((u) => (
-              <Ghost key={u} label={u === unit ? `${u} ✓` : u} onPress={() => setUnit(u)} />
-            ))}
-          </View>
+          {/* The unit is a choice of one from two: the kit's Segmented says
+              which is selected to a screen reader, which a tick typed into a
+              label did not. */}
+          <Segmented style={{ marginTop: sp.md }} value={unit} onChange={setUnit} options={UNITS.map((u) => ({ key: u, label: u }))} />
         </Section>
 
         {/* ── Getting readings in ───────────────────────────────────────── */}
@@ -217,7 +322,7 @@ export default function Glucose() {
             {src.openStore && importNote?.status === 'denied' ? (
               <Ghost label={`Open ${src.storeName}`} onPress={src.openStore} />
             ) : null}
-            <Ghost label="Add One By Hand" onPress={() => setTyping(true)} />
+            <Ghost label="Add One by Hand" onPress={() => setTyping(true)} />
           </View>
         </Section>
 
@@ -226,9 +331,9 @@ export default function Glucose() {
           <SectionHead title="Your Coach" />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, color: t.ink }}>Let my coach see these</Text>
+              <Text style={{ ...ty.body, color: t.ink }}>Let My Coach See These</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-                Off by default. Turning it off again hides the history as well as the next reading.
+                Off by default. Turning it off hides the history too.
               </Text>
             </View>
             <Switch
@@ -238,6 +343,21 @@ export default function Glucose() {
               // showing "off" stops somebody turning ON what may already be on,
               // and stops the switch asserting a state nobody has confirmed.
               disabled={g.sharedWithCoach === null}
+              // The words beside this control are a SIBLING of it, not a parent,
+              // so a screen reader arriving here read out a switch and its
+              // on/off state with no name at all — on the one control that
+              // decides who may see a member's blood sugar. The visible line
+              // says "these", which the eye resolves from the readings above it
+              // and a reader cannot, so the spoken name says what "these" are.
+              accessibilityLabel="Let my coach see my glucose readings"
+              // The consequence, not a restatement: turning it off is not
+              // merely "stop sharing from now on".
+              accessibilityHint={
+                g.sharedWithCoach === null
+                  ? 'Unavailable: whether this is on could not be read just now.'
+                  : 'Turning it off again hides the readings already shared as well as the next one.'
+              }
+              accessibilityState={{ disabled: g.sharedWithCoach === null }}
             />
           </View>
           {g.sharedWithCoach === null ? (
@@ -269,15 +389,15 @@ export default function Glucose() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.sm }}>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Before</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Before</Text>
                     <Text style={{ ...ty.body, color: t.ink }}>{fig(p.before ? formatGlucose(p.before.mmol, unit) : null)}</Text>
                   </View>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Peak after</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Peak After</Text>
                     <Text style={{ ...ty.body, color: bandColor(band(p.peak?.mmol)) }}>{fig(p.peak ? formatGlucose(p.peak.mmol, unit) : null)}</Text>
                   </View>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Change</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Change</Text>
                     {/* Null unless BOTH ends are real readings. A peak with no
                         baseline is a number, not a rise. */}
                     <Text style={{ ...ty.body, color: t.ink }}>
@@ -321,12 +441,28 @@ export default function Glucose() {
             </Text>
           ) : (
             g.readings.slice(0, 60).map((r, i) => (
-              <View key={`${r.at}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <View key={`${r.id ?? r.at}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <Text style={{ ...ty.body, color: bandColor(band(r.mmol)), width: 64 }}>{formatGlucose(r.mmol, unit)}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{when(r.at)}</Text>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{bandWord(band(r.mmol))}{r.sourceName ? ` · ${r.sourceName}` : ''}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{bandWord(band(r.mmol))}{r.sourceName ? ` · ${r.sourceName}` : ''}</Text>
                 </View>
+                {/* The way back out. `useGlucose().remove` was written when the
+                    table landed, is documented as "only the owner can, and the
+                    database agrees", and had no caller anywhere — so a 15.5
+                    typed for 5.5 stayed in the fortnight average, the highest,
+                    the in-range percentage and the coach's copy for good, while
+                    every sibling record in this app can be taken back.
+
+                    A visible control rather than a long press: this app has
+                    already written down (src/ui/messages.tsx) that a gesture
+                    nothing announces is not a way in. `Ghost icon="minus"`
+                    speaks as "Remove" and the label below names the reading, so
+                    sixty of these do not all announce the same thing. */}
+                {!g.readOnly && r.id ? (
+                  <Ghost icon="minus" a11yLabel={`Remove the ${formatGlucose(r.mmol, unit)} reading from ${when(r.at)}`}
+                    onPress={() => confirmRemove(r.id!, formatGlucose(r.mmol, unit), when(r.at))} />
+                ) : null}
               </View>
             ))
           )}
@@ -337,13 +473,25 @@ export default function Glucose() {
               total. `known` is `status === 'ready'`. */}
           {known && g.readings.length > 60 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Showing the most recent 60 of {g.readings.length}.</Text>
+          ) : g.status === 'partial' && g.readings.length > 0 ? (
+            /* The other half of the same gating. Under 'partial' the count in
+               the heading is withheld and this sentence was withheld with it,
+               so the list simply stopped at sixty rows with nothing said —
+               and `g.readings.length` is the ROW CAP rather than a total, so
+               "of 1,000" would have been a figure taken off a truncated read.
+               What can be stated is that the list is short and why, which is
+               the one thing a reader needs and the one thing they were not
+               told. */
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              Showing the most recent 60. There are more readings on record than we can read at once, so this is not all of them.
+            </Text>
           ) : null}
         </Section>
       </ScrollView>
 
       <Modal visible={typing} animationType="slide" transparent onRequestClose={() => setTyping(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: t.surface, padding: layout.gutter, paddingBottom: 40 }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: 40 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Add a Reading</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>In {unit}, as your meter shows it.</Text>
             <TextInput

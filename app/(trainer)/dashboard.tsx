@@ -24,52 +24,65 @@
 //     clients.
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
-import { useEffect, useMemo, useState } from 'react';
-import { num } from '../../src/lib/format';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import {
   DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
 import type { PtSession } from '../../src/lib/gymSessions';
+// The same diary rows, arranged by PERSON. `bookedAhead` is the module
+// app/(trainer)/calendar.tsx already reads for its Booked Ahead section; this
+// screen reads the coach's own sessions anyway, so the roster row costs no
+// extra round trip. See the note on `nextBooked`.
+import { BOOKED_AHEAD_DAYS, bookedAhead } from '../../src/lib/bookedAhead';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { appLocale } from '../../src/lib/locale';
 import { useAuth } from '../../src/ui/auth';
+import { accountCacheKey } from '../../src/lib/deviceAccountCache';
 import {
-  assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
-  DRIFT_LABEL, DEFAULT_WINDOWS, localDayKey, type Drift,
+  compareDrift, bandTitle,
+  DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
+import { useClientDrift } from '../../src/ui/clientDrift';
 import { reportError } from '../../src/lib/reportError';
-import { capLimit, capped } from '../../src/lib/rowCap';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { trialInfo } from '../../src/lib/trial';
-import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { trialCard } from '../../src/lib/trialGate';
+import { useTrialReading } from '../../src/ui/trialReading';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
-import { goalToEnum } from '../../src/lib/rosterMerge';
 import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow, TonedChip, Donut, Legend, Segmented, IconPlate, type Tone } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
-import { atRiskClient } from '../../src/lib/trainerMock';
-import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
-import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode } from '../../src/lib/types';
+import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, booksInPerson, type CoachedMode } from '../../src/lib/types';
+import { lastActiveLine } from '../../src/lib/lastActiveLine';
+// Calendar days, not elapsed hours: "new this week" is a statement about which
+// week somebody joined, and `joinedAt` is a `created_at` timestamptz on one
+// path and a date-only string on the other. Same helper `tenureLabel` uses.
+import { daysBetween } from '../../src/lib/bodyFigures';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
-import { sharedAreas, fillName } from '../../src/lib/coachShare';
+import { sharedAreas, fillName, allergenFact } from '../../src/lib/coachShare';
 import { useRoster } from '../../src/ui/roster';
 import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
-import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
 import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
@@ -86,7 +99,8 @@ import {
   type JoinCodeRow,
 } from '../../src/lib/joinCodes';
 import {
-  LAST_TOUCH_NOTE, codeFigures, enoughToTell, parseSpend, returnLine, spendFieldValue, stayedLine,
+  LAST_TOUCH_NOTE, codeFigures, enoughToTell, parseSpend, returnLine, spendCurrency, spendFieldValue,
+  stayedLine,
   type CodeReturnRow,
 } from '../../src/lib/codeReturn';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
@@ -118,18 +132,27 @@ import {
 } from '../../src/lib/rosterImport';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachSetup } from '../../src/ui/coachSetup';
-import { coachSetupRows, coachSetupLeft, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
+import { coachSetupRows, coachSetupCardLine, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { EndReasonSheet, UnexplainedDepartures, DEPARTURE_WINDOW_DAYS } from '../../src/ui/EndReasonSheet';
-// R3. The tally the answers were never put into. `END_REASON_LABEL` is the same
-// vocabulary the sheet asks with, so the card that collects a reason and the
-// card that counts it cannot come to call it two different things.
-import {
-  departureTally, departureLine, END_REASON_LABEL,
-  type EndReason, type EndedRelationship,
-} from '../../src/lib/endCoaching';
-import { promptUnmarkedBacklog } from '../../src/ui/coachReminders';
+import { type EndReason } from '../../src/lib/endCoaching';
+import { promptBookAlerts } from '../../src/ui/coachReminders';
+import { useChannelPrefs } from '../../src/ui/coachNotify';
+import { channelAllows } from '../../src/lib/coachNotify';
+import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { blockEnding } from '../../src/lib/blockEnding';
+import { creditsLow, creditsLine } from '../../src/lib/creditsLow';
+import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect';
+import { weekCount } from '../../src/lib/programBlock';
+import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle, type HomeMoney } from '../../src/lib/homeMoney';
+import { minorMoney } from '../../src/lib/coachMoney';
+// The day every expiry and every overdue judgement below is made against, kept
+// current for as long as this tab is mounted — which, for a tab, is the life of
+// the app. See the note on `invoiceAgeing`.
+import { useToday, useNow } from '../../src/ui/today';
+import { FORWARD_CHAR, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -203,7 +226,7 @@ function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean;
       flex: 1, alignItems: 'center', paddingVertical: 10,
       borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2,
     }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -225,11 +248,87 @@ function driftTone(t: Theme, d: Drift): string {
   }
 }
 
-/** A client's initials — the roster's only ornament. */
-function Initials({ t, name, size = 38 }: { t: Theme; name: string; size?: number }) {
+/** How many days a client counts as "new" on their roster row. A week — the
+ *  board's word for it — and past that the row says what they have done. */
+const NEW_THIS_WEEK_DAYS = 7;
+
+/**
+ * The one line of status under a name on the roster, in words, and the mark
+ * beside it.
+ *
+ * The board writes four states — On track, Needs check-in, Missing progress,
+ * New this week — and every one of them is DERIVED here from facts the screen
+ * already reads rather than declared: the drift verdict (src/lib/clientDrift.ts,
+ * measured against the client's own earlier rate), the joined date, and the
+ * two facts a hand-added client carries. The order is the order a coach acts
+ * in: a client who is slipping is said to be slipping even if they joined on
+ * Monday, and "new this week" is only ever said about somebody nothing has yet
+ * been able to judge.
+ *
+ * `tone` is null where there is no state to mark — a book with no drift read
+ * yet, or a client added by hand, about whom "missing progress" would be a
+ * claim that there was a record to be missing from. Never colour alone: the
+ * words carry the state and the dot repeats it (kit rule two).
+ */
+//
+// `chip` is the same state as a NAME from the kit's data palette, for the
+// states the mockups colour — the monogram's plate, the state's word at the
+// trailing edge and the adherence bar all take it — red for a check-in owed, amber for
+// slipping, purple for the unknown (driftTone's own reason for giving it a hue
+// of its own), blue for new, the accent for on track. Absent wherever `tone`
+// is null, and on the adherence line, which is a sentence and not a state.
+function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolean, today: string): { words: string; tone: string | null; chip?: Tone } {
+  if (d && d.status === 'at_risk') return { words: 'Needs check-in', tone: driftTone(t, d), chip: 'red' };
+  if (d && d.status === 'watch') return { words: 'Slipping', tone: driftTone(t, d), chip: 'amber' };
+  const days = c.joinedAt ? daysBetween(c.joinedAt, today) : null;
+  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New this week', tone: t.brand, chip: 'blue' };
+  // No account behind them, so there is no activity to be missing — see the
+  // note on `attnReason`, which learned this the expensive way.
+  if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
+  if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d), chip: 'purple' };
+  if (d) return { words: 'On track', tone: driftTone(t, d), chip: 'brand' };
+  // No drift verdict to speak, and a figure THEY submitted that says something.
+  // This was a separate "Below target" flag on a second line of the row; the
+  // row has one line now, so it is that line's words where nothing above had
+  // a better claim to it. Never said of a hand-added client — they returned
+  // above, and they have no check-in to have scored.
+  if (c.adherence != null && c.adherence < 80) return { words: `Below target · ${c.adherence}% adherence`, tone: t.warn };
+  return {
+    words: driftRead
+      ? `${c.goal} · ${c.lastActive} · no drift reading yet`
+      : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${c.lastActive}`,
+    tone: null,
+  };
+}
+
+/**
+ * A tone's three colours, by name: the MARK (a bar, a stroke), the pale plate
+ * and the INK that may be text on it.
+ *
+ * The kit keeps its own copy of this private, and every part that takes a
+ * `tone` resolves it inside. The roster row is the one shape here the kit has
+ * no part for — a monogram on a plate of the state's hue, the state's word in
+ * its ink, a thin bar in its mark — so the same three lookups are made here,
+ * from the same tokens, and would be the kit's `toneOf` the day it is exported.
+ * Text only ever takes `ink`: the contrast gate refuses a mark as a colour.
+ */
+function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
+  if (tone === 'brand') return { mark: t.brand, soft: t.brandSoft, ink: t.brandText };
+  if (tone === 'neutral') return { mark: t.ink3, soft: t.surface3, ink: t.ink2 };
+  return { mark: t.data[tone], soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+}
+
+/** A client's initials on a plate — the accent's by default, and the row's own
+ *  state hue on the roster, the way the mockups colour each monogram. Two
+ *  characters through `Array.from`, the kit's AttentionRow rule: half of an
+ *  emoji or an astral letter is "�". The diameter grows with the reader's
+ *  text so the letters never outgrow the plate. */
+function Initials({ t, name, size = 38, tone = 'brand' }: { t: Theme; name: string; size?: number; tone?: Tone }) {
+  const c = toneOf(t, tone);
+  const D = grown(size);
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{name.split(' ').map((x) => x[0]).join('')}</Text>
+    <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <Text style={{ ...ty.label, ...font('700'), color: c.ink }}>{Array.from(name.split(' ').map((x) => Array.from(x)[0] ?? '').join('')).slice(0, 2).join('')}</Text>
     </View>
   );
 }
@@ -244,11 +343,107 @@ function Flag({ t, tone, text }: { t: Theme; tone: string; text: string }) {
   );
 }
 
-/** A 3px meter — the same mark the kit's <Meter/> draws, without its read-out. */
-function Bar({ t, pct, good }: { t: Theme; pct: number; good: boolean }) {
+/** Where this tab keeps which of its folds a coach left open. One key per
+ *  account and a map under it. It is a preference about THIS handset's screen,
+ *  so it does not belong on the server and a reinstall forgetting it costs a
+ *  tap; but a gym handset is signed in and out all day, so it is scoped the way
+ *  app/(trainer)/statement.tsx scopes its year start, through
+ *  `accountCacheKey`, which answers null (do not persist) for no account. The
+ *  unqualified key it replaces is removed unread, once per mount. */
+const FOLDS_PREFIX = 'repple.coachHome.folds:';
+const LEGACY_FOLDS_KEY = 'repple.coachHome.folds';
+
+/**
+ * A section of this tab that is shut until a coach opens it, and stays the way
+ * they left it on this phone.
+ *
+ * ── Why it exists ─────────────────────────────────────────────────────────
+ * A working coach, on TestFlight: "A way to minimise the coaching tools so
+ * like a drop down." Fourteen chips stood open between the day's agenda and
+ * the roster on every visit, and they are the lowest-frequency thing on the
+ * tab — the data-layout review's seventh rule: the first viewport holds the
+ * decision, and tools sit behind a row.
+ *
+ * ── Why it is not src/ui/Disclosure.tsx ───────────────────────────────────
+ * Nor the kit's `Expandable`, yet. Same shape as both on purpose — a
+ * `SectionHead` for the title so a folded heading reads exactly like an open
+ * one (the same tester: "the subheadings … blend in too much"; what the kit
+ * did to strengthen `SectionHead` lands here too), Expandable's turning
+ * chevron, the note saying what is inside while it is shut, and the state in
+ * `accessibilityState.expanded`. What neither of them does is REMEMBER: both
+ * keep `open` in their own `useState` with no way to be told or to tell, and
+ * a coach who uses Broadcast daily should not reopen the drawer daily.
+ * Expandable also draws its own `Section`, and the second fold here lives
+ * INSIDE the roster's card. Given an `open`/`onToggle` pair (or a storage
+ * key) and a bare variant, this becomes a wrapper round it and then goes.
+ *
+ * Shut until the stored answer is in, never open-then-shut: a block of
+ * fourteen chips that appears for a frame and collapses moves everything
+ * under it twice. A failed read is simply "shut", which is the default.
+ */
+function Fold({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
+  const t = useTheme();
+  const { user } = useAuth();
+  const key = accountCacheKey(FOLDS_PREFIX, user?.id);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    void AsyncStorage.removeItem(LEGACY_FOLDS_KEY).catch(() => {});
+  }, []);
+  useEffect(() => {
+    let live = true;
+    // Shut first, on every change of account, so the last coach's choice is
+    // never on screen under the next coach's name while the read is in flight.
+    setOpen(false);
+    if (!key) return () => { live = false; };
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        const map = raw ? JSON.parse(raw) : null;
+        if (live && map && typeof map === 'object' && map[id] === true) setOpen(true);
+      } catch { /* shut, which is what it already is */ }
+    })();
+    return () => { live = false; };
+  }, [id, key]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // Read-modify-write, because two folds share the key and neither may
+    // forget the other. Best effort: a preference that could not be written
+    // costs one tap on the next launch, and failing the tap would cost more.
+    if (!key) return;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        const was = raw ? JSON.parse(raw) : null;
+        const map = was && typeof was === 'object' && !Array.isArray(was) ? was : {};
+        await AsyncStorage.setItem(key, JSON.stringify({ ...map, [id]: next }));
+      } catch { /* on screen for this session either way */ }
+    })();
+  };
   return (
-    <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
-      <View style={{ height: 3, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand, opacity: good ? 1 : 0.5 }} />
+    <View>
+      <Pressable onPress={toggle} accessibilityRole="button" accessibilityState={{ expanded: open }}
+        accessibilityLabel={note ? `${title}. ${note}` : title} hitSlop={hitSlopFor(32)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        {/* SectionHead carries its own bottom margin, which is right over a
+            section's contents and wrong inside a row centred on an icon — the
+            negative margin gives it back so the title and the mark share a
+            centre line whether the fold is open or shut. */}
+        <View style={{ flex: 1, minWidth: 0, marginBottom: -sp.md }}>
+          <SectionHead title={title} />
+        </View>
+        {/* The kit's own mark for this: the reader's forward chevron when
+            shut, turned down when open, through `turn()` so it is right in a
+            right-to-left locale too. Decoration — the state is in
+            `accessibilityState` on the row. */}
+        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+        </View>
+      </Pressable>
+      {!open && note ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text>
+      ) : null}
+      {open ? <View style={{ marginTop: sp.md }}>{children}</View> : null}
     </View>
   );
 }
@@ -263,30 +458,88 @@ function Bar({ t, pct, good }: { t: Theme; pct: number; good: boolean }) {
  * still finds them by name — and they come back on their own the moment an
  * in-person client appears. See src/lib/coachDelivery.ts.
  *
- * Only Schedule qualifies today. It is written as a list anyway because the
+ * Schedule and Your Register qualify. It is written as a list because the
  * question "is this an in-person tool?" is the thing worth being able to answer
  * once, and the next chip added here is a one-line decision rather than a
  * rewrite of the branch below.
+ *
+ * Your Register is the other end of taking a class: it says what the registers
+ * a coach took actually came to, and until now nothing in the app linked to it
+ * — `/(trainer)/my-register` was named in src/lib/features.ts and nowhere else,
+ * so a coach could only reach it by searching Explore for a screen they had no
+ * reason to know existed.
  */
 const IN_PERSON_SHORTCUTS: [IconName, string, string][] = [
   ['calendar', 'Schedule', '/(trainer)/calendar'],
+  ['check', 'Your Register', '/(trainer)/my-register'],
 ];
 
-const SHORTCUTS: [IconName, string, string][] = [
+/**
+ * The tools drawer, in three named groups instead of one wall.
+ *
+ * ── What was measured ─────────────────────────────────────────────────────
+ *
+ * This tab led to 25 destinations one tap away while Videos led to 2, and a
+ * flat ChipGrid of fourteen chips under one word — "Coaching Tools" — is the
+ * same wall the member app's Me screen has. A coach scanning it was reading a
+ * list with no order in it: their own nutrition log sat between a leaderboard
+ * and a feedback form.
+ *
+ * So the chips are grouped by WHOSE question they answer — everybody on the
+ * book, the book as a whole, or the coach themselves — and each group says so
+ * in a head above it. Nothing is a new destination and nothing here is new
+ * code: it is the same array, cut into three.
+ *
+ * ── What left, and where it is now ────────────────────────────────────────
+ *
+ * Three chips are gone from this drawer and none of the three screens is a tap
+ * further away than it was:
+ *
+ *   · Programs   — is a tab. A chip on one tab root pointing at another tab is
+ *                  a tap to open a drawer to reach something the bar already
+ *                  holds.
+ *   · Analytics  — likewise a tab.
+ *   · Videos     — stopped being a tab (app/(trainer)/_layout.tsx says why) and
+ *                  is now a chip on Programs, beside Templates and the Exercise
+ *                  Library. Still reached from Analytics, from an exercise and
+ *                  from the Exercise Library, and still in src/lib/features.ts
+ *                  so Explore finds it by name.
+ *
+ * Referrals stays, even though Money — which is a tab now — carries it too: it
+ * is read against the roster listed on this screen as often as against the
+ * takings, and a second way in is not a second screen.
+ */
+type Shortcut = [IconName, string, string];
+
+/** Reaching the people on the book. Your Code first, and first for a reason:
+ *  asked "where is the coach's code to give to clients? it should be readily
+ *  available", the answer was: press Invite a Client below and read it off a
+ *  modal sheet whose title is about adding one. Nothing on this screen — or any
+ *  other — said the sheet held it. Not in IN_PERSON_SHORTCUTS: an online coach
+ *  hands their code out more often than a coach who works in a room, not less. */
+const REACH_SHORTCUTS: Shortcut[] = [
+  ['share', 'Your Code', '/(trainer)/join-code'],
   ['bell', 'Broadcast', '/(trainer)/broadcast'],
-  ['train', 'Programs', '/(trainer)/builder'],
-  ...IN_PERSON_SHORTCUTS,
-  ['video', 'Videos', '/(trainer)/videos'],
-  ['chart', 'Analytics', '/(trainer)/analytics'],
+];
+
+/** Reading the book as a whole. Leaderboard and Referrals are read for the same
+ *  reason — who on this book is worth more than the sessions they buy — and
+ *  Referrals had the same problem Your Register had: `/(trainer)/referrals` was
+ *  named in src/lib/features.ts and nowhere else in the app, so the screen that
+ *  says which clients bring in other clients could only be searched for. */
+const BOOK_SHORTCUTS: Shortcut[] = [
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
+  ['people', 'Referrals', '/(trainer)/referrals'],
   ['message', 'Feedback', '/(trainer)/feedback'],
-  // The coach's own tracking, last and together because these three are the
-  // only things here that are not about a client. My Training was reachable
-  // only from a row inside Profile, which is buried — and a coach who cannot
-  // find where to log their own session logs it nowhere, or worse, into
-  // somebody else's record. Nutrition and Progress sit beside it rather than
-  // anywhere else for exactly that reason: the same coach, on the same day,
-  // looking for the same thing.
+];
+
+/** The coach's own tracking — the only things in this drawer that are not about
+ *  a client. My Training was reachable only from a row inside Profile, which is
+ *  buried, and a coach who cannot find where to log their own session logs it
+ *  nowhere, or worse, into somebody else's record. Nutrition and Progress sit
+ *  beside it for exactly that reason: the same coach, on the same day, looking
+ *  for the same thing. */
+const OWN_SHORTCUTS: Shortcut[] = [
   ['dumbbell', 'My Training', '/(trainer)/my-training'],
   ['meals', 'My Nutrition', '/(trainer)/my-nutrition'],
   ['progress', 'My Progress', '/(trainer)/my-progress'],
@@ -327,7 +580,7 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
   if (failed) {
     return (
       <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.crit} style={{ marginBottom: sp.md }}>
-        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+        <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
           Could not check for unmarked sessions
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
@@ -339,7 +592,7 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
   if (n === null || n === 0) return null;
   return (
     <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.s3} style={{ marginBottom: sp.md }}>
-      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
         {n} session{n === 1 ? '' : 's'} need an outcome
       </Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
@@ -350,22 +603,112 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
 }
 
 
-// R3's select list, written out here on one line rather than imported. Same
-// reason every other screen in this group declares its own: check-schema.mjs
-// resolves a named select list only within the file that names it, so a shared
-// constant is a select list nothing compares against the SQL or the live
-// database.
-const ENDED_COLS = 'client_id, ended_at, end_reason';
+/**
+ * What the coach is owed, on the screen they open first.
+ *
+ * ── Why this card did not exist ────────────────────────────────────────────
+ *
+ * It is not that the data was not here. This screen has read the entire invoice
+ * book for as long as it has fired notifications from it — twenty-two columns,
+ * aged into overdue / upcoming / undated on every render — and exactly one
+ * number left that memo: `invoiceAgeing.overdue.length`, into `bookState`.
+ * `bookState` is not drawn either. It feeds `promptBookAlerts`, a local
+ * notification fired at most once a week, and `bookAlert` ranks the invoice
+ * line BELOW unmarked sessions — so a coach with three sessions waiting on an
+ * outcome was never told about their money at all, by the only thing that would
+ * have told them.
+ *
+ * There was also no route to /(trainer)/invoices anywhere on this screen. The
+ * question src/lib/coachInvoice.ts calls "the most common unanswered question
+ * in this app" had its answer sitting in this component's memory and no pixel
+ * and no tap.
+ *
+ * ── What it may say ───────────────────────────────────────────────────────
+ *
+ * Every judgement is src/lib/homeMoney.ts's, for the usual reason: the figure
+ * is over the OVERDUE rows alone so it is about the same invoices as the count
+ * beside it, a truncated read loses its number and keeps its rows, a failed one
+ * draws a card saying so — `UnmarkedSessions` above already makes that
+ * distinction, and an absent card here reads as a clear book — and the money is
+ * one line per currency, never a sum across them.
+ */
+function MoneyOwed({ m }: { m: HomeMoney }) {
+  const t = useTheme();
+  const router = useRouter();
+  if (!homeMoneyDrawn(m)) return null;
+  return (
+    <Card onPress={() => router.push('/(trainer)/invoices')} tone={m.failed ? t.crit : t.s3} style={{ marginBottom: sp.md }}>
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{homeMoneyTitle(m)}</Text>
+      {/* One row per currency. `minorMoney` is the one money formatter in this
+          codebase and it is the only thing here that knows what a minor unit is
+          worth; a null from it draws nothing rather than a bare number in a
+          currency nobody stated. */}
+      {(m.pots ?? []).map((p) => {
+        const amount = minorMoney(p.minorUnits, p.currency);
+        if (!amount) return null;
+        return (
+          <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.sm }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {p.count} in {p.currency}
+            </Text>
+            <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount}</Text>
+          </View>
+        );
+      })}
+      {/* Said once, and never added together. Two currencies are two amounts of
+          money — the same rule app/(trainer)/invoices.tsx states beside its own
+          per-currency rows. */}
+      {(m.pots?.length ?? 0) > 1 ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+          These are separate amounts of money and are deliberately not added together.
+        </Text>
+      ) : null}
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{homeMoneyNote(m)}</Text>
+    </Card>
+  );
+}
+
 
 export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
-  const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
-  useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
+  // Kept current for as long as this screen is mounted, which for a tab is the
+  // life of the app. NOT `useMemo(() => localDayKey(Date.now()), [])` and not a
+  // day captured inside another memo's body — see `invoiceAgeing`.
+  const today = useToday();
+  // The trial, from the ACCOUNT, through the same read Billing uses.
+  //
+  // This was `trialInfo()` — the AsyncStorage counter in src/lib/trial.ts,
+  // whose own header says in capitals that it is no longer the authority on
+  // anything and which starts again from zero on reinstall. It was rendered
+  // here as a flat fact ("12 days left in your free trial") while Billing, one
+  // tap away and on the same account, said the start date could not be read.
+  // Both were doing what their own code said, and neither knew the other
+  // existed. src/ui/trialReading.ts is now the one read and the one clock, so
+  // the two screens cannot disagree without that file disagreeing with itself.
+  //
+  // Read once at mount and never again was also a bug on its own: a tab is
+  // never unmounted, so the figure was frozen at launch. `reloadEverything`
+  // below re-runs it on focus and on a pull down.
+  const { reading: trialReading, reload: reloadTrial } = useTrialReading();
   // `status` was computed by the roster provider and read by nobody, so a
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
-  const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  const { roster, status: rosterStatus, addClient, removeClient, setClientMode, refresh: refreshRoster } = useRoster();
+  /* ── the nonce the screen's own reads hang off ──────────────────────────
+   *
+   * Four effects here read the server directly: the roster-wide drift, the
+   * coach's own delivered sessions, the coaching relationships that ended, and
+   * the Repple invoices behind the overdue banner. They stay four separate
+   * effects — each is reported separately and a shared loader would hide a
+   * working half behind a broken one — so the refresh bumps this and every one
+   * of them re-reads through the code that already knows how to report it.
+   *
+   * The two effects keyed on `sel` are deliberately NOT on this nonce. They
+   * belong to the open client sheet, one of them clears the generated summary
+   * the coach may be reading, and the pull below is on the scroll view
+   * underneath a modal that would have to be closed to reach it. */
+  const [readNonce, setReadNonce] = useState(0);
   // How this coach works: their own declared answer, widened by their roster.
   // Only ever narrows the screen when the coach said "online" AND the roster
   // came back WHOLE AND nobody on it trains in the room. Anything short of all
@@ -384,7 +727,7 @@ export default function TrainerClients() {
   // draws the same distinction.
   const coachUnit: WeightUnit = useSettings().weightUnit;
   const rosterUnread = rosterStatus === 'error';
-  const { tenant } = useTenant();
+  const { tenant, refresh: refreshTenant } = useTenant();
   // The signed-in coach. Their own sessions are keyed on this, not on a gym —
   // which is the whole reason an independent trainer saw nothing here.
   const { user: authUser, loading: authLoading } = useAuth();
@@ -404,63 +747,42 @@ export default function TrainerClients() {
   //   driftErr !== null           → the read failed. Say so, and say the list
   //                                 is in its ordinary order — never let a
   //                                 failed read look like "nobody is drifting".
-  const [drift, setDrift] = useState<Record<string, Drift> | null>(null);
-  const [driftErr, setDriftErr] = useState<string | null>(null);
-  const rosterKey = roster.map((c) => c.id).join(',');
-  useEffect(() => {
-    const ids = rosterKey ? rosterKey.split(',') : [];
-    let live = true;
-    setDriftErr(null);
-    if (!ids.length) { setDrift({}); return; }
-    setDrift(null);
-    (async () => {
-      try {
-        const events = await fetchClientActivity(supabase, ids, {
-          days: DEFAULT_WINDOWS.historyDays,
-          tenantId: tenant?.id ?? null,
-        });
-        if (!live) return;
-        const map: Record<string, Drift> = {};
-        // `since` is the client's join date, and passing it changes two things.
-        // A client added yesterday and a client silent for eight weeks both
-        // have no recent activity, so without it they were indistinguishable —
-        // both UNKNOWN, both told "nothing recorded in the last 56 days", which
-        // is a strange thing to say about somebody who joined on Tuesday. It
-        // also clamps the drift baseline to the period they were actually on
-        // the book, so a real fall is not diluted by weeks they did not exist
-        // for. It comes from coach_clients.created_at or the coaching
-        // relationship; null where genuinely unknown, never guessed.
-        const joinedOf: Record<string, string | null> = {};
-        for (const c of roster) joinedOf[c.id] = c.joinedAt ?? null;
-        for (const id of ids) {
-          map[id] = assessDrift({ clientId: id, events: events[id] ?? [], since: joinedOf[id] ?? null });
-        }
-        setDrift(map);
-      } catch (e: any) {
-        if (!live) return;
-        reportError('dashboard.clientDrift', e);
-        setDrift(null);
-        setDriftErr(e?.message || 'Could not read the training record.');
-      }
-    })();
-    return () => { live = false; };
-  }, [rosterKey, tenant?.id]);
-  const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
-  const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
+  /**
+   * The read itself, and the three-plus-one states it produces, now live in
+   * src/ui/clientDrift.ts. Every line of it came from here — this screen was
+   * the only one that had moved off `atRiskClient`, and the two that had not
+   * (analytics.tsx and assistant.tsx) could not move without either copying a
+   * hundred lines out of this file or sharing them. Two definitions of "at
+   * risk" was the bug; three implementations of the good one would have been
+   * the next one.
+   *
+   * The names below are kept so the four hundred lines that read them do not
+   * move: `drift` is the map (null until read, an empty map IS an answer),
+   * `driftErr` is a failure and never an absence, `driftRead` is what the read
+   * could not cover, `driftActionable` gates ACTING on a verdict as opposed to
+   * ordering by it, and `driftActingNote` says out loud why a short list of
+   * names is not a clean book.
+   */
+  const _drift = useClientDrift(roster, tenant?.id ?? null, readNonce);
+  const drift = _drift.drift;
+  const driftErr = _drift.error;
+  const driftRead = _drift.coverage;
+  const driftFor = (c: RosterClient): Drift | null => _drift.driftFor(c.id);
+  const driftActionable = (c: RosterClient): boolean => _drift.actionable(c.id);
+  const driftActingNote: string | null = _drift.note;
+  const bands = _drift.bands;
 
-  const { name: coachName } = useMyTrainerProfile();
+  const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   // `status` as well as the two functions, for the reason the notes provider
   // below spells out: `getFeedback` returns `[]` under 'loading' AND under
   // 'error', so the sheet was reading an unread provider as a coach who had
   // never written to this client.
-  const { getFeedback, addFeedback, status: fbStatus } = useCoachFeedback();
+  const { getFeedback, addFeedback, status: fbStatus, reload: reloadFeedback } = useCoachFeedback();
   // A note that never reached the server has to say so, the same way a private
   // note does — `addFeedback` resolves false and the client never sees it.
   const [fbBusy, setFbBusy] = useState(false);
-  const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus } = useCoachNutrition();
-  const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
-  const [mealQuery, setMealQuery] = useState('');
-  const { getNotes, addNote, removeNote, status: notesStatus } = useCoachNotes();
+  const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus, reload: reloadNutri } = useCoachNutrition();
+  const { getNotes, addNote, removeNote, status: notesStatus, reload: reloadNotes } = useCoachNotes();
   // Saving a private note is now a round trip (see src/ui/coachNotes.tsx: it
   // used to be a `useState` that lost every note on relaunch), so the Save
   // button has to be able to say "in flight" and "that did not save".
@@ -468,8 +790,8 @@ export default function TrainerClients() {
   // `mine` and `status` as well as the write: a coach who has posted notices
   // could not see one of them anywhere in this app, so "did that go out?" was
   // answered by posting it again. The sheet below lists them.
-  const { addAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
-  const { sent: sentInvites, sendInvite, revokeInvite, status: inviteStatus } = useInvites();
+  const { addAnnouncement, mine: myNotices, status: noticeStatus, reload: reloadNotices } = useAnnouncements();
+  const { sent: sentInvites, sendInvite, revokeInvite, status: inviteStatus, reload: reloadInvites } = useInvites();
   /**
    * The addresses this coach already has an open invite for.
    *
@@ -489,13 +811,13 @@ export default function TrainerClients() {
       : []),
     [inviteStatus, sentInvites],
   );
-  const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
-  const { tagsFor, allTags, addTag, removeTag, status: tagStatus } = useClientTags();
-  const { templates } = useProgramTemplates();
+  const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite, reload: reloadTrainerInvites } = useTrainerInvites();
+  const { tagsFor, allTags, addTag, removeTag, status: tagStatus, reload: reloadTags } = useClientTags();
+  const { templates, reload: reloadTemplates } = useProgramTemplates();
   // `assignProgramTo` rather than `assignProgram`: this screen assigns to a
   // whole segment at once and has to report on each write by name, which needs
   // the sentence saying why one of them did not land.
-  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
+  const { assignProgramTo, getProgram, status: programStatus, startsOn: programStarts, reload: reloadPrograms } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   // Removing a whole segment is the one bulk action on this screen that cannot
@@ -523,10 +845,60 @@ export default function TrainerClients() {
   // It narrows what the segment already selected, so what the bulk controls act
   // on stays exactly what is listed under them — see `shownRoster`.
   const [rosterQ, setRosterQ] = useState('');
+  // ── who the bulk controls act on ────────────────────────────────────────
+  //
+  // The rows a coach has ticked, and nobody else. Message, Assign Program and
+  // Remove From Your Roster are not on screen until at least one row is ticked:
+  // the tester's screenshot of this tab (TestFlight, coach build 20) is mostly
+  // those buttons, with "Remove 1 From Your Roster" standing open under a
+  // one-client list. Ticking starts from the Select control over the list or a
+  // long press on a row. See `pickedRoster`.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePick = (id: string) => setPicked((was) => {
+    const next = new Set(was);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const stopPicking = () => { setPicking(false); setPicked(new Set()); };
   const [tagDraft, setTagDraft] = useState('');
+  /**
+   * Accept an invitation to a gym, and say which of the two things happened.
+   *
+   * The congratulation used to be unconditional. `acceptTrainerInvite` goes to
+   * real trouble to make a refusal recoverable — src/ui/trainerInvites.tsx puts
+   * the invitation BACK on this dashboard when the RPC did not attach — and the
+   * boolean saying so was dropped on the floor. So a coach whose acceptance the
+   * server refused was welcomed to a platform they are not on, pushed to set up
+   * a profile for it, and then found the invitation sitting on the dashboard
+   * again with nothing to explain it. That reads as the app having lost their
+   * acceptance rather than never having had it, and joining a gym is the moment
+   * a coach's roster, currency and payroll change hands.
+   */
   const acceptJoin = async (id: string, ownerName: string | null) => {
-    await acceptTrainerInvite(id);
-    Alert.alert('Welcome to the platform', 'You have joined ' + (ownerName || 'the platform') + ' as a trainer. Let us set up your profile.', [{ text: 'Set up profile', onPress: () => router.push('/(trainer)/profile') }, { text: 'Later' }]);
+    const joined = await acceptTrainerInvite(id);
+    if (!joined) {
+      Alert.alert('Not Joined',
+        `You have NOT been added to ${ownerName || 'that gym'}. The server did not accept it, so nothing has changed and none of your clients have moved. `
+        + 'The invitation is back on this screen; try it again in a moment, or ask them to send a new one.');
+      return;
+    }
+    Alert.alert('Welcome to the Platform', 'You have joined ' + (ownerName || 'the platform') + ' as a trainer. Let us set up your profile.', [{ text: 'Set Up Profile', onPress: () => router.push('/(trainer)/profile') }, { text: 'Later' }]);
+  };
+  /**
+   * Withdraw an invitation, and only say it is withdrawn when it is.
+   *
+   * The row used to be filtered off this list on the tap and the result thrown
+   * away. An invitation is a live link into the coach's book: cancel one sent to
+   * the wrong address, watch it disappear, and that address can still join them
+   * — with no second place in the app to check, because the list the row was in
+   * is the list that was just filtered.
+   */
+  const cancelInvite = async (id: string, email: string) => {
+    if (await revokeInvite(id)) return;
+    Alert.alert('Not Cancelled',
+      `${email} can still use that invitation to join you. The server did not confirm the cancellation, so it is still live and the row is still here. `
+      + 'Try again in a moment.');
   };
   const [pnote, setPnote] = useState('');
   const [bcOpen, setBcOpen] = useState(false);
@@ -541,12 +913,6 @@ export default function TrainerClients() {
   const [fb, setFb] = useState('');
   const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
-  // The meal picker is a slot on ONE client, so it cannot outlive the sheet
-  // that named them. Closing the client sheet while it is open leaves
-  // `mealPick` set, and the next client opened would have the picker spring up
-  // unasked — on their breakfast, ready to write a meal to somebody the coach
-  // had not chosen it for.
-  useEffect(() => { if (!sel) setMealPick(null); }, [sel]);
   const [addOpen, setAddOpen] = useState(false);
 
   // ── bringing a whole book across ─────────────────────────────────────────
@@ -594,7 +960,7 @@ export default function TrainerClients() {
     // anywhere in Europe has accented names in its first column, and the naive
     // read puts "ZoÃ«" on somebody's roster permanently.
     const text = base64ToUtf8(b64);
-    if (text == null) { setImpErr('That file could not be read as text. Export it as CSV and try again — nothing has been imported.'); return; }
+    if (text == null) { setImpErr('That file could not be read as text. Export it as CSV and try again. Nothing has been imported.'); return; }
     const pv = previewCoachRoster(text);
     // A read that has not come back is not "nobody has been invited". Refused
     // here rather than run on the guess: the alternative is re-inviting
@@ -604,7 +970,7 @@ export default function TrainerClients() {
       setImpFile(picked.file.name || 'your file');
       setImpPreview(pv);
       setImpPlan(null);
-      setImpErr('Your existing invites could not be read, so this cannot tell who you have already invited. That is a read that failed rather than a coach who has invited nobody — reopen this screen and try again. Nothing has been imported.');
+      setImpErr('Your existing invites could not be read, so this cannot tell who you have already invited. That is a read that failed rather than a coach who has invited nobody. Reopen this screen and try again. Nothing has been imported.');
       return;
     }
     const screened = screenInvites<CoachClientRow>(pv.ready, openInviteEmails);
@@ -641,7 +1007,7 @@ export default function TrainerClients() {
     setImpResult({ rows });
   };
   const [newName, setNewName] = useState('');
-  const [newGoal, setNewGoal] = useState('Fat loss');
+  const [newGoal, setNewGoal] = useState('Fat Loss');
   const [newMode, setNewMode] = useState<CoachedMode>('online');
   const [invOpen, setInvOpen] = useState(false);
   // Copying the bare link, for the places an online coach actually earns
@@ -655,7 +1021,7 @@ export default function TrainerClients() {
     // build (see JoinLinkFallback below), so this is the second lock on the same
     // door — and a coach told "copied" who then pastes nothing has lost the post.
     if (!(await copyToClipboard(joinLink(code)))) {
-      Alert.alert('Not copied', `The link for ${label} could not be copied. It is ${joinLink(code)} — write it down, or use Share instead.`, [{ text: 'OK' }]);
+      Alert.alert('Not Copied', `The link for ${label} could not be copied. It is ${joinLink(code)}. Write it down, or use Share instead.`, [{ text: 'OK' }]);
       return;
     }
     // The destination sentence is not a nicety. If a coach points a paid ad at
@@ -665,9 +1031,9 @@ export default function TrainerClients() {
     // with no code on it. Saying so at the moment they copy is the only point
     // where it is still free to get right.
     Alert.alert(
-      'Link copied',
+      'Link Copied',
       `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.\n\n` +
-        'Running an ad? Use this as the ad’s destination — not your profile. It is what lets what you spent be matched to the clients it actually brought.',
+        'Running an ad? Use this as the ad’s destination, not your profile. It is what lets what you spent be matched to the clients it actually brought.',
       [{ text: 'Done' }],
     );
   };
@@ -710,21 +1076,111 @@ export default function TrainerClients() {
     // failed save cannot sit on screen looking like the recorded figure.
     setSpendDraft(Object.fromEntries(r.rows.map((x) => [x.id ?? '', spendFieldValue(x)])));
   };
+  /**
+   * Open the Invite sheet, with the coach's code and their named codes loaded.
+   *
+   * Lifted out of the "Invite a Client" button because it is now reached two
+   * ways. The second is Getting Started: two of its steps — "Add Your First
+   * Client" and "Name a Join Code" — are done in THIS sheet and nowhere else,
+   * and both of them used to route to `/(trainer)/dashboard` with no
+   * instruction about what to do once they arrived.
+   *
+   * That is the failure mode the card exists to avoid. A coach tapping "add
+   * your first client" landed back on the Clients tab, looking at the same
+   * card that had just sent them, with the control that completes the step
+   * behind a button they were never told about. A checklist whose items lead
+   * nowhere is worse than no checklist, because it teaches the reader to
+   * ignore it — and then it is ignored on the row that mattered.
+   */
+  const openInvite = useCallback(async () => {
+    setInvEmail(''); setInvMode('online'); setInvOpen(true);
+    setMyCode(null); setMyCodeErr(null);
+    const r = await fetchMyJoinCode();
+    if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+    await loadCodes();
+    // `loadCodes` is redeclared on every render and is not a dependency on
+    // purpose: it reads no state, only writes it. Listing it would rebuild
+    // this callback every render and re-fire the effect below on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── landing on the control, not merely on the screen ──────────────────
+   *
+   * `?start=invite`, set by src/lib/coachFirstRun.ts on the two steps that
+   * are completed in the sheet above. Consumed once and cleared, so returning
+   * to this tab later does not reopen a sheet the coach has already closed —
+   * a tab keeps its params, and without the clear the sheet would spring open
+   * every time they came back to Clients for the rest of the session.
+   *
+   * Anything else in `start` is ignored rather than reported: a stale or
+   * hand-edited link is not something to put an error in front of a coach
+   * about, and the screen it names is the right screen either way. */
+  const startParam = useLocalSearchParams<{ start?: string }>().start;
+  const startedFor = useRef<string | null>(null);
+  useEffect(() => {
+    // Clearing the param clears the memory of having honoured it. Without
+    // this the ref latched: "Add Your First Client" and "Name a Join Code"
+    // both open the same sheet, so a coach who used the first one and came
+    // back for the second was returned to the tab with nothing open — the
+    // dead end this parameter exists to remove, arriving on the second tap
+    // instead of the first.
+    if (!startParam) { startedFor.current = null; return; }
+    if (startedFor.current === startParam) return;
+    startedFor.current = startParam;
+    if (startParam === 'invite') void openInvite();
+    router.setParams({ start: '' });
+  }, [startParam, openInvite, router]);
+
+  /* ── and landing on one client's tools ─────────────────────────────────
+   *
+   * `?sheet=<client id>`, set by the Notes and Coaching Tools row on
+   * app/(trainer)/client.tsx. The same consume-once-and-clear as `start`
+   * above and for the same reason: a tab keeps its params, and a sheet that
+   * sprang open every time a coach came back to Clients would be worse than
+   * no way in at all.
+   *
+   * It waits for the roster rather than giving up on it. This tab is mounted
+   * from launch so the roster is nearly always here already, but "nearly" is
+   * a cold deep link's whole problem; the effect re-runs when the roster
+   * lands and opens the sheet then. An id that is not in the roster once the
+   * read has SETTLED — whole, short or failed — is dropped quietly: they were
+   * removed between the two screens, or the read that would have found them
+   * did not land, and either way the roster in front of the coach already
+   * says so. Holding the param instead would open a sheet minutes later, on
+   * whichever refresh happened to bring the row back. */
+  const sheetParam = useLocalSearchParams<{ sheet?: string }>().sheet;
+  useEffect(() => {
+    if (!sheetParam) return;
+    const c = roster.find((x) => x.id === sheetParam);
+    if (c) { setSel(c); router.setParams({ sheet: '' }); return; }
+    if (rosterStatus !== 'loading') router.setParams({ sheet: '' });
+  }, [sheetParam, roster, rosterStatus, router]);
+
   // The verdict on ranking, computed once for the sheet. enoughToTell refuses
   // outright under anything but a completed read, and refuses again when the
   // two busiest codes cannot be told apart from a coin toss.
   const codeTell = enoughToTell(returns.status, returns.rows);
   const saveSpend = async (row: CodeReturnRow) => {
     const key = row.id ?? '';
-    const parsed = parseSpend(spendDraft[key]);
-    if (parsed.kind === 'bad') { Alert.alert('Not saved', parsed.reason); return; }
+    // The currency travels WITH the figure, both here and to the server. It
+    // used to be scaled by a flat hundred here while `set_code_spend` resolved
+    // a currency of its own to stamp on the result, so on a yen account the
+    // number was a hundred times the money AND the label agreed with it. What
+    // the coach typed is now scaled in a currency somebody actually stated, and
+    // that same currency is what gets stored.
+    const parsed = parseSpend(spendDraft[key], spendCurrency(row));
+    if (parsed.kind === 'bad') { Alert.alert('Not Saved', parsed.reason); return; }
     setSpendBusy(key);
     // A cleared field sends null, which DELETES the record. Sending 0 would
     // tell Repple the campaign was free, and a free campaign has a perfect
     // return and wins every comparison on this screen.
-    const r = await saveCodeSpend(row.id, parsed.kind === 'clear' ? null : parsed.cents);
+    const r = await saveCodeSpend(
+      row.id,
+      parsed.kind === 'clear' ? null : parsed.cents,
+      parsed.kind === 'clear' ? null : parsed.currency,
+    );
     setSpendBusy(null);
-    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    if (!r.ok) { Alert.alert('Not Saved', r.reason); return; }
     await loadCodes();
   };
   const namedCodes = codes.rows.filter((r) => !r.isDefault);
@@ -746,16 +1202,68 @@ export default function TrainerClients() {
   // happily write "you are not logging your meals" into a coaching summary the
   // coach sends on. See the read below.
   const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[] | null>(null);
+  /**
+   * How many meals this client logged in the last seven days, or null when we
+   * could not find out.
+   *
+   * ── Why this is its own read and not `clientMeals.length` ────────────────
+   *
+   * It WAS `clientMeals.length`, and `clientMeals` is `.limit(6)` with no date
+   * bound at all. So the figure handed to `genSummary` below — described in its
+   * own comment as "Logged 9 meals this week" — could never exceed six and was
+   * never about a week. A client logging four meals a day for a month was
+   * reported to the model as having logged six; a client who logged six meals
+   * in March and nothing since was reported as having logged six as well. The
+   * model then wrote whichever of those it made of the number into a coaching
+   * summary the coach reads and sends on.
+   *
+   * A count over a truncated read is the thing src/lib/rowCap.ts exists about,
+   * arriving through a display limit rather than through PostgREST's own. So
+   * the count is asked for as a count — `head: true` returns no rows at all —
+   * and it is bounded to the window the sentence claims.
+   *
+   * `count == null` means unread, and `genSummary` says so to the model rather
+   * than sending a zero. Nothing on screen renders this; the list beside it is
+   * still the list.
+   */
+  const [mealsThisWeek, setMealsThisWeek] = useState<number | null>(null);
   const [aiSummary, setAiSummary] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [draftClient, setDraftClient] = useState<RosterClient | null>(null);
   const [draftText, setDraftText] = useState('');
   const [draftBusy, setDraftBusy] = useState(false);
+  /**
+   * Whether there is an account behind the client whose sheet is open.
+   *
+   * `sel.id.includes('-')` was the test the photo read below used, on the
+   * belief that a hand-added client carries an id the phone invented. It does
+   * not: `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so it has
+   * dashes and the guard never fired. app/(trainer)/client-report.tsx,
+   * client-body.tsx and client-training.tsx all carry the same note and all
+   * three ask `clientIsQueryable`, which consults the one thing that knows
+   * which table the row came from — the roster's own `handAdded`.
+   *
+   * What it costs on THIS sheet is not a wrong pixel, it is a sentence sent to
+   * a model. `food_logs` is read through a policy that hangs off
+   * `is_my_client()`, an EXISTS over `clients`, so a hand-added client's read
+   * comes back with zero rows and NO error — and `mealsThisWeek` became a
+   * confident `0`, which `genSummary` posts as "0 in the last 7 days" under a
+   * prompt asking for "one concern to watch". The coach then reads, and may
+   * send on, a paragraph about a person not logging their food in an app they
+   * have never been given.
+   */
+  const selAskable = clientIsQueryable(sel?.id, sel?.handAdded);
   useEffect(() => {
     let cancelled = false;
     setAiSummary('');
-    if (!sel) { setClientMeals(null); return; }
+    if (!sel) { setClientMeals(null); setMealsThisWeek(null); return; }
     setClientMeals(null);
+    setMealsThisWeek(null);
+    // Nothing server-backed is asked about somebody with no account. Both stay
+    // null, which is "not known" everywhere downstream — the sheet has its own
+    // sentence for this and `genSummary` tells the model there is no food log
+    // rather than that there is an empty one.
+    if (!selAskable) return;
     (async () => {
       try {
         // `error` was not destructured here. supabase-js resolves rather than
@@ -769,8 +1277,27 @@ export default function TrainerClients() {
         setClientMeals(data.map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
       } catch { if (!cancelled) setClientMeals(null); }
     })();
+    (async () => {
+      try {
+        // Seven local days back to this morning's midnight, which is the week
+        // the summary is written about. Built from the local getters rather
+        // than a UTC day, for the reason src/lib/offlineQueue.ts gives: a meal
+        // eaten at 9pm is that day's dinner everywhere west of Greenwich.
+        const from = new Date();
+        from.setHours(0, 0, 0, 0);
+        from.setDate(from.getDate() - 6);
+        const { count, error } = await supabase.from('food_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('client_id', sel.id).gte('logged_at', from.toISOString());
+        if (cancelled) return;
+        // A null count with no error is PostgREST declining to count rather
+        // than a client who ate nothing, and it is the same unknown.
+        if (error || count == null) { setMealsThisWeek(null); return; }
+        setMealsThisWeek(count);
+      } catch { if (!cancelled) setMealsThisWeek(null); }
+    })();
     return () => { cancelled = true; };
-  }, [sel]);
+  }, [sel, selAskable]);
   // ── progress photos this client SENT ────────────────────────────────────
   // A coach sees a progress photo for exactly one reason: the client sent that
   // photo. There is no roster-wide read and no "linked trainer" policy behind
@@ -787,9 +1314,15 @@ export default function TrainerClients() {
     setShared(null);
     setSharedErr(null);
     if (!sel) return;
-    // A coach-created client (coach_clients) has no account and therefore no
-    // photos; its id is not a uuid, so asking would be a guaranteed error.
-    if (!sel.id.includes('-')) { setShared([]); return; }
+    // A client the coach typed in by hand has no account, so there is no phone
+    // for a photo to have been sent FROM — an empty list is the true answer
+    // rather than an unread one, and it is what the sheet's third branch says.
+    //
+    // This was `!sel.id.includes('-')`, written in the belief that such a row
+    // carries an id the phone invented. `coach_clients.id` is `uuid DEFAULT
+    // gen_random_uuid()`, so it has dashes, the guard never fired, and the
+    // round trip ran on every one of them. See `selAskable` above.
+    if (!selAskable) { setShared([]); return; }
     const forClient = sel.id;
     (async () => {
       try {
@@ -801,7 +1334,7 @@ export default function TrainerClients() {
       }
     })();
     return () => { cancelled = true; };
-  }, [sel]);
+  }, [sel, selAskable]);
   const active = roster.length;
   // How many clients there are, as opposed to how many came back.
   //
@@ -837,7 +1370,23 @@ export default function TrainerClients() {
     if (!coachId) { setMySessions(null); setSessionsUnread(true); return; }
     (async () => {
       try {
-        const rows = await fetchMySessions(supabase, coachId, windowStart(MARK_WINDOW_DAYS), new Date().toISOString());
+        /* The upper bound used to be NOW, because the only two questions asked
+         * of these rows looked backwards. It now reaches `BOOKED_AHEAD_DAYS`
+         * forward so the roster row can say when the coach next sees somebody —
+         * see `nextBooked`.
+         *
+         * Nothing behind it has to change and nothing behind it can drift:
+         * `isAwaitingOutcome` (src/lib/gymSessions.ts) requires the session to
+         * have ENDED — `end <= now` — so a future row can never join the
+         * unmarked queue, and `deliveredBetween` bounds its own upper end at
+         * `Date.now()` by default. A fortnight of a coach's own diary is tens
+         * of rows against a cap of a thousand, and `fetchMySessions` still
+         * refuses a truncated read outright rather than reporting a short one. */
+        const rows = await fetchMySessions(
+          supabase, coachId,
+          windowStart(MARK_WINDOW_DAYS),
+          new Date(Date.now() + BOOKED_AHEAD_DAYS * 86_400_000).toISOString(),
+        );
         if (live) { setMySessions(rows); setSessionsUnread(false); }
       } catch (e) {
         reportError('dashboard.mySessions', e);
@@ -845,64 +1394,87 @@ export default function TrainerClients() {
       }
     })();
     return () => { live = false; };
-  }, [coachId, authLoading]);
+  }, [coachId, authLoading, readNonce]);
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
+  /* ── today's diary, off the same read ────────────────────────────────
+   *
+   * The approved board opens the coach's home on the day ahead: who is
+   * booked, when, for how long. Those rows are already in `mySessions` — the
+   * window reaches `BOOKED_AHEAD_DAYS` forward — so this costs no read.
+   *
+   * Null, not `[]`, while the read has not landed or failed: "No sessions
+   * booked today" is a statement about the coach's day and only a read that
+   * answered may make it. `today` is the screen's one day key (`useToday`),
+   * so the list re-settles at midnight rather than freezing at launch. */
+  const todaySessions = mySessions === null ? null : mySessions
+    .filter((s) => s.status === 'booked' && localDayKey(Date.parse(s.startsAt)) === today)
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 
-  /* ── why they left, counted ───────────────────────────────────────────
+  /* ── when this coach next sees each of them ────────────────────────────
    *
-   * R3. The Unexplained Departures card above asks about every ending with no
-   * reason on it. Until now the answers went into `coaching_relationships.
-   * end_reason` and NOTHING read them back: `fetchEndRecord` had no caller
-   * anywhere in the app, and the only read of the column filtered
-   * `is('end_reason', null)` in order to keep asking.
+   * `RosterClient.next` is the literal string '—' in all three places
+   * src/ui/roster.tsx builds a client: it is computed nowhere and never has
+   * been, so the row below carried a field called "Next" with a dash after it
+   * until somebody removed the field rather than the dash. Meanwhile every
+   * competitor's roster — TrueCoach, Trainerize, PT Distinction — answers "when
+   * am I next with this person" on the row, and in this app the only way to
+   * find out was to open the diary and tap through a fortnight.
    *
-   * The same window as the card, deliberately. Two windows on one screen would
-   * have the card asking about four people and the tally counting six, and a
-   * coach would have to work out which of the two was lying.
+   * The rows were already here. `bookedAhead` is the module
+   * app/(trainer)/calendar.tsx reads for its own Booked Ahead section, so this
+   * is the same judgement about what counts as held — an `available` slot
+   * belongs to nobody, a cancelled one has been given back, and a session is
+   * ahead by its END so the hour somebody is standing in is still theirs.
    *
-   * Null on a failed read and never an empty tally. "Nobody has left you" is a
-   * lovely sentence and this screen must not produce it out of a refusal.
+   * NULL, NOT AN EMPTY MAP. `mySessions === null` is a diary that did not
+   * answer, and a row that then said nothing would be indistinguishable from a
+   * client with nothing booked — which is the one reading a coach must not take
+   * from this. The row draws nothing at all in that case and the line under the
+   * list says the diary could not be read.
+   *
+   * `today` rather than a clock captured in this memo's body: this screen is a
+   * tab and stays mounted for days, which is the defect `invoiceAgeing` above
+   * carries a paragraph about.
    */
-  const [ended, setEnded] = useState<EndedRelationship[] | null>(null);
-  useEffect(() => {
-    if (authLoading) return;
-    let live = true;
-    if (!coachId) { setEnded(null); return; }
-    setEnded(null);
-    (async () => {
-      const since = new Date(Date.now() - DEPARTURE_WINDOW_DAYS * 86_400_000).toISOString();
-      const { data, error } = await supabase
-        .from('coaching_relationships')
-        .select(ENDED_COLS)
-        .eq('coach_id', coachId).eq('status', 'ended')
-        .gte('ended_at', since)
-        .order('ended_at', { ascending: false })
-        .limit(capLimit());
-      if (!live) return;
-      if (error) {
-        // Includes 42703 on a database that has not had part 168 applied.
-        // Both that and a refusal are unread, and unread draws no card.
-        reportError('dashboard.departureReasons', error);
-        setEnded(null); return;
-      }
-      const page = capped(data);
-      // A truncated read is treated as unread. A tally over a prefix is not a
-      // smaller tally, it is a different one, and the reason that came out on
-      // top would be a fact about the row cap.
-      setEnded(page.truncated ? null : page.rows.map((r: any) => ({
-        reason: r.end_reason ?? null,
-        endedAt: typeof r.ended_at === 'string' ? r.ended_at : null,
-      })));
-    })();
-    return () => { live = false; };
-  }, [coachId, authLoading]);
+  const nextBooked = useMemo(() => {
+    if (mySessions === null) return null;
+    const m = new Map<string, string>();
+    for (const a of bookedAhead(mySessions, Date.now())) m.set(a.clientId, a.startsAt[0]);
+    return m;
+  }, [mySessions, today]);
 
-  const departures = useMemo(() => departureTally(ended), [ended]);
-  const departureNote = useMemo(
-    () => departureLine(departures, DEPARTURE_WINDOW_DAYS), [departures],
-  );
+  /** The line on one roster row, or null when there is nothing honest to put
+   *  there. Three answers: the diary was not read (null — the list says so once,
+   *  underneath, rather than on thirty rows), nothing in the window (null — an
+   *  absence a coach reads off the empty space, and one this screen cannot turn
+   *  into "they have nothing booked with anybody", since these are the coach's
+   *  own rows), and a date. */
+  const nextBookedLine = (clientId: string): string | null => {
+    const at = nextBooked?.get(clientId);
+    if (!at) return null;
+    /* `fmtRelativeDay` and `fmtTime`, never a hand-built date. Both read the
+       instant in the coach's own zone through `localDate`, and `fmtClock` asks
+       Intl whether this reader's locale writes a 12- or a 24-hour clock — "7 am"
+       is not a time to a coach in Berlin, and "Thu 9/12" is two different days
+       either side of the Atlantic. Not lowercased: it would turn "Thu 18 Sep"
+       into "thu 18 sep" for every client further out than tomorrow. */
+    return `Next: ${fmtRelativeDay(at, new Date())}, ${fmtTime(at)}`;
+  };
 
+  /* ── why they left: one read, and it does not live here any more ──────
+   *
+   * This screen used to run its OWN read of `coaching_relationships` — same
+   * coach, same ninety days, no `end_reason` filter — purely to count the
+   * reasons, alongside the card's read of the same table WITH the filter. Two
+   * round trips to describe one book, and two sections describing it, which is
+   * what put the same fact on the screen twice in two voices.
+   *
+   * `useDepartures` in src/ui/EndReasonSheet.tsx now reads every ending in the
+   * window once and the card does both jobs off it: the people still worth
+   * asking, and the answers already given. `readNonce` is threaded in so a pull
+   * down this screen re-reads it with everything else.
+   */
   // ── Nothing prompted the coach to clear this ────────────────────────────
   //
   // The queue exists on app/(trainer)/sessions.tsx and the card above counts
@@ -913,14 +1485,101 @@ export default function TrainerClients() {
   // somebody's pay held up.
   //
   // `unmarked` is NULL when the read did not answer, and null never prompts.
-  // `backlogDue` enforces that and this is the caller that could get it wrong by
-  // coercing: a banner about a coach's own business built out of a failed query
-  // is how somebody learns to ignore the next one. Weekly, not daily — clearing
-  // it is a sit-down job.
+  // `bookAlert` enforces that for every figure it is given, and this is the
+  // caller that could get it wrong by coercing: a banner about a coach's own
+  // business built out of a failed query is how somebody learns to ignore the
+  // next one. Weekly, not daily — clearing any of this is a sit-down job.
+  //
+  // ── the other three things about a coach's own book ──────────────────────
+  //
+  // The unmarked queue used to be the only one of these the app would tell a
+  // coach about without being opened. An invoice ageing past its due date and a
+  // client who has stopped training were computed already, on screens somebody
+  // had to go and look at, and there is no trigger to hang either on — nothing
+  // about a coach's own book has another person's action behind it. So this
+  // phone works them out. See `bookAlert` in src/lib/coachNotify.ts for the
+  // order and why there is only ever one banner.
+  /**
+   * The coach's own unpaid book, read once for the banner.
+   *
+   * One call, and the same one app/(trainer)/client.tsx and the Invoices screen
+   * make. `{ rows: [], status: 'loading' }` until it lands, and 'error' is what
+   * makes `bookState` pass null rather than nought — an empty list from a read
+   * that did not answer is not a coach nobody owes money to.
+   */
+  /** The coach's answer for the `book` channel. Read here because this is where
+   *  the banner is fired from, and a preference applied anywhere else would be
+   *  a switch that governs nothing. */
+  const channels = useChannelPrefs();
+  const [invoices, setInvoices] = useState<{ rows: CoachInvoice[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   useEffect(() => {
-    if (sessionsUnread) return;
-    void promptUnmarkedBacklog(unmarked);
-  }, [unmarked, sessionsUnread]);
+    if (!coachId || authLoading) return;
+    let live = true;
+    (async () => {
+      const inv = await fetchMyInvoices();
+      if (live) setInvoices(inv);
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading, readNonce]);
+  /** The coach's own pack sales, for who is about to run out of credits —
+   *  the read app/(trainer)/broadcast.tsx already makes, and `creditsLow` is
+   *  null under anything but a whole one (src/lib/creditsLow.ts). */
+  const [purchases, setPurchases] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  useEffect(() => {
+    if (!coachId || authLoading) return;
+    let live = true;
+    (async () => {
+      const p = await fetchClientPurchases();
+      if (live) setPurchases(p);
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading, readNonce]);
+  const lowCredits = useMemo(() => creditsLow(purchases.rows, isWhole(purchases.status)), [purchases]);
+  /**
+   * The book, aged against TODAY — and today is a value that moves.
+   *
+   * This was `localDayKey(Date.now())` inside a memo keyed on `[invoices]`, so
+   * the day was fixed at whatever it was when the invoices last landed and no
+   * dependency could ever change it. This screen is a TAB: app/(trainer)/
+   * _layout.tsx mounts it once and backgrounding a phone does not tear it down,
+   * so a coach who opened the app on Sunday and came back on Wednesday had
+   * every due date judged against Sunday — and `promptBookAlerts` below fired
+   * off that stale copy. app/(trainer)/invoices.tsx already passes `useToday()`
+   * to this same call; the two screens could disagree about which invoices were
+   * overdue, which is exactly the defect src/ui/today.ts was written for.
+   */
+  const invoiceAgeing = useMemo(
+    () => ageingBook(invoices.rows, invoices.status, today),
+    [invoices, today],
+  );
+  /** What the card below may say about all that — src/lib/homeMoney.ts. The
+   *  whole ageing book was computed here already and nothing drew a pixel of
+   *  it. */
+  const owed = useMemo(() => homeMoney(invoiceAgeing, invoices.status), [invoiceAgeing, invoices.status]);
+  const bookState = useMemo(() => ({
+    unmarkedSessions: sessionsUnread ? null : unmarked,
+    // Null under anything but a whole read: `ageingBook` withholds its own
+    // outstanding figure on the same test, and a count over a page of somebody's
+    // book is a wrong number rather than a small one.
+    invoicesOverdue: invoices.status === 'ready' ? invoiceAgeing.overdue.length : null,
+    // Only from a read that can actually support a verdict about who has
+    // stopped. `driftActionable` is per client for the suggested check-ins; this
+    // is the same question asked of the whole book, and a truncated read
+    // disqualifies all of it — see src/lib/clientDrift.ts.
+    clientsDrifting: bands && driftRead && !driftRead.truncated && !driftRead.notAsked.size
+      ? bands.drifting : null,
+    // Clients at or under one session across their paid packs, off the whole
+    // purchase read above; null (unknown, not nought) under anything less.
+    packsRunningOut: lowCredits ? lowCredits.size : null,
+  }), [sessionsUnread, unmarked, invoiceAgeing, invoices.status, bands, driftRead, lowCredits]);
+  useEffect(() => {
+    // Defaults to allowed while the preference read has not landed, matching
+    // what supabase/functions/send-push does with the same table: a transient
+    // fault must not silently swallow the only thing that tells a coach their
+    // own money is sitting still.
+    const allowed = channels.status === 'ready' ? channelAllows('book', channels.muted) : true;
+    void promptBookAlerts(bookState, allowed);
+  }, [bookState, channels.status, channels.muted]);
   /** Sessions actually delivered in the last month — a count of recorded
    *  outcomes, not an inference from the clock. Null until the read lands. */
   const delivered = mySessions === null
@@ -937,14 +1596,41 @@ export default function TrainerClients() {
   // printed a confident "Unread 0" while the Hero directly above it said the
   // roster could not be read. A coach reads that tile to decide whether anybody
   // is waiting on them, and closes the app.
+  //
+  // ── and the test is over the rows that CAN carry a count ────────────────
+  //
+  // `roster.some((c) => c.unread == null)` was true forever for any coach with
+  // one hand-added client, and it is not a read failing. `coach_unread_counts()`
+  // enumerates `clients` — a manually-added `coach_clients` row is a name the
+  // coach typed with no account behind it, so it is in no thread, has never
+  // been counted, and can NEVER have an unread figure. Nothing about that
+  // changes with a retry.
+  //
+  // So one cash client nulled this tile permanently: "Unread —" for the life of
+  // the account, while the Unanswered chip below it happily listed the three
+  // people actually waiting. The unknown is real for the LINKED rows and only
+  // for them; a hand-added row is not an unknown count, it is the absence of a
+  // thread, and summing them as nought is the truthful reading rather than the
+  // convenient one. `handAdded` is marked in src/ui/roster.tsx at the only
+  // place that knows which table the row came from — `coach_clients.id` is a
+  // real uuid, so nothing downstream can work it out from the id.
+  const threaded = roster.filter((c) => c.handAdded !== true);
   const unread = isWhole(rosterStatus)
-    ? (roster.some((c) => c.unread == null) ? null : roster.reduce((a, c) => a + (c.unread ?? 0), 0))
+    ? (threaded.some((c) => c.unread == null) ? null : threaded.reduce((a, c) => a + (c.unread ?? 0), 0))
     : null;
-  // The legacy signal, kept only for the render where the drift read has not
-  // landed. It cannot see the client this whole feature is about: with
-  // `adherence: null` and `lastActive: 'no activity yet'` both of its clauses
-  // are false, so a client nobody has heard from reads as not at risk.
-  const atRisk = roster.filter(atRiskClient).length;
+  /** Clients whose own adherence figure is below target — the one signal on a
+   *  roster row that is evidence ABOUT the person rather than the absence of it.
+   *
+   *  This was `roster.filter(atRiskClient)`, kept "only for the render where
+   *  the drift read has not landed". Two of that function's three clauses are
+   *  not evidence: `staleDays` regexes a number out of the display string
+   *  `ago()` writes for a human to read, and `noRecordOf` is true whenever
+   *  there is no figure and no date — which is true, permanently, of every
+   *  client a coach added by hand (`adherence: null, lastActive: 'added by
+   *  you'`, src/ui/roster.tsx). Those two clauses are now gone from this file
+   *  and from the app; what is left is the figure the client submitted. */
+  const lowAdherence = (c: RosterClient): boolean => c.adherence != null && c.adherence < 80;
+  const belowTarget = roster.filter(lowAdherence).length;
   /** Drifting plus unknown — the number a coach actually has to act on. Null
    *  until the record has been read, so it renders as an em-dash rather than as
    *  zero.
@@ -977,16 +1663,31 @@ export default function TrainerClients() {
    *  captioned a fragment as the whole book. The segment still SELECTS in both
    *  cases — filtering what did load is honest — it just cannot say how many.  */
   const segN = (n: number): number | null => (isWhole(rosterStatus) ? n : null);
-  const AUTO_SEGS = [
+  /** Nobody has written this client a program — as opposed to "this phone has
+   *  not been told what they are on", which is what a null means under any
+   *  status but 'ready'. Only ever asked behind `isWhole(programStatus)`. */
+  const noProgram = (c: RosterClient): boolean => getProgram(c.id) == null;
+  // `band` marks the four that are a STATE rather than a kind of client, with
+  // the state's hue by name. The mockups draw those as a row of toned chips
+  // under the segment bar and the rest in the bar; both rows set the one `seg`,
+  // so there is still exactly one filter, one list and one set of recipients
+  // for the bulk controls — see `shownRoster`.
+  const AUTO_SEGS: { key: string; label: string; n: number | null; band?: Tone }[] = [
     { key: 'all', label: 'All', n: segN(roster.length) },
     // The drift segments replace the old At-risk chip rather than sitting
     // beside it: two rules for "who needs attention" on one screen is how the
     // product ended up with two status scales in the first place. Before the
     // read lands there is no honest count, so the old chip stands in.
     ...(bands
-      ? [{ key: 'drifting', label: 'Drifting', n: segN(bands.drifting) },
-         { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown) }]
-      : [{ key: 'atrisk', label: 'At-risk', n: segN(atRisk) }]),
+      // All four bands `summariseDrift` sorts the book into, so the chips add
+      // up to the book and agree with the Roster Health donut slice for slice.
+      // "On Track" and "Slipping" had a count in the donut and no way to list
+      // who they were.
+      ? [{ key: 'steady', label: 'On Track', n: segN(bands.steady), band: 'brand' as const },
+         { key: 'watch', label: 'Slipping', n: segN(bands.watch), band: 'amber' as const },
+         { key: 'drifting', label: 'At Risk', n: segN(bands.drifting), band: 'red' as const },
+         { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown), band: 'purple' as const }]
+      : [{ key: 'below', label: 'Below Target', n: segN(belowTarget) }]),
     // ── who is waiting on a reply ─────────────────────────────────────────
     // R6. This row already draws "3 unread" on it and the segment list could
     // not filter to it, so a coach with forty clients had recency-only ordering
@@ -999,18 +1700,61 @@ export default function TrainerClients() {
     // saying "Unanswered 0" over a list that is missing them. `null` renders as
     // a dash and the chip still selects, which is the same bargain every other
     // chip on this row makes.
+    //
+    // Over `threaded` for the reason spelled out on the Unread tile above: a
+    // hand-added row can never carry an unread count, because
+    // `coach_unread_counts()` enumerates `clients` and there is no account and
+    // no thread behind one. Testing it here dashed this chip permanently for
+    // any coach with a single cash client — while the chip itself still
+    // selected and listed the three people genuinely waiting, so the caption
+    // said "unknown" over a list the screen could plainly count.
     { key: 'unanswered', label: 'Unanswered',
-      n: roster.some((c) => c.unread == null) ? null : segN(roster.filter((c) => (c.unread ?? 0) > 0).length) },
+      n: threaded.some((c) => c.unread == null) ? null : segN(threaded.filter((c) => (c.unread ?? 0) > 0).length) },
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
     // other two, instead of quietly filing them under Online.
+    /* ── who this coach is not actually programming for ──────────────────
+     *
+     * The chip a coach opens a roster to find and the one this screen did not
+     * have. TrueCoach, Trainerize and PT Distinction all surface "no active
+     * program" on the roster, because it is the difference between somebody
+     * who is coached and somebody who is merely listed — and it is invisible
+     * from every other signal here: a client with no program at all can be
+     * training four times a week off their own bat, so they are `on_track` in
+     * drift, unflagged on adherence, and nothing on this screen ever mentions
+     * that the coach has written them nothing.
+     *
+     * No new read. `useAssignedPrograms` is already mounted for the bulk-assign
+     * panel and the client sheet, and `getProgram` is what both of those ask.
+     *
+     * ONLY OFFERED OFF A WHOLE READ, and that is not fussiness. The header of
+     * src/ui/assignedPrograms.tsx is explicit that `getProgram` serves this
+     * DEVICE's cache when no read has landed — deliberately — and that serving
+     * the cache does not make anything 'ready'. So under 'loading' and under
+     * 'error' a null program means "this phone has not been told", and a chip
+     * built on it would list every client the cache happens not to hold under a
+     * heading asserting the coach has programmed none of them. The drift chips
+     * two entries above appear on exactly the same condition and for exactly
+     * the same reason; this one is absent rather than wrong.
+     */
+    ...(isWhole(programStatus)
+      ? [{ key: 'noprogram', label: 'No Program', n: segN(roster.filter(noProgram).length) }]
+      : []),
     ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: segN(roster.filter((c) => c.mode === m).length) })),
   ];
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
+    : seg === 'watch' ? driftFor(c)?.status === 'watch'
+    // `summariseDrift`'s own else-branch: assessed, and in none of the other
+    // three. A client with no verdict yet is in no band and in no chip's count.
+    : seg === 'steady' ? driftFor(c)?.status === 'on_track'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
-    : seg === 'atrisk' ? atRiskClient(c)
+    : seg === 'below' ? lowAdherence(c)
+    // Only reachable while the chip is on screen, which is only while the
+    // program read was whole — see AUTO_SEGS. `segLive` drops the selection
+    // back to the whole book if that stops being true underneath the coach.
+    : seg === 'noprogram' ? noProgram(c)
     // A row whose unread count could not be read is NOT in this list. The
     // segment is a queue a coach works through, and a client who may or may not
     // have written is not something to answer — the chip's own dash says the
@@ -1021,7 +1765,14 @@ export default function TrainerClients() {
     : tagsFor(c.id).includes(seg);
   // A drift segment cannot be honoured once the read is gone; fall back to the
   // whole book rather than showing an empty list that reads as "none of these".
-  const segLive = !(!bands && (seg === 'drifting' || seg === 'nodata'));
+  //
+  // The same for 'noprogram': a program read that stops being whole — a
+  // refresh that fails, a sign-out and back — leaves `getProgram` serving a
+  // cache, and a segment computed off that would quietly become a list of the
+  // clients this handset has forgotten rather than the ones nobody has written
+  // to. It falls back to the whole book, which is visibly not a filtered list.
+  const segLive = !((!bands && (seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'))
+    || (seg === 'noprogram' && !isWhole(programStatus)));
   const segRoster = segLive ? roster.filter(matchSeg) : roster;
   // What is on screen, and therefore what every control under the list acts on.
   //
@@ -1031,6 +1782,10 @@ export default function TrainerClients() {
   // which is the worst version of a control this file already takes care to
   // print a count on. One list, one count, one set of recipients.
   const shownRoster = searchRoster(segRoster, rosterQ);
+  // Ticked AND still listed. A search or segment that hides a ticked row takes
+  // it out of what the controls act on, so the count on the button is always a
+  // count of names the coach can see ticked.
+  const pickedRoster = shownRoster.filter((c) => picked.has(c.id));
   /** The sentence a search over an incomplete read owes the coach, or null.
    *  Only a whole read may say a person is not on the book. */
   const rosterQLine = rosterSearchLine({
@@ -1051,31 +1806,123 @@ export default function TrainerClients() {
   // regardless — so a client added by hand (a coach_clients row with no user
   // account behind it) got "Nudge sent" while the insert failed on the foreign
   // key and no push had anywhere to go.
-  const deliverMessage = async (client: RosterClient, body: string, pushTitle: string): Promise<{ ok: boolean; error?: string }> => {
+  //
+  // The push that used to follow this insert has gone. The row's own AFTER
+  // INSERT trigger already posts to supabase/functions/notify-message, which
+  // writes the inbox row and sends a push to the same person, with the same
+  // body, to the same route — so a nudge buzzed the client's phone twice, in
+  // two wordings, seconds apart. src/lib/notifyInbox.ts had already stopped the
+  // duplicate ROW for exactly this send ("part 26's trigger records that"); the
+  // duplicate PUSH went on happening, which is the shape supabase/parts/2392
+  // describes. See the long note in src/ui/messaging.ts's `send`.
+  const deliverMessage = async (client: RosterClient, body: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { error } = await supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body });
       if (error) return { ok: false, error: error.message };
     } catch (e: any) { return { ok: false, error: e?.message || 'Could not reach the server.' }; }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: pushTitle, body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* the message is saved; the push is a bonus */ }
     return { ok: true };
   };
   const sendNudge = async (client: RosterClient) => {
-    const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
-    const r = await deliverMessage(client, body, 'A nudge from your coach');
+    const body = 'Hey ' + client.name.split(' ')[0] + ', checking in! How is your week going? Let me know if you need anything.';
+    const r = await deliverMessage(client, body);
     Alert.alert(r.ok ? 'Nudge sent' : 'Not sent',
       r.ok ? 'Saved to your thread with ' + client.name.split(' ')[0] + '. They will see it next time they open Repple.'
            : 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Clients you added by hand cannot receive messages until they join.');
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
-  const attnReason = (c: RosterClient): string | null => {
+  //
+  // `attnFor` is the whole row and `attnReason` the sentence in it. It returned
+  // the sentence alone until the data-layout review's attention-row contract —
+  // identity, ONE reason, its age, the state in words, one direct action — and
+  // two of those five were not on the row: nothing said what KIND of problem
+  // it was, and every row offered the same "Nudge", including the one whose
+  // reason was that the client was already waiting on the coach. `state` is
+  // the kind, in the book's own band words where the reason is a drift
+  // verdict; `kind` picks the action. One reason per client, first match wins,
+  // in the order below — never a cloud of every flag they carry.
+  //
+  // `line` is what the row prints beside `state`; `reason` is the sentence the
+  // draft prompt and the draft sheet have always been given, left word for
+  // word as it was. They differ only for adherence, where the old sentence
+  // ends in the state and would say "below target" twice on one row.
+  //
+  // ── plan ending, money owed, no program ─────────────────────────────────
+  //
+  // Three more of the review's valid reasons, each off a read this screen
+  // already makes and each raised only when that read answered: the block's
+  // end off `startsOn` + `weekCount` (src/lib/blockEnding.ts) behind a whole
+  // program read, an overdue invoice off the same ageing book the Money Owed
+  // card draws behind a 'ready' invoice read, and "no program" behind the same
+  // `isWhole(programStatus)` the No Program chip waits for. They come AFTER
+  // the coaching reasons, so money never outranks a check-in owed. Credits
+  // running low come after an overdue invoice, off `lowCredits` above, which
+  // is null unless the whole purchase read answered.
+  type Attn = { kind: 'drift' | 'adherence' | 'unread' | 'plan' | 'owed' | 'credits' | 'setup'; state: string; line: string; reason: string; tone: string };
+  const overdueBy = new Map<string, { n: number; oldest: string }>();
+  if (invoices.status === 'ready') {
+    // `overdue` is longest-overdue first, so the first seen is the oldest.
+    for (const { invoice, age } of invoiceAgeing.overdue) {
+      if (!invoice.clientId) continue;
+      const had = overdueBy.get(invoice.clientId);
+      overdueBy.set(invoice.clientId, { n: (had?.n ?? 0) + 1, oldest: had?.oldest ?? age.line });
+    }
+  }
+  const attnFor = (c: RosterClient): Attn | null => {
     const d = driftFor(c);
     // Drift speaks first where it can, because it is the only signal that sees
-    // a client with no record at all.
-    if (d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
-    if (!d && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
-    if (c.unread != null && c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
+    // a client with no record at all — but only where the read behind it can
+    // actually support a verdict about this person. A truncated read and a
+    // client the database was never asked about both produce a confident
+    // "nothing recorded in 56 days" out of rows that were never seen.
+    const acting = driftActionable(c);
+    if (acting && d && (d.status === 'at_risk' || d.status === 'idle')) return { kind: 'drift', state: bandTitle(d.status), line: d.reason, reason: d.reason, tone: driftTone(t, d) };
+    // Where the record cannot be acted on, the fallback is the ONE clause that
+    // is evidence about this person — a low adherence figure they submitted.
+    //
+    // It used to be `atRiskClient(c)`, whose other two clauses are
+    // `staleDays(c.lastActive) >= 2` — a regex over the display string `ago()`
+    // writes for a human to read — and `noRecordOf(c)`, which is true when
+    // there is no figure and no date at all. Every client a coach added BY HAND
+    // is built with `adherence: null, lastActive: 'added by you'`
+    // (src/ui/roster.tsx), so every one of them matched `noRecordOf`
+    // permanently and came back here as "Inactive added by you — check in".
+    //
+    // A coach with twenty cash clients had twenty entries in this list that
+    // could never clear, whatever they did about any of them, and learns inside
+    // a week to read past all of them — including the one that is real. The
+    // absence of a record is not a reason to ring somebody; it is the reason
+    // `idle` exists in src/lib/clientDrift.ts, and that band is raised here
+    // only when the read behind it actually covered them.
+    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '%, below target', tone: t.warn };
+    if (c.unread != null && c.unread > 0) { const said = c.unread + ' unread message' + (c.unread > 1 ? 's' : ''); return { kind: 'unread', state: 'Waiting on you', line: said + ' in your thread.', reason: said, tone: t.brand }; }
+    const prog = isWhole(programStatus) ? getProgram(c.id) : undefined;
+    if (prog) {
+      const end = blockEnding(programStarts[c.id], today, weekCount(prog));
+      if (end?.state === 'ended') {
+        const said = `${prog.title || 'Their block'} ended ${end.daysAgo === 1 ? 'yesterday' : end.daysAgo + ' days ago'}`;
+        return { kind: 'plan', state: 'Plan ended', line: said + '. Write the next block.', reason: said + ', next block not written yet', tone: t.warn };
+      }
+      if (end?.state === 'ending') {
+        const said = `${prog.title || 'Their block'} ends ${end.daysLeft === 0 ? 'today' : end.daysLeft === 1 ? 'tomorrow' : 'in ' + end.daysLeft + ' days'}`;
+        return { kind: 'plan', state: 'Plan ending', line: said + '.', reason: said, tone: t.brand };
+      }
+    }
+    const owedBy = overdueBy.get(c.id);
+    if (owedBy) {
+      const said = owedBy.n + ' overdue invoice' + (owedBy.n > 1 ? 's' : '');
+      return { kind: 'owed', state: 'Payment overdue', line: `${said}. ${owedBy.n > 1 ? 'The oldest is ' : ''}${owedBy.oldest}`, reason: said, tone: t.warn };
+    }
+    const credits = lowCredits?.get(c.id);
+    if (credits) {
+      const { state, line } = creditsLine(credits);
+      return { kind: 'credits', state, line, reason: line, tone: credits.out ? t.warn : t.brand };
+    }
+    // Linked clients only: a hand-added name has no account to train from, and
+    // flagging every one of them forever is the badge nobody reads (see above).
+    if (prog === null && c.handAdded !== true) return { kind: 'setup', state: 'Setup missing', line: 'No program assigned yet.', reason: 'No program assigned yet', tone: t.ink3 };
     return null;
   };
+  const attnReason = (c: RosterClient): string | null => attnFor(c)?.reason ?? null;
   const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => {
     const da = driftFor(a), db = driftFor(b);
     if (da && db) return compareDrift(da, db);
@@ -1084,6 +1931,18 @@ export default function TrainerClients() {
     // used to be `?? 999`, which sorted exactly those clients to the bottom.
     return (a.adherence ?? -1) - (b.adherence ?? -1);
   });
+  /* ── the book's adherence, as one figure ─────────────────────────────
+   *
+   * The mean of every client who has submitted a check-in, and ONLY under a
+   * whole roster read: an average over a fragment of the book would be a
+   * figure about clients whose rows never came back. Clients with no
+   * check-in contribute nothing rather than a zero — a member who has never
+   * submitted one is not at 0%, and averaging them in would say the book is
+   * doing worse than anybody on it. Null draws as a dash. */
+  const adherenceValues = roster.flatMap((c) => (c.adherence == null ? [] : [c.adherence]));
+  const bookAdherence = isWhole(rosterStatus) && adherenceValues.length
+    ? Math.round(adherenceValues.reduce((sum, n) => sum + n, 0) / adherenceValues.length)
+    : null;
   // AI-draft a personalised check-in the coach reviews before sending.
   // ── the client's name used to go to a model, and now does not ──────────
   //
@@ -1102,26 +1961,60 @@ export default function TrainerClients() {
     const reason = attnReason(client) || 'general check-in';
     const ctx = {
       goal: client.goal,
-      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      // Was `client.adherence != null ? … : 'no check-ins yet'` — the same
+      // sentence as the "0 meals in the last 7 days" defect that the sibling
+      // field on the summary ask below (`mealsLoggedCount`) was already fixed
+      // for, and it takes the same three answers rather than two. A hand-added
+      // client has no Repple account and therefore no check-in screen to have
+      // been silent from, so "no check-ins yet" is an accusation about somebody
+      // who was never asked — and the coach may forward the draft built on it.
+      // `clientIsQueryable` is the one thing that knows which (src/lib/clientRecord.ts).
+      adherence: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown: they have no account in the app, so there is no check-in for them to have made and no '
+          + 'adherence figure exists; do not suggest they have missed any'
+        : client.adherence != null
+          ? client.adherence + '%'
+          : 'unknown: no adherence figure has come back for them (they may have no check-in on record, or that '
+            + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
       // Areas and severity, never the note. The note is seeded from the line
       // off an uploaded medical document (src/lib/injuryExtract.ts) and
       // src/ui/injuryDocs.ts states the rule it would break.
-      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      //
+      // Was `sharedAreas(client.injuries ?? []) || 'none disclosed'`, under a
+      // prompt whose standing rule is to ALWAYS train around a disclosed
+      // injury — so that literal is the one sentence that unlocks programming
+      // an injured area. Two separate silences reached it. A hand-added client
+      // carries no `injuries` field at all (src/ui/roster.tsx builds those rows
+      // out of `coach_clients`, which has no such column), so `?? []` turned
+      // "never asked" into "disclosed none" — the defect src/lib/clientRecord.ts
+      // exists for. And for a linked client the empty array really is "the
+      // coach has recorded none", which is a fact about the RECORD: "none
+      // disclosed" says something about the CLIENT that nobody established.
+      // The combined list (the roster runs `excludedAllergens`), or absent when
+      // either half is unread or there is no account, which the prompt reads as
+      // "not known", never as "none".
+      allergens: allergenFact(client.avoid),
+      injuryAreas: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
+          + 'here says they have none. Treat no area as cleared'
+        : sharedAreas(client.injuries ?? [])
+          || 'none recorded against their account. Nobody has stated they are injury-free, so avoid loading a '
+            + 'joint hard without checking first',
       reason,
     };
-    const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name} — write that literally, it is filled in afterwards. Write only the message, no preamble.' }], ctx);
+    const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name}, written literally; it is filled in afterwards. Write only the message, no preamble.' }], ctx);
     setDraftBusy(false);
     setDraftText(answer.ok
       ? fillName(answer.reply, client.name)
-      : ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
+      : ('Hey ' + client.name.split(' ')[0] + ', checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
   };
   const sendDraft = async () => {
     const client = draftClient; const body = draftText.trim();
     if (!client || !body) return;
-    const r = await deliverMessage(client, body, 'A note from your coach');
-    if (!r.ok) { Alert.alert('Not sent', 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Your draft is still here.'); return; }
+    const r = await deliverMessage(client, body);
+    if (!r.ok) { Alert.alert('Not Sent', 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Your draft is still here.'); return; }
     setDraftClient(null); setDraftText('');
     Alert.alert('Sent', 'Saved to your thread with ' + client.name.split(' ')[0] + '.');
   };
@@ -1144,7 +2037,7 @@ export default function TrainerClients() {
    *
    * ASSIGN. It fanned a template over the segment with no confirmation, no
    * overwrite guard and no injury gate — so the fastest way in this app to
-   * replace thirty training programmes without seeing one of them was to pick
+   * replace thirty training programs without seeing one of them was to pick
    * a segment here rather than open the template library, which withholds the
    * same control until `assigned_programs` has been read whole. Both guards
    * are consulted now, and the write is preceded by a sentence saying how many
@@ -1165,9 +2058,16 @@ export default function TrainerClients() {
    *  every `tagsFor()` come back empty, so a chosen tag matches nobody and
    *  renders identically to a tag that genuinely has nobody in it. */
   const segStatus: LoadStatus =
-    seg === 'drifting' || seg === 'nodata'
+    seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'
       ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
-      : seg === 'all' || seg === 'atrisk' || (COACHED_MODES as readonly string[]).includes(seg)
+      : seg === 'noprogram'
+        // Bulk message and bulk assign both act on "everybody in this segment",
+        // and this segment IS the program read. `guardRecipients` refuses the
+        // pair outright on anything but 'ready' — which matters most here,
+        // because the obvious next gesture after filtering to No Program is
+        // to assign one to all of them.
+        ? programStatus
+      : seg === 'all' || seg === 'below' || (COACHED_MODES as readonly string[]).includes(seg)
         ? 'ready'
         : tagStatus;
   // Reads as the object of a sentence, because it is one: the guard writes
@@ -1189,7 +2089,7 @@ export default function TrainerClients() {
   const nameOf = (id: string) => roster.find((c) => c.id === id)?.name.split(' ')[0] ?? 'A client';
 
   const openBulkMessage = () => {
-    if (!shownRoster.length) return;
+    if (!pickedRoster.length) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
     setMsgBody(''); setMsgFailed([]); setMsgOpen(true);
   };
@@ -1219,23 +2119,23 @@ export default function TrainerClients() {
       if (!report.retry.length) { setMsgBody(''); setMsgOpen(false); }
       Alert.alert(report.title, report.body);
     } catch {
-      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent — check your connection and try again.');
+      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent. Check your connection and try again.');
     } finally { setMsgBusy(false); }
   };
 
   /** One assign here is as many overwrites as there are people in the segment,
-   *  so it waits until the programmes it would replace have actually been read.
+   *  so it waits until the programs it would replace have actually been read.
    *  `getProgram` returns null both for a client on nothing and for a client
    *  whose row did not come back, and this screen had no way to tell. */
-  const bulkGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
+  const bulkGuard = guardOverwrite(programStatus, 'the programs these clients are currently on');
   const bulkAssign = async (tpl: ProgramTemplate) => {
     if (bulkBusy) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
     if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
-    const list = shownRoster;
+    const list = pickedRoster;
     if (!list.length) return;
     const targets: AssignTarget[] = list.map((c) => ({
-      clientId: c.id, name: c.name.split(' ')[0], onProgramme: !!getProgram(c.id),
+      clientId: c.id, name: c.name.split(' ')[0], onProgram: !!getProgram(c.id),
     }));
     const brief = overwriteBrief(targets, tpl.name);
     const go = await new Promise<boolean>((resolve) => {
@@ -1290,7 +2190,7 @@ export default function TrainerClients() {
   const bulkEnd = async () => {
     if (endBusy) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-    const list = shownRoster;
+    const list = pickedRoster;
     if (!list.length) return;
     const targets: EndTarget[] = list.map((c) => ({
       clientId: c.id, name: c.name.split(' ')[0], handAdded: c.handAdded === true,
@@ -1321,7 +2221,7 @@ export default function TrainerClients() {
         // It cannot say which, so this does not pretend to: the sentence names
         // both and says the roster is unchanged for them, which is the part the
         // coach acts on.
-        why: ok ? null : 'nothing was removed — either the server refused it or there was no coaching relationship left to end. They are still on your roster.',
+        why: ok ? null : 'nothing was removed. Either the server refused it or there was no coaching relationship left to end. They are still on your roster.',
       });
     }
     setEndBusy(false);
@@ -1395,20 +2295,61 @@ export default function TrainerClients() {
     setAiBusy(true); setAiSummary('');
     const ctx = {
       goal: client.goal,
-      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      // The same three answers as `mealsLoggedCount` below and as the nudge
+      // draft above: no account, an account with no figure, or the figure.
+      adherence: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown: they have no account in the app, so there is no check-in for them to have made and no '
+          + 'adherence figure exists; do not suggest they have missed any'
+        : client.adherence != null
+          ? client.adherence + '%'
+          : 'unknown: no adherence figure has come back for them (they may have no check-in on record, or that '
+            + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
-      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      // See the nudge draft above for why this is three answers and why the
+      // last of them is about the record rather than about the client. The
+      // prompt below ends "do not suggest anything that loads a flagged injury
+      // area", and an empty list is not a flag that nothing is wrong.
+      allergens: allergenFact(client.avoid),
+      injuryAreas: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
+          + 'here says they have none: treat no area as cleared'
+        : sharedAreas(client.injuries ?? [])
+          || 'none recorded against their account. Nobody has stated they are injury-free, so avoid loading a '
+            + 'joint hard without checking first',
       // A COUNT, not the names. "Logged 9 meals this week" is the adherence
       // fact a summary needs; "chicken shawarma, protein shake" is a diary.
-      mealsLoggedCount: clientMeals === null ? 'their food log could not be read — do not comment on their food logging' : clientMeals.length,
-      programTitle: getProgram(client.id)?.title ?? 'no coach-assigned programme',
+      //
+      // From `mealsThisWeek`, which is an exact count over the last seven days.
+      // It used to be `clientMeals.length` — the length of a six-row display
+      // read with no date bound on it — so the number could never pass six and
+      // was not about a week at all. See the read.
+      // Three answers, not two. `selAskable` false is "there is no food log",
+      // which is neither a count nor a failed read — and it is the one the
+      // model was previously handed as a confident zero, because a hand-added
+      // client's `food_logs` read is refused by RLS with no error. See
+      // `selAskable`.
+      mealsLoggedCount: !clientIsQueryable(client.id, client.handAdded)
+        ? 'they have no account in the app, so there is no food log at all, so do not comment on their food logging'
+        : mealsThisWeek == null
+          ? 'their food log could not be read, so do not comment on their food logging'
+          : `${mealsThisWeek} in the last 7 days`,
+      // One literal used to serve two different states: this client is on
+      // nothing, and the assigned programs did not come back. `noProgram`
+      // at :1394 states the rule this now keeps — `getProgram` returning null
+      // is only an answer behind `isWhole(programStatus)` — and the question
+      // this prompt asks is what to focus on next week, which a model told the
+      // client is on nothing answers by writing them a program.
+      programTitle: !isWhole(programStatus)
+        ? 'unknown: their assigned programs could not be read, so do not say they are on nothing and do not '
+          + 'write them a new program on the strength of it'
+        : getProgram(client.id)?.title ?? 'no coach-assigned program',
     };
-    const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
+    const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only. You have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
     setAiBusy(false);
     setAiSummary(answer.ok
       ? fillName(answer.reply, client.name)
-      : 'Could not generate a summary right now — the AI backend may be unavailable.');
+      : 'Could not generate a summary right now. The AI backend may be unavailable.');
   };
 
   // Both of these read the *signed-in user's* own rows. They stay mounted (the
@@ -1426,20 +2367,122 @@ export default function TrainerClients() {
    *  them — which is fine for a list nobody counts. */
   const timelineStatus = worstStatus(notesStatus, fbStatus);
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * The coach's home screen, and almost nothing on it is written by the coach.
+   * A client joins, trains, goes quiet, accepts an invitation, is added to a
+   * gym; a Repple invoice falls overdue; a gym owner sends a coaching
+   * invitation. Every one of those arrives from somewhere else, and this
+   * screen had no gesture that went and looked.
+   *
+   * Fourteen sources. The screen already refuses to state a figure whose read
+   * was short — `isWhole` gates them one by one — and the same reasoning
+   * decides the shape of this: a refresh that moved some of them would leave
+   * the roster count and the drift assessment describing different books, and
+   * a coach reading "3 going quiet" out of 11 when it was measured against 9. */
+  const reloadEverything = useCallback(() => {
+    setReadNonce((n) => n + 1);
+    return Promise.all([
+      refreshRoster(), Promise.resolve(refreshTenant()), reloadProfile(),
+      Promise.resolve(reloadFeedback()), Promise.resolve(reloadNutri()),
+      Promise.resolve(reloadNotes()), Promise.resolve(reloadNotices()),
+      Promise.resolve(reloadInvites()), Promise.resolve(reloadTrainerInvites()),
+      Promise.resolve(reloadTags()), Promise.resolve(reloadTemplates()),
+      Promise.resolve(reloadPrograms()), Promise.resolve(channels.reload()),
+      // The trial too. It is a countdown: read once at mount on a tab that is
+      // never unmounted, it is a figure from whenever the app was last cold
+      // started, and a coach who leaves Repple open over a weekend was being
+      // shown Friday's number on Monday.
+      reloadTrial(),
+    ]);
+  }, [refreshRoster, refreshTenant, reloadProfile, reloadFeedback, reloadNutri, reloadNotes,
+      reloadNotices, reloadInvites, reloadTrainerInvites, reloadTags, reloadTemplates,
+      reloadPrograms, channels, reloadTrial]);
+  const pull = usePullToRefresh(reloadEverything);
+
+  /* ── and the same fourteen when the coach comes back ─────────────────────
+   *
+   * `readNonce` was bumped by the gesture above and by nothing else, and this
+   * file had no `useFocusEffect` at all — so this screen read once, on mount,
+   * for the life of the app. It is the coach's HOME tab: they leave it to do
+   * the thing it told them to do and return to it immediately afterwards.
+   *
+   * Mark four sessions, come back, and "4 need an outcome" was still on the
+   * card — so the coach marks them again. Log a session from the client screen,
+   * come back, and What They've Actually Done had not heard of it. `promptBookAlerts`
+   * then fires off that same stale state, which is the version of this that
+   * reaches a client.
+   *
+   * This is the identical defect that stopped a coach accepting a coaching
+   * request — `src/ui/CoachRequests.tsx` reading once on mount — and it is
+   * fixed the same way. The first focus is skipped because the mount reads are
+   * already running; see src/ui/refreshOnFocus.ts. */
+  useRefreshOnFocus(reloadEverything);
+
   const studio = (coachName || 'Your Studio').replace('Coach ', '');
+  // The greeting turns on the HOUR, and `useNow` re-settles at midnight, on
+  // foreground and on focus — the three moments it changes on a tab that is
+  // never unmounted. A bare `new Date()` here would be frozen at launch.
+  const now = useNow();
+  // The hero's date, the way client Home writes its own: the reader's locale
+  // decides the order and the words, off the same clock as the greeting.
+  const dayLine = now.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+  /** The hero's "Next up": today's first booking that has not ENDED. By its end
+   *  and not its start, `bookedAhead`'s rule — a coach ten minutes into the
+   *  nine o'clock is still with the nine o'clock. Null when the diary did not
+   *  answer and when nothing is left today; the hero then draws no column
+   *  rather than a name it has no basis for. */
+  const nextUp = todaySessions?.find((x) => Date.parse(x.startsAt) + x.durationMin * 60_000 > now.getTime()) ?? null;
+  const hi = now.getHours() < 12 ? 'Good Morning' : now.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
   const G = layout.gutter;
+  /** The green + over the screen. 56pt is the size the board draws it and
+   *  clears the 44pt target with room for the shadow. */
+  const FAB = 56;
+
+  /**
+   * A name on this tab opens that person's PROFILE, not the sheet.
+   *
+   * The same coach, on TestFlight, of the roster: "this portion should be
+   * condensed down, to only see information of a client if I choose their
+   * profile." The roster is a catalogue of names with one line of state each;
+   * what a row used to carry, and what the sheet it opened went on to repeat
+   * (goal, weight change, adherence, a body-composition table), is the first
+   * screen of app/(trainer)/client.tsx — which reads each of those properly,
+   * re-reads on focus, and is the board's fourth page. The sheet is still
+   * here, holding the things a coach WRITES about somebody — notes, feedback,
+   * meal targets, tags, the weekly summary, removing them — and the profile
+   * has the row that opens it (`?sheet=<client id>`, below).
+   */
+  const openProfile = (c: RosterClient) => {
+    router.push({ pathname: '/(trainer)/client', params: { clientId: c.id, name: c.name } });
+  };
+
+  /** Open the Add Client sheet. Lifted out of the button it used to live in
+   *  because the button is now the pinned + at the bottom of the screen. */
+  const openAdd = async () => {
+    setNewName(''); setNewEmail(''); setNewGoal('Fat Loss'); setNewMode('online'); setAddOpen(true);
+    // The code is needed by the alert at the end of THIS flow, so it has to be
+    // loaded on this path too. It was only ever fetched by the Invite button.
+    if (!myCode) {
+      const r = await fetchMyJoinCode();
+      if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 + FAB + sp.lg }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>{studio}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
+        {/* The mockups' opening: "Good morning," spoken over the name, then the
+            round controls and the coach's own monogram at the trailing edge —
+            it led the row before, where it pushed the name a plate's width in
+            from the gutter every card under it keeps. */}
+        <ScreenHeader
+          greeting
+          eyebrow={`${hi},`}
+          title={studio}
+          actions={<>
             {/* Every SCREEN in the coach app, and it is the only way into
                 Explore that does not disappear once Getting Started is done —
                 so it stays pointed there. It reads as "search" to a screen
@@ -1453,151 +2496,443 @@ export default function TrainerClients() {
                 cannot receive one. The row on Me is the way in for somebody
                 looking for it; this is the way in for somebody glancing. */}
             <NotificationBell group="trainer" />
+            <Initials t={t} name={studio} size={40} />
+          </>}
+        />
+
+        {/* ── the day, as the hero ──────────────────────────────────────────
+            The approved mockups open the coach's home on one night card: the
+            date, how many sessions today in the hero figure, and who is next
+            with what kind of session it is. The whole card opens Schedule — it
+            is the day, and Schedule is where a day is changed.
+
+            The figure is `todaySessions.length` and only that: null while the
+            diary has not answered or did not, which draws the dash and ONE
+            line saying which — a failed read is not an empty day, and the
+            "0" of a day with nothing booked is only ever printed off a read
+            that came back. "Next up" is the first booking today that has not
+            ENDED, by `bookedAhead`'s rule that the hour somebody is standing
+            in is still theirs, measured against `now` — which re-settles on
+            focus and on foreground, the two moments a coach looks at this.
+
+            Built here from the night tokens rather than on the kit's HeroCard:
+            that part sets its headline at `display` and makes only its words
+            pressable, and this hero is a 44pt figure over its unit with a
+            second column beside it, pressable as one thing. Same ground,
+            radius, shadow, eyebrow and inks, so it is the same card. */}
+        <Pressable onPress={() => router.push('/(trainer)/calendar')} accessibilityRole="button"
+          accessibilityLabel={[
+            `Today, ${dayLine}`,
+            todaySessions === null
+              ? (sessionsUnread ? 'Your diary could not be read, so today’s count is not none' : 'Reading today’s schedule')
+              : `${num(todaySessions.length)} ${todaySessions.length === 1 ? 'session' : 'sessions'} today`,
+            nextUp ? `Next up ${fmtTime(nextUp.startsAt)}, ${nextUp.clientName || 'client name unavailable'}, PT session` : '',
+            'Open Schedule',
+          ].filter(Boolean).join('. ')}
+          style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+          {/* The date in the reader's own locale, capitalised by the style and
+              not by the string: an eyebrow is set in capitals, and a transform
+              leaves the words a screen reader is given alone. */}
+          <Text style={{ ...ty.eyebrow, color: t.nightInk3, textTransform: 'uppercase' }}>Today · {dayLine}</Text>
+          {/* Side by side, and one over the other once the reader's text is
+              large: a 44pt figure at 1.35 beside a name is a name cut short. */}
+          <View style={{
+            flexDirection: fontScale >= 1.35 ? 'column' : 'row',
+            alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end',
+            justifyContent: 'space-between', gap: sp.md, marginTop: 6,
+          }}>
+            <View>
+              <Text style={{ ...ty.hero, ...numeric, color: t.nightInk }}>{fig(todaySessions === null ? null : num(todaySessions.length))}</Text>
+              <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 4 }}>{todaySessions?.length === 1 ? 'session today' : 'sessions today'}</Text>
+            </View>
+            {nextUp ? (
+              <View style={{ flexShrink: 1, minWidth: 0, alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end', gap: 4 }}>
+                <Text style={{ ...ty.micro, color: t.nightInk3 }}>Next Up</Text>
+                <Text numberOfLines={2} style={{ ...ty.head, ...numeric, color: t.nightInk, textTransform: nextUp.clientName ? 'capitalize' : 'none' }}>
+                  {fmtTime(nextUp.startsAt)} · {nextUp.clientName || 'Client name unavailable'}
+                </Text>
+                {/* The session's kind as the mockups' bright chip. Every row of
+                    `mySessions` is a PT slot — that is the table — so the kind
+                    is a fact and not a guess; PT is the accent wherever a
+                    session type takes a colour. */}
+                <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, justifyContent: 'center', backgroundColor: t.brandBright }}>
+                  <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.brandDeep }}>PT Session</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
+          {todaySessions === null ? (
+            <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
+              {sessionsUnread ? 'Your diary could not be read, so today’s count is not none.' : 'Reading today’s schedule…'}
+            </Text>
+          ) : null}
+        </Pressable>
+
+        {/* ── three glanceable truths ───────────────────────────────────────
+            The mockups' strip under the hero, each figure in a hue of its own
+            and each one a count or a mean this screen already works out: the
+            book (blue), its adherence (green) and the length of the Needs
+            Attention queue below (red). Sessions today was the middle tile; it
+            is the hero now, and saying it twice would be one figure spending
+            two places.
+
+            Each stays honest the way the Hero these replaced was. The counts
+            are withheld until the roster read is whole; Need You is gated the
+            way that queue's own head is — a whole roster AND a drift read that
+            landed, or a dash; adherence is `bookAdherence`, a mean over the
+            clients who HAVE a check-in and never a zero for the ones who have
+            not. The one line under the strip says which read is short, or what
+            the percentage is a mean of and of how many (the data-layout
+            review's second rule) — a dash on its own would only say
+            "something", and 78% on its own does not say 78% of what.
+
+            No trend is passed, because there is no series behind any of the
+            three and a sparkline is not a thing to invent. */}
+        <View>
+          <KpiRow tiles
+            onPress={(k) => { if (k.route) router.push(k.route as never); }}
+            items={[
+              { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics', tone: 'blue' },
+              { label: 'Adherence', value: bookAdherence == null ? fig(null) : `${num(bookAdherence)}%`, route: '/(trainer)/analytics', tone: 'brand' },
+              { label: 'Need You', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges', tone: 'red' },
+            ]}
+          />
+          {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {rosterStatus === 'error'
+                ? 'Your roster could not be read, so these are not zero. The clients below are the ones that did come back.'
+                : rosterStatus === 'partial'
+                  ? 'Only part of your roster came back, so it cannot be counted or averaged.'
+                  : 'Reading your roster…'}
+            </Text>
+          ) : rosterCount != null && rosterCount > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {bookAdherence != null
+                ? `Adherence is the mean of the latest check-in from ${num(adherenceValues.length)} of your ${num(rosterCount)} ${rosterCount === 1 ? 'client' : 'clients'}.`
+                : 'No adherence yet. Nobody on your book has submitted a check-in.'}
+            </Text>
+          ) : null}
         </View>
 
-        {/* Clients who found this coach in the public directory and asked to
-            be coached. Renders nothing at all when there are none. */}
-        <CoachRequests />
-        <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
+        {/* ── roster health ────────────────────────────────────────────────
+            The mockups' donut, over the four bands src/lib/clientDrift.ts
+            already sorts the book into — the same `bands` the Clients head,
+            the segment bar and `bookState` count from, so this is a picture of
+            figures the screen already states and not a new claim.
 
-        {/* What the band headings below actually mean. "At risk" is measured
-            against each client's OWN earlier rate and not against a target, and
-            "nothing to assess" is not "fine" — the two readings a coach gets
-            wrong are the two that cost a phone call to somebody who trained
-            yesterday. src/lib/screenHelp.ts holds the sentences; one row, shut,
-            gone for good once dismissed. */}
-        <ScreenHelp screen="coach-clients" />
+            Drawn only from a read that can support a verdict about the WHOLE
+            book: a whole roster, a drift answer, and drift coverage that was
+            neither truncated nor refused for anybody — `bookState`'s gate,
+            word for word. Anything less and the card is absent rather than
+            drawn from part of the book; the line under the tiles above already
+            says which read fell short. The legend carries every count in
+            words, so the colours repeat the state and never are it. */}
+        {isWhole(rosterStatus) && bands && bands.total > 0 && driftRead && !driftRead.truncated && !driftRead.notAsked.size ? (() => {
+          const slices = [
+            { label: 'On Track', value: bands.steady, shown: num(bands.steady), tone: 'brand' as const },
+            { label: 'Slipping', value: bands.watch, shown: num(bands.watch), tone: 'amber' as const },
+            { label: 'Needs Check-in', value: bands.drifting, shown: num(bands.drifting), tone: 'red' as const },
+            { label: 'Nothing Recorded', value: bands.unknown, shown: num(bands.unknown), tone: 'purple' as const },
+          ];
+          return (
+            <Section>
+              <SectionHead title="Roster Health" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={slices} centre={num(bands.total)} sub={bands.total === 1 ? 'client' : 'clients'}
+                  spoken={`Roster health. ${slices.map((x) => `${x.shown} ${x.label.toLowerCase()}`).join(', ')}, of ${num(bands.total)}.`} />
+                <Legend items={slices} />
+              </View>
+            </Section>
+          );
+        })() : null}
 
-        {/* The first-run list, while it still has something to say. It removes
-            itself the moment every row is DONE — and not a moment earlier: a
-            row that could not be read keeps it here, because the coach whose
-            currency read failed is exactly the coach who needs the currency
-            step. Once it goes, Explore and Settings still reach the screen.
-            src/lib/coachFirstRun.ts holds the rule. */}
-        <CoachSetupRow />
+        {/* ── the order of everything under the hero ───────────────────────
+            The data-layout review's stack for this tab, which asks one
+            question — who needs me today — in the approved mockups' flow of
+            hero, infographics, lists: greeting · the day as the hero · three
+            figures · roster health · NEEDS ATTENTION · today's agenda · the
+            roster · invitations and onboarding · then retention, the month and
+            the tools. The agenda sat over the queue until the day's count and
+            the next session became the hero; the rows under it are the rest of
+            the day, which is a list, and lists come last. It used to run agenda ·
+            requests · unmarked sessions · money · help · setup · trial ·
+            invitations · needs attention · the month · departures · tools ·
+            pending invites · roster, so the queue the tab exists for sat
+            under seven other things and the roster under thirteen.
 
-        {/* Endings nobody explained. Renders nothing when there are none and
-            nothing when the read failed — the Clients screen already carries
-            four honest warnings and a fifth saying "we could not check whether
-            anybody left" is noise. src/ui/EndReasonSheet.tsx. */}
-        <UnexplainedDepartures />
+            The decisions that arrive from somewhere else — a coaching request,
+            sessions waiting on an outcome, money owed, the trial, a platform
+            invitation — stay ABOVE the roster, directly under the queue:
+            each renders nothing when there is nothing to decide, each is a
+            thing somebody is waiting on, and under a book of forty names none
+            of them would ever be seen. They are below the queue and not over
+            it because the review is explicit that money does not outrank an
+            overdue coaching action. */}
 
-        {/* ── and the answers, counted ────────────────────────────────────
-            R3. The card above has been collecting departure reasons since it
-            shipped and nothing has ever read one back: `fetchEndRecord` had no
-            caller anywhere in the app, and the only read of the column filters
-            for the UNANSWERED ones in order to keep asking. Churn reasons are
-            the cheapest true thing a coaching business can know about itself
-            and this product collected them and buried them.
+        {/* ── needs attention ───────────────────────────────────────────────
+            The operating question for this tab, asked before setup, billing
+            and the month's figures: who needs the coach now? It was a Notice
+            inside the interrupts block with a "Draft" button per row; the
+            board gives it a section of its own. Every row is backed by the
+            same drift, unread-message and adherence facts the roster below
+            uses, and a partial or failed read stays visibly partial or failed
+            so this queue can never masquerade as the whole book. */}
+        <Section>
+          {/* The count left this head for the red Need You tile above, which
+              is the same figure behind the same gate; what the mockups put
+              here is the way to the whole queue. Offered only where there IS
+              a queue this screen can stand behind. */}
+          <SectionHead
+            title="Needs Attention"
+            note={isWhole(rosterStatus) && drift && needsAttention.length > 0 ? 'See All' : undefined}
+            onPress={isWhole(rosterStatus) && drift && needsAttention.length > 0 ? () => router.push('/(trainer)/nudges') : undefined}
+          />
 
-            Counts, never a rate. A percentage over the four people who left a
-            coach's book this quarter is noise, which is what
-            `MIN_COHORT_FOR_RATE` exists to say elsewhere in the app.
-
-            Renders nothing when the read failed or came back truncated, on the
-            same argument the card above makes: a fifth warning on this screen
-            saying "we could not count why anybody left" is noise, and a tally
-            over a prefix would put a reason on top because of the row cap. */}
-        {departures && departureNote ? (<>
-          <Rule />
-          <Section>
-            <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />
-            <Text style={{ ...ty.label, color: t.ink2 }}>{departureNote}</Text>
-            <View style={{ marginTop: sp.md }}>
-              {departures.counts.map((c, i) => (
-                <View key={c.reason} style={{
-                  flexDirection: 'row', justifyContent: 'space-between', gap: sp.md,
-                  paddingVertical: sp.sm,
-                  borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
-                }}>
-                  <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{END_REASON_LABEL[c.reason]}</Text>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>{num(c.n)}</Text>
-                </View>
-              ))}
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.crit} kicker="Roster Unavailable"
+              title="Could not build your attention queue"
+              note="The clients that did return are still listed below, but this is not an all-clear and the queue cannot be ranked safely." />
+          ) : rosterStatus === 'partial' ? (
+            <View style={{ marginBottom: sp.md }}>
+              <PartialRead what="clients" shown={roster.length} />
             </View>
-            {/* Kept out of the list rather than filed under "They Did Not Say".
-                Nobody having asked and somebody declining to answer are opposite
-                facts about the coach's own record-keeping, and only one of them
-                is something they can still fix. */}
-            {departures.unrecorded > 0 ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {num(departures.unrecorded)} of {num(departures.total)} {departures.unrecorded === 1 ? 'has' : 'have'} nothing
-                recorded against {departures.unrecorded === 1 ? 'it' : 'them'} and {departures.unrecorded === 1 ? 'is' : 'are'} in
-                none of the counts above. The card above is where they get an answer.
+          ) : null}
+
+          {/* Why this list is shorter than it should be, or null when it is not.
+              Shown whether or not there is anybody in it: an empty list of
+              suggested check-ins over a read that could not prove anybody's
+              silence is an all-clear made out of our own failure, and a coach
+              cannot tell it from a book with nothing wrong in it. */}
+          {driftActingNote && active > 0 ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Notice tone={t.ink3} kicker="Suggested Check-ins" title="These are not built on their training"
+                note={driftActingNote} />
+            </View>
+          ) : null}
+
+          {!drift && !driftErr && roster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
+                Reading recent check-ins, workouts, sessions and visits before ranking the queue.
               </Text>
-            ) : null}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Counts, not percentages. Over a book this size a share would move by twenty points because one
-              person moved house, and it would read as a trend.
+            </View>
+          ) : driftErr ? (
+            <Flag t={t} tone={t.warn} text="Recent activity could not be read. The roster below remains usable, but it is not ranked by who needs you." />
+          ) : needsAttention.length > 0 ? (
+            <View>
+              {/* ── the attention row's contract ─────────────────────────────
+                  Who · what KIND of problem, in words with its mark · the one
+                  reason · how old it is · one action that answers it. The
+                  review's test is that a coach can name the next three people
+                  to contact AND why without opening three records; the row
+                  used to stop at a reason and offer every client the same
+                  "Nudge", including the one whose reason was that they were
+                  already waiting on a reply. `attnFor` picks ONE reason per
+                  person — never a badge cloud — and the action follows it:
+                  somebody who wrote gets Reply and their thread, everybody
+                  else gets the AI draft the coach reviews before it is sent.
+                  The row itself opens their profile. */}
+              {needsAttention.slice(0, 4).map((c, index) => {
+                const a = attnFor(c);
+                const aged = /\bago$/.test(c.lastActive) ? `Last active ${c.lastActive}` : null;
+                return (
+                  /* The kit's AttentionRow, which is this contract as a
+                     component: it speaks the row as one sentence, names the
+                     client on the action's spoken label, and drops the action
+                     under the words at large text. The monogram is cut by
+                     this screen's own rule so it matches the roster below. */
+                  <AttentionRow key={c.id} divider={index > 0}
+                    /* The monogram on a plate of the reason's own hue, as the
+                       mockups draw it and as the roster row below does: red
+                       for a check-in owed, purple for nothing recorded, amber
+                       for a low figure, blue for somebody waiting on a reply.
+                       The words beside it still carry the state. */
+                    avatar={<Initials t={t} name={c.name} size={42}
+                      tone={a == null ? 'amber' : a.kind === 'unread' || a.kind === 'plan' ? 'blue' : a.kind === 'adherence' || a.kind === 'owed' || a.kind === 'credits' ? 'amber'
+                        : a.kind === 'setup' ? 'purple'
+                        : driftFor(c)?.status === 'idle' ? 'purple' : 'red'} />}
+                    name={c.name}
+                    reason={a ? a.line : 'Needs a review.'}
+                    status={a ? a.state : undefined}
+                    tone={a ? a.tone : t.warn}
+                    /* The age, where the roster row has one to give. The four
+                       sentences `lastActive` can be instead of a figure
+                       (src/lib/lastActiveLine.ts) are not ages, and a drift
+                       reason already carries its own count of days. */
+                    age={aged ?? undefined}
+                    onPress={() => openProfile(c)}
+                    action={a && a.kind === 'unread'
+                      ? { label: 'Reply', onPress: () => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } }) }
+                      : a && (a.kind === 'plan' || a.kind === 'setup')
+                      ? { label: a.kind === 'setup' ? 'Build Program' : 'Next Block', onPress: () => router.push({ pathname: '/(trainer)/builder', params: { clientId: c.id, name: c.name, from: 'trainerDashboard' } }) }
+                      : a && a.kind === 'owed'
+                      ? { label: 'Invoices', onPress: () => router.push('/(trainer)/invoices') }
+                      : a && a.kind === 'credits'
+                      ? { label: 'Sell a Pack', onPress: () => router.push('/(trainer)/payments') }
+                      /* Drafts a check-in with AI for the coach to review, then
+                         send — the same flow the old "Draft" button opened. */
+                      : { label: 'Nudge', onPress: () => draftNudge(c) }} />
+                );
+              })}
+              {needsAttention.length > 4 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {needsAttention.length - 4} more {needsAttention.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
+                </Text>
+              ) : null}
+            </View>
+          ) : rosterStatus === 'ready' && roster.length === 0 ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>Add or invite your first client to start a coaching queue.</Text>
+          ) : rosterStatus === 'ready' && drift ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              {active === 0 ? 'No clients yet. Add or invite your first below.' : driftNote()}
             </Text>
-          </Section>
-        </>) : null}
+          ) : null}
+        </Section>
+
+
+        {/* ── today ─────────────────────────────────────────────────────────
+            The rest of the day under the hero's count, in booking order, as
+            the mockups' agenda row: a bar in the session type's colour, the
+            hour, the name, and the type again as a chip — so the colour never
+            stands alone. Rows open the client's record when the booking names
+            one and the diary otherwise; a walk-in slot with no client on it
+            has no record to open. */}
+        <Section style={{ paddingBottom: 0 }}>
+          {/* Through `SectionHead` like every other head on this tab, and not
+              the hand-built row it was. A coach on TestFlight: "the
+              subheadings … blend in too much with the other text, it's easy
+              to miss" — and a head built here in `ty.micro` is one the kit
+              cannot strengthen when it strengthens the rest. The green + that
+              sat beside it is the head's trailing link now, in words: a
+              second green circle on a screen whose one green + means Add
+              Client was two primaries, and this one only ever opened
+              Schedule. */}
+          <SectionHead title="Today" note="Add a Session" onPress={() => router.push('/(trainer)/calendar')} />
+          {sessionsUnread ? (
+            <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: layout.section }}>Today’s schedule could not be read. This is not an empty day. Open Schedule to try again.</Text>
+          ) : todaySessions === null ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Reading today’s schedule…</Text>
+            </View>
+          ) : todaySessions.length === 0 ? (
+            <ListRow icon="calendar" tone="brand" title="No Sessions Booked Today"
+              note="Open Schedule to add one or set availability."
+              onPress={() => router.push('/(trainer)/calendar')} />
+          ) : (
+            todaySessions.map((session, index) => {
+              const name = session.clientName || 'Client name unavailable';
+              return (
+                <Pressable key={session.id}
+                  onPress={() => session.clientId
+                    ? router.push({ pathname: '/(trainer)/client', params: { clientId: session.clientId, name: session.clientName || undefined } })
+                    : router.push('/(trainer)/calendar')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, PT session, ${session.durationMin} minutes`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(56), paddingVertical: sp.sm, borderTopWidth: index ? hairline : 0, borderTopColor: t.ring }}>
+                  {/* The type's bar. PT is the accent everywhere a session
+                      type takes a colour, and every row of `mySessions` is a
+                      PT slot — that is the table — so there is one colour
+                      here until this read carries a second kind. Stretched to
+                      the row rather than a fixed 34pt, so it still spans the
+                      words when the reader's text is large. */}
+                  <View style={{ width: 4, alignSelf: 'stretch', marginVertical: sp.xs, borderRadius: 2, backgroundColor: t.brand }} />
+                  {/* The hour first, in figures, in a fixed column so the
+                      names line up under each other; it is the thing a coach
+                      reads down the list. */}
+                  <Text style={{ ...ty.label, ...font('600'), ...numeric, color: t.ink2, minWidth: 74 }}>{fmtTime(session.startsAt)}</Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, color: t.ink, textTransform: session.clientName ? 'capitalize' : 'none' }} numberOfLines={1}>{name}</Text>
+                    {/* The length is the only figure that varies between
+                        them; the kind is the chip. */}
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(session.durationMin)} min</Text>
+                  </View>
+                  {/* Hidden from a screen reader: the row's own label already
+                      says "PT session" once. */}
+                  <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                    <TonedChip label="PT" tone="brand" />
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+        </Section>
+
+        {/* Clients who found this coach in the public directory and asked to
+            be coached. Renders nothing at all when there are none.
+
+            `readNonce` is threaded in so a pull down this screen re-reads the
+            requests too. The component owns its own state, so without it the
+            gesture refreshed everything around a pending request and not the
+            request itself — and it re-reads on focus of its own accord, which
+            is what a push arriving while the app is open needs. */}
+        <CoachRequests reload={readNonce} />
+        <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
+        {/* Below the unmarked queue and above everything else, which is
+            `bookAlert`'s own order arriving on a screen: a session waiting on
+            an outcome holds up somebody's pay, and money already earned and not
+            collected is the next most expensive thing to leave alone. */}
+        <MoneyOwed m={owed} />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
-          {/* ── the trial card, and the condition that was exactly backwards ──
-              This read `trial && !billingAvailable()`.
+          {/* ── the trial card ───────────────────────────────────────────
+              Two defects, and the second is the one a coach saw.
 
+              ONE. The condition was `trial && !billingAvailable()`.
               `billingAvailable()` (src/lib/billing.ts) is true when at least
               one plan has a Stripe price id — i.e. when subscribing is
-              actually possible. So the negation meant the card appeared ONLY
+              actually possible — so the negation meant the card appeared ONLY
               on builds where checkout cannot be started, and vanished on the
-              builds where it can. Both halves are wrong and they are wrong in
-              opposite directions: a coach who could have upgraded was never
-              asked, and a coach who could not was shown "Upgrade ›", sent to
-              the billing screen, and left there with nothing to buy — which is
-              the worse of the two, because it happens at the moment their
-              trial has just expired and they are trying to keep working.
+              builds where it can. It is now two states rather than one
+              condition: the trial is worth telling a coach about either way,
+              and what changes is whether this card may promise them a way out
+              of it. Where billing is not configured it does not offer a door
+              that opens onto a wall.
 
-              It is now two states rather than one condition. The trial is
-              worth telling a coach about either way; what changes is whether
-              this card is allowed to promise them a way out of it. Where
-              billing is not configured it says what is true — their trial is
-              running, or has ended — and does not offer a door that opens onto
-              a wall. */}
-          {trial ? (
-            billingAvailable() ? (
-              <Card onPress={() => router.push('/(trainer)/billing')} tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                    {/* Two sentences replaced here, and both were claims about
-                        what the money buys that nothing in this codebase
-                        enforces. `trialInfo` (src/lib/trial.ts) is a date in
-                        AsyncStorage on this device: it gates nothing, no screen
-                        reads it but this card, and the plan features in `PLANS`
-                        ("Up to 3 clients") are not checked anywhere either.
-                        "Upgrade to keep coaching your clients" told a coach
-                        their roster stops without a payment, and "unlock
-                        everything" told them something was locked. Neither is
-                        true, and a false claim about what a subscription is for
-                        is exactly what a store reviewer opens the paid screen
-                        to check. What is left says what the trial is and offers
-                        the plans without asserting a consequence. */}
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time — see what each plan includes.'}</Text>
-                  </View>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade ›</Text>
+              TWO. The figure came from `trialInfo()` — AsyncStorage on this
+              handset, restarted by a reinstall, gating nothing, and read by
+              no other screen. It was printed here as a flat fact while
+              Billing said, of the same account, that the start date could not
+              be read. `trialCard` in src/lib/trialGate.ts now decides, from
+              the account's reading, whether there is a printable figure at
+              all — and returns null when there is not, which is why there is
+              no `unknown` branch here. The argument for silence over an
+              apology is in that function's header; the short of it is that
+              nothing is gated on the trial, so a card that cannot state a
+              number has nothing to warn anybody about, and Billing carries
+              all four states in full one tap away. */}
+          {(() => {
+            const card = trialCard(trialReading, billingAvailable());
+            if (!card) return null;
+            const body = (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <Icon name="sparkle" size={20} color={card.expired ? t.ink3 : t.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{card.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{card.note}</Text>
                 </View>
+                {billingAvailable() ? (
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
+                ) : null}
+              </View>
+            );
+            return billingAvailable() ? (
+              <Card onPress={() => router.push('/(trainer)/billing')} tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                {body}
               </Card>
             ) : (
-              <Card tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Subscriptions are not open yet — keep coaching, and we will be in touch before anything changes.</Text>
-                  </View>
-                </View>
+              <Card tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                {body}
               </Card>
-            )
-          ) : null}
+            );
+          })()}
 
           {trainerInvites.length > 0 ? (
             <View>
               {trainerInvites.map((iv) => (
-                <Notice key={iv.id} tone={t.brand} kicker="Platform invitation"
+                <Notice key={iv.id} tone={t.brand} kicker="Platform Invitation"
                   title={`${iv.ownerName || 'Repple'} invited you to coach`}
                   note="Accept to join the platform as a trainer and set up your coaching profile.">
                   <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
@@ -1609,47 +2944,430 @@ export default function TrainerClients() {
             </View>
           ) : null}
 
-          {needsAttention.length > 0 ? (
-            <Notice tone={t.warn} kicker="Suggested check-ins"
-              title={`${needsAttention.length} client${needsAttention.length > 1 ? 's' : ''} could use a nudge`}
-              note="Draft one with AI, review it, then send.">
-              <View style={{ marginTop: sp.sm }}>
-                {needsAttention.slice(0, 4).map((c) => (
-                  <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Initials t={t} name={c.name} size={34} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                      <View style={{ marginTop: 3 }}><Flag t={t} tone={t.warn} text={attnReason(c) || ''} /></View>
-                    </View>
-                    <Cta label="Draft" onPress={() => draftNudge(c)} />
-                  </View>
-                ))}
-              </View>
-            </Notice>
-          ) : null}
         </View>
 
-        {/* ── the hero: one number leads the screen ───────────────────────── */}
-        <Hero
-          label="Active Clients"
-          figure={fig(rosterCount)}
-          // 'partial' gets its own sentence rather than falling through to the
-          // drift summary. It used to print the short count with no hint that
-          // it was short, and the drift note underneath it ("2 drifting") was
-          // computed over the same fragment — two figures about a book neither
-          // of them had seen the whole of.
-          note={rosterStatus === 'error'
-            ? 'Your roster could not be read, so this is not a count of zero. The clients listed below are the ones that did come back.'
-            : rosterStatus === 'partial'
-              ? 'Only part of your roster came back, so it cannot be counted — a subtotal here would read as your whole book.'
-              : rosterStatus === 'loading'
-                ? 'Reading your roster…'
-                : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
-          tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
-          onPress={() => router.push('/(trainer)/analytics')}
-        />
+        {/* ── the roster ───────────────────────────────────────────────────
+            The mockups' Clients page, which on this tab is the second half of
+            the scroll: its title, the search, the segment bar and the status
+            chips on the GROUND, and the names in one card under them. The
+            title is the page's own step — `display`, a header to the rotor —
+            because this is where Home ends and Clients begins.
 
-        <Rule />
+            The head used to carry `driftNote()` as a caption ("2 drifting · 1
+            with nothing recorded"), gated on `isWhole(rosterStatus)` after it
+            was caught captioning a FRAGMENT of the book with an all-clear. The
+            status chips below say the same counts, one band each, through
+            `segN` — the same gate — so the sentence went rather than say it
+            twice. */}
+        <View style={{ marginTop: sp.xl }}>
+          <Text accessibilityRole="header" style={{ ...ty.display, color: t.ink, marginBottom: sp.md }}>Clients</Text>
+
+          {/* ── the two ways onto the book, first ───────────────────────────
+              Back over the list, where the coach who tests this build found
+              them and said so: "I like the tabs of invite and import, maybe
+              have 'view client' … a catalogue of names". Last round moved them
+              under the rows; on a book of forty that is forty rows away from
+              the moment somebody asks how to get a client in. The catalogue
+              they asked for is the list under these — a name and one line.
+
+              Two buttons, and they used to be called "Add a client" and
+              "Add client" — eight characters apart, side by side, doing
+              different things. The prominent one made a roster entry; the
+              other opened the sheet that shows the coaching code. A coach
+              pressed the prominent one and asked "is this the only way? I
+              don't see a trainer's code", which is the only reasonable
+              reading of that pair. The sheet's own failure text already
+              called it "Invite a client"; the button label had drifted.
+              Add Client itself is the green + pinned over the screen now —
+              `openAdd` — so it is one control, reachable from anywhere in
+              the scroll, rather than a third button in this row. */}
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
+            {/* Import sits beside Invite rather than under a menu, because the
+                moment a coach needs it is their first hour in the product —
+                and the alternative to finding it is typing forty clients. */}
+            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
+          </View>
+
+          {/* The read failed. Say so, say what it cost, and do NOT let the
+              ordinary order pass for the drift order. */}
+          {driftErr && active > 0 ? (
+            <Notice tone={t.crit} kicker="Order Unavailable"
+              title="Could not read who is drifting"
+              note={driftErr + ' The list below is in its usual order, not by who needs a call.'} />
+          ) : null}
+
+          {/* Read, and the record is empty for everyone. Distinct from both of
+              the other two renders, and explicitly not an all-clear. */}
+          {bands && bands.total > 0 && bands.unknown === bands.total ? (
+            <Notice tone={t.s5} kicker="Nothing Recorded"
+              title={`No record for ${bands.total === 1 ? 'this client' : 'any of your ' + bands.total + ' clients'}`}
+              note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine. It means there is nothing here to judge them on.`} />
+          ) : null}
+
+          {/* ── find one person ──────────────────────────────────────────────
+              The segments under this answer "which kind of client"; this
+              answers "which client", which is the question a coach with eighty
+              of them actually has. It was answerable nowhere on this screen:
+              the magnifying glass in the header opens Explore, and Explore
+              searches the list of SCREENS.
+
+              It narrows the segment rather than replacing it, and everything
+              below — the bulk controls, their counts, the drift order — is built
+              from the result, so what the buttons act on is what is listed.
+
+              First under the title, the way the board's Clients page opens:
+              a search field, then the segment bar, then the rows. The pill is
+              the same shape Meals' search row takes. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface, ...elevation.card, marginBottom: sp.md }}>
+            {/* White with the card shadow, now that it sits on the grey ground
+                and not inside a card: `surface2` there is two points of grey
+                from the ground, which is a field nobody can see. */}
+            <Icon name="search" size={17} color={t.ink3} />
+            <TextInput value={rosterQ} onChangeText={setRosterQ}
+              placeholder="Search clients" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name" returnKeyType="search"
+              style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
+            {rosterQ ? (
+              <Pressable onPress={() => setRosterQ('')} hitSlop={hitSlopFor(24)}
+                accessibilityRole="button" accessibilityLabel="Clear the client search">
+                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {/* ── the segment bar, and the status chips under it ──────────────
+              The mockups draw an Active / Inactive bar and, under it, a row of
+              toned chips: All · On track · Slipping · At risk. There is no
+              honest "inactive" list on this screen without a second read of
+              `coaching_relationships` — `UnexplainedDepartures` below already
+              reads the endings, and this file's own history (see its header)
+              is of the same table read twice by two hands — so the bar holds
+              the kinds of client this book actually has: everybody on it, who
+              is waiting on a reply, who has no program, how each is coached,
+              and the coach's own tags. "Active" is the whole roster, which is
+              what the Active Clients tile counts. It is the kit's `Segmented`
+              in its scrolling form, because the length of the set is the
+              data's.
+
+              The chips are the four drift bands, each in the hue the donut and
+              the rows give it, and they are absent until the drift read lands —
+              before that there is no honest count and the old Below Target
+              segment stands in, in the bar. Bar and chips set the ONE `seg`:
+              a second filter beside the first would put "Remove 12 From Your
+              Roster" under a list narrowed twice and described once.
+
+              Every count is still a count OF THE ROSTER (`segN`) and dashes
+              under anything but a whole read; a chip still selects then, it
+              just cannot say how many. */}
+          {/* Chips that wrap, not a segment bar: there are up to six of these
+              plus a chip per tag, and squeezed into one bar they shrank to
+              unreadable or scrolled off the edge looking cut (seen 21 Sep 2026).
+              Same shape and selected fill as the status chips under them. */}
+          <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+            {[
+              ...AUTO_SEGS.filter((sg) => !sg.band).map((sg) => ({
+                key: sg.key,
+                label: `${sg.key === 'all' ? 'Active' : sg.label} · ${fig(sg.n)}`,
+                a11yLabel: `${sg.key === 'all' ? 'Active' : sg.label}, ${sg.n == null ? 'count not available' : num(sg.n)}`,
+              })),
+              ...allTags.map((tg) => ({ key: tg, label: `#${tg}`, a11yLabel: `Tag ${tg}` })),
+            ].map((o) => {
+              const on = seg === o.key;
+              return (
+                <Pressable key={o.key} onPress={() => setSeg(o.key)} hitSlop={hitSlopFor(32)}
+                  accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={o.a11yLabel}
+                  style={{ minHeight: grown(32), paddingHorizontal: 14, borderRadius: grown(32) / 2, justifyContent: 'center', backgroundColor: on ? t.ink : t.surface3 }}>
+                  <Text style={{ ...ty.label, ...font('600'), ...numeric, color: on ? t.surface : t.ink2 }}>{o.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {bands ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+              {[AUTO_SEGS[0], ...AUTO_SEGS.filter((sg) => sg.band)].map((sg) => {
+                const on = seg === sg.key;
+                const words = `${sg.label} ${fig(sg.n)}`;
+                return (
+                  <Pressable key={sg.key} onPress={() => setSeg(sg.key)} hitSlop={hitSlopFor(26)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${sg.label}, ${sg.n == null ? 'count not available' : num(sg.n)}`}>
+                    {on ? (
+                      // Selected is the ink fill the segment bar uses, in the
+                      // chip's own shape — and `selected` is said, because a
+                      // fill is not a state a screen reader gets.
+                      <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, justifyContent: 'center', backgroundColor: t.ink }}>
+                        <Text style={{ ...ty.micro, ...font('700'), ...numeric, letterSpacing: 0, color: t.surface }}>{words}</Text>
+                      </View>
+                    ) : (
+                      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                        <TonedChip label={words} tone={sg.band ?? 'neutral'} />
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {/* What the search actually searched. Under anything but a whole read
+              that is not the roster, and "nobody matches" said over a read that
+              failed tells a coach somebody is not on their book — see
+              src/lib/rosterSearch.ts. This line is the only thing on the screen
+              that may state an absence, and only under 'ready'. */}
+          {rosterQLine ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{rosterQLine}</Text>
+          ) : null}
+
+          {/* An empty list has four causes and they are not interchangeable.
+              A search that matched nobody is already spoken for by the line
+              under the field — which is the one that knows whether the roster
+              was read at all — so this does not say "no clients in this
+              segment" over a filtered list and send a coach to check a segment
+              that has people in it. */}
+          {shownRoster.length === 0 && !rosterQLine ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {rosterUnread && roster.length === 0
+                ? 'Your roster could not be read, so this is not "no clients". Pull down to try again.'
+                : roster.length === 0 ? 'No clients yet. Add or invite your first; they connect once they accept in the app.' : 'No clients in this segment.'}
+            </Text>
+          ) : null}
+
+          {/* Not read yet. The list is on screen and usable; it just is not
+              sorted by drift, and it says so rather than implying it is. */}
+          {!drift && !driftErr && shownRoster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                Reading check-ins, logs, sessions and visits. The order below is not by drift yet.
+              </Text>
+            </View>
+          ) : null}
+
+        </View>
+
+        {/* The names, in one card — and no card at all over an empty book that
+            was read whole, where the line above has already said so and the
+            fold below has nothing to act on. */}
+        {driftRows.length > 0 || roster.length > 0 || rosterStatus !== 'ready' ? (
+        <Section style={{ paddingVertical: sp.sm, paddingHorizontal: sp.sm }}>
+          {/* ── ticking rows, and what can be done to the ticked ones ────────
+              One quiet line until a coach asks to select. The bulk controls
+              appear here, over the names they act on, only once somebody is
+              ticked, so nothing that messages, reassigns or removes people is
+              on screen by default. */}
+          {shownRoster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+              <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1 }}>
+                {picking ? (pickedRoster.length ? `${num(pickedRoster.length)} selected` : 'Tap names to select them') : ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.lg }}>
+                {picking && pickedRoster.length < shownRoster.length ? (
+                  <Pressable onPress={() => setPicked(new Set(shownRoster.map((c) => c.id)))} hitSlop={hitSlopFor(24)}
+                    accessibilityRole="button" accessibilityLabel={`Select all ${shownRoster.length} listed`}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Select All</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable onPress={() => (picking ? stopPicking() : setPicking(true))} hitSlop={hitSlopFor(24)}
+                  accessibilityRole="button" accessibilityLabel={picking ? 'Stop selecting clients' : 'Select clients to message, assign or remove'}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{picking ? 'Done' : 'Select'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+          {pickedRoster.length > 0 ? (
+            <View style={{ paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
+              {/* The count on each button is what the coach consents to, so it
+                  is only a number when the reads behind the list came back
+                  whole. Under anything else the control carries the reason
+                  instead and the handler refuses as well, because a message
+                  cannot be taken back. */}
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+                <View style={{ flex: 1 }}><Ghost icon="message"
+                  label={segClaim.allowed ? `Message ${pickedRoster.length}` : 'Cannot Message Yet'}
+                  onPress={openBulkMessage} /></View>
+                <View style={{ flex: 1 }}><Ghost icon="grid"
+                  label={segClaim.allowed && bulkGuard.allowed ? 'Assign Program' : 'Cannot Assign Yet'}
+                  onPress={() => {
+                    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                    if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
+                    setBulkTplOpen(true);
+                  }} /></View>
+              </View>
+              {/* On its own row, away from Message, because it cannot be taken
+                  back for anybody it reaches; the count is on the label because
+                  this is the last thing read before the dialog. */}
+              <Ghost
+                label={!segClaim.allowed
+                  ? 'Cannot Remove Yet'
+                  : endBusy ? 'Removing…' : `Remove ${pickedRoster.length} From Your Roster`}
+                onPress={() => {
+                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                  void bulkEnd();
+                }} />
+            </View>
+          ) : null}
+          {driftRows.map(({ c, d }) => {
+            const st = rowStatus(t, c, d, !!drift, today);
+            const hue = toneOf(t, st.chip ?? 'neutral');
+            // The two states a coach ACTS on take the row tint: a check-in
+            // owed and slipping. Nothing-recorded is a different kind of thing
+            // (see `driftTone`) and keeps its purple without the alarm.
+            const urgent = st.chip === 'red' || st.chip === 'amber';
+            // The bar is the figure THEY submitted at their latest check-in,
+            // and only off a whole roster read — the gate every other
+            // adherence figure on this tab sits behind. No figure, no bar:
+            // not an empty track, which reads as nought per cent.
+            const adherence = st.chip && isWhole(rosterStatus) && c.adherence != null ? c.adherence : null;
+            // The two facts that are a reason to open THIS row today:
+            // somebody waiting on a reply, and an injury — which the review
+            // wants in front of a coach before they change a program, and a
+            // new one is said as new. Words, not marks, so the line reads
+            // whole to a screen reader and at any text size.
+            const extras = [
+              c.unread != null && c.unread > 0 ? `${c.unread} unread` : null,
+              c.injuries && c.injuries.length ? (c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury') : null,
+            ].filter(Boolean) as string[];
+            const line = [st.words, ...extras].join(' · ');
+            return (
+            /* ── one row per client: a catalogue, not a record ────────────
+                The mockups' roster row: a monogram on a plate of the state's
+                hue, the name, the state as a WORD in that hue's ink at the
+                trailing edge, a thin adherence bar under the name in the same
+                hue, a chevron — and what the coach who tests this build asked
+                for in as many words: "this portion should be condensed down,
+                to only see information of a client if I choose their profile."
+
+                This row has been cut twice. It first carried a weight delta,
+                a next-session line, a rate line, a flags row, a reason line,
+                a tags row, a 3px adherence bar and an adherence figure; the
+                last round left the state line, the drift reason, the Next
+                line, a flags row and a tags row, under band headings with a
+                sentence each. What went, and where each now lives:
+                  · the drift reason — on the Needs Attention row above for
+                    anybody it is a reason to call, and the lead line of their
+                    profile for everybody;
+                  · Next — the profile's own "when you are seeing them next",
+                    and the Training block of their tools sheet;
+                  · tags — the segment bar filters by them and the tools sheet
+                    edits them;
+                  · the band headings — every row already says its own state,
+                    the list is still in drift order, the status chips still
+                    count each band, and the help row under this section
+                    still says what the words mean.
+                The bar is back because the mockups draw it and because it is
+                now honest: one figure, the client's own, withheld with the
+                rest. The tint is the state's pale plate at half strength, so
+                the inks on it clear the contrast they are measured for on the
+                full plate; never colour alone — the word is on the row and in
+                its spoken label. */
+            <Pressable key={c.id}
+              onPress={() => (picking ? togglePick(c.id) : openProfile(c))}
+              onLongPress={() => { if (!picking) setPicking(true); togglePick(c.id); }}
+              accessibilityRole={picking ? 'checkbox' : 'button'}
+              accessibilityState={picking ? { checked: picked.has(c.id) } : undefined}
+              accessibilityLabel={`${picking ? '' : 'Open '}${c.name}, ${line}${adherence != null ? `, ${num(adherence)}% adherence` : ''}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(72), paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.md, overflow: 'hidden' }}>
+              {urgent ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: hue.soft, opacity: 0.5 }} /> : null}
+              <Initials t={t} name={c.name} size={46} tone={st.chip ?? 'neutral'} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                {/* Name and state share a line and part company when they
+                    cannot: the state wraps under the name rather than cutting
+                    either short at a large text size. */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: sp.sm }}>
+                  <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize', flexShrink: 1 }} numberOfLines={1}>{c.name}</Text>
+                  {st.chip ? <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: hue.ink }}>{st.words}</Text> : null}
+                </View>
+                {adherence != null ? (
+                  <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 6, overflow: 'hidden' }}>
+                    <View style={{ height: 6, borderRadius: 3, width: `${Math.max(0, Math.min(100, adherence))}%`, backgroundColor: hue.mark }} />
+                  </View>
+                ) : null}
+                {st.chip ? (
+                  extras.length ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }} numberOfLines={2}>{extras.join(' · ')}</Text> : null
+                ) : (
+                  /* No state to colour — a client added by hand, or a book
+                     with no drift read yet — so the row says what it does
+                     know as a sentence, with `rowStatus`'s mark where it gave
+                     one. Two lines allowed, so a large text size wraps the
+                     line rather than cutting a figure. */
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {st.tone ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: st.tone }} /> : null}
+                    <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{line}</Text>
+                  </View>
+                )}
+              </View>
+              {picking ? (
+                <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center',
+                  borderColor: picked.has(c.id) ? t.brand : t.ink3, backgroundColor: picked.has(c.id) ? t.brand : 'transparent' }}>
+                  {picked.has(c.id) ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+                </View>
+              ) : <Icon name={FORWARD_ICON} size={15} color={t.ink3} />}
+            </Pressable>
+            );
+          })}
+
+          {/* Out of the app, and only ever the whole book, so it is not one of
+              the controls that wait for a tick. `exportRoster` refuses on a read
+              that failed and marks the file INCOMPLETE on one that was
+              truncated; see src/lib/rosterExport.ts. */}
+          {roster.length > 0 || rosterStatus !== 'ready' ? (
+            <View style={{ marginTop: driftRows.length ? sp.lg : sp.sm, paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
+              <Ghost icon="share" label={exportBusy ? 'Exporting…' : 'Export Roster'} onPress={exportRoster} />
+            </View>
+          ) : null}
+        </Section>
+        ) : null}
+
+        {/* What the states on the rows above actually mean. "At risk" is measured
+            against each client's OWN earlier rate and not against a target, and
+            "nothing to assess" is not "fine" — the two readings a coach gets
+            wrong are the two that cost a phone call to somebody who trained
+            yesterday. src/lib/screenHelp.ts holds the sentences; one row, shut,
+            gone for good once dismissed. */}
+        <ScreenHelp screen="coach-clients" />
+
+        {/* ── pending invites ──────────────────────────────────────────────
+            The section used to VANISH when the read failed, because `sent` is
+            `[]` under 'error' and the only test was `length > 0`. So the coach
+            re-invited people who already have a live invitation, and part 37's
+            partial unique index refused it — a second failure with an even less
+            useful explanation. This screen already refuses to trust this list
+            twice over, for `openInviteEmails` and for the CSV import; this is
+            the third place and it was the one a coach reads first. */}
+        {inviteStatus === 'error' ? (<>
+          <Section>
+            <SectionHead title="Pending Invites" />
+            <Flag t={t} tone={t.warn}
+              text={'Your open invitations could not be read, so none are listed. That is not a statement that '
+                + 'nobody is waiting on you. Anyone you have already invited still has a live invitation, and '
+                + 'inviting them again will be refused.'} />
+          </Section>
+        </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
+          <Section>
+            <SectionHead title="Pending Invites"
+              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} Awaiting` : undefined} />
+            {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
+              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <IconPlate icon="message" tone="blue" size={36} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{i.email}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
+                </View>
+                <Ghost label="Cancel" onPress={() => cancelInvite(i.id, i.email)} />
+              </View>
+            ))}
+          </Section>
+        </>) : null}
+
+
+        {/* The first-run list, while it still has something to say. It removes
+            itself the moment every row is DONE — and not a moment earlier: a
+            row that could not be read keeps it here, because the coach whose
+            currency read failed is exactly the coach who needs the currency
+            step. Once it goes, Explore and Settings still reach the screen.
+            src/lib/coachFirstRun.ts holds the rule. */}
+        <CoachSetupRow />
 
         {/* ── the business, in three columns ──────────────────────────────── */}
         <Section>
@@ -1680,12 +3398,31 @@ export default function TrainerClients() {
             // What replaces it is a count of sessions with a RECORDED outcome
             // of 'completed' in the last month — real work, really marked,
             // needing no currency to state. A dash until the read lands.
-            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d` },
-            { label: 'Unread', value: fig(unread) },
+            // ── and each of the three now goes somewhere ────────────────
+            //
+            // `KpiRow` has taken an `onPress` and `KpiItem` a `route` since it
+            // was written, and this row passed neither — so all three tiles
+            // were inert. The Unread one is the reason that mattered: the
+            // comment beside `unread` above says a coach "reads that tile to
+            // decide whether anybody is waiting on them", and there was no
+            // route to /(trainer)/messages ANYWHERE on this screen. The tile
+            // that answers the question and the screen that acts on it were on
+            // the same phone with nothing between them.
+            //
+            // A tile with no `route` stays disabled and keeps no button role,
+            // so the row can be part live and stay honest to a screen reader.
+            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d`, route: '/(trainer)/sessions' },
+            { label: 'Unread', value: fig(unread), route: '/(trainer)/messages' },
             // Null until the record has been read: an em-dash, never a zero
-            // that would tell a coach nobody needs them this week.
-            { label: 'To Contact', value: fig(toContact) },
-          ]} />
+            // that would tell a coach nobody needs them this week. Still
+            // tappable on a dash: a coach whose count could not be read is
+            // exactly the one who should go and look.
+            //
+            // Quiet Clients, which is what `toContact` counts — drifting plus
+            // nothing-recorded — and the same screen `bookAlert`'s drift banner
+            // now opens, so the two agree about where this fact is dealt with.
+            { label: 'To Contact', value: fig(toContact), route: '/(trainer)/nudges' },
+          ]} onPress={(k) => { if (k.route) router.push(k.route as never); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {sessionsUnread
               ? 'Your sessions could not be read, so this is not a count of none.'
@@ -1697,37 +3434,116 @@ export default function TrainerClients() {
           </Text>
         </Section>
 
-        <Rule />
+        {/* Why people have left, and the ones still worth asking about — one
+            section off one read. src/ui/EndReasonSheet.tsx.
+
+            ── why it is HERE and not at the top ────────────────────────────
+            It sat between the first-run row and the block headed "interrupts:
+            things that need a decision now", which split that block in two and
+            put a ninety-day review above an expired trial and a platform
+            invitation. Read as one screen rather than as a stack of cards, this
+            is not a morning interrupt: nothing in it is holding up somebody's
+            pay or somebody's reply today, and its own deadline is measured in
+            months. It is a fact about the business, so it reads directly under
+            the business — the count above says how many clients there are, and
+            this says who stopped being one and why.
+
+            Renders nothing when there are none and nothing when the read
+            failed: this screen already carries four honest warnings and a fifth
+            saying "we could not check whether anybody left" is noise.
+
+            `readNonce` is threaded in so a pull down this screen re-reads it.
+            The card owns its own state, so without it the gesture refreshed
+            everything around this section and not the section itself — the same
+            gap `CoachRequests` at the top of the screen had.
+
+            ABOVE the `<Rule />` below and not under it, because the component
+            draws its own leading rule. Under it there are two hairlines on a
+            screen where this section renders and, on the far commoner screen
+            where it renders nothing, none at all between This Month and
+            Coaching Tools. */}
+        <UnexplainedDepartures reload={readNonce} />
+
 
         {/* ── coaching tools ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Coaching Tools" />
-          {/* Seven destinations, and this was a horizontal ScrollView with its
-              indicator hidden — so Analytics, Leaderboard and Feedback sat past
-              the right edge of a phone with nothing on screen saying they were
-              there. The client app's Train tab had the identical fault and hid
-              most of its row; ChipGrid wraps instead. It has to be a plain View
-              to do it: flexWrap is inert inside a horizontal ScrollView, which
-              lays out on one unbounded axis, so this could not be fixed in
-              place. `tone` keeps the coach's icons in brand, as they were.
-              `key` is the route, so two chips sharing a word cannot collide. */}
-          {/* For a coach who works in the room, or one we do not know about,
-              this is the list it has always been. For a coach who has said they
-              work online and has nobody on the book training in person, the
-              in-person tools drop below the rest with the reason on them —
-              DE-EMPHASISED, never removed. `showsInPerson` resolves every
-              unknown to "show everything", so a roster that failed to load or a
-              question nobody answered hides nothing at all. */}
+          {/* Shut by default and remembered per phone — see `Fold`. The note is
+              what a shut drawer owes the reader: what is in it, by name, so
+              nobody has to open it to find out whether Broadcast lives here. */}
+          <Fold id="tools" title="Coaching Tools"
+            note="Your code, broadcast and notices; the leaderboard, referrals and feedback; your own training, nutrition and progress. Programs, Schedule, Money and Analytics are tabs.">
+          {/* Fourteen chips under one word was the wall this fold opened onto.
+              They are three named groups now — see REACH_SHORTCUTS above — and
+              the note on the shut fold names all three, because a shut drawer
+              owes the reader what is in it.
+
+              Each group is a ChipGrid, which WRAPS. This was once a horizontal
+              ScrollView with its indicator hidden, so Leaderboard and Feedback
+              sat past the right edge of a phone with nothing on screen saying
+              they were there; flexWrap is inert inside a horizontal ScrollView,
+              so that could not be fixed in place. `tone` keeps the coach's
+              icons in brand and `key` is the route, so two chips sharing a word
+              cannot collide.
+
+              For a coach who works in the room, or one we do not know about,
+              Schedule and Your Register sit in the first group as they always
+              have. For a coach who has said they work online and has nobody on
+              the book training in person, they drop below the rest with the
+              reason on them — DE-EMPHASISED, never removed. `showsInPerson`
+              resolves every unknown to "show everything", so a roster that
+              failed to load or a question nobody answered hides nothing. */}
+          <SectionHead title="Everybody On Your Book" />
           <ChipGrid
             tone={t.brand}
-            items={(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
-              .map(([ic, label, route]) => ({
+            items={[
+              ...[...REACH_SHORTCUTS, ...(showsInPerson(delivery) ? IN_PERSON_SHORTCUTS : [])]
+                .map(([ic, label, route]) => ({
+                  icon: ic, label, key: route, onPress: () => router.push(route as any),
+                })),
+              // The door onto the notice composer, which had none. The sheet at
+              // the bottom of this file — composer, push switch, "Posted
+              // before" list — was complete and `bcOpen` was never set true
+              // anywhere in the repo, so the only way to post a gym-wide notice
+              // was unreachable while `reloadNotices` still paid for a read on
+              // every pull-to-refresh. It is a chip rather than a table row
+              // because the tables above are tables of ROUTES and this is a
+              // modal on this screen; giving them an action arm to hold one
+              // entry would make every other row carry a null.
+              //
+              // Beside Broadcast on purpose: those are the two all-client
+              // tools, and a coach who wants one has usually just considered
+              // the other. The sheet's own copy at the bottom of this file
+              // draws the line — a NOTICE is posted once and read on every
+              // client's dashboard; a MESSAGE lands in each person's thread.
+              {
+                icon: 'info' as IconName,
+                label: 'Post a Notice',
+                key: '/(trainer)/dashboard#post-a-notice',
+                onPress: () => setBcOpen(true),
+              },
+            ]}
+          />
+          <View style={{ marginTop: sp.lg }}>
+            <SectionHead title="How the Book Is Doing" />
+            <ChipGrid
+              tone={t.brand}
+              items={BOOK_SHORTCUTS.map(([ic, label, route]) => ({
                 icon: ic, label, key: route, onPress: () => router.push(route as any),
               }))}
-          />
+            />
+          </View>
+          <View style={{ marginTop: sp.lg }}>
+            <SectionHead title="Your Own Training" />
+            <ChipGrid
+              tone={t.brand}
+              items={OWN_SHORTCUTS.map(([ic, label, route]) => ({
+                icon: ic, label, key: route, onPress: () => router.push(route as any),
+              }))}
+            />
+          </View>
           {!showsInPerson(delivery) ? (
             <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In-person tools</Text>
+              <SectionHead title="In-Person Tools" />
               <ChipGrid
                 tone={t.ink3}
                 items={IN_PERSON_SHORTCUTS.map(([ic, label, route]) => ({
@@ -1739,314 +3555,29 @@ export default function TrainerClients() {
               </Text>
             </View>
           ) : null}
-        </Section>
-
-        {/* ── pending invites ────────────────────────────────────────────── */}
-        {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
-          <Rule />
-          <Section>
-            <SectionHead title="Pending Invites" note={`${sentInvites.filter((i) => i.status === 'pending').length} awaiting`} />
-            {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
-              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="message" size={16} color={t.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
-                </View>
-                <Ghost label="Cancel" onPress={() => revokeInvite(i.id)} />
-              </View>
-            ))}
-          </Section>
-        </>) : null}
-
-        <Rule />
-
-        {/* ── the roster ─────────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Your Clients" note={active > 0 ? driftNote() : undefined} />
-
-          {/* The read failed. Say so, say what it cost, and do NOT let the
-              ordinary order pass for the drift order. */}
-          {driftErr && active > 0 ? (
-            <Notice tone={t.crit} kicker="Order unavailable"
-              title="Could not read who is drifting"
-              note={driftErr + ' The list below is in its usual order, not by who needs a call.'} />
-          ) : null}
-
-          {/* Read, and the record is empty for everyone. Distinct from both of
-              the other two renders, and explicitly not an all-clear. */}
-          {bands && bands.total > 0 && bands.unknown === bands.total ? (
-            <Notice tone={t.s5} kicker="Nothing recorded"
-              title={`No record for ${bands.total === 1 ? 'this client' : 'any of your ' + bands.total + ' clients'}`}
-              note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine — it means there is nothing here to judge them on.`} />
-          ) : null}
-
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            {/* Two buttons, and they used to be called "Add a client" and
-                "Add client" — eight characters apart, side by side, doing
-                different things. The prominent one made a roster entry; the
-                other opened the sheet that shows the coaching code. A coach
-                pressed the prominent one and asked "is this the only way? I
-                don't see a trainer's code", which is the only reasonable
-                reading of that pair. The sheet's own failure text already
-                called it "Invite a client"; the button label had drifted. */}
-            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={async () => {
-                setInvEmail(''); setInvMode('online'); setInvOpen(true);
-                setMyCode(null); setMyCodeErr(null);
-                const r = await fetchMyJoinCode();
-                if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
-                await loadCodes();
-              }} /></View>
-            {/* Import sits beside Add rather than under a menu, because the
-                moment a coach needs it is their first hour in the product —
-                and the alternative to finding it is typing forty clients. */}
-            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
-            <View style={{ flex: 1 }}><Cta label="Add Client" wide onPress={async () => {
-                setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
-                // The code is needed by the alert at the end of THIS flow, so
-                // it has to be loaded on this path too. It was only ever
-                // fetched by the button beside this one.
-                if (!myCode) {
-                  const r = await fetchMyJoinCode();
-                  if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
-                }
-              }} /></View>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2, marginBottom: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
-            {AUTO_SEGS.map((sg) => (
-              <Pressable key={sg.key} onPress={() => setSeg(sg.key)}
-                style={{ backgroundColor: seg === sg.key ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: seg === sg.key ? t.brandInk : t.ink2 }}>{sg.label} {fig(sg.n)}</Text>
-              </Pressable>
-            ))}
-            {allTags.map((tg) => (
-              <Pressable key={tg} onPress={() => setSeg(tg)}
-                style={{ backgroundColor: seg === tg ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={{ ...ty.label, color: seg === tg ? t.brandInk : t.ink3 }}>#</Text>
-                <Text style={{ ...ty.label, fontWeight: '500', color: seg === tg ? t.brandInk : t.ink2, textTransform: 'capitalize' }}>{tg}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          {/* ── find one person ──────────────────────────────────────────────
-              The chips above answer "which kind of client"; this answers "which
-              client", which is the question a coach with eighty of them actually
-              has. It was answerable nowhere on this screen: the magnifying glass
-              in the header opens Explore, and Explore searches the list of
-              SCREENS.
-
-              It narrows the segment rather than replacing it, and everything
-              below — the bulk controls, their counts, the drift order — is built
-              from the result, so what the buttons act on is what is listed. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginBottom: sp.md }}>
-            <Icon name="search" size={16} color={t.ink3} />
-            <TextInput value={rosterQ} onChangeText={setRosterQ}
-              placeholder="Find a client by name" placeholderTextColor={t.ink3}
-              autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name"
-              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
-            {rosterQ ? (
-              <Pressable onPress={() => setRosterQ('')} hitSlop={hitSlopFor(24)}
-                accessibilityRole="button" accessibilityLabel="Clear the client search">
-                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          {/* What the search actually searched. Under anything but a whole read
-              that is not the roster, and "nobody matches" said over a read that
-              failed tells a coach somebody is not on their book — see
-              src/lib/rosterSearch.ts. This line is the only thing on the screen
-              that may state an absence, and only under 'ready'. */}
-          {rosterQLine ? (
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{rosterQLine}</Text>
-          ) : null}
-
-          {/* Out of the app, and only ever the whole book. `exportRoster`
-              refuses on a read that failed and marks the file INCOMPLETE on one
-              that was truncated — see src/lib/rosterExport.ts. Offered whatever
-              the segment or the search is, and it exports `roster` rather than
-              what is listed, because a coach exporting their clients means all
-              of them. */}
-          {roster.length > 0 || rosterStatus !== 'ready' ? (
-            <View style={{ marginBottom: sp.md }}>
-              <Ghost icon="share" label={exportBusy ? 'Exporting…' : 'Export Roster'} onPress={exportRoster} />
-            </View>
-          ) : null}
-
-          {/* Offered on every segment including All, which is the one a coach
-              most often means by "everybody". It used to be hidden there, so
-              the two bulk controls appeared only once a filter had been chosen
-              and the most ordinary case had no control at all. */}
-          {shownRoster.length > 0 ? (
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              {/* The count on this button is what the coach consents to, so
-                  it is only a number when the two reads behind the segment came
-                  back whole. Under anything else the control carries the reason
-                  instead and the handler refuses as well — belt and braces,
-                  because a message cannot be taken back. */}
-              <View style={{ flex: 1 }}><Ghost icon="message"
-                label={segClaim.allowed ? `Message ${shownRoster.length}` : 'Cannot Message This Segment'}
-                onPress={openBulkMessage} /></View>
-              <View style={{ flex: 1 }}><Ghost icon="grid"
-                label={segClaim.allowed && bulkGuard.allowed ? 'Assign Program' : 'Cannot Assign Yet'}
-                onPress={() => {
-                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-                  if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
-                  setBulkTplOpen(true);
-                }} /></View>
-            </View>
-          ) : null}
-
-          {/* Removing the segment. On its own row rather than beside the other
-              two, because a destructive control the width of a Ghost sitting
-              next to "Message 12" is a thumb-width away from it — and this one
-              cannot be taken back for anybody it reaches.
-
-              The count is on the label for the same reason it is in the dialog:
-              this button is the last thing the coach reads before the dialog,
-              and a bare "Remove" beside a segment chip is how somebody removes
-              a book they thought was a filter. Withheld with the reason under
-              anything but a whole read of the segment — `guardRecipients`
-              refuses rather than warns, and forty irreversible writes over a
-              list nobody read whole is the case it was written for. */}
-          {shownRoster.length > 0 ? (
-            <View style={{ marginBottom: sp.md }}>
-              <Ghost
-                label={!segClaim.allowed
-                  ? 'Cannot Remove This Segment'
-                  : endBusy ? 'Removing…' : `Remove ${shownRoster.length} From Your Roster`}
-                onPress={() => {
-                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-                  void bulkEnd();
-                }} />
-            </View>
-          ) : null}
-
-          {/* An empty list has four causes and they are not interchangeable.
-              A search that matched nobody is already spoken for by the line
-              under the field — which is the one that knows whether the roster
-              was read at all — so this does not say "no clients in this
-              segment" over a filtered list and send a coach to check a segment
-              that has people in it. */}
-          {shownRoster.length === 0 && !rosterQLine ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {rosterUnread && roster.length === 0
-                ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
-                : roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
-            </Text>
-          ) : null}
-
-          {/* Not read yet. The list is on screen and usable; it just is not
-              sorted by drift, and it says so rather than implying it is. */}
-          {!drift && !driftErr && shownRoster.length > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
-              <ActivityIndicator size="small" color={t.ink3} />
-              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                Reading check-ins, logs, sessions and visits — the order below is not by drift yet.
-              </Text>
-            </View>
-          ) : null}
-
-          {driftRows.map(({ c, d }, idx) => {
-            const prev = idx > 0 ? driftRows[idx - 1].d : null;
-            const opensBand = !!d && (!prev || prev.status !== d.status);
-            // Drift is stated on the row only where there is something to act
-            // on. "Holding their pattern" is said once, by the band heading.
-            const showDrift = !!d && d.status !== 'on_track';
-            return (
-            <View key={c.id}>
-              {opensBand ? (
-                <View style={{ marginTop: idx === 0 ? 0 : sp.xl, marginBottom: sp.sm }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: driftTone(t, d!) }} />
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>{bandTitle(d!.status)}</Text>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
-                </View>
-              ) : null}
-            <Pressable onPress={() => setSel(c)}
-              style={{ paddingVertical: sp.lg, borderTopWidth: idx === 0 || opensBand ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Initials t={t} name={c.name} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {COACHED_MODE_SHORT[c.mode]} · {c.lastActive}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    {/* No scan, no delta. "0 kg" said this client had held
-                        their weight exactly, which is a measurement nobody
-                        took — the same invented zero the rest of this screen
-                        renders as a dash. */}
-                    {/* `<= 0` painted the accent dot for every client whose
-                        weight had come down — including the ones the coach
-                        recorded as building muscle, and including a delta of
-                        exactly zero, which is not a direction at all. The goal
-                        on the row decides it, and where the goal is unknown or
-                        has no opinion the mark stays neutral. */}
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: movementIsProgress(c.weightDelta, goalToEnum(c.goal), 'weight') ? t.brand : t.ink3 }} />
-                    <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>
-                      {deltaLabel(weightDeltaIn(c.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'No change', noBaseline: '—' })}
-                    </Text>
-                  </View>
-                  {/* Days a week, against what this person's own weeks used to
-                      look like. An em-dash where there is no baseline — never
-                      a rate invented out of an empty window. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
-                    {d ? `${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}` : `Next: ${c.next}`}
-                  </Text>
-                </View>
-              </View>
-
-              {((c.unread != null && c.unread > 0) || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
-                  {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
-                  {!d && atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
-                  {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
-                  {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
-                </View>
-              ) : null}
-
-              {showDrift ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>{d!.reason}</Text>
-              ) : null}
-
-              {drift && !d ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>Not read yet — no drift assessment for this client.</Text>
-              ) : null}
-
-              {tagsFor(c.id).length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
-                  {tagsFor(c.id).map((tg) => (
-                    <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-
-              <View style={{ marginTop: sp.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>Plan Adherence</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{c.adherence != null ? c.adherence + '%' : 'no check-ins yet'}</Text>
-                </View>
-                {c.adherence != null ? <Bar t={t} pct={c.adherence} good={c.adherence >= 85} /> : null}
-              </View>
-            </Pressable>
-            </View>
-            );
-          })}
+          </Fold>
         </Section>
 
       </ScrollView>
 
+      {/* ── the board's one green + ──────────────────────────────────────
+          Pinned over the scroll at the bottom end, above the tab bar (this
+          view ends where the tab bar begins, so `bottom` is measured from
+          it), at `e1` so it sits on the cards without floating like a sheet.
+          It is the Add Client action that was the third button in the roster
+          row: one control, reachable from wherever a coach is in the scroll.
+          The scroll's bottom padding leaves room for it so the last row is
+          never under it. */}
+      <Pressable onPress={() => { void openAdd(); }} accessibilityRole="button" accessibilityLabel="Add Client"
+        style={{ position: 'absolute', end: G, bottom: sp.lg, width: FAB, height: FAB, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', ...elevation.e1 }}>
+        <Icon name="plus" size={26} color={t.brandInk} />
+      </Pressable>
+
       {/* ── client detail ────────────────────────────────────────────────── */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setSel(null)} />
+        <Pressable style={SCRIM} onPress={() => setSel(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { padding: 0, paddingBottom: 0, maxHeight: '86%' })}>
           {sel && (
             <>
@@ -2072,13 +3603,31 @@ export default function TrainerClients() {
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{sel.name}</Text>
               <Pressable onPress={() => setSel(null)} accessibilityRole="button"
                 accessibilityLabel={`Close ${sel.name}`} hitSlop={12}
-                style={{ marginLeft: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
+                style={{ marginStart: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
                          justifyContent: 'center', backgroundColor: t.surface2 }}>
+                {/* grown(24) and not head's own grown(22): the extra two points centre
+                    the × in its 32pt circle. The circle is pinned, so at a large
+                    text size the glyph spills past the ring instead of being cut
+                    off by a 24pt line — and this is the dismissal for a sheet
+                    drawn over the whole client record. */}
                 <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : deltaLabel(weightDeltaIn(sel.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'no change', noBaseline: 'no scans yet' })} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
+
+              {/* First, not last. It was the final row of a sheet several
+                  screens long, so the profile — where how this person is doing
+                  is actually read — was behind everything a coach might WRITE
+                  about them. The roster opens the profile directly now and this
+                  sheet is reached from it; when it is opened some other way
+                  (a deep link, the Needs Attention draft), this is the way
+                  back to the record. */}
+              <View style={{ marginBottom: sp.xl }}>
+                <ListRow icon="people" title={`Open ${sel.name.split(' ')[0]}`}
+                  note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
+                  onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
+              </View>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />
@@ -2090,32 +3639,32 @@ export default function TrainerClients() {
                 </View>
               </View>
 
-              {sel.metrics && Object.values(sel.metrics).some((v) => v != null) ? (
-                <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Body Composition · latest scan" />
-                  {METRIC_GROUPS.map((g) => {
-                    const items = METRIC_DEFS.filter((d) => d.group === g && sel.metrics && sel.metrics[d.key] != null);
-                    if (!items.length) return null;
-                    return (
-                      <View key={g} style={{ marginBottom: sp.md }}>
-                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>{g}</Text>
-                        {items.map((d) => (
-                          <View key={String(d.key)} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-                            <Text style={{ ...ty.label, color: t.ink2 }}>{d.label}</Text>
-                            <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>{sel.metrics![d.key]} {d.unit}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    );
-                  })}
-                  {(() => {
-                    const m = sel.metrics!; const out: string[] = [];
-                    const pair = (l?: number, r?: number, name?: string) => { if (l == null || r == null || !l || !r) return; const diff = Math.abs(l - r) / Math.max(l, r); if (diff >= 0.1) out.push(name + ': ' + (l < r ? 'left' : 'right') + ' ' + Math.round(diff * 100) + '% behind'); };
-                    pair(m.leanArmLKg, m.leanArmRKg, 'Arms'); pair(m.leanLegLKg, m.leanLegRKg, 'Legs');
-                    return out.length ? <Flag t={t} tone={t.warn} text={out.join('  ·  ') + ' — cue the weaker side.'} /> : null;
-                  })()}
-                </View>
-              ) : null}
+              {/* ── the body-composition table that stood here ───────────────
+                  "Body Composition · Latest Scan", and a coach reported of it:
+                  "Can't see the updated body scan." It was not the latest scan.
+
+                  The block drew `sel.metrics`, which src/ui/roster.tsx fills by
+                  walking the client's scans newest-first and keeping the first
+                  one that HAS a `metrics` breakdown. Only a photographed InBody
+                  sheet has one — a scan the client types in is stored as
+                  'InBody (manual)' with weight, body fat and muscle and no
+                  `metrics` (app/(client)/scans.tsx) — so after a typed scan
+                  this went on showing the thirteen figures off the sheet
+                  BEFORE it, undated, under the words "latest scan", and the
+                  new scan's own three figures appeared nowhere on the sheet.
+                  `sel` is also a copy of the roster row taken at the tap, so
+                  it could not move while the sheet was open either.
+
+                  Nothing was wrong with what the coach may read: the policy
+                  `scans_trainer_read` asks only whose client the scan belongs
+                  to, never when it was added. The answer was one screen away
+                  and correct — app/(trainer)/client-body.tsx reads every
+                  scan, dated and sourced, typed ones included — so the copy
+                  is gone rather than repaired: a second table here is a second
+                  place to be out of date, and the review asks that a summary
+                  surface not duplicate its detail route. The profile this
+                  sheet is opened from carries the live row into it, saying
+                  when they were last scanned. */}
 
               {/* ── progress photos this client sent ─────────────────────────
                   The ONLY route by which a progress photo reaches a coach. There
@@ -2125,16 +3674,16 @@ export default function TrainerClients() {
                   read the list" must never look like "they have sent nothing",
                   because the second is a fact about them and the first is not. */}
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title={`Progress photos · sent by ${sel.name.split(' ')[0]}`} />
+                <SheetHead t={t} title={`Progress Photos · Sent by ${sel.name.split(' ')[0]}`} />
                 {sharedErr ? (
                   <KitFlag tone={t.warn}>
-                    {sharedErr} That is not the same as them having sent none — the list could not be read, so this sheet cannot say either way.
+                    {sharedErr} That is not the same as them having sent none. The list could not be read, so this sheet cannot say either way.
                   </KitFlag>
                 ) : shared === null ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Loading what they have sent you…</Text>
                 ) : shared.length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
-                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo — there is nothing to turn on here, and being their coach does not show you the rest.
+                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo. There is nothing to turn on here, and being their coach does not show you the rest.
                   </Text>
                 ) : (
                   <View>
@@ -2155,7 +3704,7 @@ export default function TrainerClients() {
                       ))}
                     </ScrollView>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]} — and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
+                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]}, and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
                     </Text>
                     {(missingSharedFiles(shared) ?? 0) > 0 ? (
                       <KitFlag tone={t.warn} style={{ marginTop: 4 }}>
@@ -2178,7 +3727,7 @@ export default function TrainerClients() {
                   ))}
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag — e.g. comp prep" placeholderTextColor={t.ink3} autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
+                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag, e.g. comp prep" placeholderTextColor={t.ink3} accessibilityLabel="Add a tag" autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
                   <Cta label="Add" onPress={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} />
                 </View>
                 {allTags.filter((tg) => !tagsFor(sel.id).includes(tg)).length > 0 ? (
@@ -2194,13 +3743,13 @@ export default function TrainerClients() {
 
               {sel.injuries && sel.injuries.length ? (
                 <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Injuries & Limitations · disclosed at onboarding" />
+                  <SheetHead t={t} title="Injuries & Limitations · Disclosed at Onboarding" />
                   {sel.injuries.map((inj, i) => (
                     <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Icon name="heart" size={14} color={t.s3} />
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{areaLabel(inj.area)}</Text>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{areaLabel(inj.area)}</Text>
                           <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>· {inj.severity}</Text>
                           {inj.isNew ? <Flag t={t} tone={t.s3} text="New" /> : null}
                         </View>
@@ -2221,18 +3770,55 @@ export default function TrainerClients() {
                     ? `Assigned program: ${selProgram.title} · ${selProgram.days.length} day${selProgram.days.length === 1 ? '' : 's'} a week.`
                     : 'No program assigned yet.'}
                 </Text>
+                {/* "next session {sel.next}" is gone from this line for the
+                    reason the roster row above gives: that field has never held
+                    anything but an em dash. The client's own page answers it
+                    properly — src/lib/nextUp.ts, from the bookings that screen
+                    already reads. */}
+                {/* `lastActive` is a display PHRASE with five shapes and this
+                    line used to glue "Last active " to the front of whichever
+                    one arrived. Seen on an iPhone 17 Pro on a client added
+                    today: "Last active no activity yet." The dash case was the
+                    expensive one — "Last active —." reads as a client who has
+                    gone quiet, and a dash here means the stats page came back
+                    truncated. src/lib/lastActiveLine.ts writes the sentence
+                    from the value instead, and tells the four facts apart. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                  Last active {sel.lastActive} · next session {sel.next}. What they have actually trained is under What They've Actually Done on their profile.
+                  {lastActiveLine(sel.lastActive)} What they have actually trained is under What They've Actually Done on their profile.
+                </Text>
+                {/* There IS a Next, and it is read rather than declared — see
+                    `nextBooked`. It was a line on every roster row until the
+                    roster became a catalogue of names; it is said here, once,
+                    for the person the sheet is about. Absent, never dashed,
+                    when the fortnight is empty, and the sentence says which
+                    of "nothing booked" and "could not be read" this is —
+                    these are the COACH's own diary rows, so a blank is never
+                    "they have nothing booked with anybody". */}
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+                  {nextBooked === null
+                    ? 'Your diary could not be read, so this cannot say when you next see them. That is the read, not an empty book.'
+                    : nextBookedLine(sel.id)
+                      ?? `Nothing booked with you in the next ${BOOKED_AHEAD_DAYS} days, which is not the same as nothing booked with anybody.`}
                 </Text>
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="AI Weekly Summary" />
                 {aiSummary ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{aiSummary}</Text> : null}
+                {/* Role and state, because the only thing that changed while a
+                    summary was being written was the opacity and the word
+                    inside — and a control with no `accessibilityRole` is not
+                    announced as a button at all, so a coach on VoiceOver had
+                    nothing telling them the tap had landed. */}
                 <Pressable onPress={() => genSummary(sel)} disabled={aiBusy}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: aiBusy, busy: aiBusy }}
+                  accessibilityLabel={aiBusy
+                    ? `Writing the weekly summary for ${sel.name}`
+                    : aiSummary ? `Write the weekly summary for ${sel.name} again` : `Generate an AI weekly summary for ${sel.name}`}
                   style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: aiBusy ? 0.6 : 1 }}>
                   {aiBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
                 </Pressable>
               </View>
 
@@ -2246,6 +3832,35 @@ export default function TrainerClients() {
                     no history, and this line asserted the second. The Private
                     Notes section further down already renders these three
                     states; this one now agrees with it. */}
+                {/* ── the fourth state, which this chain admitted silently ────
+                    Both providers read the coach's ENTIRE history in one capped
+                    page — `src/ui/feedback.tsx` :69 and `src/ui/coachNotes.tsx`
+                    :114, both `capLimit()` and both `page.truncated ?
+                    'partial' : 'ready'`. Newest first, so the thousandth row is
+                    the oldest one that survives: a coach two years in, past a
+                    thousand notes and feedback items between them, opens a
+                    client they last wrote to eight months ago and every row
+                    about that client is on the other side of the cap. `timeline`
+                    is then empty and this said "No history yet" about a client
+                    with a year of it.
+
+                    Said above the rows rather than instead of them: the rows
+                    that did come back are real and are worth reading — it is
+                    the ABSENCE that cannot be reported, which is the same
+                    bargain src/ui/loadStatus.ts describes for 'partial'.
+
+                    `=== 'error'` and `=== 'loading'` name two of the three bad
+                    answers and leave the third free, which is why `isWhole` is
+                    a function — and why this never showed up in `check:whole`:
+                    that gate matches `!==` comparisons, so an `=== 'error'`
+                    chain walks straight past it. */}
+                {timelineStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have more notes and feedback on record than one request returns, so this is
+                    not the whole of their history. Anything older than the newest thousand is not
+                    in it, and an empty stretch below is that limit rather than a quiet period.
+                  </Text>
+                ) : null}
                 {timelineStatus === 'error' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
                     This history could not be read, so we cannot say whether there is any.
@@ -2253,7 +3868,11 @@ export default function TrainerClients() {
                 ) : timelineStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Reading their history…</Text>
                 ) : timeline.length === 0 ? (
-                  <Text style={{ ...ty.label, color: t.ink3 }}>No history yet — notes, feedback and check-ins appear here.</Text>
+                  // Only a whole read may say there is none. Under 'partial'
+                  // the line above has already said what the emptiness is.
+                  isWhole(timelineStatus)
+                    ? <Text style={{ ...ty.label, color: t.ink3 }}>No history yet. Notes, feedback and check-ins appear here.</Text>
+                    : null
                 ) : timeline.slice(0, 8).map((ev) => (
                   <View key={ev.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                     <View style={{ alignItems: 'center' }}>
@@ -2273,7 +3892,27 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Meal Plan Targets" />
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat. Applies to their Meals tab live.</Text>
+
+                {/* The deltas below are safe to set from here: they are numbers
+                    against the client's own computed targets and depend on
+                    nothing this sheet failed to read. Picking their MEALS is
+                    not, and a picker that did it used to sit under them. A meal
+                    is an index into a catalogue that `avoid` has already
+                    filtered, `useRoster` only selects `diet, avoid` for LINKED
+                    clients and selects neither when the read comes back short —
+                    so `sel.avoid ?? []` turned "we could not read what they
+                    avoid" into "they avoid nothing" and assigned food out of an
+                    unfiltered catalogue. It also wrote the superseded flat
+                    `meal_override`. client-nutrition.tsx reads that profile
+                    itself, holds its own LoadStatus for it, withholds the send
+                    behind `guardPlan`, and writes the weekday-carrying `plan`.
+                    Above the adjustment gate rather than inside it: opening a
+                    screen writes nothing, so a coach whose ADJUSTMENT could not
+                    be read is still one tap from the job. */}
+                <ListRow icon="meals" title="Write Their Week of Meals" tone="orange"
+                  note={`Pick ${sel.name.split(' ')[0]}'s meals against what they avoid`}
+                  onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client-nutrition', params: { clientId: id, name: nm } }); }} />
 
                 {/* The controls are withheld, not just annotated, when the
                     adjustment could not be read.
@@ -2288,7 +3927,7 @@ export default function TrainerClients() {
                 {nutriStatus === 'error' ? (
                   <KitFlag tone={t.warn}>
                     {sel.name.split(' ')[0]}&rsquo;s current adjustment could not be read, so it is not shown
-                    and cannot be changed here — anything set now would overwrite figures we
+                    and cannot be changed here: anything set now would overwrite figures we
                     cannot see. Their Meals tab is unaffected. Try again once you are connected.
                   </KitFlag>
                 ) : nutriStatus === 'loading' ? (
@@ -2311,38 +3950,32 @@ export default function TrainerClients() {
                     </View>
                   </View>
                 ))}
-                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6, marginTop: 4 }}>Set specific meals</Text>
-                {slotsFor(sel.mealsPerDay || 3).map((slot, pos) => {
-                  const ovIdx = getNutri(sel.id)?.mealOverride?.[pos];
-                  const dietForPick = (sel.diet || 'meat') as any;
-                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx, (sel.avoid ?? []) as any) : null;
-                  return (
-                    <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                      <View style={{ flex: 1, marginRight: sp.sm }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>{slot}</Text>
-                        <Text style={{ ...ty.label, fontWeight: picked ? '500' : '400', color: picked ? t.ink : t.ink3, marginTop: 2 }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {picked ? <Ghost label="Clear" onPress={() => setNutri(sel.id, { mealOverride: (() => { const mm = { ...(getNutri(sel.id)?.mealOverride ?? {}) }; delete mm[pos]; return mm; })() })} /> : null}
-                        <Cta label={picked ? 'Change' : 'Choose'} onPress={() => { setMealQuery(''); setMealPick({ pos, slot }); }} />
-                      </View>
-                    </View>
-                  );
-                })}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                  <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} style={{ ...field(t), flex: 1 }} />
+                  <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} accessibilityLabel="Note on the plan, optional" style={{ ...field(t), flex: 1 }} />
                   <Cta label="Save" onPress={() => { setNutri(sel.id, { note: nnote.trim() }); }} />
                 </View>
                 {getNutri(sel.id) ? (
                   <Pressable onPress={() => { clearNutri(sel.id); setNnote(''); }} style={{ paddingVertical: sp.sm, marginTop: 2 }}>
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>Clear adjustment</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Clear Adjustment</Text>
                   </Pressable>
                 ) : null}
                 </>
                 )}
               </View>
 
-              {clientMeals === null ? (
+              {/* Three answers, kept apart. "No account" is not "could not be
+                  read": nothing was asked, nothing was refused, and telling a
+                  coach their connection let them down about a person they
+                  typed into their own book sends them to retry something that
+                  will never work. */}
+              {!selAskable ? (
+                <View style={{ marginBottom: sp.xl }}>
+                  <SheetHead t={t} title="Recent Meals Logged" />
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    You added {sel.name.split(' ')[0]} to your book by hand, so there is no food log. Meals are logged in the app and they do not have it. Invite them and this fills in from the day they accept.
+                  </Text>
+                </View>
+              ) : clientMeals === null ? (
                 <View style={{ marginBottom: sp.xl }}>
                   <SheetHead t={t} title="Recent Meals Logged" />
                   <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -2355,7 +3988,7 @@ export default function TrainerClients() {
                   {clientMeals.map((m, i) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{m.name}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: sp.sm }}>{num(m.kcal)} kcal · {m.via}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginStart: sp.sm }}>{num(m.kcal)} kcal · {m.via}</Text>
                     </View>
                   ))}
                 </View>
@@ -2371,11 +4004,26 @@ export default function TrainerClients() {
                     would either write it again or conclude they never did. */}
                 {fbStatus === 'error' ? (
                   <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
-                    Your feedback for {sel.name.split(' ')[0]} could not be read — this is not "no feedback".
+                    Your feedback for {sel.name.split(' ')[0]} could not be read. This is not "no feedback".
                     Anything you send now still goes to them.
                   </KitFlag>
                 ) : fbStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your feedback…</Text>
+                ) : /* The third bad answer, which naming the first two with
+                       `===` left free. `src/ui/feedback.tsx` :69 reads every
+                       note this coach has ever written to ANYBODY in one
+                       `capLimit()` page, newest first — so past a thousand of
+                       them the oldest fall off, and a client last written to
+                       eight months ago has all of theirs on the far side of the
+                       cap. "No feedback yet" was then said to a coach who wrote
+                       them a page, and the coach either writes it again or
+                       decides they never did. */
+                  fbStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have written more feedback than one request returns, so anything older than
+                    your newest thousand notes is not below. Nothing here says you have not written
+                    to {sel.name.split(' ')[0]}.
+                  </Text>
                 ) : getFeedback(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No feedback yet. Leave {sel.name.split(' ')[0]} a note below.</Text>
                 ) : null}
@@ -2386,7 +4034,7 @@ export default function TrainerClients() {
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
+                  <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} accessibilityLabel="Leave advice or a note" multiline style={{ ...field(t, 44), flex: 1 }} />
                   {/* The result of the send is read, and the box is cleared
                       only once the row is on the server. This used to throw the
                       boolean away: `addFeedback` returns false when there is no
@@ -2406,14 +4054,14 @@ export default function TrainerClients() {
                       const sent = await addFeedback(id, draft);
                       setFbBusy(false);
                       if (sent) setFb('');
-                      else Alert.alert('Not sent', 'That note did not reach your client, so it is still in the box. Check your connection and tap Send again.');
+                      else Alert.alert('Not Sent', 'That note did not reach your client, so it is still in the box. Check your connection and tap Send again.');
                     })();
                   }} />
                 </View>
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="Private Notes (only you)" />
+                <SheetHead t={t} title="Private Notes (Only You)" />
                 {/* Three renders, and the middle one is the whole point.
                     'error' with an empty list means the notes could NOT be
                     read — it is not a coach who has written nothing. Say so,
@@ -2422,11 +4070,24 @@ export default function TrainerClients() {
                     it again, or worse, deciding it did not happen. */}
                 {notesStatus === 'error' ? (
                   <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
-                    Your notes could not be read — this is not "no notes". Anything you save now
+                    Your notes could not be read. This is not "no notes". Anything you save now
                     will still be stored, but check back once you have a connection.
                   </KitFlag>
                 ) : notesStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your notes…</Text>
+                ) : /* And the third, for the same reason as the two sections
+                       above it. `src/ui/coachNotes.tsx` :114 is one
+                       `capLimit()` page of every private note this coach has
+                       ever written, newest first. "Nothing here yet" over a
+                       truncated read is the sentence this section's own header
+                       says it exists to prevent — a coach deciding the thing
+                       they are half-remembering did not happen. */
+                  notesStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have written more notes than one request returns, so anything older than
+                    your newest thousand is not below. This is not &quot;no notes&quot; about{' '}
+                    {sel.name.split(' ')[0]}.
+                  </Text>
                 ) : getNotes(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                     Nothing here yet. Only you can see what you write below.
@@ -2445,11 +4106,11 @@ export default function TrainerClients() {
                         list as though it were gone. */}
                     <Pressable onPress={() => {
                       const cid = sel.id;
-                      Alert.alert('Delete this note?', 'It is only visible to you, and this cannot be undone.', [
+                      Alert.alert('Delete This Note?', 'It is only visible to you, and this cannot be undone.', [
                         { text: 'Cancel', style: 'cancel' },
                         { text: 'Delete', style: 'destructive', onPress: () => { void (async () => {
                           const gone = await removeNote(cid, n.id);
-                          if (!gone) Alert.alert('Not deleted', 'That note is still saved. Check your connection and try again.');
+                          if (!gone) Alert.alert('Not Deleted', 'That note is still saved. Check your connection and try again.');
                         })(); } },
                       ]);
                     }} hitSlop={8}
@@ -2459,7 +4120,7 @@ export default function TrainerClients() {
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
+                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} accessibilityLabel="Private note, your client cannot see this" multiline style={{ ...field(t, 44), flex: 1 }} />
                   {/* The text is cleared only once the note is stored. It used
                       to be cleared immediately, which is how a note that was
                       never saved anywhere also stopped being recoverable by
@@ -2473,7 +4134,7 @@ export default function TrainerClients() {
                       const saved = await addNote(cid, draft);
                       setNoteBusy(false);
                       if (saved) setPnote('');
-                      else Alert.alert('Not saved', 'That note was not stored, so it is still in the box. Check your connection and tap Save again.');
+                      else Alert.alert('Not Saved', 'That note was not stored, so it is still in the box. Check your connection and tap Save again.');
                     })();
                   }} />
                 </View>
@@ -2493,9 +4154,6 @@ export default function TrainerClients() {
                   when this person was last seen at all. Nothing has been taken
                   away; the same seven screens are one tap further on and one
                   sentence better described. */}
-              <ListRow icon="people" title={`Open ${sel.name.split(' ')[0]}`}
-                note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
-                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
 
               {/* Logging a session was FOUR taps from here — this sheet, then
                   Open, then the client screen, then the row on it — and it is
@@ -2524,10 +4182,10 @@ export default function TrainerClients() {
                 // mean it — removing a client is destructive and a picker is
                 // not a confirmation — and the sheet then asks why, with an
                 // explicit way to record nothing. See src/ui/EndReasonSheet.tsx.
-                onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { setSel(null); setEnding({ id: s.id, name: s.name }); } }]); }}
+                onPress={() => { const s = sel; Alert.alert('Remove Client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { setSel(null); setEnding({ id: s.id, name: s.name }); } }]); }}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 13, marginTop: sp.lg, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Remove client</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Remove Client</Text>
               </Pressable>
               <Cta label="Close" wide onPress={() => setSel(null)} />
             </ScrollView>
@@ -2561,7 +4219,7 @@ export default function TrainerClients() {
               void (async () => {
                 const ok = await removeClient(e.id, reason, note);
                 if (!ok) {
-                  Alert.alert('Not Removed', `${e.name.split(' ')[0]} is still on your roster. Either the server refused the change or there was no coaching relationship left to end — nothing was written either way, and anything you recorded about why they left was not saved.`);
+                  Alert.alert('Not Removed', `${e.name.split(' ')[0]} is still on your roster. Either the server refused the change or there was no coaching relationship left to end. Nothing was written either way, and anything you recorded about why they left was not saved.`);
                 }
               })();
             }}
@@ -2569,132 +4227,125 @@ export default function TrainerClients() {
         ) : null}
       </Modal>
 
-      {/* ── coach meal picker ─────────────────────────────────────────────
-          Nested in the client sheet on purpose. "Choose" is only ever tapped
-          on a meal row above, and the picker reads `sel` for the diet, the
-          allergens and the name it writes to — it has no meaning without this
-          sheet open. As a sibling `<Modal>` at the screen root it was worse
-          than meaningless: iOS presents each modal in its own window and puts
-          one opened from the root beneath the sheet already showing, so
-          "Choose" set `mealPick`, mounted the picker out of sight behind the
-          client sheet, and left a coach tapping a button that never did
-          anything. Nested here it presents above the sheet it belongs to. */}
-      <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setMealPick(null)} />
-        <View style={sheet(t, { maxHeight: '80%' })}>
-          {mealPick && sel ? (
-            <>
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
-              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.md }} />
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
-                  <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                    <View style={{ flex: 1, marginRight: sp.md }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{m.n}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
-                    </View>
-                    <Icon name="chevron" size={16} color={t.ink3} />
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
-        </View>
-              </KeyboardAvoidingView>
-      </Modal>
-      {/* ── end of the client sheet, which the meal picker sits inside ──── */}
+      {/* ── the coach meal picker used to sit here ────────────────────────
+          It searched the catalogue with `sel.avoid ?? []` and `sel.diet ||
+          'meat'`. `useRoster` only selects diet and avoid for LINKED clients,
+          and under a 'partial' or 'error' roster read it does not select them
+          at all — so those two fallbacks turned "we could not read what they
+          avoid" into "they avoid nothing", and a coach assigned a meal from an
+          UNFILTERED catalogue to somebody whose exclusions had never been
+          read. It also wrote `coach_nutrition.meal_override`, the superseded
+          flat pos → idx map with no weekday on it (see src/ui/coachNutrition.tsx).
+          app/(trainer)/client-nutrition.tsx does this job properly: it reads
+          `clients.diet, avoid` itself with its own LoadStatus and withholds
+          the send behind `guardPlan` until that read has landed. The row above
+          opens it on this client, so the job is still one tap from here. */}
       </Modal>
 
       {/* ── add a client ─────────────────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setAddOpen(false)} />
-          <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>They join your roster and become bookable in your schedule.</Text>
-            <SheetHead t={t} title="Name" />
-            <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Email · optional, records an invite" />
-            <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Goal" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
-                <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
-              ))}
-            </View>
-            <SheetHead t={t} title="Coaching Type" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-              {COACHED_MODES.map((id) => (
-                <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
-              ))}
-            </View>
-            {/* What the chip above does, for the one that is selected. Three
-                delivery names in a row are three words until something says
-                which client screens each of them turns on. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[newMode]}</Text>
-            <View style={{ flexDirection: 'row', gap: sp.md }}>
-              <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
-              <View style={{ flex: 2 }}>
-                <Cta label="Add Client" wide onPress={async () => {
-                  if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
-                  // Awaited and READ, like sendInvite two lines down already
-                  // was. Firing this and moving on is why a coach could add
-                  // somebody, watch them appear, and find them gone at the next
-                  // launch: the row is added to local state first and the
-                  // server write can refuse without anything on screen
-                  // changing. If it did not land, say so and keep the sheet
-                  // open with what they typed still in it.
-                  const added = await addClient(newName, newGoal, newMode);
-                  if (!added) {
-                    Alert.alert(
-                      'Not saved',
-                      `${newName.trim()} is showing on this phone but was not recorded, so they will be gone when you next open the app. Check your connection and try again.`,
-                    );
-                    return;
-                  }
-                  const em = newEmail.trim();
-                  const wanted = !!em && em.includes('@');
-                  // Awaited and read. sendInvite resolves false when the write
-                  // was refused, and this used to announce success either way.
-                  const invited = wanted ? await sendInvite(em, newMode) : false;
-                  setAddOpen(false);
-                  const nm = newName.trim();
-                  // The code goes IN the alert, because this is the moment the
-                  // coach needs it. This used to end on "tell them yourself so
-                  // they know to install it" without giving them anything to
-                  // tell — the coaching code lived behind a different button,
-                  // on a different sheet, also called "Add a client". A tester
-                  // asked "is this the only way? I don't see a trainer's code".
-                  //
-                  // It also matters that the code is the RELIABLE path: the
-                  // email invite only links if they sign up with that address
-                  // spelled exactly the same way, and nothing tells either side
-                  // when it does not.
-                  const codeLine = myCode
-                    ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with — send it to them.'
-                    : '';
-                  const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
-                  if (myCode) {
-                    buttons.unshift({
-                      text: 'Share code',
-                      onPress: () => Share.share({
-                        message: inviteMessage(myCode),
-                      }).catch(() => {}),
-                    });
-                  }
-                  Alert.alert('Client added',
-                    (!wanted
-                      ? nm + ' is now on your roster.'
-                      : invited
-                        ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
-                        : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
-                    buttons);
-                }} />
+          <Pressable style={SCRIM} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={sheet(t, { maxHeight: '90%' })}>
+            {/* Two fields, two chip rows and a note, and the whole sheet had to fit
+                the window because nothing in it scrolled. With the keyboard up over
+                Name the sheet is taller than what is left, and this one overflows
+                upwards — the field being typed into goes off the top. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
+              {/* Conditional on the coaching type, because the flat sentence was
+                  contradicted by this sheet's own caption four rows further down.
+                  Seen on an iPhone 17 Pro with the sheet at its defaults: the
+                  header promised "become bookable in your schedule" while the
+                  note under the selected Online chip said "They get no booking
+                  calendar" — and Online is the default, so the two sentences
+                  disagreed on first open, every time. `booksInPerson` is the same
+                  predicate the calendar uses to decide who has slots to book. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>
+                They join your roster{booksInPerson(newMode) ? ' and become bookable in your schedule' : ''}.
+              </Text>
+              <SheetHead t={t} title="Name" />
+              <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
+              <SheetHead t={t} title="Email · Optional, Records an Invite" />
+              <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
+              <SheetHead t={t} title="Goal" />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+                {['Fat Loss', 'Build Muscle', 'Tone'].map((g) => (
+                  <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
+                ))}
               </View>
-            </View>
+              <SheetHead t={t} title="Coaching Type" />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+                {COACHED_MODES.map((id) => (
+                  <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
+                ))}
+              </View>
+              {/* What the chip above does, for the one that is selected. Three
+                  delivery names in a row are three words until something says
+                  which client screens each of them turns on. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[newMode]}</Text>
+              <View style={{ flexDirection: 'row', gap: sp.md }}>
+                <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
+                <View style={{ flex: 2 }}>
+                  <Cta label="Add Client" wide onPress={async () => {
+                    if (!newName.trim()) { Alert.alert('Add a Name', 'Enter the client name.'); return; }
+                    // Awaited and READ, like sendInvite two lines down already
+                    // was. Firing this and moving on is why a coach could add
+                    // somebody, watch them appear, and find them gone at the next
+                    // launch: the row is added to local state first and the
+                    // server write can refuse without anything on screen
+                    // changing. If it did not land, say so and keep the sheet
+                    // open with what they typed still in it.
+                    const added = await addClient(newName, newGoal, newMode);
+                    if (!added) {
+                      Alert.alert(
+                        'Not Saved',
+                        `${newName.trim()} is showing on this phone but was not recorded, so they will be gone when you next open the app. Check your connection and try again.`,
+                      );
+                      return;
+                    }
+                    const em = newEmail.trim();
+                    const wanted = !!em && em.includes('@');
+                    // Awaited and read. sendInvite resolves false when the write
+                    // was refused, and this used to announce success either way.
+                    const invited = wanted ? await sendInvite(em, newMode) : false;
+                    setAddOpen(false);
+                    const nm = newName.trim();
+                    // The code goes IN the alert, because this is the moment the
+                    // coach needs it. This used to end on "tell them yourself so
+                    // they know to install it" without giving them anything to
+                    // tell — the coaching code lived behind a different button,
+                    // on a different sheet, also called "Add a client". A tester
+                    // asked "is this the only way? I don't see a trainer's code".
+                    //
+                    // It also matters that the code is the RELIABLE path: the
+                    // email invite only links if they sign up with that address
+                    // spelled exactly the same way, and nothing tells either side
+                    // when it does not.
+                    const codeLine = myCode
+                      ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with. Send it to them.'
+                      : '';
+                    const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
+                    if (myCode) {
+                      buttons.unshift({
+                        text: 'Share Code',
+                        onPress: () => Share.share({
+                          message: inviteMessage(myCode),
+                        }).catch(() => {}),
+                      });
+                    }
+                    Alert.alert('Client Added',
+                      (!wanted
+                        ? nm + ' is now on your roster.'
+                        : invited
+                          ? nm + ' is on your roster. Repple does not send email; ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
+                          : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
+                      buttons);
+                  }} />
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2708,7 +4359,8 @@ export default function TrainerClients() {
           Nothing reaches the database until Import is pressed. */}
       <Modal visible={impOpen} transparent animationType="slide" onRequestClose={() => setImpOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setImpOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setImpOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Import Your Clients</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
@@ -2733,7 +4385,7 @@ export default function TrainerClients() {
                     <Text style={{ ...ty.caption, color: t.ink3 }}>
                       {r.outcome === 'failed'
                         ? 'Not saved. They are not on your roster.'
-                        : 'On your roster, but no invite was recorded — send them your coaching code.'}
+                        : 'On your roster, but no invite was recorded. Send them your coaching code.'}
                     </Text>
                   </View>
                 ))}
@@ -2753,7 +4405,7 @@ export default function TrainerClients() {
                 ) : null}
 
                 {impPlan.rejected.length ? (<>
-                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Rows that will not be imported</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Rows That Will Not Be Imported</Text>
                   {impPlan.rejected.map((r) => (
                     <View key={r.line} style={{ paddingVertical: 5 }}>
                       <Text style={{ ...ty.label, color: t.ink }}>
@@ -2765,7 +4417,7 @@ export default function TrainerClients() {
                 </>) : null}
 
                 {impPlan.inviteSkipped.length ? (<>
-                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Added, but no invite recorded</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Added, but No Invite Recorded</Text>
                   {impPlan.inviteSkipped.map((r) => (
                     <View key={r.email} style={{ paddingVertical: 5 }}>
                       <Text style={{ ...ty.label, color: t.ink }}>{r.name}</Text>
@@ -2799,101 +4451,118 @@ export default function TrainerClients() {
       {/* ── broadcast ────────────────────────────────────────────────────── */}
       <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
-          <View style={sheet(t)}>
-            {/* Was "Broadcast to All Clients", which is the name of a
-                DIFFERENT screen — app/(trainer)/broadcast.tsx, whose own
-                subtitle is "Send one message to a whole segment of your
-                clients". So a coach met two all-client tools both called
-                Broadcast, and was sent from one to the other to do the thing
-                neither of them does. These are a NOTICE (posted once, seen on
-                every dashboard) and a MESSAGE (written into each person's
-                thread, with a push). Named for what they are. */}
-            <Text style={{ ...ty.title, color: t.ink }}>Post a Notice</Text>
-            {/* This copy has now been wrong in both directions, which is worth
-                recording.
+          <Pressable style={SCRIM} onPress={() => setBcOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={sheet(t, { maxHeight: '90%' })}>
+            {/* Post a Notice is the tallest sheet in this file — a five-line
+                explanation, a 90pt box, a switch row, the button and the last three
+                notices posted. On a 4.7" phone with the keyboard up that is well past
+                the window, and the sheet has no scroller of its own to reach the rest
+                with. Same shape as the sheets in app/(trainer)/receipts.tsx: a capped
+                height and a scroller inside it. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              {/* Was "Broadcast to All Clients", which is the name of a
+                  DIFFERENT screen — app/(trainer)/broadcast.tsx, whose own
+                  subtitle is "Send one message to a whole segment of your
+                  clients". So a coach met two all-client tools both called
+                  Broadcast, and was sent from one to the other to do the thing
+                  neither of them does. These are a NOTICE (posted once, seen on
+                  every dashboard) and a MESSAGE (written into each person's
+                  thread, with a push). Named for what they are. */}
+              <Text style={{ ...ty.title, color: t.ink }}>Post a Notice</Text>
+              {/* This copy has now been wrong in both directions, which is worth
+                  recording.
 
-                It first promised "Everyone on your roster sees this on their
-                dashboard" and confirmed "Sent" over an in-memory store with no
-                table behind it — a coach believing they had told forty clients
-                about a cancelled class. It was corrected to say the note stayed
-                on this device, which was true of the store as it then was.
+                  It first promised "Everyone on your roster sees this on their
+                  dashboard" and confirmed "Sent" over an in-memory store with no
+                  table behind it — a coach believing they had told forty clients
+                  about a cancelled class. It was corrected to say the note stayed
+                  on this device, which was true of the store as it then was.
 
-                `announcements` is real now (part 109): a row addressed to this
-                coach's current roster, which their clients read on their own
-                dashboards. So the correction became the lie — a coach could pin
-                a note believing it private and put it in front of every client
-                they have. That is worse than the original, because the original
-                over-promised reach and this one under-promised it.
+                  `announcements` is real now (part 109): a row addressed to this
+                  coach's current roster, which their clients read on their own
+                  dashboards. So the correction became the lie — a coach could pin
+                  a note believing it private and put it in front of every client
+                  they have. That is worse than the original, because the original
+                  over-promised reach and this one under-promised it.
 
-                The rule this file keeps relearning: the sentence describes what
-                the write does TODAY, and it moves when the write moves. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
-            <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
+                  The rule this file keeps relearning: the sentence describes what
+                  the write does TODAY, and it moves when the write moves. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices, where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
+              <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} accessibilityLabel="Your announcement" multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
 
-            {/* The push is its own decision and the label says what it does.
-                Before this, a notice reached nobody at all; the temptation on
-                fixing that is to push every one of them, and a coach who can
-                ring forty phones at three in the morning should have to choose
-                it. There is no scheduler in this app and nothing records what
-                timezone anybody is in, so a "sends in the morning" option would
-                be a promise nothing here could keep — the honest control says
-                NOW, and lets the words be judged against that. */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
-              </View>
-              <Switch value={bcPush} onValueChange={setBcPush} />
-            </View>
-
-            {/* Awaited, and the answer read. `addAnnouncement` reaches a server
-                now, so announcing "Posted" on the tap would be the same class of
-                claim this modal has already made twice. What it reports is what
-                the fan-out COUNTED — rows notify_users() actually wrote — and
-                never the size of the roster, which is the false figure
-                app/(owner)/promotions.tsx used to print. */}
-            <View pointerEvents={bcBusy ? 'none' : 'auto'} style={{ opacity: bcBusy ? 0.6 : 1 }}>
-              <Cta label={bcBusy ? 'Posting…' : 'Post to My Clients'} wide onPress={async () => {
-                if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
-                setBcBusy(true);
-                let res;
-                try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
-                if (!res.ok || !res.delivery) {
-                  // The sheet stays open with the text in it: they wrote it once.
-                  Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
-                  return;
-                }
-                const summary = deliverySummary(res.delivery);
-                setBcText(''); setBcPush(false); setBcOpen(false);
-                Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead — everyone, or one tag — use Broadcast.`,
-                  [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
-              }} />
-            </View>
-
-            {/* What this coach has already posted. A notice used to be
-                write-only from here — nothing in the coach's app showed one
-                back — so the only way to check whether Thursday's cancellation
-                went out was to post it again. */}
-            <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Posted before</Text>
-              {noticeStatus === 'error' ? (
-                // An empty list under 'error' is unknown, not "you have posted
-                // none" — src/ui/loadStatus.ts.
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
-                  Your posted notices could not be read just now. This is not a statement that you have none.
-                </Text>
-              ) : myNotices.length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
-                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing posted yet.'}
-                </Text>
-              ) : myNotices.slice(0, 3).map((a) => (
-                <View key={a.id} style={{ marginTop: sp.sm }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={2}>{a.body}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{inboxAge(a.at)}</Text>
+              {/* The push is its own decision and the label says what it does.
+                  Before this, a notice reached nobody at all; the temptation on
+                  fixing that is to push every one of them, and a coach who can
+                  ring forty phones at three in the morning should have to choose
+                  it. There is no scheduler in this app and nothing records what
+                  timezone anybody is in, so a "sends in the morning" option would
+                  be a promise nothing here could keep — the honest control says
+                  NOW, and lets the words be judged against that. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also Send a Push</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
                 </View>
-              ))}
-            </View>
+                {/* The same control app/(owner)/ops.tsx already fixed, and the
+                    note there applies here word for word: this switch is the
+                    difference between a note in the app and a push to every
+                    client, and it announced "switch, on" with no statement of
+                    what was on. The sentence beside it is a sibling, so it is
+                    sighted-only. */}
+                <Switch value={bcPush} onValueChange={setBcPush}
+                  accessibilityLabel="Also send this as a push notification to every client"
+                  accessibilityHint={pushConsequence('coach', null)} />
+              </View>
+
+              {/* Awaited, and the answer read. `addAnnouncement` reaches a server
+                  now, so announcing "Posted" on the tap would be the same class of
+                  claim this modal has already made twice. What it reports is what
+                  the fan-out COUNTED — rows notify_users() actually wrote — and
+                  never the size of the roster, which is the false figure
+                  app/(owner)/promotions.tsx used to print. */}
+              <View pointerEvents={bcBusy ? 'none' : 'auto'} style={{ opacity: bcBusy ? 0.6 : 1 }}>
+                <Cta label={bcBusy ? 'Posting…' : 'Post to My Clients'} wide onPress={async () => {
+                  if (!bcText.trim()) { Alert.alert('Write Something', 'Enter your announcement.'); return; }
+                  setBcBusy(true);
+                  let res;
+                  try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
+                  if (!res.ok || !res.delivery) {
+                    // The sheet stays open with the text in it: they wrote it once.
+                    Alert.alert('Not Posted', 'That could not be posted, so your clients have not seen it. Your words are still here. Try again in a moment.');
+                    return;
+                  }
+                  const summary = deliverySummary(res.delivery);
+                  setBcText(''); setBcPush(false); setBcOpen(false);
+                  Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead (everyone, or one tag), use Broadcast.`,
+                    [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
+                }} />
+              </View>
+
+              {/* What this coach has already posted. A notice used to be
+                  write-only from here — nothing in the coach's app showed one
+                  back — so the only way to check whether Thursday's cancellation
+                  went out was to post it again. */}
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Posted Before</Text>
+                {noticeStatus === 'error' ? (
+                  // An empty list under 'error' is unknown, not "you have posted
+                  // none" — src/ui/loadStatus.ts.
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                    Your posted notices could not be read just now. This is not a statement that you have none.
+                  </Text>
+                ) : myNotices.length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                    {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing posted yet.'}
+                  </Text>
+                ) : myNotices.slice(0, 3).map((a) => (
+                  <View key={a.id} style={{ marginTop: sp.sm }}>
+                    <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={2}>{a.body}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{inboxAge(a.at)}</Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2901,7 +4570,8 @@ export default function TrainerClients() {
       {/* ── invite by email ──────────────────────────────────────────────── */}
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setInvOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setInvOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           {/* Capped and scrolled, following the meal and template sheets on
               this screen. The code section used to be one code and one line;
               it is now a list that grows with every campaign a coach runs, and
@@ -2964,7 +4634,7 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
                     Tapping the code sends a message with the link in it; {HAS_NATIVE_CLIPBOARD ? 'Copy Link gives you' : 'above it is'} the bare address, for a bio, a caption,
-                    or the destination of an ad — which is the one that lets what you spend be matched to who it brought.
+                    or the destination of an ad, which is the one that lets what you spend be matched to who it brought.
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
                     {/* "Is the code working?" is the first thing anybody asks
@@ -2975,14 +4645,14 @@ export default function TrainerClients() {
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{codeCountLine(codes.status, defaultCodeRow)}</Text>
                     <Ghost label="New Code" onPress={() => {
                       Alert.alert(
-                        'Issue a new code?',
-                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.\n\nTo run a second code alongside this one — for a flyer or a bio link — make a named code below instead.',
+                        'Issue a New Code?',
+                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.\n\nTo run a second code alongside this one, for a flyer or a bio link, make a named code below instead.',
                         [
-                          { text: 'Keep it' },
-                          { text: 'New code', style: 'destructive', onPress: async () => {
+                          { text: 'Keep It' },
+                          { text: 'New Code', style: 'destructive', onPress: async () => {
                             const r = await rotateJoinCode();
                             if (r.ok) { setMyCode(r.code); setMyCodeErr(null); await loadCodes(); }
-                            else Alert.alert('Not changed', r.reason);
+                            else Alert.alert('Not Changed', r.reason);
                           } },
                         ],
                       );
@@ -3010,7 +4680,7 @@ export default function TrainerClients() {
               {codes.status === 'error' ? (
                 <Notice
                   tone={t.warn}
-                  kicker="Not read"
+                  kicker="Not Read"
                   title="Your named codes could not be read"
                   note={codes.reason ?? 'Nothing here is a count. Close this and open it again once you have a connection.'}
                 />
@@ -3020,20 +4690,20 @@ export default function TrainerClients() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Reading your codes…</Text>
               ) : namedCodes.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  None yet. A named code tells you which of the things you did brought somebody in — one for the gym flyer, one for your Instagram bio, both live at once.
+                  None yet. A named code tells you which of the things you did brought somebody in: one for the gym flyer, one for your Instagram bio, both live at once.
                 </Text>
               ) : null}
 
               {namedCodes.map((c) => (
                 <View key={c.id ?? c.code} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{codeCountLine(codes.status, c)}</Text>
                     {!c.isLive ? (
                       // Kept on screen with its counts. A campaign that is over
                       // still tells the coach what it did, and deleting the row
                       // would make it look as though it never ran.
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off — it takes nobody new.</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off. It takes nobody new.</Text>
                     ) : null}
                     {/* No clipboard in this binary, so the address goes on
                         screen where the button would have put it. The sentence
@@ -3044,7 +4714,15 @@ export default function TrainerClients() {
                     onPress={() => { Share.share({ message: inviteMessage(c.code) }).catch(() => {}); }}
                     disabled={!c.isLive}
                     accessibilityRole="button"
-                    accessibilityLabel={`Share the code for ${c.label}, ${c.code.split('').join(' ')}`}
+                    /* A withdrawn code is refused, and `opacity: 0.5` was the
+                       whole of what said so — which a screen reader does not
+                       have. The state is announced, and the label says which
+                       code it is talking about rather than leaving a coach to
+                       tap a dead control and guess. */
+                    accessibilityState={{ disabled: !c.isLive }}
+                    accessibilityLabel={c.isLive
+                      ? `Share the code for ${c.label}, ${c.code.split('').join(' ')}`
+                      : `The code for ${c.label} has been withdrawn and cannot be shared`}
                     style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8, opacity: c.isLive ? 1 : 0.5 }}>
                     <Text style={{ ...ty.label, ...numeric, color: t.ink, letterSpacing: 2 }}>{c.code}</Text>
                   </Pressable>
@@ -3055,18 +4733,18 @@ export default function TrainerClients() {
                     <Ghost label="Turn Off" onPress={() => {
                       const id = c.id as string;
                       Alert.alert(
-                        `Turn off “${c.label}”?`,
+                        `Turn Off “${c.label}”?`,
                         'It stops working for anyone you have given it to. Clients who already joined with it are unaffected, and it keeps its count so you can still see what it brought in.',
                         [
-                          { text: 'Keep it' },
-                          { text: 'Turn it off', style: 'destructive', onPress: async () => {
+                          { text: 'Keep It' },
+                          { text: 'Turn It Off', style: 'destructive', onPress: async () => {
                             const r = await revokeJoinCode(id);
                             // Re-read rather than editing the row in place: the
                             // list is the only thing that says which codes are
                             // live, and a local edit would show it off whether
                             // or not the server agreed.
                             if (r.ok) await loadCodes();
-                            else Alert.alert('Still on', r.reason);
+                            else Alert.alert('Still On', r.reason);
                           } },
                         ],
                       );
@@ -3082,7 +4760,8 @@ export default function TrainerClients() {
                       <TextInput
                         value={newCodeLabel}
                         onChangeText={setNewCodeLabel}
-                        placeholder="Name it — “Gym flyer”, “Instagram bio”"
+                        placeholder="Name it, e.g. “Gym flyer”, “Instagram bio”"
+                        accessibilityLabel="What to call this join code"
                         placeholderTextColor={t.ink3}
                         maxLength={MAX_LABEL}
                         style={{ ...field(t), marginBottom: sp.sm }}
@@ -3094,17 +4773,17 @@ export default function TrainerClients() {
                         // server stays the authority — two devices can create
                         // codes at once and only it sees both.
                         const problem = labelProblem(newCodeLabel, codes.rows.filter((r) => r.isLive && !r.isDefault).map((r) => r.label));
-                        if (problem) { Alert.alert('Name it first', problem); return; }
+                        if (problem) { Alert.alert('Name It First', problem); return; }
                         setCodeBusy(true);
                         const r = await createJoinCode(newCodeLabel);
                         setCodeBusy(false);
-                        if (!r.ok) { Alert.alert('Not made', r.reason); return; }
+                        if (!r.ok) { Alert.alert('Not Made', r.reason); return; }
                         setNewCodeLabel('');
                         await loadCodes();
                         Alert.alert(
-                          'Code made',
-                          `${r.label}: ${r.code}. Put this one wherever that campaign lives — anyone who joins with it is counted against it.`,
-                          [{ text: 'Share it', onPress: () => { Share.share({ message: inviteMessage(r.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
+                          'Code Made',
+                          `${r.label}: ${r.code}. Put this one wherever that campaign lives. Anyone who joins with it is counted against it.`,
+                          [{ text: 'Share It', onPress: () => { Share.share({ message: inviteMessage(r.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
                         );
                       }} />
                     </>
@@ -3142,7 +4821,7 @@ export default function TrainerClients() {
               {returns.status === 'error' ? (
                 <Notice
                   tone={t.warn}
-                  kicker="Not read"
+                  kicker="Not Read"
                   title="What your codes returned could not be read"
                   note={returns.reason ?? 'Nothing here is a figure. Close this and open it again once you have a connection.'}
                 />
@@ -3151,7 +4830,7 @@ export default function TrainerClients() {
               ) : returns.status === 'loading' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>Working out what each code returned…</Text>
               ) : codeTell.rankable ? (
-                <Notice tone={t.good} kicker="Enough to tell" title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`} note={codeTell.note} />
+                <Notice tone={t.good} kicker="Enough to Tell" title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`} note={codeTell.note} />
               ) : (
                 // The important one. A coach with twelve clients seeing
                 // "Instagram 4, TikTok 1" has learned nothing — that gap is
@@ -3159,7 +4838,7 @@ export default function TrainerClients() {
                 // screen that ranked them would be spending their money on
                 // noise it had dressed up as a finding. So no comparison is
                 // drawn at all, and the reason is stated instead.
-                <Notice tone={t.s3} kicker="Not enough yet" title="Too early to say which is working" note={codeTell.note} />
+                <Notice tone={t.s3} kicker="Not Enough Yet" title="Too early to say which is working" note={codeTell.note} />
               )}
 
               {returns.rows.map((c) => {
@@ -3167,13 +4846,13 @@ export default function TrainerClients() {
                 const key = c.id ?? '';
                 return (
                   <View key={key || c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(returns.status, c)}</Text>
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                       <CodeFig t={t} label="Spent" value={fgs.spent} />
                       <CodeFig t={t} label="Clients" value={fgs.clients} />
-                      <CodeFig t={t} label="They paid" value={fgs.revenue} />
-                      <CodeFig t={t} label="Each cost" value={fgs.perClient} />
+                      <CodeFig t={t} label="They Paid" value={fgs.revenue} />
+                      <CodeFig t={t} label="Each Cost" value={fgs.perClient} />
                     </View>
                     {returnLine(returns.status, c) ? (
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{returnLine(returns.status, c)}</Text>
@@ -3190,7 +4869,7 @@ export default function TrainerClients() {
                       // has not said is not to be guessed at).
                       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm, marginTop: sp.sm }}>
                         <Field
-                          label="What it cost you"
+                          label="What It Cost You"
                           hint={c.spend?.currency ? `${c.spend.currency} · leave empty to clear` : 'leave empty if you don’t know'}
                           a11y={c.spend?.currency ? `What this code cost you, in ${c.spend.currency}` : 'What this code cost you'}
                         >
@@ -3226,7 +4905,7 @@ export default function TrainerClients() {
               <View style={{ flex: 2 }}>
                 <Cta label="Send Invite" wide onPress={async () => {
                   const e = invEmail.trim();
-                  if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid client email address.'); return; }
+                  if (!e || !e.includes('@')) { Alert.alert('Enter an Email', 'Add a valid client email address.'); return; }
                   const ok = await sendInvite(e, invMode);
                   setInvOpen(false);
                   // "Invitation sent" was the wrong two words: nothing is sent.
@@ -3248,7 +4927,8 @@ export default function TrainerClients() {
       {/* ── AI check-in draft review ─────────────────────────────────────── */}
       <Modal visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setDraftClient(null)} />
+        <Pressable style={SCRIM} onPress={() => setDraftClient(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t)}>
           {draftClient && (
             <>
@@ -3260,7 +4940,7 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>Drafting a personalised check-in…</Text>
                 </View>
               ) : (
-                <TextInput value={draftText} onChangeText={setDraftText} multiline placeholder="Your message…" placeholderTextColor={t.ink3} style={{ ...field(t, 110), marginBottom: sp.lg }} />
+                <TextInput value={draftText} onChangeText={setDraftText} multiline placeholder="Your message…" placeholderTextColor={t.ink3} accessibilityLabel="The check-in message" style={{ ...field(t, 110), marginBottom: sp.lg }} />
               )}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Ghost icon="sparkle" label="Redraft" onPress={() => draftNudge(draftClient)} />
@@ -3287,27 +4967,28 @@ export default function TrainerClients() {
           refuse outright, and the reason Quiet Clients drafts and will not
           send. */}
       <Modal visible={msgOpen} transparent animationType="slide" onRequestClose={() => setMsgOpen(false)}>
-        <Pressable style={SCRIM} onPress={() => setMsgOpen(false)} />
+        <Pressable style={SCRIM} onPress={() => setMsgOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={sheet(t, { maxHeight: '86%' })}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-              <Text style={{ ...ty.title, color: t.ink }}>Message {shownRoster.length} Clients</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Message {pickedRoster.length} Clients</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-                Everyone in {segLabel}. This goes out as you, in your words.
+                Everyone you selected. This goes out as you, in your words.
               </Text>
 
               {/* Every name, before anything is sent. The count is the alarm and
                   the list is what a coach checks a specific person against. */}
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg }}>
-                {shownRoster.map((c) => c.name).join(', ')}
+                {pickedRoster.map((c) => c.name).join(', ')}
               </Text>
 
               {msgFailed.length > 0 ? (
-                <Notice tone={t.warn} kicker="Not delivered" title={`${msgFailed.length} did not get the last one`}
-                  note={`${listNames(msgFailed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
+                <Notice tone={t.warn} kicker="Not Delivered" title={`${msgFailed.length} Did Not Get the Last One`}
+                  note={`${listNames(msgFailed.map(nameOf))}: nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
               ) : null}
 
-              <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
+              <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Your message"
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginTop: sp.lg, marginBottom: sp.md }} />
 
               {/* What the client will see, said to the coach and not added to
@@ -3315,13 +4996,13 @@ export default function TrainerClients() {
                   "sent to 12 clients" would put words the coach did not write
                   into a message signed by the coach, and the client could not
                   tell which sentence came from which of them. */}
-              {bulkThreadNote(shownRoster.length) ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{bulkThreadNote(shownRoster.length)}</Text>
+              {bulkThreadNote(pickedRoster.length) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{bulkThreadNote(pickedRoster.length)}</Text>
               ) : null}
 
-              <Cta label={msgBusy ? 'Sending…' : `Send to ${shownRoster.length}`} wide
-                disabled={!msgBody.trim() || msgBusy || !shownRoster.length}
-                onPress={() => deliverBulk(shownRoster.map((c) => c.id))} />
+              <Cta label={msgBusy ? 'Sending…' : `Send to ${pickedRoster.length}`} wide
+                disabled={!msgBody.trim() || msgBusy || !pickedRoster.length}
+                onPress={() => deliverBulk(pickedRoster.map((c) => c.id))} />
 
               {/* Retry reaches the threads that failed and no others. Sending to
                   the segment again would put the same words a second time in
@@ -3341,20 +5022,21 @@ export default function TrainerClients() {
       </Modal>
 
       <Modal visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
-        <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)} />
+        <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { maxHeight: '78%' })}>
-          <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} Clients</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone in {segLabel}.</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Assign to {pickedRoster.length} Clients</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone you selected.</Text>
           {/* Said before the template is chosen as well as in the confirmation
               after it, because this is the sheet a coach is scanning while they
               decide — and only sayable off a whole read of assigned_programs,
               which is what `bulkGuard` above has already established. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
             {(() => {
-              const on = shownRoster.filter((c) => !!getProgram(c.id));
+              const on = pickedRoster.filter((c) => !!getProgram(c.id));
               return on.length === 0
-                ? 'None of them are on a coach-assigned programme, so nothing here is replaced.'
-                : `${on.length} of them are on a programme now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
+                ? 'None of them are on a coach-assigned program, so nothing here is replaced.'
+                : `${on.length} of them are on a program now: ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
             })()}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -3395,7 +5077,15 @@ export default function TrainerClients() {
 function CoachSetupRow() {
   const t = useTheme();
   const router = useRouter();
-  const { facts, status } = useCoachSetup();
+  const { facts, status, reload } = useCoachSetup();
+  // Re-read every time the coach comes back, exactly as
+  // app/(trainer)/getting-started.tsx does with the same provider. The card
+  // names the NEXT outstanding step and links straight to it, so without this
+  // the loop is: tap the row, do the thing, come back, and be told to do it
+  // again — the provider's only trigger is its own mount. Pulling down did not
+  // fix it either, which is what turns a stale card into a coach believing the
+  // setting did not save and going back to change it a second time.
+  useRefreshOnFocus(useCallback(() => { void reload(); }, [reload]));
   // The same fact app/(trainer)/getting-started.tsx uses, for the same reason
   // and from the same place. This card names the NEXT outstanding step, and
   // the two screens disagreeing about what is outstanding — this one sending a
@@ -3405,7 +5095,6 @@ function CoachSetupRow() {
   if (status === 'loading') return null;
   const rows = coachSetupRows(facts, delivery.shape);
   if (!showCoachSetup(rows)) return null;
-  const left = coachSetupLeft(rows);
   const next = coachSetupNext(rows);
   return (
     <View style={{ marginTop: sp.lg }}>
@@ -3413,16 +5102,21 @@ function CoachSetupRow() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
           <Icon name="sparkle" size={20} color={t.brand} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
-              {left > 0 ? `Setting up · ${left} left` : 'Setting up'}
+            {/* Not a bare `${left} left`. That count deliberately excludes
+                rows whose read did not answer, so on its own it understates —
+                a coach with two refused reads was told "3 left" for a list
+                with five rows they had not done. src/lib/coachFirstRun.ts
+                holds the wording and the argument. */}
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
+              {coachSetupCardLine(rows)}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               {next
-                ? `Next: ${next.title.toLowerCase()} — until it is done, ${next.breaks}.`
+                ? `Next: ${next.title.toLowerCase()}. Until it is done, ${next.breaks}.`
                 : 'Some of this could not be checked just now, so it is worth a look before you rely on it.'}
             </Text>
           </View>
-          <Icon name="chevron" size={15} color={t.ink3} />
+          <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
         </View>
       </Card>
     </View>

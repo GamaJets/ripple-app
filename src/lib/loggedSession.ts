@@ -1,0 +1,274 @@
+// A training SESSION, assembled out of the rows that make it up.
+//
+// ── the report this exists for ─────────────────────────────────────────────
+//
+// "Training sessions logged by the coach are not displaying what exercises and
+// weights and reps were done."
+//
+// The rows were there and always had been. `workouts` carries one row PER
+// MOVEMENT — src/lib/mockData.ts says it on `WorkoutEntry.id`, "one session
+// writes all its exercises with the same timestamp" — and every member-side
+// read hands that list on unchanged. What no screen outside the Train day sheet
+// did was put the rows back together again:
+//
+//   · app/(client)/activity.tsx drew one row per MOVEMENT, so an hour with a
+//     coach arrived as five separate "Logged Hip Thrust" lines, indistinguishable
+//     from five things the member had done alone on five occasions, each of
+//     them one line of a forty-row page — and with `FEED_PAGE` at forty, an
+//     older session's five lines sit below the cut with nothing saying so.
+//     Nothing on any of them said a coach had written it.
+//   · app/(client)/pt-sessions.tsx listed the HOUR and never what happened in
+//     it. A member reading "Session Not Yet Marked · Tue, Sep 15" had no way at
+//     all to reach the five exercises their coach had recorded against that day.
+//
+// So this module is the missing noun. It groups rows into sessions and it pairs
+// a session of rows with the booked hour it belongs to, and it does both in one
+// place because two answers to "which rows are that session" is how one screen
+// comes to disagree with the screen beside it.
+//
+// ── the grouping key is the instant AND who wrote it ───────────────────────
+//
+// `t` alone is the obvious key and it is not enough. A coach typing up an hour
+// and the member logging their own accessory work in the same minute would fold
+// into one session with one attribution, and the attribution would be wrong for
+// half of it. `logged_by` is part of the identity of a session, not a label on
+// it: src/lib/workoutAttribution.ts turns it into the sentence, and a sentence
+// about a mixed group cannot be true.
+//
+// ── why the pairing rule is the DAY ────────────────────────────────────────
+//
+// `workouts.session_id` (supabase/parts/890) is the exact answer and is used
+// whenever a row carries it. It is null on every row written before that column
+// existed, and on every row a coach logs from a client's record rather than
+// from the booked hour — which app/(trainer)/log-session.tsx leaves null on
+// purpose, because part 890's guard refuses a link it cannot prove.
+//
+// For those the only honest pairing is the one part 890's own header describes
+// people doing by eye: "matching a workout's `performed_at` against a session's
+// `starts_at` and hoping the coach wrote it up on the right day". The HOUR
+// cannot be used — src/lib/sessionWhen.ts asks the coach for a day and an hour
+// and writes the hour THEY picked, which is routinely not the hour the session
+// ran — so the day is the unit, and it is the same unit that file names as the
+// one that matters: "the day is what their log, their streak, their weekly
+// report and plan-versus-actual all count it on".
+//
+// The day is the READER'S local day, because that is the day every other
+// figure in this app buckets on. It is therefore possible for a coach in
+// another timezone, writing up an hour at their own local evening, to land on
+// the member's previous day and not be paired. That is the correct failure of
+// the two available ones: a session shown with nothing under it sends somebody
+// to ask their coach, and a session shown with the wrong day's training under
+// it does not.
+//
+// A day-paired session is therefore reported AS day-paired (`by: 'day'`) and
+// never as the same fact as a linked one. The screen says which it has, because
+// "what your coach logged in this session" and "what was logged on this day"
+// are two different claims and only one of them is proven.
+//
+// Pure — no react, no supabase, no clock. Every branch is asserted in
+// loggedSession.test.ts under plain node.
+import { isoDay } from './weekStart';
+
+/**
+ * The fields a session needs off a workout row.
+ *
+ * Structural rather than `WorkoutEntry`, for the reason src/lib/coachLogReview.ts
+ * gives about the same table: the feed, the session screen and the tests all
+ * hold different shapes of the same row, and a generic keeps the caller's own
+ * type on the way out so a screen can still reach `sets`, `feel` and the rest.
+ */
+export interface SessionRow {
+  /** The instant the session happened. The session's identity. */
+  t: string;
+  exercise: string;
+  /** Present on a lifted entry. A cardio row has none and is still part of the
+   *  session it was logged in. */
+  sets?: [number, number][];
+  /** The coach who recorded it. Absent means the member logged it themselves. */
+  loggedBy?: string;
+  /** The booked hour this was filed under, when it was filed under one. */
+  sessionId?: string;
+}
+
+/** One session: the rows of it, and what they add up to in COUNTS. No load
+ *  here — a tonnage needs the member's weight history to price a bodyweight
+ *  set, which is a read this module cannot see. See `tonnage` in
+ *  src/lib/bodyweightSets.ts, and note that the caller owes `tonnageNote`. */
+export interface LoggedSession<T> {
+  /** The instant every row in it shares. */
+  at: string;
+  /** The coach who wrote it, or null when the member logged it themselves. */
+  loggedBy: string | null;
+  /** The booked hour these rows name, or null when none of them names one.
+   *  Rows of one session may disagree only by one of them being null — the
+   *  first id found wins, which is the only value any of them can hold. */
+  sessionId: string | null;
+  /** The rows, in the order they were logged in. */
+  entries: T[];
+  /** Distinct movements. `entries.length` would count a movement logged twice
+   *  in one hour as two exercises, which is a rep scheme and not an exercise. */
+  exercises: number;
+  /** Sets performed across the whole session. A row with no `sets` (a cardio
+   *  entry) contributes none rather than contributing zero. */
+  sets: number;
+}
+
+/**
+ * Every session in a log, newest first.
+ *
+ * A single-row session is still a session and is returned as one; the caller
+ * decides whether one movement is worth a session's heading. Rows with an
+ * unparseable `t` are kept — they are real training and the member typed them —
+ * but they sort to the end rather than to the epoch, because a row this module
+ * cannot date must not be presented as the oldest thing that ever happened.
+ */
+export function loggedSessions<T extends SessionRow>(log: readonly T[]): LoggedSession<T>[] {
+  const by = new Map<string, LoggedSession<T>>();
+  for (const e of log) {
+    if (!e || typeof e.t !== 'string' || !e.t) continue;
+    const who = e.loggedBy || null;
+    // A separator that cannot occur in an ISO instant or in a uuid, so no two
+    // different pairs can spell the same key.
+    const key = `${e.t}|${who ?? ''}`;
+    let s = by.get(key);
+    if (!s) {
+      s = { at: e.t, loggedBy: who, sessionId: null, entries: [], exercises: 0, sets: 0 };
+      by.set(key, s);
+    }
+    s.entries.push(e);
+    // The first id found, and never overwritten by a later null. A session
+    // whose rows were part-written before part 890 has the link on some of
+    // them; one link is the whole session's link.
+    if (!s.sessionId && e.sessionId) s.sessionId = e.sessionId;
+    s.sets += Array.isArray(e.sets) ? e.sets.length : 0;
+  }
+  const out = [...by.values()];
+  for (const s of out) {
+    const names = new Set<string>();
+    for (const e of s.entries) names.add(String(e.exercise ?? ''));
+    s.exercises = names.size;
+  }
+  return out.sort((a, b) => {
+    const x = Date.parse(a.at), y = Date.parse(b.at);
+    // An undated row goes last, whichever end it would otherwise sort to.
+    if (!Number.isFinite(x)) return Number.isFinite(y) ? 1 : 0;
+    if (!Number.isFinite(y)) return -1;
+    return y - x;
+  });
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What a session came to, as the line under its heading.
+ *
+ * `load` is the caller's already-rendered tonnage — "5,472 kg" in the member's
+ * own unit — or null when there is none to state. Null covers both "no set in
+ * this session carried a load" and "the weight history needed to price it did
+ * not come back", and it is the caller's job to say which: this module cannot
+ * see a `LoadStatus` and must not invent a zero for either. The rule is the
+ * house one and check:invented-zero enforces it.
+ */
+export function sessionSummary(s: LoggedSession<unknown>, load: string | null): string {
+  const parts = [plural(s.exercises, 'exercise', 'exercises'), plural(s.sets, 'set', 'sets')];
+  if (load) parts.push(load);
+  return parts.join(' · ');
+}
+
+/**
+ * The heading for a session in a member's own feed.
+ *
+ * Title Case, like every other heading in that feed, and the coach's own name
+ * where the client app can prove it — `coachNameFor` in
+ * src/lib/coachLogReview.ts is the one place that judgement is made, and its
+ * three ways of declining all arrive here as null and read as "Your Coach".
+ */
+export function sessionFeedTitle(s: LoggedSession<unknown>, coachName: string | null): string {
+  if (!s.loggedBy) return 'Training Session';
+  const who = coachName?.trim();
+  return who ? `Session With ${who}` : 'Session With Your Coach';
+}
+
+/* ── pairing a session of rows with the hour it was booked as ────────────── */
+
+/** How the rows below were matched to the session. See the module header. */
+export type PairedBy =
+  /** `workouts.session_id` names this session. Exact, and provable. */
+  | 'link'
+  /** They fall on the same local day and nothing links them. A likelihood,
+   *  and the screen has to say so. */
+  | 'day'
+  /** Nothing was found either way. */
+  | 'none';
+
+export interface SessionPair<T> {
+  entries: T[];
+  by: PairedBy;
+}
+
+/** What the pairing needs to know about the booked hour. */
+export interface BookedSession {
+  id: string;
+  startsAt: string;
+  /** The coach who delivered it. When it is known, a day-paired row has to
+   *  have been written by THEM — otherwise the member's own Tuesday evening
+   *  training would be presented as what happened in their Tuesday morning
+   *  session. Null where the caller cannot read it, and the day match then
+   *  stands on the day alone. */
+  trainerId?: string | null;
+}
+
+/**
+ * The rows logged in one booked session.
+ *
+ * `link` first and exclusively: the moment ANY row names this session, the
+ * linked rows are the answer and no day matching is attempted. Mixing the two
+ * would add a row somebody logged separately that day to a session whose
+ * contents are recorded exactly, which is the one case where this module is in
+ * a position to be precise.
+ *
+ * A day match additionally requires that nothing about the row contradicts the
+ * session: a row carrying a DIFFERENT `session_id` belongs to a different hour
+ * and is never swept in by its date.
+ */
+export function entriesInSession<T extends SessionRow>(
+  log: readonly T[],
+  session: BookedSession,
+): SessionPair<T> {
+  const linked = log.filter((e) => e && e.sessionId === session.id);
+  if (linked.length) return { entries: linked, by: 'link' };
+
+  const start = Date.parse(session.startsAt);
+  if (!Number.isFinite(start)) return { entries: [], by: 'none' };
+  const day = isoDay(new Date(start));
+  const trainer = session.trainerId || null;
+
+  const sameDay = log.filter((e) => {
+    if (!e || typeof e.t !== 'string') return false;
+    // Already spoken for by another hour.
+    if (e.sessionId) return false;
+    const ms = Date.parse(e.t);
+    if (!Number.isFinite(ms)) return false;
+    if (isoDay(new Date(ms)) !== day) return false;
+    // A coach-written row has to have been written by THIS session's coach.
+    // A row the member logged themselves is left in: a member who typed their
+    // own session up is the ordinary case for a coach who does not log.
+    if (trainer && e.loggedBy && e.loggedBy !== trainer) return false;
+    return true;
+  });
+  return sameDay.length ? { entries: sameDay, by: 'day' } : { entries: [], by: 'none' };
+}
+
+/**
+ * The one line that says how sure the pairing is, or null for a linked one.
+ *
+ * Null on 'link' because there is nothing to qualify — the rows name the
+ * session. On 'day' it is not a footnote and must not be rendered as one: the
+ * member is being shown training under a heading naming an hour, and the app
+ * cannot prove it happened in that hour.
+ */
+export function pairingNote(by: PairedBy): string | null {
+  return by === 'day'
+    ? 'Logged on this day rather than filed against this session, so this is what was recorded that day and not a record of this hour itself.'
+    : null;
+}

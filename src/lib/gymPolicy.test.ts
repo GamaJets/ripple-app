@@ -219,6 +219,18 @@ async function main(): Promise<void> {
       'and saving the name leaves the colour alone — every field is independently optional or a settings screen becomes a way to erase four things at once');
   }
   {
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { timezone: 'Asia/Dubai' });
+    eq(sent[0].timezone, 'Asia/Dubai',
+      'a timezone lands in the column part 710 added, unnormalised — zone names are case-sensitive and there is nothing here that could safely fold one');
+  }
+  {
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { timezone: null });
+    eq(sent[0].timezone, null,
+      'and clearing it is a deliberate null — a gym whose days go back to being the reader’s, which every screen has to say out loud rather than call UTC');
+  }
+  {
     // The widening is OPT-IN, at the mapping. `brand` is refused by a trigger
     // (part 101 §4) and `plan` is what the gym is billed on; neither is in
     // `GymProfilePatch`, and this asserts that being absent from the TYPE is

@@ -61,8 +61,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, Cta, Flag, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { brandInkFor } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -75,11 +75,12 @@ import { useAuth } from '../../src/ui/auth';
 import { clearMyLogo, pickLogo, uploadMyLogo, useMyCoachLogo } from '../../src/ui/coachLogo';
 import { LOGO_SCOPE_NOTE, LOGO_UNREADABLE_NOTE } from '../../src/lib/coachLogo';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function CoachBrand() {
   const t = useTheme();
   const { palettes } = useThemeControls();
-  const { name: coachName } = useMyTrainerProfile();
+  const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   const { user: authUser } = useAuth();
   const coachId = authUser?.id ?? null;
   const logo = useMyCoachLogo();
@@ -148,6 +149,14 @@ export default function CoachBrand() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // Three reads sit behind this screen: the brand row, the logo, and the coach's
+  // own name that the preview falls back to. A failed brand read shows "could
+  // not be read" with no way back except leaving the screen.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), Promise.resolve(logo.reload()), reloadProfile()]),
+    [load, logo, reloadProfile],
+  ));
+
   const nameField = nameDraft ?? savedName ?? '';
   const colorField = colorDraft ?? savedColor ?? '';
   // What the app would actually apply, which is not always what is stored.
@@ -192,18 +201,16 @@ export default function CoachBrand() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Coach</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your Branding</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your clients see around your coaching — saved to your account, not to this phone</Text>
-        </View>
+        {/* The board's page head, with a back control this screen never had:
+            it is reached from Profile and had no way back but the tab bar. */}
+        <PageHead title="Your Branding" subtitle="Saved to your account, not this phone" />
 
         {status === 'error' ? (
           <Section>
             <Flag tone={t.warn}>
-              Your branding could not be read, so what is set is not known — this is not a coach who has set none.
+              Your branding could not be read, so what is set is not known. This is not a coach who has set none.
               Nothing here can be changed until it can be read.
             </Flag>
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
@@ -214,17 +221,41 @@ export default function CoachBrand() {
           <Section><Text style={{ ...ty.label, color: t.ink3 }}>Reading your branding…</Text></Section>
         ) : (<>
 
+          {/* ── live preview, FIRST: exactly what a client of theirs sees ─────
+              The page opens on the picture the three forms below change. It
+              was the fourth card down, under the form that feeds it, so a
+              coach saved a colour and scrolled to find out what it did. */}
+          <Section>
+            <SectionHead title="Live Preview" />
+            <View style={{ backgroundColor: t.surface2, borderRadius: radius.lg, overflow: 'hidden' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface3 }}>
+                <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: preview }} />
+                {/* Their trading name where they have one, their own name
+                    otherwise — never a placeholder standing in for a real one. */}
+                <Text style={{ ...ty.head, color: t.ink }}>{previewName}</Text>
+              </View>
+              <View style={{ padding: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.lg }}>As seen by a client who trains only with you.</Text>
+                <View style={{ backgroundColor: preview, borderRadius: radius.md, minHeight: 52, justifyContent: 'center', alignItems: 'center' }}>
+                  {/* brandInkFor MEASURES rather than guessing, which is why a
+                      bright green here gets black and not white at 1.59:1. */}
+                  <Text style={{ ...ty.button, color: brandInkFor(preview) }}>Start Today's Workout</Text>
+                </View>
+              </View>
+            </View>
+          </Section>
+
           {/* ── the trading name ───────────────────────────────────────────── */}
           <Section>
             <SectionHead title="Trading Name" />
             <TextInput value={nameField} onChangeText={(v) => { setNameDraft(v); if (nameMsg) setNameMsg(null); }}
               placeholder="What you coach under" placeholderTextColor={t.ink3}
-              maxLength={MAX_BRAND_NAME} accessibilityLabel="Trading name" style={inp} />
+              maxLength={MAX_BRAND_NAME} accessibilityLabel="Trading Name" style={inp} />
             {nameMsg && nameMsg.bad ? (
               <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{nameMsg.text}</Flag>
             ) : (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {nameMsg ? nameMsg.text : 'Leave it empty to coach under your own name. An empty field clears it — it does not mean you have no name.'}
+                {nameMsg ? nameMsg.text : 'Leave it empty to coach under your own name. An empty field clears it; it does not mean you have no name.'}
               </Text>
             )}
             <View style={{ marginTop: sp.lg }}>
@@ -232,7 +263,6 @@ export default function CoachBrand() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── the logo ───────────────────────────────────────────────────── */}
           <Section>
@@ -251,6 +281,22 @@ export default function CoachBrand() {
                 {logo.dataUri ? (
                   <Image source={{ uri: logo.dataUri }} resizeMode="contain" accessibilityLabel="Your logo"
                     style={{ width: 160, height: 56 }} />
+                ) : logo.pictureStatus === 'loading' ? (
+                  // ── the third state, which this branch was reporting as the
+                  // second ──────────────────────────────────────────────────
+                  // `logo.status` is about the RECORD; the picture is a second
+                  // step that runs after it and has its own status
+                  // (src/ui/coachLogo.ts :301). A null `dataUri` under a 'ready'
+                  // record is therefore two different things — the download is
+                  // in flight, or the download failed — and this said the
+                  // second about both. Every launch showed a coach a failure
+                  // notice for the second or two their own logo was on its way,
+                  // over an empty box, on the screen whose whole job is telling
+                  // them their branding is in order. app/(trainer)/share-kit.tsx
+                  // :870 already reads `pictureStatus` rather than the null.
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    Your logo is set and the picture of it is still coming down.
+                  </Text>
                 ) : (
                   // The record says there is one and the picture did not
                   // arrive. Those are two different failures and this is the
@@ -287,7 +333,6 @@ export default function CoachBrand() {
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── the colour, with the measurement in front of the coach ─────── */}
           <Section>
@@ -310,7 +355,7 @@ export default function CoachBrand() {
                     accessibilityRole="button" accessibilityLabel={p.name}
                     style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: p.theme.brand }} />
-                    {on ? <View style={{ position: 'absolute', bottom: 3, right: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
+                    {on ? <View style={{ position: 'absolute', bottom: 3, end: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
                   </Pressable>
                 );
               })}
@@ -342,30 +387,7 @@ export default function CoachBrand() {
             </View>
           </Section>
 
-          <Rule />
 
-          {/* ── live preview: exactly what a client of theirs sees ─────────── */}
-          <Section>
-            <SectionHead title="Live Preview" />
-            <View style={{ backgroundColor: t.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation.e1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
-                <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: preview }} />
-                {/* Their trading name where they have one, their own name
-                    otherwise — never a placeholder standing in for a real one. */}
-                <Text style={{ ...ty.head, color: t.ink }}>{previewName}</Text>
-              </View>
-              <View style={{ padding: sp.lg }}>
-                <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>How your coaching looks to a client who trains with you and with nobody else.</Text>
-                <View style={{ backgroundColor: preview, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
-                  {/* brandInkFor MEASURES rather than guessing, which is why a
-                      bright green here gets black and not white at 1.59:1. */}
-                  <Text style={{ ...ty.label, fontWeight: '600', color: brandInkFor(preview) }}>Start today's workout</Text>
-                </View>
-              </View>
-            </View>
-          </Section>
-
-          <Rule />
 
           <Section>
             <View style={{ alignSelf: 'flex-start' }}>
@@ -374,19 +396,24 @@ export default function CoachBrand() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               Puts you back to having chosen no colour, and your clients back to the app’s own.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          </Section>
+
+          {/* Who sees what, behind a fold: four paragraphs of scope that stood
+              at the foot of the page in caption type. */}
+          <Expandable title="Who Sees Your Branding">
+            <Text style={{ ...ty.label, color: t.ink2 }}>
               The name and the colour are what your clients see inside the app. They reach the clients you are actively coaching, and they stop when the coaching does.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
               Your logo is not part of that. It goes on the documents and cards you make and hand over yourself, which is why the preview above does not show it.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
               A client who trains at a gym sees that gym's branding instead of yours. Membership is what the gym holds about them; you are their coach, not their club.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              This does not change the app itself — its name in the store, its icon, or who published it. Repple makes the app; the coaching inside it is yours.
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+              This does not change the app itself: its name in the store, its icon, or who published it. Repple makes the app; the coaching inside it is yours.
             </Text>
-          </Section>
+          </Expandable>
         </>)}
       </ScrollView>
     </SafeAreaView>

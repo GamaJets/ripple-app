@@ -21,6 +21,7 @@
 //
 // Compile with tsc then run with node, like plateMath.test.ts.
 import { wholeMonths } from './historyWindow';
+import { monthKey } from './longView';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -117,6 +118,93 @@ const keys = (l: WorkoutEntry[]) => l.map((e) => e.id).join(',');
   const r = wholeMonths(log, true);
   eq(r.droppedMonth, '2024-01', 'an unreadable row does not become the oldest month');
   ok(r.log.some((e) => e.id === 'bad'), 'and it is still in the set — it is handled downstream, not deleted here');
+}
+
+/* ── the month the SCREEN is allowed to name ───────────────────────────────
+ *
+ * `wholeMonths` is correct on its own and always was. What was wrong was one
+ * line of the composition around it in app/(client)/history.tsx, and no
+ * assertion here could see it because the fault was in which of the two return
+ * values got printed:
+ *
+ *     partialBefore: page.truncated ? whole.droppedMonth ?? … : null
+ *
+ * `droppedMonth` is the month that was REMOVED. The banner it feeds reads
+ * "Read back as far as {month}" and "anything before {month} is on record and
+ * not counted here" — two sentences that are both one month early, about a
+ * month the page does not have. The Hero underneath, drawn off the first month
+ * it DOES have, said "Lifted since Apr 2024, at least" while the banner over it
+ * said March.
+ *
+ * So this asserts the invariant the banner needs rather than a value: the month
+ * it names must be a month the page is actually holding, and nothing older may
+ * be on the page either — that is the whole meaning of "read back as far as".
+ * `bannerMonth` is the screen's expression, kept here verbatim so the two
+ * cannot drift; src/lib/memberLookup.test.ts tests app/(client)/access.tsx the
+ * same way and for the same reason.
+ */
+const bannerMonth = (log: WorkoutEntry[], truncated: boolean): string | null => {
+  const whole = wholeMonths(log, truncated);
+  if (!truncated) return null;
+  for (const e of whole.log) {
+    const k = monthKey(e.t);
+    if (k != null) return k;
+  }
+  return null;
+};
+
+/** Every month key on the page, in the order the entries arrive. */
+const monthsOf = (log: WorkoutEntry[]): string[] => {
+  const out: string[] = [];
+  for (const e of log) { const k = monthKey(e.t); if (k != null && !out.includes(k)) out.push(k); }
+  return out;
+};
+
+// A read cut inside January: the page starts in February, and February is what
+// the banner has to say. Naming January claims a month that is not there and
+// leaves January itself unaccounted for by the sentence written to account for
+// the gap.
+{
+  const log = [at(2024, 1, 20), at(2024, 1, 28), at(2024, 2, 3), at(2024, 3, 9)];
+  const named = bannerMonth(log, true);
+  const onPage = monthsOf(wholeMonths(log, true).log);
+  eq(named, '2024-02', 'the banner names the oldest month the page still holds, not the one dropped from it');
+  ok(named != null && onPage.includes(named), 'a banner may only name a month that is on the page');
+  ok(onPage.every((k) => named != null && k >= named), 'and nothing older than it may be on the page — that is what "read back as far as" means');
+  ok(named !== wholeMonths(log, true).droppedMonth, 'the dropped month is not the month the page reaches');
+}
+
+// The screen's other arm, and the one the old expression was actually written
+// for: a truncated page that is all ONE month. `wholeMonths` keeps it whole and
+// reports no drop, so the oldest month on the page IS that month and the banner
+// says so. The invariant is the same one; only the arm is different.
+{
+  const log = [at(2024, 5, 1), at(2024, 5, 2), at(2024, 5, 3)];
+  const named = bannerMonth(log, true);
+  eq(named, '2024-05', 'an all-one-month page reaches back to that month, and the banner names it');
+  ok(monthsOf(wholeMonths(log, true).log).every((k) => named != null && k >= named), 'nothing older is on the page');
+}
+
+// A year boundary, because '2023-12' vs '2024-01' is where an off-by-one turns
+// into an off-by-a-year in the printed label.
+{
+  const log = [at(2023, 12, 30), at(2024, 1, 2), at(2024, 2, 2)];
+  eq(bannerMonth(log, true), '2024-01', 'December was dropped, so the page reaches back to January of the next year');
+}
+
+// A whole read names nothing, because there is no banner to draw.
+{
+  const log = [at(2024, 1, 5), at(2024, 2, 6)];
+  eq(bannerMonth(log, false), null, 'a read that came back whole has no truncation notice');
+}
+
+// An unreadable timestamp is kept by `wholeMonths` and must not become the
+// month the banner names — `monthKey` returns null for it, so the scan walks
+// past rather than printing an empty label into the sentence.
+{
+  const bad = { id: 'bad', t: 'not-a-date' } as unknown as WorkoutEntry;
+  const log = [bad, at(2024, 1, 5), at(2024, 2, 5), at(2024, 3, 5)];
+  eq(bannerMonth(log, true), '2024-02', 'a row with no month is stepped over rather than named');
 }
 
 if (errors.length) {

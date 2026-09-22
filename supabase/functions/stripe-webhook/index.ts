@@ -66,7 +66,7 @@
 //                                   invoice.payment_succeeded. One row per invoice.
 //   invoices                        the PLATFORM's, and nothing to do with a coach.
 //
-// And two writes that take money AWAY, added because under direct charges both
+// And three writes that take money AWAY, added because under direct charges all
 // of them happen somewhere this app was never looking:
 //
 //   refunded_cents                  from `charge.refunded`. A coach on a
@@ -75,6 +75,16 @@
 //                                   until this branch existed a refund made
 //                                   there reached nothing here — the sale went
 //                                   on showing the money as taken, forever.
+//   gym_payments (negative)         also from `charge.refunded`, for a GYM's
+//                                   online sale, which is in neither table
+//                                   `saleForCharge` looks in. Same defect, same
+//                                   dashboard, and it survived the fix above
+//                                   because the lookup only knew about the two
+//                                   client tables. A gym sale leaves money
+//                                   through a REVERSING ROW rather than a
+//                                   column — supabase/parts/180 argues why at
+//                                   length — keyed on the Stripe refund id by
+//                                   part 800 so a retry cannot record it twice.
 //   client_disputes                 from `charge.dispute.*`. The screen tells a
 //                                   coach a chargeback is theirs to answer
 //                                   while giving them no way to know one
@@ -98,7 +108,14 @@ import { renewalIsContiguous, supersedeRow } from '../../../src/lib/termDates.ts
 // The ledger row an online gym sale leaves behind, and the two refusals it can
 // answer with. Also a leaf, for the same reason. Asserted in
 // src/lib/gymOrderPayment.test.ts.
-import { gymOrderPaymentRow, isClosedMonthRefusal } from '../../../src/lib/gymOrderPayment.ts';
+// And the same module's other half: money going back OUT of a gym's ledger,
+// when the gym refunded an online sale from its own Stripe dashboard. Both
+// directions live in one leaf because they are one ledger and one argument.
+import {
+  gymOrderPaymentRow, isClosedMonthRefusal,
+  gymRefundRow, refundsToMirror, refundStateForOrder, refusalNote, overReversedBy,
+  type RefundFacts, type ReversibleSale,
+} from '../../../src/lib/gymOrderPayment.ts';
 // The day a session pack's validity window closes, worked out by the same
 // arithmetic the app reads it back with. A leaf, for the same reason. Asserted
 // in src/lib/packExpiry.test.ts.
@@ -209,11 +226,43 @@ Deno.serve(async (req) => {
     return data?.trainer_id ?? null;
   };
 
-  const trainerOf = async (customerId: string | null, metaId?: string | null): Promise<string | null> => {
-    if (metaId) return metaId;
-    if (!customerId) return null;
-    const { data } = await service.from('billing_customers').select('trainer_id').eq('stripe_customer_id', customerId).maybeSingle();
-    return data?.trainer_id ?? null;
+  /**
+   * The coach a PLATFORM customer belongs to, or the reason we could not look.
+   *
+   * ── why this answers a pair and not a string ─────────────────────────────
+   *
+   * It used to be `const { data } = await …` with the error thrown away, and
+   * that made a REFUSED READ indistinguishable from "this Stripe customer
+   * belongs to nobody here". Both came back null, and the two callers treat
+   * null very differently from each other and both wrongly:
+   *
+   *   · `customer.subscription.*` on the platform is wrapped in `if (trainerId)`
+   *     with no else. A transient PostgREST fault therefore wrote NOTHING, fell
+   *     through to `{ received: true }`, and the replay ledger at the bottom
+   *     recorded the event as handled — so Stripe never retries and no later
+   *     `customer.subscription.*` is coming either, because Stripe only sends
+   *     one per change. A coach's plan silently keeps whatever status it had.
+   *   · `invoice.*` on the platform writes the row anyway with `trainer_id`
+   *     null, which files one of Repple's own invoices against nobody: it drops
+   *     out of `fetchFailedInvoices` and out of owner-metrics' revenue, and no
+   *     later event repairs it because the ordering guard on `stripe_event_at`
+   *     refuses the older redelivery that would.
+   *
+   * `dbError` is the same shape `saleForCharge` and `gymSaleForCharge` answer
+   * with, and the callers make the same call they do: a read that FAILED is a
+   * 500 so Stripe retries, and every write in both branches is an upsert on a
+   * unique key so being tried again is free. A read that SUCCEEDED and found
+   * nobody is a real answer and is handled, not retried.
+   */
+  const trainerOf = async (
+    customerId: string | null,
+    metaId?: string | null,
+  ): Promise<{ trainerId: string | null; dbError: string | null }> => {
+    if (metaId) return { trainerId: metaId, dbError: null };
+    if (!customerId) return { trainerId: null, dbError: null };
+    const { data, error } = await service.from('billing_customers').select('trainer_id').eq('stripe_customer_id', customerId).maybeSingle();
+    if (error) return { trainerId: null, dbError: error.message };
+    return { trainerId: data?.trainer_id ?? null, dbError: null };
   };
 
   // When Stripe says this happened. Webhooks are retried and are NOT ordered,
@@ -374,6 +423,153 @@ Deno.serve(async (req) => {
     return { sale: { table: 'client_purchases', id: row.id, trainerId: row.trainer_id ?? null, clientId: row.client_id ?? null }, dbError: null };
   };
 
+  /** A gym's own online sale, which is in neither of the two tables above. */
+  type GymSaleRef = {
+    orderId: string;
+    tenantId: string;
+    /** The ledger row to reverse, or null when the sale never reached the
+     *  ledger at all — a closed month, or a sale that stated no currency. */
+    payment: ReversibleSale | null;
+  };
+
+  /**
+   * The GYM sale a Stripe charge paid for, or null when this database has no
+   * record of one.
+   *
+   * ── Why this exists beside `saleForCharge` and not inside it ────────────
+   *
+   * `saleForCharge` answers "which of the two CLIENT money tables is this", and
+   * both of its answers are handled identically by the caller: assign Stripe's
+   * running total to `refunded_cents` on the row it found. A gym sale is not a
+   * third row of that shape. supabase/parts/180 settled that money leaves
+   * `gym_payments` as a NEGATIVE ROW naming what it undoes, never as an edit to
+   * the original, so the write is an INSERT with completely different
+   * arithmetic behind it — and folding a third variant into `SaleRef` would
+   * have produced a union whose every consumer had to switch on it anyway.
+   *
+   * ── The same two answers, kept apart ────────────────────────────────────
+   *
+   * A DATABASE read that fails is returned as `dbError` and becomes a 500, so
+   * Stripe retries. "No gym sale" is returned as null and becomes a 200. The
+   * distinction is the one `saleForCharge`'s header spends a paragraph on and
+   * it matters more on this path than on that one: treating "could not look" as
+   * "no such sale" here would silently leave a refund unmirrored while the
+   * ledger went on counting the money, and nothing would ever try again.
+   *
+   * ── Two ways back, and a third answer that is not a failure ─────────────
+   *
+   *   1. THE PAYMENT INTENT, on `gym_orders.stripe_payment_intent`. Stamped
+   *      when the order was closed as paid. One indexed read, no Stripe call.
+   *   2. THE CHECKOUT SESSION, through Stripe, for an order whose intent was
+   *      never stamped — an order fulfilled before that write existed, or one
+   *      that failed fulfilment and was closed without it. Same slow path
+   *      `saleForCharge` uses, and a listing that throws is "we could not find
+   *      it" rather than a reason to answer Stripe with a 500.
+   *
+   * A gym order found with NO `gym_payments` row against it is a real answer
+   * and not an error: part 480's own closed-month case leaves exactly that.
+   * There is nothing to reverse, and the caller records the refund on the order
+   * so the reconciliation screen says so, rather than logging into the void.
+   */
+  const gymSaleForCharge = async (
+    paymentIntent: string | null,
+  ): Promise<{ gym: GymSaleRef | null; dbError: string | null }> => {
+    if (!paymentIntent) return { gym: null, dbError: null };
+
+    // `.limit(1)` and an array rather than `.maybeSingle()`, because
+    // `gym_orders.stripe_payment_intent` carries no unique index — a member who
+    // abandoned a checkout and came back can leave two orders naming one intent
+    // — and `maybeSingle` answers a second row with an error, which would turn
+    // a findable sale into a 500 that never stops.
+    const { data: byPi, error: piErr } = await service.from('gym_orders')
+      .select('id, tenant_id').eq('stripe_payment_intent', paymentIntent)
+      .order('paid_at', { ascending: false }).limit(1);
+    if (piErr) return { gym: null, dbError: piErr.message };
+    let order = (byPi ?? [])[0] ?? null;
+
+    if (!order) {
+      let sessionIds: string[] = [];
+      try {
+        const list = await stripe.checkout.sessions.list({ payment_intent: paymentIntent, limit: 5 }, acctOpts);
+        sessionIds = (list.data ?? []).map((x) => x.id).filter(Boolean);
+      } catch (e) {
+        console.warn('stripe-webhook: could not list sessions for gym refund on ' + paymentIntent + ':', (e as Error).message);
+      }
+      if (!sessionIds.length) return { gym: null, dbError: null };
+      const { data: bySess, error: sessErr } = await service.from('gym_orders')
+        .select('id, tenant_id').in('stripe_session_id', sessionIds).limit(1);
+      if (sessErr) return { gym: null, dbError: sessErr.message };
+      order = (bySess ?? [])[0] ?? null;
+    }
+    if (!order?.id) return { gym: null, dbError: null };
+
+    // `maybeSingle` IS right here: part 480 put a partial UNIQUE index on
+    // `gym_payments.gym_order_id`, so there is at most one, and a second row
+    // would be the doubled takings that index exists to make impossible.
+    const { data: pay, error: payErr } = await service.from('gym_payments')
+      .select('id, tenant_id, member_id, membership_id, amount_cents, currency, method')
+      .eq('gym_order_id', order.id).maybeSingle();
+    if (payErr) return { gym: null, dbError: payErr.message };
+
+    return {
+      gym: {
+        orderId: String(order.id),
+        tenantId: String(order.tenant_id),
+        payment: pay?.id
+          ? {
+              paymentId: String(pay.id),
+              tenantId: String(pay.tenant_id),
+              memberId: pay.member_id ?? null,
+              membershipId: pay.membership_id ?? null,
+              amountCents: Number(pay.amount_cents),
+              currency: String(pay.currency ?? ''),
+              method: String(pay.method ?? ''),
+            }
+          : null,
+      },
+      dbError: null,
+    };
+  };
+
+  /**
+   * Every refund on a charge, as this mirror needs them.
+   *
+   * `charge.refunds` rides along on the event and is the cheap answer, but it
+   * is a paginated list: Stripe embeds the first ten and sets `has_more` when
+   * there are others. A charge refunded in eleven instalments is not a shape
+   * anybody plans for, and mirroring only the ten that happened to be embedded
+   * would be a ledger that is quietly short — so `has_more`, and an event that
+   * carries no list at all, both fall through to asking Stripe.
+   *
+   * A listing that throws returns what the event had rather than nothing, and
+   * the caller does not fail for it. Nothing is lost by that: the running total
+   * is written to `gym_orders.refunded_cents` regardless, so a refund this
+   * could not enumerate is still VISIBLE as a gap between what Stripe sent back
+   * and what the ledger took off. That property is what makes every partial
+   * failure on this path safe to accept rather than retry.
+   */
+  const refundsOnCharge = async (charge: Stripe.Charge): Promise<RefundFacts[]> => {
+    const asFacts = (list: readonly Stripe.Refund[]): RefundFacts[] => list.map((r) => ({
+      id: r.id,
+      amountCents: r.amount,
+      currency: r.currency,
+      createdSeconds: r.created,
+      status: r.status ?? null,
+    }));
+
+    const embedded = (charge.refunds?.data ?? []) as Stripe.Refund[];
+    if (embedded.length && !charge.refunds?.has_more) return asFacts(embedded);
+
+    try {
+      const list = await stripe.refunds.list({ charge: charge.id, limit: 100 }, acctOpts);
+      const all = (list.data ?? []) as Stripe.Refund[];
+      if (all.length) return asFacts(all);
+    } catch (e) {
+      console.warn('stripe-webhook: could not list refunds for charge ' + charge.id + ':', (e as Error).message);
+    }
+    return asFacts(embedded);
+  };
+
   /**
    * One membership term, written from a paid gym order.
    *
@@ -491,18 +687,97 @@ Deno.serve(async (req) => {
         // construction — `isConnect` returns true for any event with an
         // `account`, so arriving here means this event came from the platform,
         // where Repple's coaches pay Repple.
-        const trainerId = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
+        const { trainerId, dbError: whoErr } = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
+        // A read that FAILED is a 500 and a retry, never a write that is
+        // quietly skipped. See the note on `trainerOf`: the `if (trainerId)`
+        // below has no else, so swallowing this left a coach's plan frozen at
+        // whatever status it already held, with the event marked handled.
+        if (whoErr) return fail('billing_customers lookup', whoErr);
         if (trainerId) {
-          const { error } = await service.from('subscriptions').upsert({
+          // ORDERED, for the reason stated at `eventAt` above and by the same
+          // three writes `writeConnectSub` uses. This was a bare upsert with no
+          // ordering token at all — `client_subscriptions` and
+          // `client_disputes` honoured the invariant and this table did not.
+          //
+          // Last-writer-wins is not survivable here, and the replay ledger is
+          // not the answer. A coach's card fails (status past_due, created T1);
+          // some other write in that same delivery errors, `fail()` answers 500
+          // and Stripe schedules a retry with backoff. The coach pays, an
+          // `active` event created T2 is delivered and succeeds. The T1 retry
+          // then lands — and the ledger CANNOT stop it, because a 500'd event
+          // is deliberately never recorded, which is the behaviour that keeps
+          // money from being dropped. Without a guard that retry puts the coach
+          // back to past_due, and no further event is coming to correct it.
+          //
+          // What that row is: studio-web/lib/platform.ts reads it for the
+          // owner's platform book, src/lib/billing.ts for the coach's own
+          // billing screen, and owner-metrics counts `status = 'active'` for
+          // the platform's live subscriber count. All three would have been
+          // reading a state Stripe had already left.
+          const row: Record<string, unknown> = {
             trainer_id: trainerId,
             stripe_subscription_id: sub.id,
             plan: sub.items?.data?.[0]?.price?.nickname ?? sub.items?.data?.[0]?.price?.id ?? null,
             status: sub.status,
             current_period_end: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null,
             cancel_at_period_end: !!sub.cancel_at_period_end,
+            stripe_event_at: eventAt,
             updated_at: new Date().toISOString(),
-          });
-          if (error) return fail('subscriptions', error.message);
+          };
+
+          // `onConflict` stated rather than inferred. The row is keyed on
+          // `trainer_id` and part 2340 restores the `unique` on
+          // `stripe_subscription_id` that setup.sql has always declared and the
+          // live table had lost, so this table now carries two unique indexes
+          // and which one an upsert resolves on must not be left to PostgREST
+          // to pick. The second one is not a conflict target here and is not
+          // meant to be: it exists so one Stripe subscription cannot be filed
+          // against two coaches, and a violation of it SHOULD 500 rather than
+          // be merged away, because the only way to reach it is an event whose
+          // `trainer_id` metadata disagrees with `billing_customers`.
+          const { error: insErr } = await service.from('subscriptions')
+            .upsert(row, { onConflict: 'trainer_id', ignoreDuplicates: true });
+          if (insErr) return fail('subscriptions', insErr.message);
+
+          // Two plain filters rather than one `.or(...)`, for the reason
+          // spelled out in `writeConnectSub`: an ISO timestamp inside
+          // PostgREST's or() grammar is a value full of the punctuation that
+          // grammar parses on.
+          //
+          // `.lte`, not `.lt` — a redelivery of the SAME event carries the same
+          // `event.created`, and rewriting the identical row is the idempotency
+          // the replay ledger is insuring rather than replacing.
+          const { error: updErr } = await service.from('subscriptions').update(row)
+            .eq('trainer_id', trainerId).lte('stripe_event_at', eventAt);
+          if (updErr) return fail('subscriptions', updErr.message);
+
+          // The row the ordering token cannot rank: one written before part
+          // 2340 added the column. There are none in production — this table is
+          // empty and no payment event has ever been delivered — but a coach
+          // seeded by hand would otherwise be frozen out of every update for
+          // ever, which is a worse failure than the one being fixed.
+          const { error: nullErr } = await service.from('subscriptions').update(row)
+            .eq('trainer_id', trainerId).is('stripe_event_at', null);
+          if (nullErr) return fail('subscriptions', nullErr.message);
+        } else {
+          // The read SUCCEEDED and named nobody: a platform subscription whose
+          // Stripe customer has no `billing_customers` row and whose metadata
+          // carries no `trainer_id`. Nothing is written, which is right — there
+          // is no coach to file it against and inventing one would be worse —
+          // but until now nothing said so either, and this is the same state
+          // `account.updated` logs when neither account table knows an id.
+          //
+          // A log and NOT a 500, for that branch's reason: a retry cannot
+          // conjure a `billing_customers` row, so spending Stripe's retry
+          // budget on it ends with the delivery abandoned and still nothing
+          // recorded. The remedy is to reconnect the customer by hand, and this
+          // is the only place the pair of ids is ever held at once.
+          console.error(
+            'stripe-webhook: platform ' + event.type + ' for subscription ' + sub.id + ' on customer '
+            + String(sub.customer ?? 'none') + ' resolves to no coach in billing_customers and carries no '
+            + 'trainer_id in its metadata, so its status (' + String(sub.status) + ') was not recorded. '
+            + 'Repple\'s own book does not know about this subscription.',
+          );
         }
       }
     } else if (event.type === 'account.updated') {
@@ -529,8 +804,14 @@ Deno.serve(async (req) => {
       // opening the app — Stripe sends `account.updated` for its own reasons,
       // and a null type is refused, so the column must not depend on the coach
       // coming back through connect-onboard.
+      //
+      // COUNTED, but the two writes are judged TOGETHER and neither on its own.
+      // The note on the second one is the reason: an account id belongs to
+      // exactly one of these two tables, so one of this pair matching nothing
+      // is the design and failing on it would break every delivery. What is
+      // NOT the design is BOTH matching nothing, and that had no reader at all.
       const acct = event.data.object as Stripe.Account;
-      const { error } = await service.from('connect_accounts').update({
+      const { error, count: coachRows } = await service.from('connect_accounts').update({
         charges_enabled: !!acct.charges_enabled,
         details_submitted: !!acct.details_submitted,
         payouts_enabled: !!acct.payouts_enabled,
@@ -539,7 +820,7 @@ Deno.serve(async (req) => {
         losses_owner: acct.controller?.losses?.payments ?? null,
         account_type: acct.type ?? null,
         updated_at: new Date().toISOString(),
-      }).eq('stripe_account_id', acct.id);
+      }, { count: 'exact' }).eq('stripe_account_id', acct.id);
       if (error) return fail('connect_accounts', error.message);
 
       // The same event, for a GYM's own account (part 280).
@@ -557,7 +838,7 @@ Deno.serve(async (req) => {
       // tell us `card_payments` went active. `gym-checkout` refuses a charge
       // while that capability is present and not active, so a gym whose status
       // is never written stays unable to sell to anybody.
-      const { error: gymErr } = await service.from('gym_connect_accounts').update({
+      const { error: gymErr, count: gymRows } = await service.from('gym_connect_accounts').update({
         charges_enabled: !!acct.charges_enabled,
         details_submitted: !!acct.details_submitted,
         payouts_enabled: !!acct.payouts_enabled,
@@ -566,8 +847,30 @@ Deno.serve(async (req) => {
         losses_owner: acct.controller?.losses?.payments ?? null,
         account_type: acct.type ?? null,
         updated_at: new Date().toISOString(),
-      }).eq('stripe_account_id', acct.id);
+      }, { count: 'exact' }).eq('stripe_account_id', acct.id);
       if (gymErr) return fail('gym_connect_accounts', gymErr.message);
+
+      // NEITHER table knew this account, which is the case the paragraph above
+      // does not cover. Stripe verified the signature, so this is an account on
+      // this platform, and nothing here has a row for it: a coach or a gym
+      // whose capability columns will never be written by the one event that
+      // was ever going to write them. `connect-checkout` and `gym-checkout`
+      // both refuse a sale on a missing or not-enabled row, so what this state
+      // becomes is a coach or an owner who has finished Stripe's verification
+      // and still cannot sell, with nothing anywhere saying why.
+      //
+      // A log and NOT a 500. A retry cannot conjure a row that does not exist —
+      // the same call `if (!order)` and `if (!gym)` make elsewhere in this file
+      // — and spending Stripe's retry budget on it ends with the delivery
+      // abandoned and still nothing recorded.
+      if (!coachRows && !gymRows) {
+        console.error(
+          'stripe-webhook: account.updated for ' + acct.id + ' matched no row in connect_accounts '
+          + 'or gym_connect_accounts. Charges ' + (acct.charges_enabled ? 'enabled' : 'disabled')
+          + ', card_payments ' + String(acct.capabilities?.card_payments ?? 'none')
+          + '. Whoever owns this account cannot be told it went live, and cannot sell until a row exists for it.',
+        );
+      }
     } else if (event.type === 'payout.paid' || event.type === 'payout.failed'
                || event.type === 'payout.updated' || event.type === 'payout.canceled') {
       // ── what actually landed in the coach's bank ─────────────────────────
@@ -590,7 +893,7 @@ Deno.serve(async (req) => {
       // recording one would put the platform's own banking on a coach's money
       // screen. A payout with no connected account behind it is not a coach's.
       if (!eventAccount) {
-        console.log('stripe-webhook: platform payout ' + payout.id + ' ignored — not a coach’s');
+        console.log('stripe-webhook: platform payout ' + payout.id + ' ignored. Not a coach’s');
       } else {
         // Null when the account resolves to no coach. The row is still written:
         // a payout this database cannot attribute still happened, and dropping
@@ -599,12 +902,47 @@ Deno.serve(async (req) => {
         const coachId = await trainerOfAccount(eventAccount);
         if (!coachId) console.warn('stripe-webhook: payout ' + payout.id + ' on ' + eventAccount + ' resolves to no coach');
 
-        // Upserted on Stripe's own payout id, so at-least-once delivery and a
-        // `payout.updated` following a `payout.paid` overwrite rather than
-        // double. `stripe_event_at` moves with it and is what a later-arriving
-        // OLDER event would be filtered on by anything that reads these in
-        // order — webhooks are retried and are not ordered.
-        const { error } = await service.from('coach_payouts').upsert({
+        // Keyed on Stripe's own payout id, so at-least-once delivery and a
+        // `payout.updated` following a `payout.paid` land on one row rather
+        // than two.
+        //
+        // ── AND ORDERED, WHICH IT WAS NOT ────────────────────────────────
+        //
+        // This was one plain upsert, last-writer-wins, under a comment saying
+        // `stripe_event_at` "is what a later-arriving OLDER event would be
+        // filtered on by anything that reads these in order". Nothing filtered
+        // on it. The column was written and never compared, here or in any
+        // reader — `fetchMyPayouts` in src/ui/coachPayouts.ts and the two
+        // statement reads in src/ui/coachStatement.ts are the only readers of
+        // this table, and all three order by `arrival_on` then `id`, which is
+        // a BANK DATE rather than a position in Stripe's event sequence and
+        // cannot rank two deliveries about one payout at all.
+        // Part 194's own column comment states the guard as
+        // if it existed: "the write is filtered on this rather than on arrival
+        // order — the same guard every other mirrored table in this schema
+        // uses." It was the one mirrored table that did not.
+        //
+        // What that costs is the same failure the three sets below this branch
+        // were written to stop, on the one table that is about money ARRIVING.
+        // Four of these five event types describe one payout and Stripe sends
+        // them in sequence: `payout.paid` at T, then the bank returns it and
+        // `payout.failed` at T+2 carries the reason. Webhooks are retried and
+        // are NOT ordered, so a retried `paid` delivered after `failed` — a
+        // 500 anywhere else in that same delivery is enough, because a 500'd
+        // event is deliberately never recorded in the replay ledger — rewrites
+        // `status` back to 'paid' and `failure_message` back to null, since
+        // Stripe's `paid` payload carries no failure string. The coach is then
+        // shown money as landed that their bank sent back, with the one line
+        // that would have told them why erased. No further payout event is
+        // coming to correct it.
+        //
+        // So: insert-if-absent, then the two guarded updates, exactly as
+        // `writeConnectSub`, the platform subscription, `client_disputes` and
+        // `invoices` all do. `.lte` and not `.lt` — a redelivery of the SAME
+        // event carries the same `event.created` and rewriting the identical
+        // row is the idempotency the replay ledger insures rather than
+        // replaces.
+        const payoutRow: Record<string, unknown> = {
           id: payout.id,
           coach_id: coachId,
           stripe_account_id: eventAccount,
@@ -621,8 +959,37 @@ Deno.serve(async (req) => {
           // and does not know it.
           failure_message: payout.failure_message ?? null,
           stripe_event_at: eventAt,
-        });
+        };
+
+        // no-count-ok: ON CONFLICT DO NOTHING, so zero rows is the row already
+        // existing — which is the ordinary case here and what the two guarded
+        // updates below are for.
+        const { error } = await service.from('coach_payouts')
+          .upsert(payoutRow, { onConflict: 'id', ignoreDuplicates: true });
         if (error) return fail('coach_payouts', error.message);
+
+        // Two plain filters rather than one `.or(...)`, for the reason spelled
+        // out in `writeConnectSub`: an ISO timestamp inside PostgREST's or()
+        // grammar is a value full of the punctuation that grammar parses on,
+        // and a filter that silently fails to apply here is a filter that lets
+        // a stale delivery overwrite a payout's real outcome.
+        //
+        // no-count-ok: zero rows here is a NEWER event having already written
+        // this payout, which is exactly what the filter is for.
+        const { error: updErr } = await service.from('coach_payouts').update(payoutRow)
+          .eq('id', payout.id).lte('stripe_event_at', eventAt);
+        if (updErr) return fail('coach_payouts', updErr.message);
+
+        // The row the ordering token cannot rank: one written before this
+        // column was filled, or by the unguarded upsert this replaced on a
+        // delivery that predates it.
+        //
+        // no-count-ok: zero rows here is the ordinary case — every row written
+        // since part 194 carries a `stripe_event_at`, so this matches only the
+        // ones that do not.
+        const { error: nullErr } = await service.from('coach_payouts').update(payoutRow)
+          .eq('id', payout.id).is('stripe_event_at', null);
+        if (nullErr) return fail('coach_payouts', nullErr.message);
       }
     } else if (event.type === 'checkout.session.completed') {
       // A client bought a trainer's package (Connect checkout).
@@ -733,13 +1100,23 @@ Deno.serve(async (req) => {
                 if (held && String(held.member_id) === String(order.member_id)) {
                   const close = supersedeRow({ startedOn: String(held.started_on) }, String(order.term_starts_on));
                   if (close) {
-                    const { error: closeErr } = await service.from('memberships')
-                      .update({ status: close.status, ends_on: close.ends_on }).eq('id', held.id);
+                    const { error: closeErr, count: closed } = await service.from('memberships')
+                      .update({ status: close.status, ends_on: close.ends_on }, { count: 'exact' }).eq('id', held.id);
                     // Logged, not fatal, and not `problem`: the member HAS the
                     // plan they paid for. What is wrong is that the old one is
                     // still open beside it, which is a tidy-up rather than a
                     // reason to tell somebody their purchase failed.
                     if (closeErr) console.error('stripe-webhook: gym order ' + orderId + ' upgraded but the old membership ' + held.id + ' was not closed:', closeErr.message);
+                    // Counted so that zero rows reaches the same log, because
+                    // it is the same outcome by a route `closeErr` cannot see.
+                    // `held` was selected by this id two lines up under the
+                    // service role, so zero rows means it has since gone — and
+                    // a membership that is gone is not one left open beside the
+                    // new one, which is the only harm this write prevents. It
+                    // is recorded rather than passed over because two rows and
+                    // no rows are different things to find in a month's billing
+                    // and this is the one moment either can be told apart.
+                    else if (!closed) console.error('stripe-webhook: gym order ' + orderId + ' upgraded and the membership ' + held.id + ' it supersedes was not there to close. Nothing is left open; the superseded term is simply not on record.');
                   }
                 }
               }
@@ -838,7 +1215,7 @@ Deno.serve(async (req) => {
                 // states no currency or no amount anywhere, and there is no
                 // honest fallback for either: a currency invented here is a
                 // permanent wrong stamp on a row an accountant files.
-                console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be written to the ledger — the session and the order both state no usable amount or currency. Session ' + sess.id + '. The entitlement stands; the money is recorded only in Stripe.');
+                console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be written to the ledger. The session and the order both state no usable amount or currency. Session ' + sess.id + '. The entitlement stands; the money is recorded only in Stripe.');
               } else {
                 const { error: payErr } = await service.from('gym_payments').insert(ledgerRow);
                 if (payErr && String(payErr.code ?? '') === '23505') {
@@ -869,18 +1246,33 @@ Deno.serve(async (req) => {
             // with the reason, because a member who has paid and holds nothing
             // must not be left looking at a screen that shows no membership and
             // says nothing about why.
-            const { error: markErr } = await service.from('gym_orders').update({
+            const { error: markErr, count: marked } = await service.from('gym_orders').update({
               status: 'failed',
               failure_note: problem,
               stripe_session_id: sess.id,
               stripe_payment_intent: pi,
               paid_at: eventAt,
               updated_at: nowIso,
-            }).eq('id', orderId);
+            }, { count: 'exact' }).eq('id', orderId);
             if (markErr) return fail('gym_orders', markErr.message);
             console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be fulfilled: ' + problem);
+            // The order was selected by this id at the top of the branch under
+            // the service role, so zero rows means it has gone since — and with
+            // it the row `problem` was going to be written on. The member has
+            // paid, holds nothing, and now has nothing on any screen saying so
+            // either, which is the exact state the write above exists to
+            // prevent. Logged and not 500'd: a retry re-reads `gym_orders`,
+            // finds nothing, and lands on this file's own `if (!order)` branch,
+            // so the row cannot be conjured by trying again.
+            if (!marked) {
+              console.error(
+                'stripe-webhook: gym order ' + orderId + ' was paid, could not be fulfilled, and has no row '
+                + 'left to record the failure on. Session ' + sess.id + ', intent ' + (pi ?? 'none')
+                + '. The member has been charged and holds nothing. Reconcile from Stripe by hand.',
+              );
+            }
           } else {
-            const { error: doneErr } = await service.from('gym_orders').update({
+            const { error: doneErr, count: done } = await service.from('gym_orders').update({
               status: 'paid',
               membership_id: membershipId,
               pass_id: passId,
@@ -889,8 +1281,21 @@ Deno.serve(async (req) => {
               paid_at: eventAt,
               failure_note: null,
               updated_at: nowIso,
-            }).eq('id', orderId);
+            }, { count: 'exact' }).eq('id', orderId);
             if (doneErr) return fail('gym_orders', doneErr.message);
+            // Same key, same reasoning, opposite outcome: here the entitlement
+            // and the money were both written, and only the order that ties
+            // them together is missing. The member HAS what they paid for, so
+            // this is not a purchase to report as failed — it is a membership
+            // or a pass with no order behind it, which is what the gym's
+            // reconciliation screen will show and what somebody has to close.
+            if (!done) {
+              console.error(
+                'stripe-webhook: gym order ' + orderId + ' was paid and fulfilled and has no row left to close. '
+                + 'Session ' + sess.id + ', intent ' + (pi ?? 'none') + ', membership ' + (membershipId ?? 'none')
+                + ', pass ' + (passId ?? 'none') + '. The member holds what they bought; the order does not exist.',
+              );
+            }
           }
         }
       }
@@ -1063,18 +1468,204 @@ Deno.serve(async (req) => {
         const { sale, dbError } = await saleForCharge(chargeInv, chargePi);
         if (dbError) return fail('refund lookup', dbError);
         if (!sale) {
-          // Money has gone back on a charge this database has no sale for.
-          // Retrying cannot conjure the row, so the event is accepted and the
-          // fact is logged as loudly as a log can be — Stripe is the surviving
-          // record and somebody has to reconcile it by hand.
-          console.error('stripe-webhook: REFUND WITH NO SALE TO MIRROR IT ON. Charge ' + charge.id + ', intent ' + (chargePi ?? 'none') + ', invoice ' + (chargeInv ?? 'none') + ', account ' + (eventAccount ?? 'platform') + '. The coach\'s takings figure still counts this money.');
+          // ── A GYM'S OWN ONLINE SALE, WHICH IS IN NEITHER OF THOSE TABLES ──
+          //
+          // This branch used to end here, at the log line below, and for a gym
+          // that was the whole story: `saleForCharge` looks in
+          // `client_subscription_payments` and `client_purchases`, and a
+          // membership or pass bought through supabase/functions/gym-checkout
+          // is in `gym_orders` and `gym_payments`. So an owner refunding a
+          // membership from their own Stripe dashboard — the ordinary way,
+          // because under direct charges the gym is the merchant of record and
+          // has the full dashboard — produced one log line and a `gym_payments`
+          // row still holding the entire original amount. The gym's ledger, its
+          // month-end close and its revenue screen all went on counting money
+          // that had gone back, and nothing on any screen looked wrong.
+          //
+          // Asked only when the client-side lookup found nothing, which costs a
+          // gym refund one extra read and costs a coach's refund nothing at
+          // all. The two are disjoint by construction: a gym checkout is
+          // stamped `repple_kind: 'gym_order'` and never writes either client
+          // table.
+          const { gym, dbError: gymErr } = await gymSaleForCharge(chargePi);
+          // A read that failed is a 500 and a retry, exactly as above. "We
+          // could not look" is not "there is nothing there", and collapsing
+          // them would leave a gym's takings permanently overstated with no
+          // second attempt.
+          if (gymErr) return fail('gym refund lookup', gymErr);
+
+          if (!gym) {
+            // Money has gone back on a charge this database has no sale for.
+            // Retrying cannot conjure the row, so the event is accepted and the
+            // fact is logged as loudly as a log can be — Stripe is the surviving
+            // record and somebody has to reconcile it by hand.
+            console.error('stripe-webhook: REFUND WITH NO SALE TO MIRROR IT ON. Charge ' + charge.id + ', intent ' + (chargePi ?? 'none') + ', invoice ' + (chargeInv ?? 'none') + ', account ' + (eventAccount ?? 'platform') + '. The coach\'s or gym\'s takings figure still counts this money.');
+          } else {
+            // ── WHAT STRIPE DID, WRITTEN BEFORE ANYTHING IS ATTEMPTED ──────
+            //
+            // First, unconditionally, and on `gym_orders` rather than on the
+            // ledger. Part 182's closed-month trigger guards `gym_payments` and
+            // `gym_invoices` and deliberately not this table, so this write
+            // always lands — which means the record of what Stripe did survives
+            // even when the ledger refuses the consequence of it. Written after
+            // the loop instead, it would be missing in exactly the case this
+            // work exists for.
+            //
+            // `refunded_cents` is Stripe's RUNNING TOTAL, assigned and never
+            // added, so a redelivery cannot inflate it. It is not a ledger
+            // figure and no money screen sums it. Its only job is to be one
+            // half of a comparison — against the sum of reversals actually
+            // recorded — that makes an unmirrored refund visible on
+            // /accounting, and that CLEARS ITSELF once somebody records the
+            // missing correction by hand.
+            const refundState = refundStateForOrder({
+              amountRefundedCents: refunded,
+              currency: charge.currency,
+              atISO: eventAt,
+            });
+            const { error: stateErr, count: stateRows } = await service.from('gym_orders').update({
+              refunded_cents: refundState.refundedCents,
+              refunded_currency: refundState.refundedCurrency,
+              refunded_at: refundState.refundedAt,
+              updated_at: new Date().toISOString(),
+            }, { count: 'exact' }).eq('id', gym.orderId);
+            // A 500 here, and not a log: this is the write that makes every
+            // later failure visible, so losing it silently would put the whole
+            // path back to where it started.
+            if (stateErr) return fail('gym_orders refund', stateErr.message);
+            // Zero rows is that same loss by the route `stateErr` cannot see,
+            // and it gets a log rather than the 500 above. `gym.orderId` came
+            // from `gymSaleForCharge` a moment ago under the service role, so
+            // zero rows means the order has since gone — and a retry would
+            // re-run that same lookup, find nothing, and land on this file's
+            // own "REFUND WITH NO SALE TO MIRROR IT ON" branch. The 500 exists
+            // to buy a second attempt at a write that could succeed; there is
+            // no second attempt at a row that is not there.
+            if (!stateRows) {
+              console.error(
+                'stripe-webhook: refund on gym order ' + gym.orderId + ' has no order row left to record it on. '
+                + 'Charge ' + charge.id + ', account ' + (eventAccount ?? 'platform')
+                + '. The exception /accounting draws from this column cannot be raised, so this refund is '
+                + 'invisible to the gym. Reconcile from Stripe by hand.',
+              );
+            }
+
+            const refusals: string[] = [];
+
+            if (!gym.payment) {
+              // The sale itself never reached the ledger — part 480's own
+              // closed-month case leaves precisely this. Part 180's CHECK
+              // requires a reversal to name what it reverses, so there is
+              // nothing legal to write, and a bare negative row would be the
+              // unexplained figure that constraint exists to refuse.
+              refusals.push('This sale never reached the payment record, so there was no row to reverse. Record the sale and the refund together.');
+              console.error('stripe-webhook: gym order ' + gym.orderId + ' was refunded in Stripe and has no ledger row to reverse. Charge ' + charge.id + '. The sale is missing from this gym’s takings and so is the refund.');
+            } else {
+              const salePayment = gym.payment;
+              // What is already recorded against this payment: the refund ids,
+              // which is the cheap idempotency guard, and the amounts, which is
+              // what says whether Stripe has now sent back more than this app
+              // thinks was ever taken.
+              const { data: doneRows, error: doneErr } = await service.from('gym_payments')
+                .select('stripe_refund_id, amount_cents').eq('reverses_payment_id', salePayment.paymentId);
+              if (doneErr) return fail('gym refund lookup', doneErr.message);
+
+              const alreadyIds = (doneRows ?? [])
+                .map((d: { stripe_refund_id: string | null }) => d.stripe_refund_id)
+                .filter((x): x is string => !!x);
+              let reversedSoFar = (doneRows ?? [])
+                .reduce((a: number, d: { amount_cents: number | null }) => a + Math.abs(Number(d.amount_cents) || 0), 0);
+
+              const onCharge = await refundsOnCharge(charge);
+              for (const one of refundsToMirror(onCharge, alreadyIds)) {
+                const built = gymRefundRow({ sale: salePayment, refund: one, fallbackAtISO: eventAt });
+                if (!built.row) {
+                  // Refused rather than guessed — a currency that disagrees
+                  // with the payment it reverses, or an amount Stripe did not
+                  // state. Recorded where an owner reads it, not just logged.
+                  refusals.push(built.refusal ?? 'This refund could not be recorded.');
+                  console.error('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' was not mirrored: ' + (built.refusal ?? 'no reason given'));
+                  continue;
+                }
+                const refundRow = built.row;
+
+                // Stripe has sent back more than this app has recorded as
+                // taken. Logged and still written: the money has already gone,
+                // and declining to record it would leave the ledger overstating
+                // the gym's takings by the whole refund — which is the defect
+                // being fixed — to keep one row's arithmetic tidy. Same call
+                // the client-side branch makes when part 192's CHECK fires.
+                const over = overReversedBy(salePayment.amountCents, reversedSoFar, Math.abs(refundRow.amount_cents));
+                if (over > 0) {
+                  console.error('stripe-webhook: refund ' + one.id + ' takes gym order ' + gym.orderId + ' past what this ledger records as taken, by ' + over + ' minor units of ' + salePayment.currency + '. Charge ' + charge.id + '. It is recorded anyway, because the money has gone; the sale’s amount and Stripe disagree and that needs a person.');
+                }
+
+                const { error: revErr } = await service.from('gym_payments').insert(refundRow);
+                if (revErr && String(revErr.code ?? '') === '23505') {
+                  // Two deliveries raced and part 800's unique index did its
+                  // job. Mirrored once, which is the whole point of keying on
+                  // the refund id: a refund recorded twice halves this gym's
+                  // takings a second time, and unlike a doubled SALE — money an
+                  // owner notices not arriving — a doubled refund only makes
+                  // the month look worse, which nobody goes looking for.
+                  console.warn('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' was already mirrored when this delivery tried. The unique index refused the second.');
+                } else if (revErr && isClosedMonthRefusal(revErr)) {
+                  // The owner has signed off the month this refund falls in.
+                  // A refund is dated when it was MADE (part 180), so this is a
+                  // refund made inside a month already closed.
+                  //
+                  // FINAL, not transient: every retry is refused identically
+                  // until a person reopens the month, so a 500 would spend
+                  // Stripe's retry budget on a write that cannot land and then
+                  // the delivery would be abandoned. Same decision part 480
+                  // takes on the sale side — but it must NOT be dropped the
+                  // same way, because there the gap showed up as a paid order
+                  // with no payment row, and here the payment row exists and
+                  // reads as perfectly correct. It is simply too big. So the
+                  // reason goes on the order, where /accounting draws it.
+                  refusals.push('Stripe refunded this sale into a month this gym has closed, so the payment record refused the reversal. Reopen that month on Close, with a reason, and record the refund against the original payment.');
+                  console.error('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' falls in a month this gym has closed: ' + revErr.message + ' The ledger still counts the original in full.');
+                } else if (revErr) {
+                  // An ordinary write failure. Worth a 500, because Stripe
+                  // retries one and the next attempt may well succeed — and the
+                  // refund ids already written are skipped when it does.
+                  return fail('gym_payments refund', revErr.message);
+                } else {
+                  reversedSoFar += Math.abs(refundRow.amount_cents);
+                }
+              }
+            }
+
+            // The reason, second and separately, because it is the outcome of
+            // trying. `refusalNote` answers null when nothing was refused,
+            // which is what clears a note left by an earlier delivery once a
+            // later one gets through.
+            // no-count-ok: zero rows here is the write above, already reported.
+            //
+            // Same key, same request, seconds apart: if this update matches
+            // nothing then `refunded_cents` matched nothing either, and that
+            // has just been logged with the charge, the account and what it
+            // costs. A second line saying the sentence explaining a refusal
+            // could not be stored on the row that is not there adds a fact
+            // nobody can act on differently, and the refusals themselves are
+            // already in the log individually, where each was raised.
+            const { error: noteErr } = await service.from('gym_orders').update({
+              refund_note: refusalNote(refusals),
+              updated_at: new Date().toISOString(),
+            }).eq('id', gym.orderId);
+            // Logged rather than fatal. The exception an owner sees is derived
+            // from the two figures above, both of which are already written;
+            // this note only says WHY. Answering with a 500 would risk
+            // re-running the loop for a sentence.
+            if (noteErr) console.error('stripe-webhook: could not record why a refund on gym order ' + gym.orderId + ' was not mirrored:', noteErr.message);
+          }
         } else {
-          const { error: refErr } = await service.from(sale.table).update({
+          const { error: refErr, count: refRows } = await service.from(sale.table).update({
             refunded_cents: refunded,
             // Stripe's own instant for the event, not now(): a delivery retried
             // three days late must not move a refund into a different month.
             refunded_at: eventAt,
-          }).eq('id', sale.id);
+          }, { count: 'exact' }).eq('id', sale.id);
           // 23514 is the CHECK in part 192 — `refunded_cents <= amount_cents`.
           // It should be unreachable, because Stripe refuses to refund more than
           // was charged; if it fires, this app's `amount_cents` disagrees with
@@ -1083,9 +1674,22 @@ Deno.serve(async (req) => {
           // accepted instead, which leaves the sale visibly wrong rather than
           // invisibly retried.
           if (refErr && String(refErr.code ?? '') === '23514') {
-            console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check — this app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
+            console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check. This app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
           } else if (refErr) {
             return fail(sale.table + ' refund', refErr.message);
+          } else if (!refRows) {
+            // The sale row went away between `saleForCharge` finding it and
+            // this write, so the money that has gone back is recorded against
+            // nothing. Worse than the CHECK above rather than better: there the
+            // sale is left visibly wrong, here there is no sale left to look
+            // wrong, and the coach's takings simply never counted it either
+            // way. A log and not a 500, because a retry re-runs the same lookup
+            // and reaches the "REFUND WITH NO SALE TO MIRROR IT ON" branch.
+            console.error(
+              'stripe-webhook: refund of ' + refunded + ' had no row left in ' + sale.table + ' to record it on: '
+              + sale.id + ' has gone. Charge ' + charge.id + ', account ' + (eventAccount ?? 'platform')
+              + '. Stripe is the only record that this money went back. Reconcile by hand.',
+            );
           }
         }
       }
@@ -1280,12 +1884,141 @@ Deno.serve(async (req) => {
           if (payErr) return fail('client_subscription_payments', payErr.message);
         }
 
+        // ── the money that did NOT arrive ────────────────────────────────
+        //
+        // The other half of the block above, and until now it was written
+        // nowhere at all. `client_subscription_payments` holds paid renewals;
+        // a DECLINED one left this database nothing but a `status` on
+        // `client_subscriptions` that the next event overwrites. A client's
+        // card fails four times across a fortnight and Stripe gives up: what
+        // this app could say afterwards was "canceled", with no date, no
+        // amount, no reason and no count — a coach whose income stopped and
+        // who could not be told when, or whether it was one card or four.
+        //
+        // supabase/parts/3000 declared `client_subscription_failures` for
+        // exactly this and named the writer it needed: "one new branch in the
+        // `event.type.startsWith('invoice.')` handler … gated on `event.type
+        // === 'invoice.payment_failed'`. That change is NOT in this part and
+        // has not been made." It had still not been made; the table was
+        // applied and empty, and an empty table there means "nothing has been
+        // written yet", never "no card has failed". This is that branch.
+        //
+        // KEYED ON THE EVENT, not the invoice. One invoice can fail four times
+        // and all four rows are the record — so `stripe_invoice_id` is
+        // deliberately not unique there, and `(invoice, attempt_count)` was
+        // refused because `attempt_count` is nullable and a unique index over a
+        // NULL does not collide, which would drop the guard in precisely the
+        // case where the data is weakest. Stripe redelivers an unacknowledged
+        // webhook under the SAME `event.id`, so every retry of one delivery
+        // lands on one row and each distinct attempt gets its own.
+        //
+        // WRITTEN BEFORE THE STATUS RE-READ BELOW, for the reason the paid
+        // block states about itself: the re-read is a network call to Stripe
+        // that can fail, and of the two this is the one that cannot be
+        // reconstructed afterwards from anything this database holds. Stripe's
+        // event history is the only other copy.
+        //
+        // NOTHING HERE SENDS ANYTHING. Stripe is already retrying and already
+        // emailing where the coach has that on; this is a record, and no
+        // notification is raised on the strength of one.
+        if (event.type === 'invoice.payment_failed' && inv.id) {
+          const failureRow: Record<string, unknown> = {
+            // The same three-step identity the paid row uses, in the same
+            // order: metadata, then the mirrored subscription, then the
+            // connected account the event arrived from.
+            client_id: subMeta.client_id || known?.client_id || null,
+            trainer_id: subMeta.trainer_id || known?.trainer_id || (await trainerOfAccount(eventAccount)) || null,
+            stripe_subscription_id: subId,
+            stripe_invoice_id: inv.id,
+            stripe_event_id: event.id,
+            // Which attempt Stripe counted this as. Null means Stripe stated
+            // none on this event — NOT that it was the first, which is 1.
+            attempt_count: inv.attempt_count ?? null,
+            // What went uncollected, in minor units: `amount_due`, not
+            // `amount_paid`, which is zero on a failure and would file every
+            // decline as a nil amount. GROSS, like every other figure this
+            // webhook writes. Null if Stripe stated none, and null is not zero.
+            amount_cents: inv.amount_due ?? null,
+            // The invoice's own currency, never defaulted — Repple is
+            // white-labelled and every default is wrong for somebody. A null
+            // here means the amount beside it joins no total.
+            currency: inv.currency ?? null,
+            billing_reason: inv.billing_reason ?? null,
+            // The EVENT's own instant. A Stripe invoice carries no failure
+            // timestamp — there is no `status_transitions.failed_at` — and a
+            // delivery retried three days later must not move a decline into a
+            // different week.
+            failed_at: eventAt,
+            // When Stripe says it will try again. Null is NOT evidence that
+            // Stripe has given up; see the column comment in part 3000.
+            next_attempt_at: inv.next_payment_attempt
+              ? new Date(inv.next_payment_attempt * 1000).toISOString()
+              : null,
+            stripe_account_id: eventAccount,
+          };
+
+          const { error: failErr } = await service.from('client_subscription_failures')
+            .upsert(failureRow, { onConflict: 'stripe_event_id' });
+          // A database that has not had part 3000 run. PostgREST answers a
+          // table it does not know with PGRST205, out of its schema cache and
+          // without ever asking Postgres — measured against this project's own
+          // API, where a real missing table answers PGRST205 and an existing
+          // one answers 42501. 42P01 is Postgres's own form and is kept
+          // because it is genuinely reachable: a warm cache over a table that
+          // has just gone, which is the window during a rollback.
+          //
+          // Logged and NOT 500'd, alone among the writes in this arm. A retry
+          // cannot conjure a table, so spending Stripe's retry budget on it
+          // ends with the delivery abandoned — and this branch is beside a
+          // MONEY path, so an unrunnable write here must not take the status
+          // re-read and the paid-renewal row down with it.
+          const failCode = String((failErr as { code?: string } | null)?.code ?? '');
+          if (failErr && (failCode === 'PGRST205' || failCode === '42P01')) {
+            console.error(
+              'stripe-webhook: invoice ' + inv.id + ' failed to collect and client_subscription_failures does not '
+              + 'exist in this database, so nothing recorded it. Run supabase/parts/3000. Event ' + event.id
+              + ', account ' + (eventAccount ?? 'platform') + '. Stripe is the only record of this decline.',
+            );
+          } else if (failErr) {
+            return fail('client_subscription_failures', failErr.message);
+          }
+        }
+
         // ── the status ───────────────────────────────────────────────────
         //
         // The invoice says what was billed; the SUBSCRIPTION says what the
         // client is now — trialing, active, past_due, unpaid. Re-read it rather
-        // than infer it, and stamp it as current-as-of-now, because that is
-        // what a live re-read is. Monthly, so the round-trip is cheap.
+        // than infer it. Monthly, so the round-trip is cheap.
+        //
+        // STAMPED WITH `eventAt`, NOT THE WALL CLOCK, and this line used to
+        // read `new Date().toISOString()` on the argument that a live re-read
+        // is current-as-of-now. That is true of the DATA and false of the
+        // ORDERING TOKEN, which is the only thing `stripe_event_at` is.
+        //
+        // `stripe_event_at` is not "when we learned this". It is the position
+        // of a write in Stripe's `event.created` sequence, and it is the only
+        // clock `writeConnectSub`'s `.lte(...)` guard compares against. Every
+        // other writer of this column fills it from `eventAt`. Filling it here
+        // from the handler's wall clock puts a reading from a different clock
+        // into a column whose whole purpose is to be comparable, and that
+        // clock is always AHEAD: between `event.created` and this line sit a
+        // cold start, the `stripe.subscriptions.retrieve` above and several
+        // PostgREST round trips, commonly 2-5 seconds.
+        //
+        // What that cost, exactly. Dunning exhausts: `invoice.payment_failed`
+        // created at T, then `customer.subscription.updated`→canceled created
+        // at T+2. The invoice event is handled first and stamps the row T+Δ.
+        // The cancellation arrives with at = T+2 < T+Δ, so BOTH of
+        // `writeConnectSub`'s updates match nothing, it returns null with no
+        // error, the handler answers 200 and the replay ledger records the
+        // event as handled. Nothing retries, and after a cancellation no
+        // further `customer.subscription.*` event is ever sent — so the row
+        // keeps `past_due` or `active` for the life of the database.
+        //
+        // Stamping `eventAt` cannot lose a newer state either: if some later
+        // event has already written the row, its `stripe_event_at` is later
+        // than ours by construction and the guard rejecting us is the guard
+        // working. DO NOT revert this to a wall clock.
         //
         // IN THE SUBSCRIPTION'S OWN ACCOUNT CONTEXT. This is the single line
         // that direct charges break hardest. A subscription created on a
@@ -1302,7 +2035,7 @@ Deno.serve(async (req) => {
         // invoice can arrive before the subscription has been mirrored.
         if (INVOICE_ACTIONABLE.has(event.type) && subId) {
           const fresh = await stripe.subscriptions.retrieve(subId, eventAccount ? { stripeAccount: eventAccount } : undefined);
-          const why = await writeConnectSub(fresh, new Date().toISOString());
+          const why = await writeConnectSub(fresh, eventAt);
           if (why) return fail('client_subscriptions', why);
         }
       } else {
@@ -1315,8 +2048,38 @@ Deno.serve(async (req) => {
         // in the table that feeds the owner's failed-payments callout — filing
         // a client's declined card as the COACH failing to pay Repple, and
         // recording none of the money.
-        const trainerId = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
-        const { error } = await service.from('invoices').upsert({
+        const { trainerId, dbError: whoErr } = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
+        // A read that FAILED is a 500 and a retry. Writing the row with a null
+        // `trainer_id` because PostgREST was briefly unavailable files one of
+        // Repple's own invoices against nobody — out of `fetchFailedInvoices`,
+        // out of owner-metrics' revenue — and no later event repairs it,
+        // because the `.lte('stripe_event_at', …)` guard below refuses the
+        // older redelivery that would. The upserts here are keyed on the
+        // invoice id, so a retry is free.
+        if (whoErr) return fail('billing_customers lookup', whoErr);
+
+        // ORDERED, and this is the widest of the three unguarded writes.
+        //
+        // `INVOICE_ACTIONABLE` gates the Connect branch above; nothing gates
+        // this one, so EVERY `invoice.*` type writes here — `invoice.created`
+        // (a draft), `.finalized`, `.updated`, `.voided`, `.payment_failed`,
+        // `.paid` — all keyed on nothing but the invoice id, all
+        // last-writer-wins. The set is left alone deliberately: a voided or
+        // uncollectible platform invoice is something the owner's book has to
+        // be able to say, so the fix is to ORDER these writes, not to drop
+        // some of them.
+        //
+        // A retried `invoice.payment_failed`, or the `invoice.created` draft
+        // itself, landing after `invoice.paid` regressed `status` — and
+        // `status` is read in two places that then disagree with Stripe:
+        // src/lib/billing.ts's `fetchFailedInvoices` filters
+        // `status in ('open','uncollectible')` for the owner's failed-payments
+        // callout, so a paid invoice reappears as a dunning item; and
+        // owner-metrics counts `(r.status ?? 'paid') === 'paid'` for revenue30,
+        // so the same invoice drops out of the month's revenue. One stale
+        // retry, and the platform is chasing money it has already been paid
+        // while reporting that it was never paid.
+        const invRow: Record<string, unknown> = {
           id: inv.id,
           trainer_id: trainerId,
           amount_due: inv.amount_due,
@@ -1324,8 +2087,21 @@ Deno.serve(async (req) => {
           status: inv.status,
           attempt_count: inv.attempt_count,
           hosted_invoice_url: inv.hosted_invoice_url,
-        });
-        if (error) return fail('invoices', error.message);
+          stripe_event_at: eventAt,
+        };
+
+        // Insert-if-absent, then the two guarded updates — the same three
+        // writes as `writeConnectSub` and the platform subscription above, in
+        // the same order and for the same reasons.
+        const { error: insErr } = await service.from('invoices')
+          .upsert(invRow, { onConflict: 'id', ignoreDuplicates: true });
+        if (insErr) return fail('invoices', insErr.message);
+        const { error: updErr } = await service.from('invoices').update(invRow)
+          .eq('id', inv.id).lte('stripe_event_at', eventAt);
+        if (updErr) return fail('invoices', updErr.message);
+        const { error: nullErr } = await service.from('invoices').update(invRow)
+          .eq('id', inv.id).is('stripe_event_at', null);
+        if (nullErr) return fail('invoices', nullErr.message);
       }
     }
   } catch (e) {

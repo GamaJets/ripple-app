@@ -81,7 +81,7 @@ eq(secondsOf(readRestSeconds(null)), null,
 eq(secondsOf(readRestSeconds(undefined)), null,
   'so is undefined');
 eq(readRestSeconds('0').ok, false,
-  'ZERO IS REFUSED, not stored — "no rest" and "not decided" would otherwise be the same programme');
+  'ZERO IS REFUSED, not stored — "no rest" and "not decided" would otherwise be the same program');
 eq(readRestSeconds('2').ok, false, `under ${MIN_REST_SEC} seconds is not a rest anybody can time`);
 eq(readRestSeconds(String(MIN_REST_SEC)).ok, true, 'the floor itself is allowed');
 eq(readRestSeconds(String(MAX_REST_SEC)).ok, true, 'and so is the ceiling');

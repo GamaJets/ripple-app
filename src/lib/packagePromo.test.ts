@@ -220,7 +220,7 @@ ok(/never a fixed amount/i.test(PROMO_IS_A_PERCENTAGE), 'the screen says why it 
 ok(/white-labelled/i.test(PROMO_IS_A_PERCENTAGE), 'and names the reason');
 
 ok(/in the app/i.test(PROMO_IS_TYPED_AT_CHECKOUT), 'the coach is told where their client types it');
-ok(/Have A Code/.test(PROMO_IS_TYPED_AT_CHECKOUT), 'and the words on the control they have to look for');
+ok(/Have a Code/.test(PROMO_IS_TYPED_AT_CHECKOUT), 'and the words on the control they have to look for');
 ok(/one copy of it and Stripe keeps it/i.test(PROMO_LIVES_AT_STRIPE), 'and that there is one copy of the count');
 
 // The thing a coach would otherwise assume, and be wrong about a year later.

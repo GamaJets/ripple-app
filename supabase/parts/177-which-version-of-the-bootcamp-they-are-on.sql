@@ -1,13 +1,13 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A coach fixes week three of the bootcamp and cannot tell who has the fix.
 --
--- `program_groups.program` holds ONE programme and no memory of the ones before
+-- `program_groups.program` holds ONE program and no memory of the ones before
 -- it. Assigning to a group is a fan-out into each member's own
 -- `assigned_programs` row — part 134 argues that at length and none of it has
 -- changed — and `memberState` in src/lib/groupProgram.ts tells the coach who is
--- on the group's programme by comparing fingerprints.
+-- on the group's program by comparing fingerprints.
 --
--- With one stored programme that comparison has exactly two answers: on it, or
+-- With one stored program that comparison has exactly two answers: on it, or
 -- not on it. So a member still training last month's version of the bootcamp
 -- and a member whose Thursday was rewritten around their shoulder both read
 -- 'diverged'. That is true and it is useless, because those two need OPPOSITE
@@ -18,7 +18,7 @@
 -- It does not make the group own the plan. Part 134 gives three reasons and
 -- every one of them still holds:
 --
---   · everything downstream of a programme is keyed per client already — the
+--   · everything downstream of a program is keyed per client already — the
 --     Train tab, logged sets, adherence, the injury acknowledgement of a
 --     specific movement for a specific person — so a group-owned plan must be
 --     reconciled on every read, in a CLIENT APP THAT IS ALREADY ON PHONES and
@@ -34,13 +34,13 @@
 -- builder lets a coach edit ONE client's copy afterwards, and the stamp would go
 -- on claiming version 3 for somebody now on something bespoke. Part 134 chose
 -- derivation over bookkeeping for precisely this reason — "who has it" is
--- answered by comparing each member's actual row against the group's programme
+-- answered by comparing each member's actual row against the group's program
 -- rather than by a record that can drift away from the truth it describes.
 --
 -- ── What it does ──────────────────────────────────────────────────────────
 --
--- Keeps the group's PAST programmes, so there is something to compare against.
--- One table, append-only, written when the coach changes the group's programme.
+-- Keeps the group's PAST programs, so there is something to compare against.
+-- One table, append-only, written when the coach changes the group's program.
 -- `versionOf` then reports which stored version a member's actual assignment
 -- fingerprints as, recomputed from the truth every time, and a member who is on
 -- none of them is bespoke rather than out of date.
@@ -66,7 +66,7 @@ create table if not exists public.program_group_versions (
   -- 1-based and allocated under a lock. Unique per group, which is what makes
   -- "they are on version 2" a sentence with one meaning.
   version    integer     not null check (version >= 1),
-  -- The programme AS IT WAS at that version, in full. Not a diff: a diff is
+  -- The program AS IT WAS at that version, in full. Not a diff: a diff is
   -- only readable against a version that itself exists, and the whole reason
   -- this table is here is that the previous version did not.
   program    jsonb       not null,
@@ -79,7 +79,7 @@ create index if not exists program_group_versions_group_idx
   on public.program_group_versions (group_id, version desc);
 
 comment on table public.program_group_versions is
-  'Every programme a group has been given, kept so "which version is this member on" can be DERIVED from their actual assignment rather than stamped on them at fan-out time and left to go stale.';
+  'Every program a group has been given, kept so "which version is this member on" can be DERIVED from their actual assignment rather than stamped on them at fan-out time and left to go stale.';
 
 alter table public.program_group_versions enable row level security;
 
@@ -116,7 +116,7 @@ grant select on public.program_group_versions to authenticated;
 --
 -- Dropped before it is recreated. `create or replace` with a different argument
 -- list makes an OVERLOAD, and PostgREST resolving one name against two
--- candidates is a 300 at the moment a coach taps Change Programme.
+-- candidates is a 300 at the moment a coach taps Change Program.
 drop function if exists public.snapshot_group_program(uuid, jsonb);
 
 create or replace function public.snapshot_group_program(p_group_id uuid, p_program jsonb)
@@ -135,7 +135,7 @@ begin
     raise exception 'not signed in';
   end if;
   if p_program is null then
-    raise exception 'a version has to carry a programme';
+    raise exception 'a version has to carry a program';
   end if;
 
   -- Ownership checked HERE rather than left to RLS, because this function is
@@ -161,13 +161,13 @@ begin
   order by v.version desc
   limit 1;
 
-  -- An unchanged programme writes no version. A coach who opens the picker and
+  -- An unchanged program writes no version. A coach who opens the picker and
   -- chooses the same template again would otherwise mint version 4 identical to
   -- version 3, and every member reading as "behind" until it was re-fanned to
   -- them — a screenful of people needing an action that would change nothing.
   --
   -- `is not distinct from` rather than `=`: jsonb `=` null is null, so a group
-  -- whose first programme this is would fall through the comparison and be
+  -- whose first program this is would fall through the comparison and be
   -- silently skipped.
   if last_program is not distinct from p_program then
     select * into out_row
@@ -186,7 +186,7 @@ begin
   values (p_group_id, n, p_program)
   returning * into out_row;
 
-  -- The group's live programme and its newest version are one fact, so they are
+  -- The group's live program and its newest version are one fact, so they are
   -- written together. Doing it here rather than in a second round trip from the
   -- app is what stops a version existing that the group is not on — which would
   -- make every member read as behind a version nobody was ever sent.
@@ -202,7 +202,7 @@ grant execute on function public.snapshot_group_program(uuid, jsonb) to authenti
 
 -- ── Backfilling the version a group is already on ─────────────────────────
 --
--- Every group that already has a programme becomes version 1 of itself, so the
+-- Every group that already has a program becomes version 1 of itself, so the
 -- screens have something to compare against from the moment this runs rather
 -- than reporting every member of every existing group as bespoke until the
 -- coach next edits the plan.

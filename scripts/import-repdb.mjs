@@ -43,10 +43,24 @@ import { join, relative } from 'node:path';
 // the drift this import exists to prevent.
 import {
   packTier, tierMayShip, demoLicenceFor, planRow, overlap, catalogueId,
+  IMPORT_TRANSLATION_LOCALES, planTranslations, translationCoverage,
 } from '../src/lib/repdbImport.ts';
 
 const ROOT = process.cwd();
 const args = process.argv.slice(2);
+/*
+ * --only <substring>: upload just the files whose pack path contains it.
+ *
+ * Added because a point release is seven exercises and nineteen files, and
+ * without this the only way to move them was to re-upload all 1,564 — 1.8 GB
+ * over the wire to replace 1,640 objects that were already correct. That is
+ * slow enough that somebody skips it, and skipping it is how a new movement
+ * ends up in the catalogue with no picture.
+ *
+ * Repeatable: --only ski-erg --only heel-flicks. It narrows the UPLOAD only;
+ * the mapping, the staged SQL and --write are unaffected, so a narrowed run
+ * still reports the whole picture and cannot quietly half-link the catalogue.
+ */
 const flag = (n, d = null) => { const i = args.indexOf(`--${n}`); return i === -1 ? d : args[i + 1]; };
 const has = (n) => args.includes(`--${n}`);
 
@@ -61,7 +75,7 @@ const UPLOAD = has('upload');
 const DRY = !WRITE && !UPLOAD;
 
 if (!PACK) {
-  console.error('usage: node scripts/import-repdb.mjs --pack <dir> [--style classic|flat] [--out .repdb-staging] [--write] [--upload]');
+  console.error('usage: node scripts/import-repdb.mjs --pack <dir> [--style classic|flat] [--out .repdb-staging] [--write] [--upload] [--only <substring>]');
   console.error('  default is a dry run: it reports what it would write and writes nothing.');
   process.exit(1);
 }
@@ -69,6 +83,7 @@ if (STYLE !== 'classic' && STYLE !== 'flat') {
   console.error(`--style must be classic or flat, got "${STYLE}".`);
   process.exit(1);
 }
+const ONLY = args.reduce((acc, a, i) => (a === '--only' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
 if (!existsSync(PACK)) { console.error(`no such pack directory: ${PACK}`); process.exit(1); }
 
 // ── 1 · the licence ────────────────────────────────────────────────────────
@@ -285,6 +300,81 @@ writeFileSync(sqlPath,
   + `-- movement backwards while looking entirely correct in a row count.\n\n`
   + updates.join('\n\n') + '\n');
 
+// ── 5b · the languages the pack ships ─────────────────────────────────────
+//
+// The Standard bundle carries exercises.de.json and exercises.es.json beside
+// exercises.json: a translated name and description for each of the 601
+// records. Staged as its own file, because it lands in a different table and
+// because a translation set is the thing somebody is most likely to want to
+// read before applying — a wrong movement name in a program is a person doing
+// the wrong exercise.
+//
+// Keyed by RepDB's OWN id, which is why planTranslations() joins through the
+// English record: for 80 of the 601 the vendor id is not the catalogue id, and
+// a row written under the vendor id violates the foreign key half way through
+// the language. See the header of src/lib/repdbImport.ts.
+const translationStats = {};
+const translationSql = [];
+for (const locale of IMPORT_TRANSLATION_LOCALES) {
+  const file = join(PACK, `exercises.${locale}.json`);
+  if (!existsSync(file)) { translationStats[locale] = { present: false }; continue; }
+  let localised = [];
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    localised = parsed.exercises || [];
+  } catch (e) {
+    console.error(`  ${locale}: ${relative(ROOT, file)} could not be parsed — ${e.message}`);
+    translationStats[locale] = { present: true, parsed: false };
+    continue;
+  }
+  const { rows, skipped } = planTranslations(records, localised, locale);
+  const cov = translationCoverage(rows, new Set(existing.keys()));
+  translationStats[locale] = {
+    present: true,
+    parsed: true,
+    rows: rows.length,
+    skipped: skipped.length,
+    skipped_reasons: skipped.reduce((m, s) => ({ ...m, [s.reason]: (m[s.reason] || 0) + 1 }), {}),
+    // The number a translation run is judged on. "601 rows written" says
+    // nothing about how much of the catalogue a member can read in their own
+    // language, and the untranslated list is what somebody works through next.
+    covers: cov.translated.length,
+    of: cov.translated.length + cov.untranslated.length,
+    untranslated: cov.untranslated,
+  };
+  if (!rows.length) continue;
+  translationSql.push(
+    `-- ${locale}: ${rows.length} rows, covering ${cov.translated.length} of `
+    + `${cov.translated.length + cov.untranslated.length} seeded movements.\n`
+    + 'insert into public.exercise_translations (exercise_id, locale, name, description, source) values\n'
+    + rows.map((r) => `  (${q(r.exerciseId)}, '${locale}', ${q(r.name)}, ${q(r.description)}, 'repdb')`).join(',\n')
+    // Upsert on the primary key: this file may be run twice, or run again with
+    // twelve names corrected, and either must leave one row per movement per
+    // language rather than a second anything.
+    + '\non conflict (exercise_id, locale) do update\n'
+    + '  set name = excluded.name,\n'
+    + '      description = excluded.description,\n'
+    + '      source = excluded.source,\n'
+    + '      updated_at = now();',
+  );
+}
+
+let translationPath = null;
+if (translationSql.length) {
+  translationPath = join(ROOT, OUT_DIR, 'translations.sql');
+  writeFileSync(translationPath,
+    `-- STAGED, NOT APPLIED. Generated by scripts/import-repdb.mjs from ${PACK}.\n`
+    + `-- Licence tier read off the pack: ${tier}.\n`
+    + '-- Data: RepDB (https://repdb.co)\n'
+    + '--\n'
+    + '-- Every exercise_id here is the slug of the movement\'s ENGLISH name, NOT\n'
+    + "-- RepDB's own id — they differ for 80 of the 601 records, and a row written\n"
+    + '-- under the vendor id is rejected by the foreign key half way through the\n'
+    + '-- language, leaving the catalogue partly translated with nothing recording\n'
+    + '-- which part.\n\n'
+    + translationSql.join('\n\n') + '\n');
+}
+
 const manifestPath = join(ROOT, OUT_DIR, 'media-manifest.json');
 writeFileSync(manifestPath, JSON.stringify({
   pack: PACK,
@@ -301,6 +391,7 @@ writeFileSync(manifestPath, JSON.stringify({
     bytes: bytes + sidecarBytes,
   },
   missing_animations: missingAnimations,
+  translations: translationStats,
   uploads: [...moves].map(([to, from]) => ({ from, to })),
 }, null, 2));
 
@@ -308,6 +399,14 @@ console.log('');
 console.log('── staged ──────────────────────────────────────────────');
 console.log(`  ${relative(ROOT, sqlPath)}       ${updates.length} row updates`);
 console.log(`  ${relative(ROOT, manifestPath)}  ${uploads.length} file moves`);
+if (translationPath) {
+  const summary = IMPORT_TRANSLATION_LOCALES
+    .map((l) => translationStats[l]?.rows ? `${translationStats[l].rows} ${l} (covers ${translationStats[l].covers} of ${translationStats[l].of})` : null)
+    .filter(Boolean).join(', ');
+  console.log(`  ${relative(ROOT, translationPath)}   ${summary}`);
+} else {
+  console.log('  no translations staged — this pack ships no exercises.<locale>.json this importer reads.');
+}
 
 if (DRY) {
   console.log('');
@@ -330,14 +429,20 @@ const BUCKET = 'exercise-demos';
 
 if (UPLOAD) {
   console.log(`\nuploading ${uploads.length + sidecarFiles} files (${mb(bytes + sidecarBytes)}) to ${BUCKET}…`);
-  let done = 0; const failed = [];
+  let done = 0; const failed = []; let skipped = 0;
   for (const [key, packPath] of moves) {
+    // Narrowed by --only. Counted and reported rather than silently passed
+    // over: "uploaded 19" under a heading that said 1564 is the kind of number
+    // somebody reads as a failure.
+    if (ONLY.length && !ONLY.some((o) => packPath.includes(o) || key.includes(o))) { skipped += 1; continue; }
     const body = readFileSync(join(PACK, packPath));
     const { error } = await db.storage.from(BUCKET).upload(key, body, { contentType: 'image/webp', upsert: true });
     if (error) { failed.push(`${packPath}: ${error.message}`); continue; }
     if (++done % 100 === 0) console.log(`  ${done}/${uploads.length}`);
   }
-  console.log(`  uploaded ${done}/${uploads.length}`);
+  console.log(ONLY.length
+    ? `  uploaded ${done}, skipped ${skipped} not matching --only ${ONLY.join(' ')}`
+    : `  uploaded ${done}/${uploads.length}`);
   if (failed.length) {
     console.error(`  ${failed.length} failed:`);
     for (const f of failed.slice(0, 8)) console.error('    ' + f);

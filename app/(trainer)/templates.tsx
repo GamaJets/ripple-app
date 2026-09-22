@@ -10,13 +10,13 @@
 //
 // ── The bulk assign is now withheld, not warned about ──────────────────────
 //
-// One tap in the sheet below replaces the training programme of every client
+// One tap in the sheet below replaces the training program of every client
 // the coach ticked. `getProgram` returns null both for a client who is on
 // nothing and for a client whose row did not come back, so against an unread
 // `assigned_programs` that tap silently overwrote however many of them were on
 // something bespoke — and the confirmation said "Assigned". The control waits
 // for a whole read now, and when it has one it marks the clients whose
-// programme it is about to replace. See src/lib/overwriteGuard.ts.
+// program it is about to replace. See src/lib/overwriteGuard.ts.
 //
 // The library itself had the quieter half of the same problem: three built-in
 // starters are always present, so a failed read of the coach's own templates
@@ -29,7 +29,7 @@
 // been read — src/lib/injuryGate.ts, which refuses when the disclosures could
 // not be READ and not merely when they are empty. This sheet, which assigns to
 // twelve people at once, asked nothing. So the single fastest way to put a
-// programme in front of somebody's shoulder without ever seeing it was to tick
+// program in front of somebody's shoulder without ever seeing it was to tick
 // their name here instead of opening them in the builder, and the coach would
 // have been told "Assigned".
 //
@@ -39,28 +39,64 @@
 // excluded from the write, and the button says "Assign to 7 of 8". Nobody is
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Alert } from 'react-native';
+//
+// ── And the third answer the gate had no word for ──────────────────────────
+//
+// Applying the gate was not enough, because what reached it had already been
+// flattened. A HAND-ADDED client — a `coach_clients` row the coach typed in, no
+// account, no app — is found in the roster, so the disclosures read 'ready';
+// their `injuries` is `undefined`, which src/ui/roster.tsx leaves undefined on
+// purpose because undefined is "nobody has ever asked this person" and `[]` is
+// "they were asked and said none"; and `(c?.injuries ?? [])` turned the first
+// into the second. `guardInjuries` returns ALLOWED on an empty list. So the
+// person on the book with the LEAST known about them opened the program gate
+// most easily, and the screen's silence read as an all-clear.
+//
+// The three states are now told apart in src/lib/disclosureFact.ts and each has
+// a sentence. The assign is NOT withheld for a hand-added client — that is the
+// ordinary use of Add Client and refusing it would be a worse product than the
+// defect — but it is no longer made in silence: their row says nobody has ever
+// asked them, the sheet says it above the list, and the alert the coach
+// confirms names them.
+import { useCallback, useMemo, useState } from 'react';
+import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Flag, Notice, PartialRead, IconPlate, TonedChip } from '../../src/ui/kit';
+import { DayPips } from '../../src/ui/coach/ProgramBuilderFlow';
+import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
+import { deleteRefusedLine } from '../../src/lib/templateLibrary';
+import { templateUsage } from '../../src/lib/templateUsage';
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
+import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
+import { isBlock, weekCount } from '../../src/lib/programBlock';
+import { num } from '../../src/lib/format';
 import { planFanOut, listNames, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
 import {
   overwriteBrief, bulkReport, selectAllOffer,
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
 import { assignCtaLabel } from '../../src/lib/assignPicker';
-import type { LoadStatus } from '../../src/ui/loadStatus';
-import type { Injury } from '../../src/lib/injuries';
+import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
+import { FORWARD_CHAR } from '../../src/ui/direction';
+import { isWhole } from '../../src/ui/loadStatus';
+import { useProgramLibrary } from '../../src/ui/workoutTemplates';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
+import {
+  goalLabel, difficultyLabel, frequencyLabel, restLabel, setsLabel,
+  shapeLine, unreadableNote, exerciseSpoken, localisedText, templateFallbackNote, daysFallBack,
+} from '../../src/lib/workoutTemplates';
 
 export default function Templates() {
   const t = useTheme();
@@ -69,57 +105,119 @@ export default function Templates() {
   //
   // The library is seeded with three built-in starters, so a failed read of
   // `program_templates` produces a page that looks entirely healthy and is
-  // missing every programme the coach ever built — and "No templates yet" is
+  // missing every program the coach ever built — and "No templates yet" is
   // printed under the same condition. The bulk assign below is worse: it
-  // replaces the programme of every client the coach ticks, and `getProgram`
+  // replaces the program of every client the coach ticks, and `getProgram`
   // returns null both for a client who has none and for a client whose row did
   // not come back. Ticking twelve names against an unread `assigned_programs`
   // silently overwrites however many of them were on something bespoke.
-  const { templates, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
-  const { roster, status: rosterStatus } = useRoster();
-  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
+  const { templates, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { programs, assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const acks = useInjuryAcks();
+  // Four reads, and this screen crosses all four on every tap: assigning a
+  // template to a ticked list needs the library, the book, what each of them
+  // is already on — the overwrite confirmation is counted off that — and the
+  // injury acknowledgements that decide who may be assigned at all. Every one
+  // of them under 'error' is a silent wrong answer rather than a gap, which
+  // is why the screen gates on all four and why the refresh asks for all four.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(reloadTemplates()), refreshRoster(),
+    Promise.resolve(reloadPrograms()), acks.refresh(),
+  ]), [reloadTemplates, refreshRoster, reloadPrograms, acks]));
   const [assignTpl, setAssignTpl] = useState<ProgramTemplate | null>(null);
+  /**
+   * The day the coach says this block begins, `YYYY-MM-DD`, or '' because they
+   * have not said.
+   *
+   * The builder has offered this since blocks landed and this screen did not,
+   * so `assignProgramTo` was called with no third argument and `starts_on` was
+   * left null on every assignment made from the library. A block assigned from
+   * here could therefore never count a week: `blockPosition` reads 'no-date',
+   * `clientWeek` resolves to week one, and a twelve-week template put the
+   * client on week one for twelve weeks — the exact failure src/lib/clientBlock.ts
+   * was written to end, arriving through the other door.
+   *
+   * Same semantics as the builder's, deliberately: blank means "assign it now",
+   * it never holds the program back, and `CLIENT_STARTS_NOW` says so under
+   * the field.
+   */
+  const [startsOn, setStartsOn] = useState('');
+  // Opens the month sheet. Rendered as a SIBLING of the assign modal below,
+  // never inside it: two native <Modal>s nested on Android is the fight
+  // src/ui/WhatsNew.tsx documents at length, and the loser is invisible while
+  // still taking taps.
+  const [startPick, setStartPick] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState(false);
-  const [delFailed, setDelFailed] = useState<string | null>(null);
+  /**
+   * The template whose delete was refused, and the sentence saying why.
+   *
+   * Keyed by id rather than held as a bare string, because this used to be
+   * drawn once, above the list. The refusal is real, correct and was invisible:
+   * a coach who had scrolled to a template half-way down their library got the
+   * explanation off the top of the screen, which is indistinguishable from the
+   * button doing nothing — and "the button does nothing" is what was reported.
+   * It is now drawn ON the row that did not go, and said again in an alert
+   * while the coach is still looking at the confirmation they just tapped.
+   */
+  const [delFailed, setDelFailed] = useState<{ id: string; why: string } | null>(null);
 
-  // One assign here is many overwrites, so it is held until the programmes it
+  // One assign here is many overwrites, so it is held until the programs it
   // would replace have actually been read. See src/lib/overwriteGuard.ts.
   // Kept alongside the plan below because it is what licenses the "replaces the
   // program they are on" marker on each row, which is a claim about a read.
-  const assignGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
+  const assignGuard = guardOverwrite(programStatus, 'the programs these clients are currently on');
 
-  const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setAssignTpl(tpl); };
+  const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setStartsOn(''); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
 
-  // ── One ticked client, as both guards need to see them ───────────────────
+  // ── What this screen actually knows about one person's injuries ──────────
   //
-  // `disclosures` is how the read of THIS person's own injury list went, and is
-  // a different question from how the acknowledgement read went. A client the
-  // roster never produced has an empty injury list for exactly the same reason
-  // a healthy client does, so only the status separates them — and a gate that
-  // opened on that silence is how somebody gets overhead press programmed
-  // around a shoulder nobody read.
+  // Three answers, not two, and the third one used to be spelled the same as
+  // the first. `disclosures` is how the read of THIS person's own injury list
+  // went — a different question from how the acknowledgement read went — and a
+  // client the roster never produced has an empty injury list for exactly the
+  // same reason a healthy client does, so only the status separates them.
+  //
+  // The status was not enough on its own. A HAND-ADDED client is found in the
+  // roster, so `c` was truthy, so `disclosures` read 'ready'; their `injuries`
+  // is `undefined` — src/ui/roster.tsx leaves it undefined deliberately,
+  // because undefined is "nobody has ever asked this person" and `[]` is "they
+  // were asked and said none" — and `?? []` turned the first into the second.
+  // `guardInjuries` returns ALLOWED on an empty list, so a person with no
+  // account who has never been asked anything opened the program gate as
+  // though they had disclosed none, and a coach assigned a template on it.
+  //
+  // src/lib/disclosureFact.ts holds the three apart and hands this screen both
+  // the status the gate needs and the sentence the coach needs. The assign is
+  // still allowed for a hand-added client — that is the ordinary case and
+  // refusing it would be worse than the defect — but it is no longer allowed
+  // SILENTLY: `fact.note` is drawn on their row and again in the sentence the
+  // coach confirms.
+  const factFor = (clientId: string): DisclosureFact => {
+    const c = roster.find((r) => r.id === clientId);
+    return disclosureFact(rosterStatus, c, clientId, c?.name.split(' ')[0] ?? 'This client');
+  };
   const asMember = (clientId: string): FanOutMember => {
     const c = roster.find((r) => r.id === clientId);
-    const disclosures: LoadStatus =
-      rosterStatus === 'error' ? 'error'
-      : c ? 'ready'
-      : rosterStatus === 'loading' ? 'loading'
-      : 'error';
+    const fact = factFor(clientId);
     return {
       clientId,
       name: c?.name.split(' ')[0] ?? 'This client',
-      disclosures,
+      disclosures: fact.gateStatus,
       ackStatus: acks.status,
-      injuries: (c?.injuries ?? []).map((i, n): Injury => ({
-        id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-        status: 'active', note: i.note, at: '',
-      })),
+      injuries: fact.injuries,
       acknowledged: acks.acknowledged(clientId),
     };
   };
+  /** First names of the people this assign WOULD write to who have never been
+   *  asked about injuries. Read off `plan.send` rather than off the ticks: a
+   *  client the gate is already holding is a different sentence, said by the
+   *  gate, and naming them twice teaches a coach to skip both. */
+  const neverAskedNames = (ids: readonly string[]): string[] =>
+    ids.filter((id) => factFor(id).kind === 'never-asked')
+      .map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client');
   const pickedMembers = pickedIds.map(asMember);
   // 'ready' for the list itself: unlike a group's membership, this list is the
   // ticks the coach just made with their own thumb. There is no read of it that
@@ -129,6 +227,10 @@ export default function Templates() {
   // What the sweeping gesture is allowed to claim, given how the roster read
   // went. See the comment beside the control itself.
   const selAll = selectAllOffer(rosterStatus, roster.length);
+  /** Said of the people this assign is about to reach who have never been asked
+   *  about injuries. Null when there are none, so the sheet drops the notice
+   *  rather than printing an empty one. */
+  const neverAskedLine = neverAskedBrief(neverAskedNames(plan.send));
 
   /**
    * The bulk assign, in three parts that used to be one.
@@ -170,16 +272,23 @@ export default function Templates() {
     if (!assignTpl || !plan.allowed || assignBusy) return;
     const tpl = assignTpl;
     // Only reachable once `guardOverwrite` has passed inside planFanOut, which
-    // is what licenses `onProgramme` being a boolean at all: under any status
+    // is what licenses `onProgram` being a boolean at all: under any status
     // but a whole read, a null from getProgram means "we did not find out" and
     // this sentence would be counting silence.
     const targets: AssignTarget[] = plan.send.map((id) => {
       const c = roster.find((r) => r.id === id);
-      return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgramme: !!getProgram(id) };
+      return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgram: !!getProgram(id) };
     });
     const brief = overwriteBrief(targets, tpl.name);
+    // The moment of decision, so the third fact is said here too and not only
+    // on a row the coach may have scrolled past. `overwriteBrief` says what is
+    // being replaced; this says what is NOT known about the people it is being
+    // replaced for. Appended rather than woven in, because the two are separate
+    // facts and src/lib/bulkActions.ts owns the first.
+    const askedNote = neverAskedBrief(neverAskedNames(plan.send));
+    const body = [brief.body, askedNote].filter(Boolean).join('\n\n');
     const go = await new Promise<boolean>((resolve) => {
-      Alert.alert(brief.title, brief.body, [
+      Alert.alert(brief.title, body, [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         // Destructive only when something is actually being destroyed. A red
         // button on every assign is a red button nobody reads.
@@ -190,7 +299,12 @@ export default function Templates() {
 
     setAssignBusy(true);
     const outcomes: WriteOutcome[] = await Promise.all(targets.map(async (tg) => {
-      const r = await assignProgramTo(tg.clientId, tpl.program);
+      // Only ever sent when the coach typed a real date. `undefined` leaves
+      // the column alone on an overwrite — a screen that did not offer a date
+      // must not silently clear one set from a screen that did — and an
+      // unparseable string is not sent at all rather than stored as a date
+      // nothing can read back. The same three-way call the builder makes.
+      const r = await assignProgramTo(tg.clientId, tpl.program, isStartDate(startsOn) ? startsOn : undefined);
       return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
     }));
     setAssignBusy(false);
@@ -206,12 +320,64 @@ export default function Templates() {
 
     const parts = [report.body];
     // Named, never silently dropped. A coach who believes twelve people got a
-    // programme when eleven did is worse off than one who was refused.
+    // program when eleven did is worse off than one who was refused.
     if (plan.blocked.length) {
-      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all. They have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
     }
     Alert.alert(report.title, parts.join('\n\n'));
   };
+
+  /**
+   * Who is training each of these, right now.
+   *
+   * A library of twenty rows all reading "5 days · 24 exercises" gives a coach
+   * nothing to choose on, and the one fact that would — whether anybody is on
+   * it — was already on this screen and unused. `programs` is the map this
+   * screen holds anyway, because the bulk assign below needs it to say whose
+   * training it is about to replace. Nothing new is read.
+   *
+   * `programStatus` governs the whole thing: `getProgram` returns null both for
+   * a client on nothing and for a client whose row did not come back, which is
+   * the trap this file's own header describes, and a count built over it under
+   * 'error' would tell a coach nobody is on a template twelve people train. See
+   * src/lib/templateUsage.ts, which refuses to produce a number at all under
+   * anything but a whole read.
+   */
+  const usage = useMemo(
+    () => templateUsage(templates, programs, programStatus),
+    [templates, programs, programStatus],
+  );
+
+  /**
+   * The coach's named programs, in the order the shortcut row draws them —
+   * the same rule, and the same sentence over the row, as the builder's.
+   *
+   * MOST USED first when `usage` could be counted, which is only under a whole
+   * read of who is training what. When it is withheld the order is the
+   * library's own, newest first, and the row says so: an order with no stated
+   * rule reads as random. The coach's OWN only — the starters are in the list
+   * below, and a shortcut row that led with programs the coach never wrote
+   * would be the app's library and not theirs.
+   */
+  const shortcuts = useMemo(() => {
+    const own = templates.filter((tpl) => !isStarter(tpl.id));
+    if (usage.withheld) return own;
+    const used = (id: string) => (usage.byId[id]?.on.length ?? 0) + (usage.byId[id]?.from.length ?? 0);
+    // Stable: equally used programs keep the library's newest-first order.
+    return own.map((tpl, i) => ({ tpl, i })).sort((a, b) => used(b.tpl.id) - used(a.tpl.id) || a.i - b.i).map((x) => x.tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates, usage]);
+  /** Into the builder, which is where a template is a start source. The
+   *  builder asks before it loads over unsaved work, and waits for its own
+   *  stored draft to answer first — see `startFromTemplate` there — so this
+   *  side is a plain push and cannot lose anything.
+   *
+   *  `at` makes each tap its own request. The builder is a tab and stays
+   *  mounted, and it loads a `templateId` once per value — so without this a
+   *  coach who opened a program, worked on somebody else's, and came back to
+   *  open the same program again was pushed to a builder that did nothing. */
+  const openInBuilder = (tpl: ProgramTemplate) =>
+    router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id, from: 'trainerTemplates', at: String(Date.now()) } });
 
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;
   const exCount = (tpl: ProgramTemplate) => tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
@@ -220,30 +386,77 @@ export default function Templates() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your library</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Templates</Text>
+        {/* Back LEADS the row and is announced. Seen on an iPhone 17 Pro: it
+            trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it, where the rest of
+            this app does not put it, and where the dev-launcher button sits on
+            top of it. Without `a11yLabel` it was also announced as "button"
+            and there is no other way back from here. See the same correction
+            in src/ui/FeedbackScreen.tsx. */}
+        {/* The board's page head (coach page 15 lists this one as Program
+            Templates). The eyebrow went; the line under the title says what
+            the screen is for. */}
+        {/* The sentence that sat under the head is the head's own subtitle
+            now, cut to the half that is not an instruction: prose comes off
+            the page, and "save any program from the builder" is said by the
+            empty state below to the one coach it is news to. */}
+        <PageHead title="Program Templates" subtitle="Build once, assign to many" />
+
+        {/* ── the coach's named programs, one tap each ───────────────────
+            Reported from a coach's phone: "Is there a way again to create
+            shortcuts to named programs you have created so you don't have
+            to scroll through." The list below is every template with its
+            controls, which is the right shape for managing a library and the
+            wrong one for the thing a coach does daily — open the block they
+            always open. One tap loads it into the builder.
+
+            Nothing is drawn for a coach who has saved nothing, and nothing
+            under a failed read: `templates` is then only the starters, the
+            filter leaves an empty row, and the Notice below says why. */}
+        {shortcuts.length ? (
+          <View style={{ marginTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programs</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
+            </View>
+            {/* Room under the chips for the card shadow, which a horizontal
+                ScrollView otherwise clips at its own bottom edge. */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg, paddingBottom: sp.sm, paddingHorizontal: 2 }}>
+              {shortcuts.map((tpl) => {
+                const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
+                const weeks = isBlock(tpl.program) ? weekCount(tpl.program) : 1;
+                const shape = `${weeks > 1 ? `${num(weeks)} weeks · ` : ''}${num(dayCount(tpl))} days · ${num(exCount(tpl))} exercises`;
+                return (
+                  <Pressable key={tpl.id} onPress={() => openInBuilder(tpl)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${tpl.name} in the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
+                    style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
+                             paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                             borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, ...font('600'), color: t.ink }}>{tpl.name}</Text>
+                    <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                      {shape}{on ? ` · ${num(on)} training it` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Build once, assign to many. Save any program from the builder.
-        </Text>
+        ) : null}
 
         <Section>
-          <Cta label="Build a New Program" wide onPress={() => router.push('/(trainer)/builder')} />
+          <Cta label="Build a New Program" wide onPress={() => router.push({ pathname: '/(trainer)/builder', params: { from: 'trainerTemplates' } })} />
           {/* A tick-list is remembered by nobody. A group is the same fan-out
               with the list kept, so tomorrow the coach can still answer "who is
-              on the bootcamp programme". */}
+              on the bootcamp program". */}
           <View style={{ marginTop: sp.sm }}>
             <Ghost label="Program Groups" onPress={() => router.push('/(trainer)/group')} />
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* A count over a library that came back short is not the size of the
@@ -251,37 +464,74 @@ export default function Templates() {
           <SectionHead title="Templates" note={tplStatus === 'ready' && templates.length ? String(templates.length) : undefined} />
 
           {/* The starters are the problem, not the consolation. Three of them
-              are always present, so a coach whose dozen saved programmes did
+              are always present, so a coach whose dozen saved programs did
               not come back sees a working library with somebody else's
-              programmes in it and concludes their work is gone. */}
+              programs in it and concludes their work is gone. */}
           {tplStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Library" title="Your saved templates could not be read"
-              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programmes are on the server and did not come back. Reopen this screen once you have signal." />
+            <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing. Your own programs are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
 
-          {delFailed ? (
-            <Notice tone={t.crit} kicker="Delete" title="That template was not deleted" note={delFailed} />
-          ) : null}
+          {/* Said once for the whole list rather than once per row: the reason
+              is a fact about a single read, and twenty copies of it is twenty
+              times the noise for the same information. */}
+          {usage.withheld ? <Flag style={{ marginTop: sp.sm }}>{usage.withheld}</Flag> : null}
 
           {templates.length === 0 && tplStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet — build a program above and save it here.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet. Build a program above and save it here.</Text>
           ) : null}
           {templates.map((tpl, i) => (
             <View key={tpl.id} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <View style={{ width: 38, height: 38, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="grid" size={18} color={t.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                {/* A starter is the platform's and a saved one is the coach's;
+                    the plate says which before the caption does. */}
+                <IconPlate icon="grid" tone={isStarter(tpl.id) ? 'amber' : 'brand'} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{tpl.name}</Text>
+                  {/* The week as pips, each day in its type's colour — the
+                      shape of the program without opening it. Drawn off the
+                      template's own days, so there is nothing to withhold. */}
+                  <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                  {/* Present tense, and only ever about who is ON something.
+                      Nothing behind this line reads a session or an adherence
+                      figure, so it must never be read as saying a program
+                      worked — and a template nobody is on says nothing at all
+                      rather than reporting its own absence twenty times over. */}
+                  {/* As chips now: the count is the thing an eye looks for down
+                      a list, and the two counts are two different facts — on
+                      it as saved, and on a copy a coach has since edited.
+                      `byId` is EMPTY under a withheld read (see
+                      src/lib/templateUsage.ts), so no chip can be drawn from a
+                      count nobody made. */}
+                  {usage.byId[tpl.id]?.line ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                      {usage.byId[tpl.id].on.length ? (
+                        <TonedChip icon="people" tone="brand"
+                          label={`${num(usage.byId[tpl.id].on.length)} Training It`} />
+                      ) : null}
+                      {usage.byId[tpl.id].from.length ? (
+                        <TonedChip icon="pencil" tone="blue"
+                          label={`${num(usage.byId[tpl.id].from.length)} on an Edited Copy`} />
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-                <View style={{ flex: 1 }}><Cta label="Assign to Clients" wide onPress={() => openAssign(tpl)} /></View>
-                <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id } })} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                {/* Two quiet controls, named for what each one WRITES. Assign
+                    was a full-width green button on every row — twenty
+                    primaries down a page whose one primary is Build a New
+                    Program — and its neighbour said "Edit", which is not what
+                    it does: it loads a COPY into the builder, and nothing
+                    there changes this template unless the coach saves over
+                    its name. The sheet Assign opens carries the one green
+                    button that actually sends. */}
+                <Ghost label="Assign to Clients" a11yLabel={`Assign ${tpl.name} to clients`} onPress={() => openAssign(tpl)} />
+                <Ghost label="Open in Builder" a11yLabel={`Open ${tpl.name} in the builder`} onPress={() => openInBuilder(tpl)} />
+                <View style={{ flex: 1 }} />
                 {/* The row no longer leaves this list before the server has
                     counted it. It used to disappear on the tap and be reported
                     as a failure afterwards, which reads as a successful delete
@@ -289,173 +539,560 @@ export default function Templates() {
                     launch with no explanation. See `removeTemplateFrom`.
 
                     The confirmation NAMES the template and says what a delete
-                    does not touch: a client training a programme assigned from
-                    it keeps that programme, because an assignment is a jsonb
+                    does not touch: a client training a program assigned from
+                    it keeps that program, because an assignment is a jsonb
                     copy and no foreign key in the database points at
                     `program_templates` at all. */}
                 {!isStarter(tpl.id) ? (
                   <Pressable onPress={() => Alert.alert(
                     'Delete This Template?',
-                    `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+                    `“${tpl.name}” is removed from your library for good. There is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
                     [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
                       const gone = await removeTemplateFrom(tpl.id);
-                      setDelFailed(gone.ok ? null : `“${tpl.name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+                      if (gone.ok) { setDelFailed((p) => (p && p.id === tpl.id ? null : p)); return; }
+                      // Said twice, on purpose, and neither one is where it used
+                      // to be. The alert lands where the coach's eyes already
+                      // are — they tapped Delete in a dialog a moment ago — and
+                      // the notice below the row survives it, so the answer is
+                      // still there when they look at the template that stayed.
+                      const why = deleteRefusedLine(tpl.name, gone.why);
+                      setDelFailed({ id: tpl.id, why });
+                      Alert.alert('That Template Was Not Deleted', why);
                     } }])}
                     hitSlop={8} accessibilityRole="button" accessibilityLabel={'Delete ' + tpl.name} style={{ padding: 8 }}>
                     <Icon name="minus" size={17} color={t.ink3} />
                   </Pressable>
                 ) : null}
               </View>
+              {/* On the row, not at the top of the list. See `delFailed`. */}
+              {delFailed && delFailed.id === tpl.id ? (
+                <Notice tone={t.crit} kicker="Delete" title="That Template Was Not Deleted" note={delFailed.why} />
+              ) : null}
             </View>
           ))}
         </Section>
 
+        <PlatformPrograms />
+
       </ScrollView>
 
       {/* ── bulk-assign sheet ────────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the start date is typed after a list of clients, well down the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top.
+
+          Nothing in this sheet raises a keyboard any more — the start date is a
+          Pressable that opens `DateSheet`, for the reason written over it — so
+          the wrapper currently lifts nothing. It stays because it is the sheet's
+          correct shape and the next field added in here would otherwise be
+          covered by the keyboard exactly as the last one was. */}
       <Modal visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
-          {assignTpl && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-              <Text style={{ ...ty.title, color: t.ink }}>Assign “{assignTpl.name}”</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Pick the clients who should get this program.</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
+            {assignTpl && (
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+                <Text style={{ ...ty.title, color: t.ink }}>Assign “{assignTpl.name}”</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Pick the clients who should get this program.</Text>
 
-              {/* This assign replaces whatever each client is on, so the sheet
-                  has to say which of them are on something. Under any status
-                  but 'ready' it cannot, and the button at the bottom is
-                  withheld rather than annotated. */}
-              {!assignGuard.allowed ? (
-                <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programmes'}
-                  title={programStatus === 'loading' ? 'Reading what these clients are on' : 'What these clients are on could not be read'}
-                  note={assignGuard.reason ?? undefined} />
-              ) : null}
+                {/* This assign replaces whatever each client is on, so the sheet
+                    has to say which of them are on something. Under any status
+                    but 'ready' it cannot, and the button at the bottom is
+                    withheld rather than annotated. */}
+                {!assignGuard.allowed ? (
+                  <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programs'}
+                    title={programStatus === 'loading' ? 'Reading What These Clients Are On' : 'What These Clients Are On Could Not Be Read'}
+                    note={assignGuard.reason ?? undefined} />
+                ) : null}
 
-              {/* The injury half. Held per ticked client, and said out loud —
-                  a bulk assign that quietly dropped somebody would leave the
-                  coach believing they had sent it. */}
-              {assignGuard.allowed && !plan.allowed && plan.reason && pickedIds.length ? (
-                <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
-              ) : null}
-              {plan.allowed && plan.heldNote ? (
-                <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
-              ) : null}
+                {/* The injury half. Held per ticked client, and said out loud —
+                    a bulk assign that quietly dropped somebody would leave the
+                    coach believing they had sent it. */}
+                {assignGuard.allowed && !plan.allowed && plan.reason && pickedIds.length ? (
+                  <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
+                ) : null}
+                {plan.allowed && plan.heldNote ? (
+                  <Notice tone={t.warn} kicker="Not Everybody" title="Some of These Are Held" note={plan.heldNote} />
+                ) : null}
 
-              {/* An unread roster is not an empty one, and a short one is not
-                  the whole book — "Select all" over it selects part of it. */}
-              {rosterStatus === 'error' ? (
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
-              ) : rosterStatus === 'partial' ? (
-                <PartialRead what="clients on your book" shown={roster.length} />
-              ) : null}
+                {/* The third fact, which has no gate of its own and must not
+                    borrow the clearance. These people ARE being assigned to —
+                    that is the ordinary use of Add Client and refusing it would
+                    be worse than the defect — but the empty injury list behind
+                    them is an absence, not an answer, and the coach is told so
+                    before the tap as well as during it. */}
+                {neverAskedLine ? (
+                  <Notice tone={t.warn} kicker="Never Asked"
+                    title="Some of These Have Never Been Asked About Injuries"
+                    note={neverAskedLine} />
+                ) : null}
 
-              {roster.length === 0 && rosterStatus === 'ready' ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet — add or invite a client first.</Text>
-              ) : null}
-              {roster.map((c, i) => {
-                const on = !!picked[c.id];
-                // Only sayable off a whole read. Under any other status the
-                // absence of a programme means nothing was found out, and
-                // marking somebody "no program yet" on that basis is how a
-                // coach comes to overwrite one without realising.
-                const replaces = assignGuard.allowed && !!getProgram(c.id);
-                const held = plan.blocked.find((b) => b.clientId === c.id);
-                return (
-                  <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                    accessibilityRole="button" accessibilityLabel={c.name}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                    <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                    </View>
-                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                      {/* The warning is a DOT, not the ink. warn as caption text
-                          measures 3.87–4.08:1 on the three light palettes —
-                          under AA — so "replaces the program they are on" was
-                          hardest to read on the coach who most needed it. The
-                          words carry the meaning; the dot carries the tone at
-                          the 3:1 a mark has to clear. */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                        {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                        <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                          {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                {/* An unread roster is not an empty one, and a short one is not
+                    the whole book — "Select all" over it selects part of it. */}
+                {rosterStatus === 'error' ? (
+                  <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
+                    note="Nobody is listed below because the roster did not come back. It does not mean you have no clients." />
+                ) : rosterStatus === 'partial' ? (
+                  <PartialRead what="clients on your book" shown={roster.length} />
+                ) : null}
+
+                {roster.length === 0 && rosterStatus === 'ready' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet. Add or invite a client first.</Text>
+                ) : null}
+                {/* ── moved above the roster ───────────────────────────────
+                    Same move as the builder, for the same reason: when a block
+                    starts is a property of the assignment, not of whichever
+                    name is ticked, and a date control that FOLLOWS a scrolling
+                    list of people reads as though it belongs to the last one
+                    on it — and on a phone is met only after every decision it
+                    belongs to. */}
+                {/* ── the day the block begins ──────────────────────────────
+                    Only on a block, because on a one-week program there is no
+                    week for a date to count to and the field would be a control
+                    that changes nothing a coach can see.
+
+                    It does NOT hold the program back. `CLIENT_STARTS_NOW` is
+                    printed under it saying so, for the reason the builder gives
+                    at length: a coach who believes the date is enforced, and
+                    assigns a block "starting Monday" on a Thursday, has replaced
+                    their client's Friday session while believing they did not. */}
+                {isBlock(assignTpl.program) ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>
+                      Starts On · {weekCount(assignTpl.program)} Week Block
+                    </Text>
+                    {/* ── the field IS the button ───────────────────────────
+                        This was a `TextInput` with a small calendar button
+                        beside it, and it was reported: "when you tap the date
+                        the keyboard pops up and blocks what you are typing".
+                        On a phone the soft keyboard comes up over the bottom of
+                        the window, which is where this sheet is anchored — so
+                        tapping the field to fill it in is the gesture that hides
+                        it. The calendar was reachable only from a 44pt target to
+                        its right, which is not where anybody taps when they want
+                        to set a date.
+
+                        So the whole box opens the month sheet and nothing here
+                        raises a keyboard. Typing a date has NOT been dropped —
+                        coaches paste them out of a client's message — it lives
+                        inside `DateSheet`, behind its own "Type a Date", so the
+                        sheet is the one place a date is entered by either
+                        route. */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+                      <Pressable onPress={() => setStartPick(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={startsOn
+                          ? 'The day this block begins. Currently ' + startsOn + '. Opens a calendar.'
+                          : 'The day this block begins. No day set, so it starts now. Opens a calendar.'}
+                        style={{
+                          flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                          minHeight: MIN_TARGET, paddingHorizontal: 12,
+                          backgroundColor: t.surface2, borderRadius: radius.sm,
+                        }}>
+                        <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
+                          {startsOn || 'YYYY-MM-DD'}
                         </Text>
-                      </View>
-                      {/* Their own sentence, on their own row. A count of how
-                          many are held tells the coach nothing about whose
-                          shoulder it is. */}
-                      {held ? (
-                        <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag>
-                      ) : null}
+                        <Icon name="calendar" size={18} color={t.ink2} />
+                      </Pressable>
+                      {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
                     </View>
-                  </Pressable>
-                );
-              })}
-              {/* ── selecting everybody, over a list that may be part of one ──
-                  "Select All" over a roster that came back at its row limit
-                  ticks a thousand people and calls it everybody. Nothing on
-                  screen is false — the names are real and the count is the size
-                  of what loaded — and the coach is still about to act on a set
-                  they cannot see, believing they can.
+                    {/* Refused rather than corrected. Kept even though the sheet
+                        only ever hands back a `YYYY-MM-DD`: `assignProgramTo`
+                        below drops an unreadable date silently, and the one
+                        thing a coach must never be is told "Assigned" for a
+                        block whose start date went nowhere. A stored value that
+                        will not parse puts every screen reading it into
+                        "unreadable" for ever, so it is not stored at all. */}
+                    {startsOn && !isStartDate(startsOn) ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                        Write the date as year, month and day: 2026-09-07. Anything else is not saved, and the
+                        program goes out with no start date rather than one nothing can read back.
+                      </Flag>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                        {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
+                        block until you set a date.
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
 
-                  So the gesture is not withheld and not warned about: it is
-                  RENAMED to the number actually shown, and the line under it
-                  says there are more past them. Ticking a thousand named people
-                  is a true gesture; calling it "all" is not. Under a failed or
-                  unfinished read there is no honest scoped version — there is
-                  no list — so it is withheld and says which of the two it is.
-                  Individual ticks stay available throughout: a tick is a claim
-                  about one person the coach can see and read. */}
-              {selAll.note ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
-              ) : null}
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: selAll.note ? sp.sm : sp.lg }}>
-                <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
-                  <Ghost label={selAll.label} onPress={() => {
-                    if (!selAll.allowed) return;
-                    setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
-                  }} />
+                {roster.map((c, i) => {
+                  const on = !!picked[c.id];
+                  // Only sayable off a whole read. Under any other status the
+                  // absence of a program means nothing was found out, and
+                  // marking somebody "no program yet" on that basis is how a
+                  // coach comes to overwrite one without realising.
+                  const replaces = assignGuard.allowed && !!getProgram(c.id);
+                  const held = plan.blocked.find((b) => b.clientId === c.id);
+                  // What this screen knows about their injuries, as one of
+                  // three facts rather than as an empty list. See the note over
+                  // `asMember` and src/lib/disclosureFact.ts.
+                  //
+                  // The gate speaks first where it has something to say — it
+                  // knows whether the coach has read a disclosure, and whether
+                  // a read failed, and has better words for both. `fact.note`
+                  // fills the two silences the gate leaves: a client who was
+                  // asked and disclosed nothing, and a client nobody has ever
+                  // asked.
+                  //
+                  // Drawn on every row for an absence and only on a TICKED row
+                  // for a clearance. "They have never been asked" is a property
+                  // of the person a coach wants while choosing; "they were
+                  // asked and said none" is a reassurance that only matters at
+                  // the point of decision, and twenty of them down a list is
+                  // twenty lines nobody reads.
+                  const fact = disclosureFact(rosterStatus, c, c.id, c.name.split(' ')[0]);
+                  const factLine = held ? held.reason : (on || fact.warn) ? fact.note : null;
+                  // The one case where the gate's reason is not the whole truth. For
+                  // 'no-list' the gate says "held until they load" — advice that cannot
+                  // help, because the read LANDED and simply carried no injury list.
+                  // Every other unread status has `note: null` exactly so this cannot
+                  // double up; this one has words of its own and they were being
+                  // shadowed. Same shape as app/(trainer)/group.tsx.
+                  const noListLine = held && fact.why === 'no-list' ? fact.note : null;
+                  return (
+                    <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                      accessibilityRole="button"
+                      // The same list as the builder's, and the same defect: a
+                      // label on a Pressable replaces the lines beneath it, so
+                      // "replaces the program they are on" and the reason a
+                      // client is held were both silent — on the control that
+                      // overwrites somebody's training.
+                      accessibilityLabel={[
+                        `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
+                        c.goal,
+                        replaces ? 'This replaces the program they are on' : null,
+                        factLine,
+                        noListLine,
+                      ].filter(Boolean).join('. ')}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                        {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
+                      </View>
+                      <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                        {/* The warning is a DOT, not the ink. warn as caption text
+                            measures 3.87–4.08:1 on the three light palettes —
+                            under AA — so "replaces the program they are on" was
+                            hardest to read on the coach who most needed it. The
+                            words carry the meaning; the dot carries the tone at
+                            the 3:1 a mark has to clear. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                            {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                          </Text>
+                        </View>
+                        {/* Their own sentence, on their own row. A count of how
+                            many are held tells the coach nothing about whose
+                            shoulder it is — and an absence gets a sentence here
+                            too, because the row that says nothing at all is the
+                            one that reads as an all-clear. */}
+                        {factLine ? (
+                          <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: 4 }}>{factLine}</Flag>
+                        ) : null}
+                        {/* Quieter than the gate's own line and underneath it, because
+                            it is the more precise half of the same fact: the read
+                            landed, and what came back had no injury list in it. Drawn
+                            in ink3 so the row carries one warn mark, not two. */}
+                        {noListLine ? (
+                          <Flag tone={t.ink3} style={{ marginTop: 4 }}>{noListLine}</Flag>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                {/* ── selecting everybody, over a list that may be part of one ──
+                    "Select All" over a roster that came back at its row limit
+                    ticks a thousand people and calls it everybody. Nothing on
+                    screen is false — the names are real and the count is the size
+                    of what loaded — and the coach is still about to act on a set
+                    they cannot see, believing they can.
+
+                    So the gesture is not withheld and not warned about: it is
+                    RENAMED to the number actually shown, and the line under it
+                    says there are more past them. Ticking a thousand named people
+                    is a true gesture; calling it "all" is not. Under a failed or
+                    unfinished read there is no honest scoped version — there is
+                    no list — so it is withheld and says which of the two it is.
+                    Individual ticks stay available throughout: a tick is a claim
+                    about one person the coach can see and read. */}
+                {selAll.note ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
+                ) : null}
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: selAll.note ? sp.sm : sp.lg }}>
+                  <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
+                    <Ghost label={selAll.label} onPress={() => {
+                      if (!selAll.allowed) return;
+                      setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
+                    }} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    {/* Withheld, not warned about. One tap here writes over as
+                        many training programs as there are ticks, with no undo
+                        and nothing told to the clients — so it waits until the
+                        screen knows what it would be replacing. */}
+                    {/* `planFanOut` is shared with the Groups screen, and with
+                        nobody ticked it answers in that screen's vocabulary:
+                        "Nobody In This Group Yet". This screen has no groups —
+                        the sheet opens with `setPicked({})` and the coach's whole
+                        client list sitting directly above the button — so on
+                        every fresh open the primary control named a group that
+                        does not exist and told the coach it was empty while their
+                        clients were on screen. The `??` fallback written for this
+                        case could never run, because `plan.label` is null only
+                        once at least one client is ticked. Asked before the
+                        shared guard, so the guard keeps answering for every other
+                        refusal (the overwrite check, a missing program) where
+                        its wording is right. */}
+                    {/* The same label the builder puts on the same gesture, from
+                        src/lib/assignPicker.ts — the two were the same expression
+                        written twice, and this screen already carries a comment
+                        about the one place they had drifted. */}
+                    <Cta label={assignCtaLabel({
+                      busy: assignBusy,
+                      picked: pickedIds.length,
+                      exercises: exCount(assignTpl),
+                      planLabel: plan.label,
+                      soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+                    })} wide
+                      disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  {/* Withheld, not warned about. One tap here writes over as
-                      many training programmes as there are ticks, with no undo
-                      and nothing told to the clients — so it waits until the
-                      screen knows what it would be replacing. */}
-                  {/* `planFanOut` is shared with the Groups screen, and with
-                      nobody ticked it answers in that screen's vocabulary:
-                      "Nobody In This Group Yet". This screen has no groups —
-                      the sheet opens with `setPicked({})` and the coach's whole
-                      client list sitting directly above the button — so on
-                      every fresh open the primary control named a group that
-                      does not exist and told the coach it was empty while their
-                      clients were on screen. The `??` fallback written for this
-                      case could never run, because `plan.label` is null only
-                      once at least one client is ticked. Asked before the
-                      shared guard, so the guard keeps answering for every other
-                      refusal (the overwrite check, a missing programme) where
-                      its wording is right. */}
-                  {/* The same label the builder puts on the same gesture, from
-                      src/lib/assignPicker.ts — the two were the same expression
-                      written twice, and this screen already carries a comment
-                      about the one place they had drifted. */}
-                  <Cta label={assignCtaLabel({
-                    busy: assignBusy,
-                    picked: pickedIds.length,
-                    exercises: exCount(assignTpl),
-                    planLabel: plan.label,
-                    soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
-                  })} wide
-                    disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
-                </View>
-              </View>
-            </ScrollView>
-          )}
-        </View>
+              </ScrollView>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
+
+      <DateSheet
+        visible={startPick}
+        value={startsOn}
+        heading="Starts On"
+        note="The day this block begins. Leave it unset to start now."
+        onCancel={() => setStartPick(false)}
+        onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
+      />
     </SafeAreaView>
+  );
+}
+
+/* ── the fifteen that belong to nobody ──────────────────────────────────────
+ *
+ * `public.workout_templates` — the platform's own program catalogue,
+ * imported from RepDB, readable by every signed-in account and writable through
+ * the API by no one. It is a SECOND table on purpose:
+ * `program_templates.coach_id` is NOT NULL, so filing these there would have
+ * meant inventing an owner and handing one coach the platform's catalogue. See
+ * supabase/parts/2600.
+ *
+ * ── Why a section here and not a second screen ────────────────────────────
+ *
+ * A coach looking for "a push-pull-legs I can crib from" is standing in their
+ * template library when they think it, and a separate screen would be a second
+ * place to look for the same kind of thing — reachable, and reachable only by
+ * someone who already knew it existed.
+ *
+ * ── And why it is kept visibly apart ──────────────────────────────────────
+ *
+ * The section above this one is the coach's own work: private to them, theirs
+ * to edit, theirs to delete, theirs to assign to a client. Not one of those is
+ * true here. So these are not merged into that list, they do not get an Edit or
+ * a Delete they would be refused, and the standing line says what they are.
+ * The one thing worse than not having them would be a coach believing they had
+ * built them — or believing they had deleted one.
+ *
+ * There is no Assign. That is a decision, not an omission: `assignProgramTo`
+ * writes a `Program` (src/lib/programs.ts), and a RepDB day is a different
+ * shape whose reps are strings like "6-8", "AMRAP" and "30s". Converting one to
+ * the other means deciding what those become, and a silent guess at that is a
+ * client doing thirty repetitions of a thirty-second plank. A button that
+ * cannot be honest is not offered, and the section says so instead.
+ */
+function PlatformPrograms() {
+  const t = useTheme();
+  const router = useRouter();
+  const { templates, status, signedOut, unreadableRows, locale, movements, reload } = useProgramLibrary();
+  // The English catalogue name is what /(trainer)/exercise must be opened with;
+  // this is the coach's own language for the line. See src/lib/catalogueLocale.ts.
+  const { nameOf } = useMovementName();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = useMemo(() => templates.find((x) => x.id === openId) ?? null, [templates, openId]);
+
+  return (
+    <Section>
+      {/* A count over a truncated read is not the size of the catalogue, and a
+          count over a signed-out read measures a permissions refusal. isWhole,
+          not `!== 'error'`. */}
+      <SectionHead
+        title="Platform Programs"
+        note={isWhole(status) && !signedOut && templates.length ? String(templates.length) : undefined}
+      />
+      {/* One line where there were three. What it still has to say is the
+          part that is a fact about the controls — no Edit, Delete or Assign
+          here — so a coach does not go looking for them. */}
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+        Ships with the app, to read and build from. Not editable, deletable or assignable.
+      </Text>
+
+      {/* Loading, failed, not-allowed-to-look and genuinely empty are four
+          different things. The third is not theoretical: the read policy is
+          `to authenticated`, so a session that has not been restored yet is
+          handed zero rows and no error at all. */}
+      {status === 'loading' ? (
+        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programs…</Text>
+      ) : status === 'error' ? (
+        <Notice tone={t.warn} kicker="Platform" title="The Platform Programs Could Not Be Read"
+          note="This is our end. Nothing has been removed and none of your own templates above are affected. Pull down to try again." />
+      ) : signedOut ? (
+        <Notice tone={t.warn} kicker="Platform" title="Sign In to See the Platform Programs"
+          note="These are only readable once you are signed in, so this section was not allowed to look them up." />
+      ) : (
+        <>
+          {status === 'partial' ? <PartialRead what="platform programs" shown={templates.length} onPress={reload} /> : null}
+          {unreadableRows > 0 ? (
+            <Flag tone={t.warn}>
+              {unreadableRows === 1
+                ? 'One platform program came back in a shape this app could not read and is not listed below.'
+                : `${unreadableRows} platform programs came back in a shape this app could not read and are not listed below.`}
+            </Flag>
+          ) : null}
+
+          {templates.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              There are no platform programs yet. They appear here as they are added.
+            </Text>
+          ) : templates.map((x, i) => {
+            const name = localisedText(x.name, locale);
+            const description = localisedText(x.description, locale);
+            const isOpen = open?.id === x.id;
+            const meta = [goalLabel(x.goal), difficultyLabel(x.difficulty), frequencyLabel(x.frequencyPerWeek), shapeLine(x)]
+              .filter(Boolean).join(' · ');
+            const note = templateFallbackNote(name, description, daysFallBack(x.days, locale));
+            const shortfall = unreadableNote(x);
+            return (
+              <View key={x.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <Pressable
+                  onPress={() => setOpenId(isOpen ? null : x.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: isOpen }}
+                  // A label REPLACES the lines beneath it, so the whole row has
+                  // to be in it. See scripts/check-a11y.mjs.
+                  accessibilityLabel={[
+                    name?.text ?? x.id, meta, description?.text,
+                    isOpen ? 'Hide the days' : 'Show the days',
+                  ].filter(Boolean).join('. ')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg, minHeight: MIN_TARGET }}
+                >
+                  <IconPlate icon="grid" tone="purple" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, color: t.ink }}>{name?.text ?? x.id}</Text>
+                    {/* Sessions a week as filled pips out of seven. A COUNT,
+                        not a calendar — the catalogue says how often and not
+                        on which days — so they fill from the leading edge and
+                        `meta` beside them says the number in words. Nothing is
+                        drawn for a row that carries no frequency. */}
+                    {typeof x.frequencyPerWeek === 'number' && x.frequencyPerWeek > 0 ? (
+                      <View style={{ flexDirection: 'row', gap: 5, marginTop: 6 }}>
+                        {Array.from({ length: 7 }, (_, k) => (
+                          <View key={k} style={{ width: 14, height: 8, borderRadius: 4, backgroundColor: k < Math.min(7, x.frequencyPerWeek as number) ? t.data.purple : t.surface3 }} />
+                        ))}
+                      </View>
+                    ) : null}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{meta}</Text>
+                    {description ? (
+                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{description.text}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{isOpen ? '–' : '+'}</Text>
+                </Pressable>
+
+                {isOpen ? (
+                  <View style={{ paddingBottom: sp.lg }}>
+                    {note ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{note}</Flag> : null}
+                    {shortfall ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{shortfall}</Flag> : null}
+                    {movements.status === 'error' ? (
+                      <Flag tone={t.warn}>
+                        The catalogue names for these movements could not be read, so each line is listed by its
+                        catalogue id. The sets, reps and rests below are the program's own and are complete.
+                      </Flag>
+                    ) : null}
+
+                    {x.days.length === 0 ? (
+                      <Text style={{ ...ty.label, color: t.ink3 }}>
+                        This program lists no days. That is a gap in the program, not a read that failed.
+                      </Text>
+                    ) : x.days.map((d, di) => {
+                      const dayName = localisedText(d.name, locale);
+                      return (
+                        <View key={`${x.id}-day-${di}`} style={{ marginTop: di === 0 ? 0 : sp.lg }}>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>{dayName?.text ?? `Day ${di + 1}`}</Text>
+                          {d.exercises.length === 0 ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>This day lists no movements.</Text>
+                          ) : d.exercises.map((e, ei) => {
+                            const english = movements.byId.get(e.exerciseId) ?? null;
+                            const label = english ? nameOf(english).text : e.exerciseId;
+                            const load = setsLabel(e.sets, e.reps);
+                            const rest = restLabel(e.restSeconds);
+                            const cue = localisedText(e.notes, locale);
+                            // exerciseSlug() of a catalogue id is the id itself,
+                            // so the detail screen resolves either and shows the
+                            // real name once the row lands.
+                            const target = english ?? e.exerciseId;
+                            return (
+                              <Pressable
+                                key={`${x.id}-${di}-${ei}-${e.exerciseId}`}
+                                onPress={() => router.push({ pathname: '/(trainer)/exercise', params: { name: target, from: 'trainerTemplates' } })}
+                                accessibilityRole="button"
+                                accessibilityLabel={[
+                                  exerciseSpoken(label, e.sets, e.reps, e.restSeconds),
+                                  cue?.text,
+                                  'Opens the movement',
+                                ].filter(Boolean).join('. ')}
+                                hitSlop={hitSlopFor(MIN_TARGET)}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm, minHeight: MIN_TARGET }}
+                              >
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ ...ty.label, color: t.ink }}>{label}</Text>
+                                  {load || rest ? (
+                                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{[load, rest].filter(Boolean).join(' · ')}</Text>
+                                  ) : null}
+                                  {cue ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{cue.text}</Text> : null}
+                                </View>
+                                <Text style={{ ...ty.caption, color: t.ink3 }}>{FORWARD_CHAR}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
+
+                    {/* Whose programs these are, on the page they are read
+                        from rather than two screens away on a credits card. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                      Program by RepDB · repdb.co
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </>
+      )}
+    </Section>
   );
 }

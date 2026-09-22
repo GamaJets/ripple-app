@@ -60,8 +60,16 @@
 // side, and half of which shipped would be worse than none.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { platformFeePct, applicationFeeCents, canTakeDirectCharges } from '../../../src/lib/directCharges.ts';
 import { termFrom, renewStart, addDays, expiryFor } from '../../../src/lib/termDates.ts';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -130,7 +138,22 @@ Deno.serve(async (req) => {
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
+      + 'Nothing has been charged. Try again in a moment.' }, 503);
+  }
   const uid = auth?.user?.id;
   if (!uid) return json({ error: 'no user' }, 401);
 
@@ -138,8 +161,19 @@ Deno.serve(async (req) => {
   if (kind !== 'membership' && kind !== 'pass') return json({ error: 'missing or unknown kind' }, 400);
   const intentRaw = String(body.intent || 'new');
   const intent = intentRaw === 'renew' || intentRaw === 'upgrade' ? intentRaw : 'new';
-  const successUrl = String(body.success_url || 'repple://membership');
-  const cancelUrl = String(body.cancel_url || 'repple://membership');
+  // The return addresses, checked rather than passed straight through. Each
+  // used to be `String(body.x || 'default')` with nothing between a request
+  // body and a payments API. src/lib/redirectTarget.ts holds the rule and
+  // says what it is and is not: an unset REDIRECT_ALLOW still refuses the
+  // four schemes that are never a redirect target, and setting it makes the
+  // list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  const okBack = checkRedirect(body.success_url, 'repple://membership', redirectAllow);
+  if (!okBack.ok) return json({ error: okBack.reason }, 400);
+  const cancelBack = checkRedirect(body.cancel_url, 'repple://membership', redirectAllow);
+  if (!cancelBack.ok) return json({ error: cancelBack.reason }, 400);
+  const successUrl = okBack.url;
+  const cancelUrl = cancelBack.url;
   const today = buyerToday(body.today);
 
   // Which gym the buyer belongs to. Read from the profile rather than taken
@@ -345,11 +379,41 @@ Deno.serve(async (req) => {
         member_id: uid,
         repple_account: gymAccount,
       },
-    }, acctOpts);
+    }, {
+      ...acctOpts,
+      // Keyed on the order, which is written above and exists before this call.
+      //
+      // What it stops: the Stripe SDK retrying this request itself after a
+      // network error, which without a key mints a SECOND live Checkout Session
+      // against one `gym_orders` row — and only the second one's id is recorded
+      // below, so the first becomes a payable session this app has no record of.
+      // `connect-onboard` and `gym-onboard` took keys for the same reason and
+      // this was the sale left without one.
+      //
+      // What it does NOT stop, said plainly rather than left to be assumed: a
+      // member tapping Buy twice. That is two requests, so two order rows and
+      // two ids, so two keys — and the fix for it is to dedupe the ORDER, not
+      // the session, which is a change to what this function does rather than
+      // to how safely it does it.
+      idempotencyKey: `repple-gym-session:${orderId}`,
+    });
   } catch (e) {
     // Nobody was charged: there is no session. The order is closed rather than
     // left pending forever, so the member's screen does not show a purchase
     // waiting on a Stripe confirmation that can never arrive.
+    //
+    // no-count-ok: and DELIBERATELY not counted, against its counted sibling
+    // twenty lines below, because the two writes fail into opposite states.
+    //
+    // Both are keyed on a row inserted moments earlier under the service role,
+    // so for both zero rows can only mean the order has gone — cascaded away by
+    // a member deletion mid-flight. Below, that is the alarming state and the
+    // only place able to notice it: a live Stripe checkout page in front of a
+    // member with no order row behind it. Here there IS no session — this is
+    // the catch around the call that failed to create one — so nobody has been
+    // charged and nothing will be. The only thing this write exists to prevent
+    // is a pending row nobody will ever close, and a row that is not there is
+    // not a pending row. Zero rows IS the state being asked for.
     const { error: closeErr } = await service.from('gym_orders')
       .update({ status: 'abandoned', failure_note: 'The checkout session was never created.', updated_at: new Date().toISOString() })
       .eq('id', orderId);
@@ -357,8 +421,8 @@ Deno.serve(async (req) => {
     return stripeError('checkout', e);
   }
 
-  const { error: linkErr } = await service.from('gym_orders')
-    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
+  const { error: linkErr, count: linked } = await service.from('gym_orders')
+    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() }, { count: 'exact' })
     .eq('id', orderId);
   // The session exists and the member is about to be sent to it. Answering with
   // an error now would tell somebody nothing was charged while a live checkout
@@ -367,6 +431,38 @@ Deno.serve(async (req) => {
   // up by, and the session id here is a convenience for reconciliation rather
   // than the key.
   if (linkErr) console.error('gym-checkout: created session ' + session.id + ' for order ' + orderId + ' but could not record it:', linkErr.message);
+  // ── and the same for a write that was accepted and changed nothing ────────
+  //
+  // COUNTED but deliberately NOT returned, and the two halves of that need
+  // saying separately.
+  //
+  // Why it is counted: the row was inserted moments earlier under the service
+  // role and its id came back, so nothing filters this update and zero rows can
+  // only mean the order row has gone — cascaded away by a member deletion
+  // mid-flight is the reachable one. `linkErr` is null in that case, so before
+  // this the single most alarming state in the file wrote NOTHING anywhere: a
+  // live Stripe checkout page in front of a member, with no order row behind
+  // it. This is the only place that can notice it, because it is the only code
+  // that holds the session id and the order id at once.
+  //
+  // Why it is not returned: nothing changes for the member, and nothing about
+  // fulfilment depends on this write. `checkout.session.completed` looks the
+  // order up by `metadata.order_id` and stamps `stripe_session_id` and
+  // `stripe_payment_intent` onto it itself, so an order that IS still there
+  // gets its session id from the webhook regardless of this line. And an order
+  // that is NOT still there fails visibly at the webhook, which already logs
+  // "PAID gym order … has no row in gym_orders … Nothing was fulfilled." What
+  // is lost meanwhile is reconciliation of an order that is never paid: an
+  // abandoned checkout leaves a pending row with no session id and no intent,
+  // and matching it back to a Stripe session by hand is the job this stamp
+  // exists to save. That is a report to read, not an error to show a member.
+  if (!linkErr && !linked) {
+    console.error(
+      'gym-checkout: created session ' + session.id + ' for order ' + orderId +
+      ' and the order row was not there to record it on. The member has been sent to a live ' +
+      'checkout page for an order this database has no row for.',
+    );
+  }
 
   return json({ url: session.url, order_id: orderId });
 });

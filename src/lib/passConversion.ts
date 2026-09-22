@@ -61,6 +61,8 @@ import {
 import { summarise, type Membership, type MembershipPlan, type MembershipStatus } from './gymRecord';
 import type { Visit } from './gymVisits';
 import { rowsOf, type Slice } from './memberView';
+import { isoDay } from './weekStart';
+import { localDate } from './localDate';
 import { MIN_COHORT_FOR_RATE, pointsPerMember, rateOf } from './gymRetention';
 
 const DAY = 86_400_000;
@@ -132,7 +134,7 @@ export function conversionWarning(rec: PassConversionRecord): string | null {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from this page rather than empty — ${broken.map((b) => b.cost).join('; ')} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
+  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from this page rather than empty: ${broken.map((b) => b.cost).join('; ')} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
 }
 
 /* ── the words the screen is required to print ─────────────────────────────── */
@@ -146,10 +148,10 @@ export function conversionWarning(rec: PassConversionRecord): string | null {
  * themselves out of habit.
  */
 export const CAUSAL_CAVEAT =
-  'This is a sequence, not a cause. It counts people who held a pass and later took out a membership, and how long there was between the two. Nothing in these rows says the pass is why they joined — some of them would have joined anyway. Read it as "used a pass, then joined", never as "the pass converted them".';
+  'This is a sequence, not a cause. It counts people who held a pass and later took out a membership, and how long there was between the two. Nothing in these rows says the pass is why they joined. Some of them would have joined anyway. Read it as "used a pass, then joined", never as "the pass converted them".';
 
 export const MONEY_NOTE =
-  'These two figures are different kinds of money and must not be added. Pass income is cash already taken, once. The membership figure is what the memberships those holders now hold are worth per month, for as long as they last — it has not been taken and may never be. A single total would book a hypothetical year of subscription as revenue.';
+  'These two figures are different kinds of money and must not be added. Pass income is cash already taken, once. The membership figure is what the memberships those holders now hold are worth per month, for as long as they last. It has not been taken and may never be. A single total would book a hypothetical year of subscription as revenue.';
 
 /* ── one holder ────────────────────────────────────────────────────────────── */
 
@@ -191,8 +193,37 @@ export interface PassHolder {
    *  joined. Measured from the issue date because every pass has one; the date
    *  it was first used is on `firstUsedOn` and is often missing. */
   daysToJoin: number | null;
-  /** What they paid for their passes, or null when no price was recorded. */
+  /** What they paid for their passes, or null when no price was recorded.
+   *
+   *  A BLIND SUM across whatever currencies their passes were priced in —
+   *  `passRevenueCents` adds every priced row and only afterwards asks whether
+   *  they agreed. It may only be printed when `paidCurrency` is non-null, which
+   *  is the same rule the "Taken for passes" tile on /passes already follows. */
   paidCents: number | null;
+  /**
+   * The one currency those passes agree on, or null when they do not.
+   *
+   * ── Why this had to be carried and not re-derived ─────────────────────
+   *
+   * `passHolders` computed the sum with `const { cents } = passRevenueCents(…)`
+   * and threw the currency half away, so /passes rendered it as `amount(paidCents,
+   * ccy)` — the gym's currency TODAY, over a total that may be two currencies
+   * added together. A gym that has ever changed `tenants.currency` had every
+   * holder's figure relabelled; a holder with a GBP pass and an AED pass had
+   * them summed into a number that is not an amount of anything. Three inches
+   * away on the same screen, "Taken for passes" refuses exactly that.
+   *
+   * Null has two causes and the screen tells them apart with `paidMixed`:
+   * nobody recorded a currency on the priced passes, or they recorded more
+   * than one.
+   */
+  paidCurrency: string | null;
+  /** True when the priced passes state more than one currency — including
+   *  "some state one and some state none", which is also two answers. */
+  paidMixed: boolean;
+  /** The codes those passes actually state, sorted, for the sentence under the
+   *  dash. Empty when none of them states one. */
+  paidCurrencies: string[];
 }
 
 /* ── the whole picture ─────────────────────────────────────────────────────── */
@@ -247,8 +278,8 @@ export interface PassMoney {
   /** How many of those memberships are active right now. */
   followingActive: number;
   /**
-   * The currency the priced passes were sold in, or null when NONE of them
-   * states one.
+   * The currency the priced passes were sold in, or null when they do not agree
+   * on one — which includes both "they name two" and "none of them names any".
    *
    * It used to be `currencies[0] ?? 'AED'`, so a gym whose passes carry no
    * currency was told its pass revenue in dirhams — a figure with a currency
@@ -256,10 +287,15 @@ export interface PassMoney {
    * gym actually sold in. Null instead: the amount is known and the money it is
    * in is not, and `money()` withholds the figure rather than denominating it
    * for us.
+   *
+   * Read from `passRevenueCents` and not derived here — see `moneyOf`, which
+   * derived it twice and disagreed with itself about the answer.
    */
   currency: string | null;
-  /** True when the passes were sold in more than one currency, in which case
-   *  `passCents` adds unlike things and the screen must say so. */
+  /** True when the PRICED passes were not all in one money — two stated codes,
+   *  or a stated code beside a priced row that states none. `passCents` then
+   *  adds unlike things and the screen must say so. Not `currency == null`: an
+   *  unpriced pass has no price to be denominated and never sets this. */
   mixedCurrency: boolean;
 }
 
@@ -303,7 +339,16 @@ export interface PassConversion {
 }
 
 export interface ConversionOptions {
-  /** Plain ISO date, the gym's own. Defaults to today in UTC. */
+  /**
+   * Plain ISO date, the gym's own — `gymDay(Date.now(), zone)`.
+   *
+   * The default was UTC's day, which is nobody's, and it is the default that
+   * every screen not passing this got. It is now the READER's day, which is the
+   * nearest true answer this module can reach on its own: it has no tenant and
+   * therefore no zone, and inventing UTC's calendar for a gym is one of the two
+   * wrong answers src/lib/gymZone.ts names by name. Pass the gym's day and this
+   * is exact.
+   */
   today?: string;
   /** Smallest decided group allowed a percentage. Defaults to the retention
    *  floor, deliberately shared so the two screens cannot disagree. */
@@ -314,7 +359,7 @@ export function buildPassConversion(
   rec: PassConversionRecord,
   opts: ConversionOptions = {},
 ): PassConversion {
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
+  const today = opts.today ?? isoDay(new Date());
   const minGroup = opts.minGroup ?? MIN_COHORT_FOR_RATE;
 
   const passRows = rowsOf(rec.passes);
@@ -410,10 +455,25 @@ export function buildHolders(
   }
 
   // First door visit per pass id, when the door log is here at all.
+  //
+  // `gym_visits.entered_at` is a `timestamptz` and PostgREST serialises it in
+  // UTC, so `String(v.enteredAt).slice(0, 10)` named GREENWICH's calendar day:
+  // somebody who walked in at 18:00 on 11 January in California was printed
+  // under "First seen at the door — 2026-01-12", a day they were not there.
+  // `isoDay(localDate(...))` reads the LOCAL parts of the same instant. The
+  // `<` comparison below is unaffected — the local day is monotonic in the
+  // instant, so the earliest day string is still the earliest visit.
+  //
+  // `firstUsedOn` is only ever DISPLAYED; nothing subtracts it. `daysToJoin`
+  // is measured from the issue date through `daysBetween`, whose ends are
+  // UTC-anchored by `dateOf` on purpose — see the `utc-day-ok` note there.
+  // This day and those days are not compared with one another.
   const firstUse = new Map<string, string>();
   for (const v of visits ?? []) {
     if (!v.passId) continue;
-    const at = String(v.enteredAt).slice(0, 10);
+    const entered = localDate(v.enteredAt);
+    if (!entered) continue;
+    const at = isoDay(entered);
     const seen = firstUse.get(v.passId);
     if (!seen || at < seen) firstUse.set(v.passId, at);
   }
@@ -455,7 +515,10 @@ export function buildHolders(
       if (at && (firstUsedOn == null || at < firstUsedOn)) firstUsedOn = at;
     }
 
-    const { cents } = passRevenueCents(theirs);
+    // Every field, not just `cents`. This was `const { cents } = …`, and the
+    // half it dropped is the half that says whether the sum is an amount of
+    // money at all — see `paidCurrency` on PassHolder.
+    const { cents, currency, currencies, mixedCurrency } = passRevenueCents(theirs);
 
     out.push({
       holderId,
@@ -472,6 +535,9 @@ export function buildHolders(
       statusNow: outcome === 'joined-after' ? after!.status : covering?.status ?? null,
       daysToJoin: joinedOn && firstPassOn ? daysBetween(firstPassOn, joinedOn) : null,
       paidCents: cents,
+      paidCurrency: currency,
+      paidMixed: mixedCurrency,
+      paidCurrencies: currencies,
     });
   }
 
@@ -582,8 +648,33 @@ export function moneyOf(
   memberships: Membership[] | null,
   plans: MembershipPlan[] | null,
 ): PassMoney {
-  const { cents, priced, total } = passRevenueCents(passes);
-  const currencies = [...new Set(passes.map((p) => p.currency).filter(Boolean))];
+  // Every field from `passRevenueCents`, including the two this function used
+  // to derive again on the line below.
+  //
+  // What that line was: `[...new Set(passes.map((p) => p.currency).filter(
+  // Boolean))]`, over the RAW column of EVERY pass. Three things wrong with it,
+  // and each one moved a figure on /passes:
+  //
+  //  · It did not normalise, so a row written ' gbp ' and a row written 'GBP'
+  //    were two currencies. A gym with one currency and one price list read
+  //    "across more than one currency" under its pass takings and a red
+  //    paragraph under that, and the total itself was withheld — `currency`
+  //    came out as whichever spelling sorted first out of a Set, so `money()`
+  //    printed a figure denominated by an accident of insertion order.
+  //  · It counted UNPRICED rows. A pass with no price contributes nothing to
+  //    the sum, so its currency cannot make the sum mixed; a free guest pass
+  //    stamped EUR withheld a month of GBP takings it was not part of.
+  //  · `.filter(Boolean)` dropped the nulls, which is the same fault from the
+  //    other side and the one that mattered most: a PRICED pass stating no
+  //    currency vanished from the set, so GBP-plus-unstated read as plain GBP
+  //    and the tile printed a total with an amount of unknown money inside it,
+  //    labelled £, with nothing anywhere saying so.
+  //
+  // `passRevenueCents` answers all three — normalised, priced rows only, and
+  // `null` kept as a member of the set — and it is the same answer the month
+  // close reads through `ClosePasses`. Derived once so the two screens cannot
+  // quote different money for the same passes.
+  const { cents, priced, total, currency, mixedCurrency } = passRevenueCents(passes);
 
   // The memberships held by people who joined AFTER a pass, and only those.
   // `summarise` from gymRecord does the interval arithmetic — a yearly plan is
@@ -605,8 +696,8 @@ export function moneyOf(
     passesTotal: total,
     followingMrrCents,
     followingActive,
-    currency: currencies[0] ?? null,
-    mixedCurrency: currencies.length > 1,
+    currency,
+    mixedCurrency,
   };
 }
 
@@ -614,7 +705,7 @@ export function moneyOf(
 
 function floorSentence(minGroup: number): string {
   const p = pointsPerMember(minGroup);
-  return `A percentage is shown only once ${minGroup} pass holders have decided. At ${minGroup}, one person is worth ${fmt(p ?? 0)} points of it; below that a single person moving swings the figure further than anything a gym would act on, so it would be measuring the group's size rather than the gym. Under the floor the counts are still shown — they are true. This is the same floor /retention uses, from the same constant.`;
+  return `A percentage is shown only once ${minGroup} pass holders have decided. At ${minGroup}, one person is worth ${fmt(p ?? 0)} points of it; below that a single person moving swings the figure further than anything a gym would act on, so it would be measuring the group's size rather than the gym. Under the floor the counts are still shown, and they are true. This is the same floor /retention uses, from the same constant.`;
 }
 
 /** Names the passes that could never have been answered for. Null when every
@@ -626,7 +717,7 @@ export function attributionSentence(
 ): string | null {
   if (anonymous <= 0) return null;
   const share = issued > 0 ? Math.round((anonymous / issued) * 100) : 0;
-  let s = `${anonymous} of ${issued} passes (${share}%) went to somebody with no account. There is no key to look those people up by in the roster, so whether they joined later is UNANSWERABLE — not "no". They are excluded from the figures below rather than counted as failures, and they cannot be counted as people either: two anonymous passes may be one person twice.`;
+  let s = `${anonymous} of ${issued} passes (${share}%) went to somebody with no account. There is no key to look those people up by in the roster, so whether they joined later is UNANSWERABLE, not "no". They are excluded from the figures below rather than counted as failures, and they cannot be counted as people either: two anonymous passes may be one person twice.`;
   if (share >= 50) {
     s += ' Over half the passes are in this position, so the figures below describe a minority of what the gym actually handed out. Taking a name and an email at the desk is what would change that.';
   }
@@ -639,7 +730,7 @@ export function attributionSentence(
 /** Names the holders whose story has not finished. Null when none. */
 export function undecidedSentence(counts: HolderCounts | null): string | null {
   if (!counts || counts.undecided <= 0) return null;
-  return `${counts.undecided} holder${counts.undecided === 1 ? '' : 's'} still ${counts.undecided === 1 ? 'has' : 'have'} a live pass and ${counts.undecided === 1 ? 'has' : 'have'} not joined. ${counts.undecided === 1 ? 'That is' : 'Those are'} undecided, not lost, and ${counts.undecided === 1 ? 'is' : 'are'} outside the figure — a pass handed out last week has not failed. Note the asymmetry this creates while any pass is live: a holder who has already joined is counted even though their pass is still running, so the figure will move as the live passes run out.`;
+  return `${counts.undecided} holder${counts.undecided === 1 ? '' : 's'} still ${counts.undecided === 1 ? 'has' : 'have'} a live pass and ${counts.undecided === 1 ? 'has' : 'have'} not joined. ${counts.undecided === 1 ? 'That is' : 'Those are'} undecided, not lost, and ${counts.undecided === 1 ? 'is' : 'are'} outside the figure. A pass handed out last week has not failed. Note the asymmetry this creates while any pass is live: a holder who has already joined is counted even though their pass is still running, so the figure will move as the live passes run out.`;
 }
 
 function headlineOf(x: {
@@ -653,14 +744,14 @@ function headlineOf(x: {
   if (x.passes.issued === 0) return null;
   const head = `${x.passes.issued} pass${x.passes.issued === 1 ? '' : 'es'} issued, ${x.redeemedPasses} used at least once.`;
   if (!x.memberRead || !x.counts) {
-    return `${head} The membership roster could not be read, so whether any holder later joined is unknown here — not none.`;
+    return `${head} The membership roster could not be read, so whether any holder later joined is unknown here, not none.`;
   }
   const c = x.counts;
   if (c.identified === 0) {
     return `${head} None of them carries an account, so no holder can be matched to a membership.`;
   }
   if (c.decided === 0) {
-    return `${head} ${c.identified} went to somebody with an account, and not one of those has decided yet — every pass is either still live or its holder was already a member. There is nothing to report a rate over.`;
+    return `${head} ${c.identified} went to somebody with an account, and not one of those has decided yet. Every pass is either still live or its holder was already a member. There is nothing to report a rate over.`;
   }
   const rate = x.joinedAfterRate == null ? '' : ` (${Math.round(x.joinedAfterRate * 100)}%)`;
   let out = `${head} ${c.joinedAfter} of ${c.decided} holders whose pass has run out later took out a membership${rate}.`;
@@ -677,14 +768,189 @@ export function suppressionSentence(
   minGroup: number = MIN_COHORT_FOR_RATE,
 ): string | null {
   if (c.suppressed === 'no-denominator') {
-    return 'No pass holder has decided yet — every identified holder either still has a live pass or was already a member. A rate over nobody is not 0%, it is nothing.';
+    return 'No pass holder has decided yet. Every identified holder either still has a live pass or was already a member. A rate over nobody is not 0%, it is nothing.';
   }
   if (c.suppressed === 'too-few') {
     const n = c.counts?.decided ?? 0;
     const p = pointsPerMember(n);
-    return `${n} holder${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} decided — one of them is worth ${fmt(p ?? 0)} points, so no percentage is shown. The floor is ${minGroup}. The counts beside it are still true.`;
+    return `${n} holder${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} decided. One of them is worth ${fmt(p ?? 0)} points, so no percentage is shown. The floor is ${minGroup}. The counts beside it are still true.`;
   }
   return null;
+}
+
+/* ── what a member is about to lose ────────────────────────────────────────── */
+
+/**
+ * How far ahead "about to run out" looks.
+ *
+ * Thirty days, because that is the horizon a desk can act on: long enough that
+ * a member can be rung, told, and get back in before the credits go, short
+ * enough that the list is a list and not the whole pass book. A pack sold on a
+ * ninety-day validity is typically half-used at thirty days out, which is
+ * exactly the conversation.
+ */
+export const EXPIRY_HORIZON_DAYS = 30;
+
+/** One live pass with credits on it and a last day coming up. */
+export interface ExpiringPass {
+  passId: string;
+  holderId: string;
+  name: string | null;
+  passTypeName: string | null;
+  /** What the credits buy. A door-and-classes credit and a personal-training
+   *  credit are not the same thing and are never added — the same split
+   *  `MemberDossier` draws between `passVisitsLeft` and `ptCreditsLeft`. Null
+   *  when the pass type could not be read. */
+  covers: GymPass['covers'];
+  creditsLeft: number;
+  usesTotal: number;
+  /** A bare YYYY-MM-DD off a `date` column, compared as a string. */
+  expiresOn: string;
+  /** Whole days from the gym's today to that day. 0 is "last day today". */
+  daysLeft: number;
+}
+
+/**
+ * What is about to be lost, and what is counted out of that list and why.
+ *
+ * ── The question no screen in this product could answer ───────────────────
+ *
+ * /door shows one pass at a time, /money shows the price book, and this page
+ * showed what pass-giving CONVERTED to. Nothing anywhere said: which members
+ * have paid for credits they are about to lose. That is the report every
+ * leading gym console leads with — Wodify, PushPress and Zen Planner all put
+ * "packs expiring" in front of the desk — and it is the one pass report a gym
+ * acts on the same day, because the member is still a member and the credits
+ * are still spendable for a fortnight.
+ *
+ * ── Four things this refuses ──────────────────────────────────────────────
+ *
+ *  · It never sums credits. Ten door visits and two PT hours are not twelve of
+ *    anything; `covers` is on every row and there is no total.
+ *  · A pass with NO expiry is not "about to run out". It is a decision the gym
+ *    made — `passTypeBlocker` says "leave it blank for a pass that does not
+ *    expire — 0 is not the same thing" — and it is counted separately so an
+ *    empty list does not read as a gym with no live credits.
+ *  · A pass whose `expires_on` could not be read as a date is a THIRD fact,
+ *    kept apart from both. A gym that imported its pass book with a broken
+ *    date column would otherwise see those passes silently fall out of a list
+ *    headed "about to run out" — the same silence as a failed read drawn as an
+ *    empty one, one column down.
+ *  · A pass held by a walk-in with no account is counted, never listed. There
+ *    is no person to ring, and two anonymous passes may be one person twice —
+ *    the rule `attributionSentence` already states for the page above.
+ *
+ * `today` is the GYM's calendar day. Every comparison here is string-on-string
+ * between bare `YYYY-MM-DD` values, which is what `date` columns hold; nothing
+ * is parsed into an instant and re-read on anybody's clock.
+ */
+export interface ExpiringPasses {
+  /** Soonest first. Live, with credits on them, and held by somebody with an
+   *  account. */
+  soon: ExpiringPass[];
+  /** Live passes with credits and a last day inside the horizon, held by a
+   *  walk-in with no account. Counted out of `soon`, never listed. */
+  anonymous: number;
+  /** Live passes with credits and no expiry at all. A decision, not a gap. */
+  neverExpire: number;
+  /** Live passes with credits whose `expires_on` is not a date this app can
+   *  read. Not the same fact as having no expiry, and not evidence of
+   *  anything — they are outside the list rather than assumed safe. */
+  unreadableExpiry: number;
+  /** How many distinct people are on `soon`, which is the size of the job. One
+   *  member holding three expiring packs is one phone call. */
+  people: number;
+  withinDays: number;
+}
+
+export function expiringPasses(
+  passes: readonly GymPass[],
+  today: string,
+  withinDays: number = EXPIRY_HORIZON_DAYS,
+): ExpiringPasses {
+  const soon: ExpiringPass[] = [];
+  let anonymous = 0;
+  let neverExpire = 0;
+  let unreadableExpiry = 0;
+
+  for (const p of passes) {
+    const creditsLeft = remainingUses(p);
+    // Nothing left to lose. A spent pass is a pass that did its job.
+    if (creditsLeft <= 0) continue;
+    // Already gone. This list is about what can still be saved; a pass that
+    // ran out last week is a different conversation and a different screen.
+    if (isExpired(p, today)) continue;
+
+    if (p.expiresOn == null) { neverExpire += 1; continue; }
+    const on = dateOf(p.expiresOn);
+    if (on == null) { unreadableExpiry += 1; continue; }
+
+    const daysLeft = daysBetween(today, on);
+    if (daysLeft == null) { unreadableExpiry += 1; continue; }
+    if (daysLeft > withinDays) continue;
+
+    if (!p.holderId) { anonymous += 1; continue; }
+
+    soon.push({
+      passId: p.id,
+      holderId: p.holderId,
+      name: p.holderName?.trim() || null,
+      passTypeName: p.passTypeName,
+      covers: p.covers,
+      creditsLeft,
+      usesTotal: p.usesTotal,
+      expiresOn: on,
+      daysLeft,
+    });
+  }
+
+  soon.sort(
+    (a, b) => a.daysLeft - b.daysLeft
+      || b.creditsLeft - a.creditsLeft
+      || a.passId.localeCompare(b.passId),
+  );
+
+  return {
+    soon,
+    anonymous,
+    neverExpire,
+    unreadableExpiry,
+    people: new Set(soon.map((s) => s.holderId)).size,
+    withinDays,
+  };
+}
+
+/**
+ * The sentence under the list, naming everything that is NOT in it.
+ *
+ * Null when there is nothing counted out, so a gym with a clean pass book gets
+ * no paragraph. Every clause here is a fact the empty-or-short list would
+ * otherwise be read as denying.
+ */
+export function expiringExclusions(x: ExpiringPasses): string | null {
+  const parts: string[] = [];
+  if (x.anonymous > 0) {
+    parts.push(
+      `${x.anonymous} ${x.anonymous === 1 ? 'pass is' : 'passes are'} held by a walk-in with no `
+      + 'account, so there is nobody here to ring, and they cannot be counted as people either, '
+      + 'since two anonymous passes may be one person twice',
+    );
+  }
+  if (x.neverExpire > 0) {
+    parts.push(
+      `${x.neverExpire} live ${x.neverExpire === 1 ? 'pass has' : 'passes have'} no expiry at all, `
+      + 'which is a decision the gym made rather than a missing date. Nothing on those runs out',
+    );
+  }
+  if (x.unreadableExpiry > 0) {
+    parts.push(
+      `${x.unreadableExpiry} live ${x.unreadableExpiry === 1 ? 'pass carries' : 'passes carry'} a `
+      + 'last day this app cannot read as a date, so whether it is close is UNKNOWN rather than no, '
+      + 'so those are outside the list and are not thereby safe',
+    );
+  }
+  if (!parts.length) return null;
+  return `Not in the list above: ${parts.join('; ')}.`;
 }
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
@@ -698,6 +964,14 @@ export function dateOf(v: string | null | undefined): string | null {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const t = Date.parse(s);
   if (Number.isNaN(t)) return null;
+  // utc-day-ok: the fallback, reached only by a value that is NOT already a
+  // bare day — the line above takes the string whole whenever it is one, which
+  // is what `pass.issued_on` and `pass.expires_on` actually hold, both being
+  // `date` columns. What lands here is a full timestamp, and every day this
+  // module then compares it against is UTC-anchored: `daysBetween` parses both
+  // ends at `T00:00:00Z`. Reading this one back locally would put it on a
+  // different calendar from the days it is subtracted from, which is a worse
+  // error than the one it would be fixing.
   return new Date(t).toISOString().slice(0, 10);
 }
 

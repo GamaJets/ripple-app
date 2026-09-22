@@ -1,11 +1,30 @@
 node_modules/
 .expo/
 .tmp/
+.tmp-solo/
 dist/
 .env
 *.log
-ios/
-android/
+# ── Anchored, and that matters ────────────────────────────────────────────
+#
+# These were `ios/` and `android/`, unanchored, which in gitignore matches a
+# directory of that name AT ANY DEPTH. The intent is only the two Continuous
+# Native Generation output directories at the repo root, which prebuild
+# regenerates and which must never be committed.
+#
+# What the unanchored form also swallowed: `modules/workout-activity/ios/` —
+# the entire native half of a local Expo module. Its config and its TypeScript
+# were tracked, so the module looked present; the Swift module, the podspec and
+# the Attributes symlink were invisible to git and were therefore never
+# uploaded to EAS. Build 47 shipped the Live Activity's widget extension with
+# nothing in the app able to start it: the app binary linked WidgetKit and not
+# ActivityKit, and carried no symbol from the module. Found by unpacking the
+# IPA, because every local build had the files on disk and worked.
+#
+# A leading slash anchors to the repository root. Anything called `ios` deeper
+# in the tree is a source directory somebody wrote, not a build product.
+/ios/
+/android/
 
 # transient edit scripts (device fs cannot rm)
 .scratch*
@@ -42,3 +61,15 @@ play-service-account*.json
 # bulk. A file listing is not the assets, but it is the shape of them, and it
 # has no reason to be in a repository either way.
 .repdb-staging/
+
+# Compiled output must never sit beside its source. A `tsc` run without
+# --outDir drops a .js next to every .ts it reads, and on 4 Sep 2026 one of
+# those was committed: src/lib/offlineQueue.js, a build artifact shadowing the
+# module it was built from. Metro resolves .js before .ts, so a stale one wins
+# silently and the app runs code nobody edited.
+src/**/*.js
+app/**/*.js
+src/**/*.js.map
+app/**/*.js.map
+
+$S/

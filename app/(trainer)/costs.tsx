@@ -56,9 +56,11 @@ import { View, Text, ScrollView, TextInput, Pressable, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
-import { isoToday } from '../../src/lib/dayPlan';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead, FigureCard, Donut, Legend, Expandable, type Tone, type Slice } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
+import { useToday } from '../../src/ui/today';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { invoiceDayLabel, plusDays } from '../../src/lib/coachInvoice';
 import {
@@ -66,10 +68,16 @@ import {
   COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE, COSTS_NOT_TWICE,
   type CoachCost, type CostDraft, type CostCategory,
 } from '../../src/lib/coachCosts';
+import {
+  linesByMonth, biggestLines,
+  MONTHS_ARE_WHAT_YOU_WROTE_DOWN, BIGGEST_IS_OF_WHAT_YOU_RECORDED, type BookLine,
+} from '../../src/lib/moneyBook';
 import { fetchMyCosts, recordCost, deleteCost } from '../../src/ui/coachCosts';
 import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachInvoices';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
+import { myCurrencyLine } from '../../src/lib/currencySource';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const DASH = '—';
 
@@ -79,7 +87,7 @@ export default function Costs() {
 
   const [rows, setRows] = useState<CoachCost[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
-  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading' });
+  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading', gap: null });
 
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
@@ -97,14 +105,82 @@ export default function Costs() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // The same read the focus effect runs. Both halves of it, because the
+  // currency is what decides whether a single one of these amounts may be
+  // printed at all — a refreshed cost list under a stale currency is the one
+  // combination this screen must not produce.
+  const pull = usePullToRefresh(load);
 
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // recording a payment at 10am would otherwise date it yesterday.
-  const today = isoToday(new Date());
+  // ── the day this screen stamps on a cost ─────────────────────────
+  //
+  // `useToday()`, not `isoToday(new Date())`. This is not a label: `paidOn`
+  // below is `dayText.trim() || today`, so when the coach does not type a date
+  // this value is WRITTEN as the day money went out. And a bare read in the render body
+  // is only ever as fresh as the last render — this screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is never torn
+  // down, and does not re-render while nobody is touching it.
+  //
+  // So a coach who opened this screen on Sunday, went to another tab, and came
+  // back on Wednesday to write something up got it dated SUNDAY — under a
+  // placeholder that says "leave it for today". The record is the thing this
+  // screen exists to keep, the date is the part of it that decides which month
+  // it lands in, and nothing on screen would have shown the coach it was
+  // wrong.
+  //
+  // `check:frozen-day` looks for `useMemo(…, [])` and cannot see this shape.
+  // `useToday` re-reads at the next local midnight and on foreground, compares
+  // before it sets, and is still the DEVICE's day rather than the server's UTC
+  // one — which is the point the comment this replaces was making, and it is
+  // preserved: a coach in Auckland recording at 10am must not date it
+  // yesterday.
+  const today = useToday();
   const paidOn = dayText.trim() || today;
 
   const taken = useMemo(() => costsTaken(rows), [rows]);
   const byCategory = useMemo(() => costsByCategory(rows), [rows]);
+
+  /* ── the two questions an expense list is actually opened for ───────────
+     "How much in September" and "what is the biggest thing in here". This
+     screen answered neither: pots, categories and a flat list, with `paid_on`
+     sitting unread on every row.
+
+     A month total is NOT a net and does not breach `COSTS_ARE_NEVER_NETTED` —
+     nothing is subtracted from anything here, on this screen or anywhere else,
+     and the rule is about the difference between two sides of a book rather
+     than about adding one side up. src/lib/moneyBook.ts does the folding so the
+     two currency rules — never merged, never ranked against each other — are
+     kept in one place for both books. */
+  const lines = useMemo((): BookLine[] => rows.map((c) => ({
+    id: c.id,
+    // The day the coach says the money WENT OUT. A quarter of receipts written
+    // up in one evening belongs in the months they were paid in, and this is
+    // the field that decides which month each one lands in.
+    day: c.paidOn,
+    amountCents: c.amountCents,
+    currency: c.currency,
+    label: c.description,
+  })), [rows]);
+
+  const byMonth = useMemo(() => linesByMonth(lines), [lines]);
+  const biggest = useMemo(() => biggestLines(lines), [lines]);
+
+  /* ── the mix, one ring per currency ──────────────────────────────────────
+   * Off the same `byCategory` the rows under the ring are drawn from, and only
+   * ever rendered inside the whole-read branch those rows sit in. */
+  const CATEGORY_TONE: Record<string, Tone> = { rent: 'blue', insurance: 'purple', education: 'teal', equipment: 'orange', kit: 'pink', travel: 'amber', professional: 'brand', other: 'neutral' };
+  const categoryRings = taken.pots.map((pot) => {
+    const slices: Slice[] = byCategory.map((g) => {
+      const part = g.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+      return { label: g.label, tone: CATEGORY_TONE[g.category] ?? 'neutral', value: part, shown: sharePercent(part, pot.minorUnits) };
+    }).filter((x) => (x.value ?? 0) > 0);
+    const centre = minorMoney(pot.minorUnits, pot.currency);
+    return {
+      currency: pot.currency, slices, centre,
+      spoken: `Where it went in ${pot.currency}, ${centre ?? 'no figure'}: ${slices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`,
+    };
+  });
 
   const draft = (): CostDraft => ({
     description, amountText, currency: ccy.currency, category, paidOn,
@@ -118,12 +194,12 @@ export default function Costs() {
   const onRecord = async () => {
     const d = draft();
     const problems = costBlockers(d);
-    if (problems.length) { Alert.alert('Not yet', problems.join('\n\n')); return; }
+    if (problems.length) { Alert.alert('Not Yet', problems.join('\n\n')); return; }
     setBusy(true);
     const res = await recordCost(d);
     setBusy(false);
     if (!res.ok) {
-      Alert.alert('That cost was not recorded', res.error || 'Nothing was written. Try again in a moment.');
+      Alert.alert('That Cost Was Not Recorded', res.error || 'Nothing was written. Try again in a moment.');
       return;
     }
     setOpen(false);
@@ -133,7 +209,7 @@ export default function Costs() {
 
   const onRemove = (c: CoachCost) => {
     Alert.alert(
-      'Remove this line?',
+      'Remove This Line?',
       // The honest framing. Nothing was handed to anybody and no document was
       // made from it, so this is a private ledger line being corrected — but it
       // does leave the figures smaller, and the coach is the only person who
@@ -148,7 +224,7 @@ export default function Costs() {
             void (async () => {
               const gone = await deleteCost(c.id);
               if (!gone) {
-                Alert.alert('Still there', 'That line was not removed and it is still in your figures. Try again in a moment.');
+                Alert.alert('Still There', 'That line was not removed and it is still in your figures. Try again in a moment.');
                 return;
               }
               await load();
@@ -166,72 +242,77 @@ export default function Costs() {
   // Four causes and not two: 'partial' and 'loading' are not settled facts
   // about the gym, and sending a coach to an owner over a query that failed
   // tells neither of them anything.
+  //
+  // And 'unset' is itself several facts since part 940, which is why this now
+  // branches the way app/(trainer)/invoices.tsx does. A gym was once the only
+  // place a currency could live, so "no currency has been set for you" could
+  // safely end by naming a gym owner. A coach with no gym has no owner to
+  // name, and that sentence sent them to look for a person who does not exist
+  // — while the setting they could actually make sat one screen away in
+  // Settings. `ccy.gap` carries which it is, and only 'gym-unset' names an
+  // owner.
   const curGap = currencyGapOfStatus({ currency: ccy.currency, status: ccy.status });
   const currencyBlocker = curGap
     ? curGap === 'unset'
-      ? 'No currency has been set for you, so there is nothing to record a cost in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
+      ? ccy.gap && ccy.gap !== 'gym-unset'
+        ? myCurrencyLine(ccy.gap, 'there is nothing to record a cost in')
+        : 'No currency has been set for you, so there is nothing to record a cost in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
       : currencyGapLine(curGap, 'nothing can be recorded')
     : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>The other side of the book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>What It Costs You</Text>
-          </View>
-        </View>
-
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="What running your business costs"
-            note={COST_IS_YOUR_WORD}
-          />
-        </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("The other side of the book") was a line of prose above the title; what it said is
+            still said by the first card below. */}
+        <PageHead title="What It Costs You" />
 
         {status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not read" title="Your recorded costs could not be read"
+          <Notice tone={t.crit} kicker="Not Read" title="Your recorded costs could not be read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
         ) : null}
         {status === 'partial' ? <PartialRead what="recorded costs" shown={rows.length} onPress={() => { void load(); }} /> : null}
 
         {currencyBlocker ? (
-          <Notice tone={t.crit} kicker="Nothing can be recorded yet" title="No currency" note={currencyBlocker} />
+          <Notice tone={t.crit} kicker="Nothing Can Be Recorded Yet" title="No Currency" note={currencyBlocker} />
         ) : null}
 
-        <Rule />
 
-        <Section>
-          <SectionHead title="What You Have Recorded" note="Counted by the day you say you paid" />
-          {status !== 'ready' ? (
-            <Flag style={{ marginTop: sp.sm }}>{costsEmptyLine(status)}</Flag>
-          ) : taken.pots.length ? (
-            <View style={{ marginTop: sp.sm }}>
-              {taken.pots.map((p) => (
-                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>
-                    {p.count} {p.count === 1 ? 'cost' : 'costs'} in {p.currency}
-                  </Text>
-                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
-                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
-                  </Text>
-                </View>
-              ))}
-              {/* Currencies are never added together, here or anywhere. */}
-              {taken.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{costsEmptyLine(status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COSTS_ARE_NEVER_NETTED}</Text>
-        </Section>
+        {/* Round five: the screen opens on its figure. The kit's figure card,
+            one figure per currency and never one over both, with the amber
+            mark this side of the book carries everywhere. A dash and
+            `costsEmptyLine`'s sentence under any read that was not whole; the word
+            "Nothing" — not a dash, and not a money nought, which would need a
+            currency — where the read was whole and there is nothing in it.
+
+            The card of prose that opened the page and the paragraph that
+            closed this card are behind What This Is, below, word for word;
+            one line of the caveat stays beside the figure it qualifies. */}
+        <FigureCard title="What You Have Recorded" period="All you have recorded" source="Your own record"
+          figure={status === 'ready' && !taken.pots.length ? 'Nothing' : null}
+          detail={status === 'ready' && taken.pots.length ? undefined : costsEmptyLine(status)}
+          figures={status === 'ready' && taken.pots.length ? taken.pots.map((p) => ({
+            key: p.currency,
+            figure: minorMoney(p.minorUnits, p.currency),
+            comparison: `${num(p.count)} ${p.count === 1 ? 'cost' : 'costs'} in ${p.currency}`,
+            tone: t.data.amber,
+            spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'no figure'}, ${num(p.count)} ${p.count === 1 ? 'cost' : 'costs'} in ${p.currency}`,
+          })) : undefined}>
+          {/* Currencies are never added together, here or anywhere. */}
+          {status === 'ready' && taken.pots.length > 1 ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              These are separate amounts of money and are deliberately not added together.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Never taken off what you were paid. There is no profit figure anywhere in this app.</Text>
+        </FigureCard>
+
+        <Expandable title="What This Is" note="Your own record of what went out, and why nothing is netted">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{COST_IS_YOUR_WORD}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{COSTS_ARE_NEVER_NETTED}</Text>
+        </Expandable>
 
         {/* ── where it went ───────────────────────────────────────────────
             Per category AND per currency. A category with nothing in it is
@@ -243,6 +324,16 @@ export default function Costs() {
             <Rule />
             <Section>
               <SectionHead title="Where It Went" note={`${byCategory.length} ${byCategory.length === 1 ? 'kind' : 'kinds'}`} />
+              {/* The mix as a ring, ONE PER CURRENCY: a ring is a whole, and
+                  two moneys are not one. Each slice is this category's pot in
+                  that currency and the share is of that currency's own total.
+                  The rows under it keep every amount and every count. */}
+              {categoryRings.map((d, i) => (
+                <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg, marginBottom: sp.md }}>
+                  <Donut slices={d.slices} centre={d.centre} sub="recorded" spoken={d.spoken} />
+                  <Legend items={d.slices} />
+                </View>
+              ))}
               {byCategory.map((c) => (
                 <View key={c.category} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ ...ty.label, color: t.ink2 }}>{c.label}</Text>
@@ -262,14 +353,105 @@ export default function Costs() {
           </>
         ) : null}
 
-        <Rule />
+        {/* ── by month ────────────────────────────────────────────────────
+            Drawn only under `isWhole(status)`, like every other figure here: a
+            month total over a truncated read is a subtotal with a month's name
+            on it, and over a refused read it is a claim about somebody's
+            spending made out of our own failure.
+
+            A month is a slice of ONE side of the book. Nothing is taken off
+            anything — see `COSTS_ARE_NEVER_NETTED`, which is about the
+            difference between the two sides and is not touched by adding one
+            of them up by month. */}
+        {status === 'ready' && byMonth.months.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="By Month" note="Counted by the Day You Say You Paid" />
+              {byMonth.months.map((m) => (
+                <View key={m.key} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{m.label}</Text>
+                  {/* One figure per currency and never one per month. A coach
+                      paying rent in dirhams and an insurer in sterling has two
+                      amounts of money in September and not a sum. */}
+                  {m.taken.pots.map((p) => (
+                    <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>
+                        {p.count} {p.count === 1 ? 'line' : 'lines'} in {p.currency}
+                      </Text>
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink }}>
+                        {minorMoney(p.minorUnits, p.currency) ?? DASH}
+                      </Text>
+                    </View>
+                  ))}
+                  {m.taken.unlabelled + m.taken.unpriced ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                      {m.taken.unlabelled + m.taken.unpriced} {m.taken.unlabelled + m.taken.unpriced === 1 ? 'line has' : 'lines have'} no readable amount and {m.taken.unlabelled + m.taken.unpriced === 1 ? 'is' : 'are'} in no figure here.
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+              {/* A day that will not read belongs to no month. Swept into this
+                  one it would make a month too big; dropped in silence it would
+                  make the months add up to less than the figure above them. */}
+              {byMonth.undated ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {byMonth.undated} {byMonth.undated === 1 ? 'cost has' : 'costs have'} a day that could not be read, so {byMonth.undated === 1 ? 'it is' : 'they are'} in none of these months. {byMonth.undated === 1 ? 'It is' : 'They are'} still in the total above.
+                </Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{MONTHS_ARE_WHAT_YOU_WROTE_DOWN}</Text>
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── the biggest line ────────────────────────────────────────────
+            ONE PER CURRENCY, because "the largest cost" is not a question with
+            a single answer over a book in two moneys — 1,200 dirhams is a
+            smaller amount than 450 pounds and a larger integer, and this app
+            holds no rate that could say so. A coach with one currency, which is
+            all of them today, sees exactly one line. */}
+        {status === 'ready' && biggest.top.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title={biggest.top.length === 1 ? 'The Biggest Line' : 'The Biggest Line in Each Currency'} />
+              {biggest.top.map((b) => (
+                <View key={b.currency} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{b.line.label}</Text>
+                    <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>
+                      {minorMoney(b.minorUnits, b.currency) ?? DASH}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{invoiceDayLabel(b.line.day)}</Text>
+                </View>
+              ))}
+              {biggest.top.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  One for each currency. These are separate amounts of money and are deliberately not ranked against one another. There is no rate in this app that could put them in an order.
+                </Flag>
+              ) : null}
+              {/* Counted out rather than quietly ignored. A line with no
+                  readable amount cannot be the biggest anything, and saying how
+                  many were left out stops the answer being read as "and there
+                  is nothing larger than this". */}
+              {biggest.skipped ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {biggest.skipped} {biggest.skipped === 1 ? 'line has' : 'lines have'} no readable amount on {biggest.skipped === 1 ? 'it' : 'them'}, so {biggest.skipped === 1 ? 'it was' : 'they were'} not compared with anything.
+                </Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{BIGGEST_IS_OF_WHAT_YOU_RECORDED}</Text>
+            </Section>
+          </>
+        ) : null}
+
 
         <Section>
           {/* A count is a claim about the coach's own records, so it is only
               made from a list that is the whole list. `fetchMyCosts` answers
               `{rows: [], status: 'error'}` for a refused read, and "Nothing
               recorded yet" over that is a sentence this app cannot support. */}
-          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing recorded yet') : 'What is on record'} />
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} Recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
           {rows.map((c) => (
             <View key={c.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
@@ -290,7 +472,7 @@ export default function Costs() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                 <Pressable onPress={() => onRemove(c)} hitSlop={8} accessibilityRole="button"
                   accessibilityLabel={`Remove the cost for ${c.description}`} style={{ paddingVertical: sp.xs }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Remove</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Remove</Text>
                 </Pressable>
               </View>
             </View>
@@ -318,23 +500,23 @@ export default function Costs() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>Something you paid for</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Something You Paid For</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                 Leave out your Repple plan and your ad spend. Both are already counted for you.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What it was for</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What It Was For</Text>
               <TextInput value={description} onChangeText={setDescription}
                 placeholder="September rent at the gym" placeholderTextColor={t.ink3}
-                accessibilityLabel="What it was for" style={inp} />
+                accessibilityLabel="What It Was For" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What kind of cost</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What Kind of Cost</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
                 {COST_CATEGORIES.map((c) => (
                   <Pressable key={c.id} onPress={() => setCategory(c.id)} accessibilityRole="button"
                     accessibilityLabel={c.label} accessibilityState={{ selected: category === c.id }}
                     style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: category === c.id ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, color: category === c.id ? '#fff' : t.ink2 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, color: category === c.id ? t.brandInk : t.ink2 }}>{c.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -353,7 +535,7 @@ export default function Costs() {
                 placeholder="450" placeholderTextColor={t.ink3}
                 accessibilityLabel="Amount" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day you paid it</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The Day You Paid It</Text>
               <TextInput value={dayText} onChangeText={setDayText} autoCapitalize="none" autoCorrect={false}
                 placeholder={`${today}, or leave it for today`} placeholderTextColor={t.ink3}
                 accessibilityLabel="The day you paid it" style={inp} />
@@ -365,7 +547,7 @@ export default function Costs() {
                       accessibilityRole="button" accessibilityLabel={label}
                       accessibilityState={{ selected: paidOn === when }}
                       style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: paidOn === when ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: paidOn === when ? '#fff' : t.ink2 }}>{label}</Text>
+                      <Text style={{ ...ty.micro, color: paidOn === when ? t.brandInk : t.ink2 }}>{label}</Text>
                     </Pressable>
                   );
                 })}
@@ -374,7 +556,7 @@ export default function Costs() {
                 The day the money went out, not today. A quarter of receipts written up in one evening belongs in the months they were paid in.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A Note, If You Want One (Optional)</Text>
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder="Paid by standing order" placeholderTextColor={t.ink3}
                 accessibilityLabel="Note" style={[inp, { minHeight: 70, textAlignVertical: 'top' }]} />

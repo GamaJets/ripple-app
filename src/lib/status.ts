@@ -23,15 +23,15 @@
 // employer's dashboard. A status on an operations screen should describe the
 // situation the numbers show, not deliver a verdict on the person — especially
 // when the underlying signal is a session count that a holiday or an injury
-// explains. "At risk" says the same thing about the work without saying it
+// explains. "At Risk" says the same thing about the work without saying it
 // about the human.
 
 export type StatusLevel = 'on_track' | 'watch' | 'at_risk' | 'idle';
 
 export const STATUS_LABEL: Record<StatusLevel, string> = {
-  on_track: 'On track',
+  on_track: 'On Track',
   watch: 'Watch',
-  at_risk: 'At risk',
+  at_risk: 'At Risk',
   idle: 'Idle',
 };
 

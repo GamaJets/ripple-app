@@ -19,7 +19,8 @@
 // invariant on each: a member who trained on N consecutive LOCAL calendar days
 // has a streak of N. In UTC, Dubai, Kiritimati and Midway that is a plain
 // restatement; in Auckland and Los Angeles it lands on the transition twice.
-import { currentStreak, currentStreakFrozen, streakRisk, activeDays, longestStreak } from './streaks';
+import { currentStreak, currentStreakFrozen, shownStreak, freezeBudget, streakRisk, activeDays, longestStreak, weekStats, thisWeekStats, statsSince } from './streaks';
+import { startOfWeek } from './weekStart';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -146,6 +147,149 @@ const runEndingAt = (end: Date, n: number): WorkoutEntry[] => {
   const log = runEndingAt(today, 9);
   eq(longestStreak(log), 9, 'nine consecutive days is a longest run of nine');
   eq(currentStreak(log, today.getTime()), 9, 'and the current streak agrees with it');
+}
+
+/* ── one streak figure, not two ──────────────────────────────────────────── */
+//
+// Home showed the frozen streak in the ring and the raw one in the banner four
+// inches above it, and the raw one was what the Milestone Card exported to
+// Instagram, what the Activity feed showed and what the Weekly Report handed to
+// the model. `shownStreak` is the single answer every one of those now asks for.
+
+{
+  const today = middayOn(2026, 5, 15);
+  // Eleven active days, one missed day inside them, so there is a freeze in the
+  // bank (one per ten active days) and something for it to bridge.
+  const log = [
+    ...runEndingAt(new Date(2026, 5, 13, 12, 0, 0, 0), 11),
+    entryAt(today),
+  ];
+  const raw = currentStreak(log, today.getTime());
+  const shown = shownStreak(log, today.getTime());
+  ok(shown > raw, 'the freeze the app granted is reflected in the figure the member is shown');
+  eq(shown, currentStreakFrozen(log, freezeBudget(log), today.getTime()).streak,
+    'and it is exactly the frozen walk over the budget the log earned — no second opinion about either');
+}
+
+{
+  // No freeze earned yet: the two answers must agree, or every unfrozen member
+  // would see a different number for no reason.
+  const today = middayOn(2026, 5, 15);
+  const log = runEndingAt(today, 3);
+  eq(shownStreak(log, today.getTime()), currentStreak(log, today.getTime()),
+    'with nothing to bridge the shown streak is the plain chain');
+  eq(shownStreak([], today.getTime()), 0, 'and an empty log is zero, not a crash');
+}
+
+
+/* ── a calendar week is not a rolling one ─────────────────────────────────── */
+//
+// `weekStats` is a rolling 168 hours and its docstring always said so.
+// app/(client)/dashboard.tsx, restday.tsx and report.tsx printed it under the
+// words "this week" anyway, while week.tsx, trends.tsx and consistency.tsx
+// measured the same phrase with `startOfWeek`. The sharpest consequence was the
+// goal ring on Home reading "4 of 4 this week · goal met" on a Monday morning
+// to somebody who had not trained since the week opened.
+//
+// No literal date is asserted anywhere below — `npm test` runs under six
+// timezones and the whole point of this window is that it is LOCAL — so every
+// instant is built from `startOfWeek` of a chosen `now`.
+
+{
+  // A Wednesday, mid-afternoon local. Built from local parts, never parsed from
+  // a bare string: `new Date('2026-09-02')` is UTC midnight and is the day
+  // before west of Greenwich, which would move the week under half the world.
+  const now = new Date(2026, 8, 2, 15, 0, 0).getTime();
+  const weekOpened = startOfWeek(now).getTime();
+  const HOUR = 3600_000;
+
+  const entry = (t: number): WorkoutEntry =>
+    ({ t: new Date(t).toISOString(), exercise: 'Bench', sets: [[8, 60]] } as WorkoutEntry);
+
+  // One session an hour after the week opened, and one six hours BEFORE it —
+  // last week, by a few hours, and inside a rolling seven days either way.
+  const log = [entry(weekOpened + HOUR), entry(weekOpened - 6 * HOUR)];
+
+  eq(thisWeekStats(log, now).workouts, 1,
+    'the calendar week counts only what was done since the week opened');
+  eq(weekStats(log, now).workouts, 2,
+    'and the rolling window still counts both, which is what it is for');
+  ok(thisWeekStats(log, now).workouts !== weekStats(log, now).workouts,
+    'the two windows are genuinely different answers, which is why one screen may not print the other’s figure under the other’s caption');
+
+  // The Monday-morning case that produced "goal met" over a week with nothing
+  // in it. Everything logged last week, nothing since the week opened.
+  const lastWeekOnly = [entry(weekOpened - 6 * HOUR), entry(weekOpened - 30 * HOUR)];
+  eq(thisWeekStats(lastWeekOnly, now).workouts, 0,
+    'a week with nothing done in it counts nought, however busy the seven days before it were');
+  eq(thisWeekStats(lastWeekOnly, now).days, 0, 'and no active days either');
+
+  // The boundary itself: an entry AT the opening instant is in the week.
+  eq(thisWeekStats([entry(weekOpened)], now).workouts, 1,
+    'the instant the week opened belongs to the week it opened');
+  eq(thisWeekStats([entry(weekOpened - 1)], now).workouts, 0,
+    'and the millisecond before it does not');
+
+  // The engine both windows share. The report screen states a span and now
+  // counts exactly that span, which is what this is for.
+  eq(statsSince(log, weekOpened).workouts, thisWeekStats(log, now).workouts,
+    'the calendar week is statsSince from the moment the week opened, and nothing else');
+  eq(statsSince(log, 0).workouts, 2, 'and an open window counts everything');
+
+  /* ── exercises and days are two different numbers, and there is no third ─
+   *
+   * `workouts` is log ENTRIES, and this app writes one per exercise. Home's
+   * goal ring printed that count against a goal measured in TRAINING DAYS —
+   * "7 of 4 this week · goal was 4" after a single Monday — and the Weekly
+   * Report, a document the member sends to their coach, stated "Trained 7
+   * time(s) across 1 active day(s)" and handed the same figure to the model
+   * that writes its summary.
+   *
+   * The obvious repair is a session count, and this block exists to pin why
+   * there is not one. A session was defined everywhere as a distinct
+   * `performed_at`, and app/(client)/workouts.tsx does stamp a whole save with
+   * one timestamp — so a member who logs at the end really does write one. The
+   * second case below is the member who does not, taken from production: one
+   * visit, saved movement by movement across an hour, seven timestamps. A
+   * count by timestamp calls that seven sessions, which is the number the ring
+   * was already wrong by.
+   *
+   * So `days` is the figure, and these assertions are what stops a `sessions`
+   * field being added back.
+   */
+  {
+    const at = new Date(weekOpened + 2 * HOUR).toISOString();
+    const ex = (name: string, t: string): WorkoutEntry =>
+      ({ t, exercise: name, sets: [[8, 60]] } as WorkoutEntry);
+
+    // Logged in one go: three movements, one timestamp.
+    const oneSave = [ex('Squat', at), ex('Bench', at), ex('Row', at)];
+    eq(thisWeekStats(oneSave, now).workouts, 3, 'three movements are three log entries');
+    eq(thisWeekStats(oneSave, now).days, 1, 'and one training day');
+
+    // The same session logged as it went, which is what the live rows look
+    // like: seven movements, seven timestamps, one afternoon, one gym.
+    const asTheyWent = [
+      ex('MixedCardio', new Date(weekOpened + 2 * HOUR).toISOString()),
+      ex('Treadmill / Run', new Date(weekOpened + 2 * HOUR + 10 * 60000).toISOString()),
+      ex('Hip Thrust', new Date(weekOpened + 2 * HOUR + 19 * 60000).toISOString()),
+      ex('Squat', new Date(weekOpened + 2 * HOUR + 31 * 60000).toISOString()),
+      ex('Hip abduction', new Date(weekOpened + 2 * HOUR + 32 * 60000).toISOString()),
+      ex('Calf raise', new Date(weekOpened + 2 * HOUR + 33 * 60000).toISOString()),
+      ex('Dead lift', new Date(weekOpened + 2 * HOUR + 58 * 60000).toISOString()),
+    ];
+    eq(thisWeekStats(asTheyWent, now).days, 1,
+      'one visit saved as it went is still ONE day — the figure every screen now shows');
+    eq(new Set(asTheyWent.map((e) => e.t)).size, 7,
+      'while a count by timestamp would call that same visit seven, which is why there is no sessions field');
+    ok(!('sessions' in thisWeekStats(asTheyWent, now)),
+      'WeekStats must not carry a sessions count: see its docstring for the production rows');
+  }
+
+  // Nothing is invented from an empty log.
+  eq(thisWeekStats([], now).workouts, 0, 'an empty log is nought logged movements');
+  eq(thisWeekStats([], now).volumeKg, 0, 'and nought volume');
+  eq(thisWeekStats([], now).unpricedSets, 0, 'with no unpriced sets to declare');
 }
 
 if (errors.length) { errors.forEach((e) => console.error(e)); console.error(`streaks: ${errors.length} failure(s)`); process.exit(1); }

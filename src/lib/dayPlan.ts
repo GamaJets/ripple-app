@@ -62,16 +62,16 @@ export type PlannedDayType = 'training' | 'off' | 'rest' | 'deload';
 export const PLANNED_DAY_TYPES: readonly PlannedDayType[] = ['training', 'off', 'rest', 'deload'];
 
 export const DAY_TYPE_LABEL: Record<PlannedDayType, string> = {
-  training: 'Training day',
+  training: 'Training Day',
   off: 'Standard',
-  rest: 'Rest day',
-  deload: 'Deload day',
+  rest: 'Rest Day',
+  deload: 'Deload Day',
 };
 
 /** The first three are `DAY_TYPES` in app/(client)/nutrition.tsx, unchanged.
  *  The fourth is the guidance already on the Rest & deload screen. */
 export const DAY_TYPE_BLURB: Record<PlannedDayType, string> = {
-  training: 'A day you train — a gym session or a hard effort. Fuel goes up so there is something to train on.',
+  training: 'A day you train: a gym session or a hard effort. Fuel goes up so there is something to train on.',
   off: 'A normal day with no session: work, walking, ordinary movement. This is the baseline target.',
   rest: 'A full day off training. Fuel comes down, because there is no session to feed.',
   deload: 'A day inside a deload: you still train, at about 60% of the volume and well shy of failure, so fatigue clears.',
@@ -209,13 +209,13 @@ export function outcomeNote(type: PlannedDayType, outcome: PlanOutcome): string 
   const label = DAY_TYPE_LABEL[type].toLowerCase();
   switch (outcome) {
     case 'not-yet':
-      return `Planned as a ${label}. This day hasn’t happened yet — nothing here is a record.`;
+      return `Planned as a ${label}. This day hasn’t happened yet, so nothing here is a record.`;
     case 'today':
       return `Planned as a ${label} for today. Anything you log today is listed separately below.`;
     case 'log-agrees':
       return `Planned as a ${label}, and there is training logged on it. The log below is what actually happened.`;
     case 'log-disagrees':
-      return `Planned as a ${label}, but there is training logged on it. Both are shown — neither has been changed to match the other.`;
+      return `Planned as a ${label}, but there is training logged on it. Both are shown. Neither has been changed to match the other.`;
     case 'nothing-logged':
       return `Planned as a ${label}. Nothing was logged on this day, so it stays a plan: an unlogged session and a day that went differently look the same from here.`;
     case 'log-unknown':
@@ -261,14 +261,14 @@ export function planConflict(
     return {
       kind: 'plan-schedules-a-session',
       focus,
-      note: `Your program schedules ${focus} on this day and you’ve marked it as a ${DAY_TYPE_LABEL[marked].toLowerCase()}. Neither has been changed — this is here so you can decide, or tell your coach.`,
+      note: `Your program schedules ${focus} on this day and you’ve marked it as a ${DAY_TYPE_LABEL[marked].toLowerCase()}. Neither has been changed. This is here so you can decide, or tell your coach.`,
     };
   }
   if (marked === 'training') {
     return {
       kind: 'plan-schedules-nothing',
       focus: null,
-      note: 'Your program has no session on this day. Marking it a training day doesn’t add one to the program — it records what you intend to do.',
+      note: 'Your program has no session on this day. Marking it a training day doesn’t add one to the program. It records what you intend to do.',
     };
   }
   return null;

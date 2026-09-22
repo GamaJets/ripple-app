@@ -12,12 +12,23 @@ Work top to bottom on the day the last of the three apps is approved and live.
 
 ---
 
-## 1. Turn email confirmation back on — SECURITY
+## 1. ~~Turn email confirmation back on~~ — DONE, verified 8 Sep 2026
 
 **Supabase → Authentication → Sign In / Providers → Supabase Auth → Confirm email**
 
-Turned **off** on 26 Aug 2026. Right now anyone can register an address they do
-not own, and the account works immediately.
+**It is back on.** Turned off on 26 Aug 2026, turned on again on 1 Sep 2026, and
+this file went on saying it was off for a week — which is the reason to record
+how it was checked rather than just flipping the word. The live project answers
+without a dashboard: `GET /auth/v1/settings` is public and returns
+`mailer_autoconfirm: false`, meaning a new signup must confirm before the
+account works. Re-run that if you need to know the state on any given day; a
+sentence in a document is not evidence of a setting that lives somewhere else.
+
+The rest of this section is kept because it is the argument for why the toggle
+must stay on, and because the template requirement below is still live.
+
+While it was off, anyone could register an address they did not own and the
+account worked immediately.
 
 **Why it was turned off.** Confirmation emails were being delivered by Resend
 and then quarantined by the recipient's mail provider — Microsoft 365 in the
@@ -31,21 +42,60 @@ gyms you have spoken to. It is not defensible when strangers can sign up:
 unverified addresses mean password resets can be aimed at accounts somebody
 else owns, and it lets one person squat on another's email.
 
-**The link shape is fixed already — 27 Aug 2026.** The Confirm sign up template
-must be changed at the same time as the toggle, or this comes straight back:
+**Confirm sign up is a CODE now, not a link — and it is already set correctly.
+Checked by eye on 11 Sep 2026.** The app calls `verifyOtp({ type: 'signup' })`
+with six digits the member reads out of the message (`src/ui/auth.tsx`,
+`src/ui/emailOtp.ts`). If the template had no `{{ .Token }}` in it, no code
+would arrive and the confirm screen could not be completed by anybody. Nothing
+in this repository fails when that is wrong — the template lives in the
+dashboard, which is exactly why it is recorded here rather than assumed.
 
-    <a href="https://repplefitness.com/confirmed?token_hash={{ .TokenHash }}&amp;type=signup">Confirm my email</a>
+What Auth → Emails → Confirm sign up actually contains today, read off the
+dashboard rather than inferred from this file:
 
-It must be the ONLY link in that template. `{{ .ConfirmationURL }}` routes
-through `/auth/v1/verify`, which spends the token server-side the moment
-*anything* fetches the URL — and a scanning mail filter fetches it before the
-person reads the message. `web/confirmed.html` now holds a `token_hash` and
-spends it when somebody presses the button, which a scanner does not do. Reset
-password was moved to this shape on 27 Aug and is the working example.
+    <h2>Confirm your email address</h2><p>Enter this code in the Repple app to
+    finish signing up:</p><h1>{{ .Token }}</h1><p>This code expires in 60
+    minutes. If you did not sign up, you can ignore this email.</p>
 
-Note that until that template changes, `web/confirmed.html` is still correct for
-the old `#access_token` shape — both are handled. Nothing breaks by waiting; the
-scanner problem simply persists.
+That satisfies everything below and needs no change. This section previously
+described the LINK shape, which was correct before the scanner problem moved
+confirmation to a code and stale afterwards — and a stale instruction here is
+worse than none, because following it would have replaced a working code
+template with a link and broken sign-up for everybody. The lesson is the one
+the toggle paragraph above already makes: a sentence in a document is not
+evidence of a setting that lives somewhere else. So this one says when it was
+looked at.
+
+Three things about that shape are load-bearing, and the live template has all
+three:
+
+- **`{{ .Token }}` and not `{{ .ConfirmationURL }}`.** The link routes through
+  `/auth/v1/verify`, which spends the token server-side the moment *anything*
+  fetches the URL — and a scanning mail filter fetches it before the person
+  reads the message. That is what took confirmation offline on 26 Aug; a code
+  removes the problem rather than working around it, because there is no URL to
+  fetch and nothing a machine can press. The argument is written out at the top
+  of `src/ui/emailOtp.ts`.
+- **Digits unbroken.** Not `123 456`, not `123-456`. iOS reads verification
+  codes out of Mail and offers them above the keyboard, and a code split by a
+  space or a hyphen is not recognised as one — the member gets no suggestion to
+  tap and has to swap apps and memorise it. It also breaks a plain copy-paste.
+  Letter-spacing is CSS and is safe; a literal separator character is not.
+- **The words "verification code" beside it.** That, and the code being near
+  the top, is what the detection keys on. There is no formal markup for email
+  the way `@domain #code` exists for SMS.
+
+`src/ui/OtpCodeEntry.tsx` holds up the app's end: one full-size field marked
+`oneTimeCode` behind the painted boxes, so the suggestion has somewhere to land.
+
+**Reset password is still the link shape**, moved there on 27 Aug and working:
+
+    <a href="https://repplefitness.com/confirmed?token_hash={{ .TokenHash }}&amp;type=recovery">Reset my password</a>
+
+It must be the ONLY link in that template, for the same scanner reason.
+`web/confirmed.html` holds the `token_hash` and spends it when somebody presses
+the button, which a scanner does not do. It also still handles the older
+`#access_token` shape, so nothing breaks in transit.
 
 **Also before flipping it back**, fix the rest of what made it necessary:
 
@@ -103,14 +153,59 @@ every callout below stays where it is. This line is here because "the store
 links 404" is the kind of claim that gets inherited rather than tested, and the
 whole point of the item is that nothing announces the day it stops being true.
 
+**Re-checked again 13 Sep 2026: still all six, eighteen days on.** Same result —
+`resultCount 0` on 6790096518, 6804358275 and 6804417240, 404 on all three Play
+packages. The three apps do exist on App Store Connect and go out over
+TestFlight; no listing is public, so a store badge on this website is still a
+button that 404s.
+
+**None of the three has ever been submitted, and the site was implying
+otherwise.** The lookup endpoints only say a listing is not public; they cannot
+say why. App Store Connect can, and was asked rather than reasoned about:
+
+```bash
+# ASC_KEY_ID / ASC_ISSUER_ID from ~/.appstoreconnect/env, ES256 JWT, then
+GET /v1/apps/<id>?include=appStoreVersions&fields[appStoreVersions]=versionString,appStoreState
+```
+
+    6790096518  Repple Client    IOS 1.0 — PREPARE_FOR_SUBMISSION
+    6804358275  Repple Coach     IOS 1.0 — PREPARE_FOR_SUBMISSION
+    6804417240  Repple Studio    IOS 1.0 — PREPARE_FOR_SUBMISSION
+
+Not `WAITING_FOR_REVIEW`, not `IN_REVIEW`, not `REJECTED`. **No version of any
+of the three is in review or approved.** The website said "Being released now"
+and "the store listings are still going live" in seven places — a claim about
+motion that does not exist, on the pages whose job is telling people where to
+get the app. All seven now say only what is checkable: *not on the stores yet*,
+and the button is the permanent address that opens when the listing publishes.
+That sentence does not go stale if the submission slips again.
+
+**Three of them had no caveat at all, and this is now gated.** The 3 Sep sweep
+put the disclosure under the badges in the HERO of `web/client.html`,
+`web/trainer.html` and `web/studio.html` and missed the CLOSING CALL TO ACTION
+on all three — so the last thing a reader saw on each of those pages was a
+"Download on the App Store" badge with nothing beside it. Fixed 13 Sep by adding
+the same sentence to each closing section, and, because one page carrying two
+badge clusters of which only one is caveated is the shape no hand sweep catches
+twice, **check N in `scripts/check-site-claims.mjs`** now refuses any
+`<a class="store">` cluster that has no release caveat inside its own
+`<section>`. It found the three; it fails loudly if another appears.
+
 What DOES need an edit when they are live:
 
-- `web/download.html` — delete the "Being released now" callout near the top.
-  It tells people a link that does not open means that app has not finished
-  going out, which stops being true.
+- `web/download.html` — delete the "Not on the stores yet" callout near the top.
+  It tells people the listings are not public, which stops being true.
 - `web/join.html` — the same callout, in the same words, on the page a coach's
   invite link lands on. Two pages, one fact; the comment at the top of each
   says so.
+- `web/index.html`, and the hero AND closing sections of `web/client.html`,
+  `web/trainer.html` and `web/studio.html` — the short form of the same
+  sentence, seven clusters in all.
+- **`scripts/check-site-claims.mjs` — delete check N with them.** It gates a
+  temporary untruth, not an invariant. Left in place after the listings publish
+  it would force the site to keep saying something that had stopped being true,
+  which is this same item pointing the other way. The check's own header says
+  so; `grep -n 'class="store"' web/*.html` lists every cluster to clear.
 
 Verify rather than assume:
 
@@ -126,24 +221,48 @@ done
 
 ---
 
-## 3. The deletion queue claim on the public page
+## 3. ~~The deletion queue claim on the public page~~ — DONE 13 Sep 2026
 
-`web/delete-account.html` says the Repple Studio screen showing an owner their
-pending deletion requests "is new and is not in every gym's build yet". True
-today. Once the build carrying `app/(owner)/deletions.tsx` is the one on the
-stores, that sentence is understating the product — reword it.
+**The sentence no longer depends on the store, so there is nothing left here to
+remember on launch day.** What follows is the argument, kept because the reason
+it was rewritten is worth more than the rewrite.
 
-**Re-checked 1 Sep 2026 and left alone.** `app/(owner)/deletions.tsx` exists,
-is registered in `app/(owner)/_layout.tsx:39` and is linked twice from
-`app/(owner)/settings.tsx`, so the SCREEN is real and has been since 25 Aug.
-That is not what the sentence claims. The condition it is written against is
+`web/delete-account.html` used to say the Repple Studio screen showing an owner
+their pending deletion requests "is new and is not in every gym's build yet".
+
+**Re-checked 1 Sep 2026 and left alone**, on this reasoning: `app/(owner)/deletions.tsx`
+exists, is registered in `app/(owner)/_layout.tsx` and is linked twice from
+`app/(owner)/settings.tsx`, so the SCREEN is real and has been since 25 Aug —
+which is not what the sentence claims. The condition it was written against is
 the build a gym is actually holding, and by §2 above there is no store build at
-all — Repple Studio's listing still 404s, owners are on TestFlight and internal
-tracks, and nothing in this repo records which binary any given gym installed.
-So the sentence is still true and, more to the point, it errs in the safe
-direction: it tells a member to email as well as tapping the button, and the
-email route is the one that does not depend on somebody else looking. Reword it
-when the listing publishes, not before.
+all. So it was still true, and it errs in the safe direction: it tells a member
+to email as well as tapping the button.
+
+**Rewritten 13 Sep 2026, for the half of that reasoning that is the actual
+problem.** "Nothing in this repo records which binary any given gym installed"
+is not a defence of the sentence, it is the objection to it. The page was
+resting a disclosure about a 30-day statutory deadline on a fact nobody here can
+establish — and was built to go stale the day the listings publish, which is the
+class of failure this whole file exists to catch. So it now rests on three
+things the code decides, each of which survives the listings going live:
+
+- Nothing runs on a timer. `delete from auth.users` appears in exactly two
+  places under `supabase/parts/`, and both are the same function —
+  `supabase/parts/41-account-deletion.sql` and its restatement in
+  `supabase/parts/2370-a-permanent-record-of-deleting-nobody.sql`. No
+  `cron.schedule` call site reaches it.
+- `action_account_deletion()` raises `42501` unless `is_owner_of()` says the
+  caller owns the subject's tenant, and the RPC is called from exactly one
+  screen. One person per gym, no other in-app route.
+- `is_owner_of()` in `supabase/parts/28-fix-profiles-recursion.sql` compares
+  `p.tenant_id = t`, which is NULL — and so false — for a subject attached to no
+  gym. An account with no tenant cannot be actioned in the app by anybody. That
+  is a property of the SQL, not of anybody's release schedule.
+
+The advice to email as well as tapping the button is unchanged, for the same
+reason it was there before: it is the route that does not depend on somebody
+else opening a screen. The full before-and-after is in an HTML comment directly
+above the paragraph.
 
 The rest of that page is verified against the schema and should not be touched
 without re-checking: the cascade counts came from `pg_constraint` on the live
@@ -364,10 +483,26 @@ Two days in which no workout saved for anybody, from any app, and nothing said
 so. `workoutLog.persist` does report the error — that part works — but nobody
 was reading a phone at the moment it happened.
 
-**Nothing in the repo catches this.** `tsc` passes: the TypeScript is correct.
-The assertions pass: `workoutRow`'s round-trip only checks the code agrees with
-itself. `expo export` passes: it is a runtime rejection, not a build one. Only
-an actual insert against the actual database fails.
+**Nothing in the repo caught this, on the day it happened.** `tsc` passes: the
+TypeScript is correct. The assertions pass: `workoutRow`'s round-trip only
+checks the code agrees with itself. `expo export` passes: it is a runtime
+rejection, not a build one. On 27 Aug 2026 only an actual insert against the
+actual database failed.
+
+That is what the **AUTOMATED** heading on this item now means, and the
+paragraph above is kept because it is the argument for the automation rather
+than a live warning. `check:schema` — the LIVE probe, `node
+scripts/check-schema.mjs` with no `--offline` — compares the columns the repo
+declares against the database in both directions and reports a
+declared-but-missing column as "a migration has not been run", which is exactly
+this failure, named. Be precise about WHERE it runs: `npm run check:all`
+contains only `check:schema:offline`, which never asks the database anything.
+The live probe runs in `npm run preflight` and in `scripts/publish.sh`, so a
+green `check:all` is still not evidence that a part has been applied.
+
+The last paragraph of this item stands unchanged either way: a column can exist
+and a write still be refused for a policy reason, and only a real insert finds
+that.
 
 So before any release, and after adding any migration, check the parts are
 really applied. Not "did I paste setup.sql", which is the step that was missed

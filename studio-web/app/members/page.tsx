@@ -21,10 +21,15 @@
 // that draws as an empty record is how a gym concludes a member has paid
 // nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailed, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { slicesLanded } from '@lib/readLanded';
 import {
   fetchMemberships, fetchPayments, money,
   type Membership, type GymPayment,
@@ -35,12 +40,50 @@ import { readByIds } from '@lib/idLookup';
 import { fetchSessions, type PtSession } from '@lib/gymSessions';
 import { fetchPasses, passStatus, remainingUses, type GymPass } from '@lib/gymPasses';
 import { fetchInvites, inviteState, type MemberInvite } from '@lib/memberInvites';
+// What the gym is actually asking each member for. The price book has never
+// been drawn beside it anywhere in this console — see src/lib/priceBook.ts for
+// why the bill and not the payment is the thing compared to a list price.
+import { fetchInvoices, type GymInvoiceRow } from '@lib/gymInvoices';
+import {
+  fetchPriceBook, priceRows, summarisePrices, driftLine, otherCurrencyNote,
+  priceAges, priceAgeLine, A_YEAR_DAYS,
+  PRICE_STATE_LABEL, PRICE_STATE_MEANS, PRICE_AGE_LABEL, WHY_PRICE_AGE_IS_UNKNOWN,
+  type PricedPlan, type PriceStamps, type PriceRow, type PriceAge,
+} from '@lib/priceBook';
+// Who the app can reach, and who is a name the gym typed into a box.
+import {
+  appAccountSplit, offAppWithheld, APP_ACCOUNT_LABEL, APP_ACCOUNT_MEANS,
+  COUNTS_ARE_NOT_A_TOTAL, type OffAppPerson,
+} from '@lib/appAccounts';
 import {
   fetchMemberRecords, saveMemberRecord, byMember, parseTags, tagsText,
   contactLine, searchableFields, isEmptyPatch,
   type GymMemberRecord, type MemberRecordPatch,
 } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { gymLink, noGymNote } from '@lib/gymLink';
+// Totals that never cross a currency. /analytics solves the same problem with
+// the same function; this tile used a bare `reduce` and the gym's current code.
+import { paidTotal, paidNote } from '@lib/gymPaidTotal';
+import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
+import { isoDate } from '@lib/format';
+// The reader's locale, the GYM's zone. Every date on a member's record — a
+// payment, a door visit, a booking, an invite — was drawn on whichever laptop
+// was open, so the same member's last visit read as two different days at two
+// desks in two countries.
+import { calendarDateText, gymDateText, gymDateTimeText, whoseClockNote } from '@lib/gymWhen';
+import { gymDay, parseGymZone } from '@lib/gymZone';
+import {
+  fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
+  type MemberNote,
+} from '@lib/memberNotes';
+import {
+  logBroadcast, loggingNote,
+  // The half that was written and never read. See `SentNotices` below for what
+  // an audit table nothing can open is worth.
+  fetchBroadcasts, senderLine, deliveredLine, logCaption, splitRecipients, recipientLine,
+  type BroadcastLog,
+} from '@lib/gymBroadcastLog';
 import {
   buildSegments, segmentCsv, postToSegment, reachBlocker, deliveryNote,
   willTruncateInbox, MAX_BODY, INBOX_BODY,
@@ -48,8 +91,15 @@ import {
 } from '@lib/gymReach';
 import {
   sliceLoading, sliceReady, sliceFailed,
+  // The four-arm note. Every tile below was a hand-written two-arm version —
+  // `state === 'failed' ? 'x not read' : <an affirmative claim>` — so a
+  // TRUNCATED read fell into the affirmative arm and this page told an owner
+  // "no visit in 90 days" and "no plan attached" about rows it had simply not
+  // read. Those two sentences are acted on: one is why a member gets a
+  // win-back call, the other is why somebody goes looking for a missing plan.
+  sliceNote,
   buildDossiers, retentionRead, doorLogActive, attendanceCaveat,
-  partialWarning, brokenParts, completeness,
+  partialWarning, truncationWarning, brokenParts, completeness,
   DEFAULT_WINDOW_DAYS,
   type Slice, type MemberRecord, type MemberBooking, type MemberDossier,
 } from '@lib/memberView';
@@ -70,12 +120,44 @@ const EMPTY: MemberRecord = {
 
 export default function Members() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   // `tenants.currency`. The payment ROWS below carry their own currency and use
   // it; the two figures that SUM them across a member's history have none of
   // their own, and inherit the gym's rather than a default.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<MemberRecord>(EMPTY);
+  /**
+   * The price book, and the bills raised against the memberships on it.
+   *
+   * Held beside `rec` rather than inside it, for the reason `gymRecs` below is:
+   * `MemberRecord` is src/lib/memberView.ts's shape and this screen is not that
+   * module's only reader. Two more slices, loaded and failing on their own, so
+   * a refused price book costs the drift table and nothing else on the page.
+   */
+  const [plans, setPlans] = useState<Slice<PricedPlan>>(sliceLoading());
+  /** Whether this database can date a price change at all — see
+   *  supabase/parts/2880. Null until the price book has been read, and null is
+   *  not 'no-column': one is a question nobody has asked yet. */
+  const [stamps, setStamps] = useState<PriceStamps | null>(null);
+  const [invoices, setInvoices] = useState<Slice<GymInvoiceRow>>(sliceLoading());
   const [sel, setSel] = useState<string | null>(null);
   /**
    * What the GYM knows about each person: contact, next of kin, an operational
@@ -92,15 +174,28 @@ export default function Members() {
   // One search box over the roster. There was none anywhere in this console,
   // and this is the screen the six-hundred-member roster lives on.
   const [q, setQ] = useState('');
+  /** Bumped when a notice is posted, so the record of what was sent re-reads
+   *  without a page reload. Not the notice itself — the list below reads the
+   *  row back from the database, which is the only copy that answers for it. */
+  const [sentAt, setSentAt] = useState(0);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setRec(EMPTY);
+    setPlans(sliceLoading());
+    setInvoices(sliceLoading());
+    setStamps(null);
     const sinceIso = new Date(Date.now() - WINDOW_DAYS * DAY).toISOString();
+    // The upper bound on the invoice read, on the GYM's clock — the same day
+    // `today` is drawn on below, and the reader's own only where the gym has
+    // never set a zone. An invoice dated tomorrow is post-dated billing and is
+    // not what anybody is being asked for today; /close and /tax bound the same
+    // read the same way.
+    const upToDay = gymDay(Date.now(), zone) ?? isoDate(new Date());
 
     // Seven independent reads, and deliberately not one Promise.all with a
     // single catch. A door log that 500s must not take the payments down with
     // it — the page is allowed to be partial, but only if it says which part.
-    const [memberships, payments, visits, bookings, sessions, passes, invites] = await Promise.all([
+    const [memberships, payments, visits, bookings, sessions, passes, invites, book, bills] = await Promise.all([
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchPayments(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId, { sinceIso })),
@@ -108,50 +203,124 @@ export default function Members() {
       slice(() => fetchSessions(supabase, tenantId, sinceIso)),
       slice(() => fetchPasses(supabase, tenantId)),
       slice(() => fetchInvites(supabase, tenantId)),
+      readPriceBook(tenantId),
+      slice(() => fetchInvoices(supabase, tenantId, upToDay)),
     ]);
     setRec({ memberships, payments, visits, bookings, sessions, passes, invites });
+    setPlans(book.plans);
+    setStamps(book.stamps);
+    setInvoices(bills);
 
     // Read after the seven above rather than beside them, and separately, so a
     // gym that has not applied part 197 yet — where this table does not exist —
     // gets one stated failure on one section instead of a page that will not
     // load. Everything else on this screen is unaffected by it.
+    let recsLanded = true;
     try {
       setGymRecs(byMember(await fetchMemberRecords(supabase, tenantId)));
       setGymRecsErr(null);
     } catch (e: any) {
+      recsLanded = false;
       setGymRecs(null);
       setGymRecsErr(e?.message ?? 'The gym’s own notes on your members could not be read.');
     }
-  }, []);
+
+    // Whole means all ten reads answered. `useFetched` stamps only on a whole
+    // read, so a refresh that lost the door log leaves the stamp where it was
+    // and the section's own banner is what says which read is missing —
+    // counting what the server confirmed, not what was sent. A TRUNCATED slice
+    // still counts as an answer: see src/lib/readLanded.ts, and the truncation
+    // has a banner of its own.
+    //
+    // The price book and the bills are in the list, not exempt from it: a stamp
+    // saying "read just now" over a drift table built from a price book that
+    // did not arrive is the same false claim as one over a missing door log.
+    return recsLanded && slicesLanded([
+      memberships, payments, visits, bookings, sessions, passes, invites,
+      book.plans, bills,
+    ]);
+    // `zone` because the invoice read is bounded on the GYM's day. The reader is
+    // held in a ref and reassigned every render (components/Fetched.tsx), so a
+    // new identity here does not re-fire anything; it is picked up by the next
+    // refresh, which is what a zone arriving after the first read should do.
+  }, [zone]);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * The whole roster in one read, and every figure on it is one a member of
+   * staff acts on: who is overdue, who has not been in for six weeks, whose
+   * pass has run out. A console left open on the front desk answered about the
+   * moment the tab was opened and did not say which moment that was — so
+   * "last in 41 days ago" was read at nine in the morning and believed at four
+   * in the afternoon, after the person had walked past the desk.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    // Eight owner-only reads, so they are not made for anybody the gate below
+    // refuses. A receptionist who types this URL used to fire all eight and
+    // have every one of them come back filtered to nothing before the refusal
+    // rendered over the top — the same wrong query the Door screen declines to
+    // keep re-asking, with the added cost that a filtered read looks exactly
+    // like an empty gym.
+    { enabled: me?.role === 'owner' },
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setRec({
-          memberships: sliceReady([]), payments: sliceReady([]), visits: sliceReady([]),
-          bookings: sliceReady([]), sessions: sliceReady([]), passes: sliceReady([]),
-          invites: sliceReady([]),
-        });
-        return;
-      }
+      // `sliceReady([])` is the strongest positive claim this codebase has: it
+      // is a read that landed WHOLE and returned nothing. Seven of them for an
+      // account with no gym on it, and `buildDossiers` then builds a roster of
+      // nobody — no members, nobody behind on payment, nobody who has not been
+      // in — for an owner whose gym is full. Nothing was asked. The slices stay
+      // loading and the branch below the role gate is what renders. See
+      // src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'members, memberships or visits');
+      if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', link.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only. The eight reads are fired by the effect
+    // below, through `refresh`, so the first read stamps exactly like every
+    // later one.
+  }, []);
 
-  const dossiers = useMemo(() => buildDossiers(rec), [rec]);
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render — the one where `me` is still
+  // undefined — and answer `false` without having read anything.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
+
+  /** The instant these eight reads landed, and the one every dossier is judged
+   *  at. `buildDossiers` defaults its `now`, and this memo is keyed on the rows
+   *  alone — so "last in 41 days ago" and every unmarked-session count under it
+   *  were frozen at the render that first built them, on a roster screen that is
+   *  left open all day at a front desk. */
+  const nowMs = readAt ?? Date.now();
+
+  const dossiers = useMemo(() => buildDossiers(rec, nowMs), [rec, nowMs]);
   const active = doorLogActive(rec);
 
   /**
@@ -186,12 +355,15 @@ export default function Members() {
     window.history.replaceState(null, '', url.toString());
   }, []);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/members">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -202,19 +374,113 @@ export default function Members() {
     );
   }
 
+  /*
+   * Owner only, and the receptionist is the case worth writing down.
+   *
+   * ── What was expected here, and why it is not what shipped ───────────────
+   *
+   * supabase/parts/711 gave the gym's front desk a role and named four files
+   * the console had to change to honour it. This is one of them, and the note
+   * against it reads: "owner-only today; the member RECORD is what the desk
+   * needs, and the money on that screen is what it must not have."
+   *
+   * The money is not the obstacle. It could be withheld — the payment tiles,
+   * the paid total, the invoices, the plan price and the passes are each their
+   * own section and each has an owner-only read behind it, so a version of this
+   * page with every priced thing removed is straightforward to draw.
+   *
+   * The ROSTER is the obstacle. Every person on this screen comes from
+   * `memberIds()` in src/lib/memberView.ts, which reads the `memberships`
+   * slice and nothing else — deliberately, and its own comment says why:
+   * inventing a roster from whoever appears in the door log would quietly drop
+   * every member who has not been in this month. `memberships` has exactly two
+   * policies, `is_owner_of(tenant_id)` and `member_id = auth.uid()`. A
+   * receptionist matches neither.
+   *
+   * A refused SELECT and a filtered SELECT are not the same event. Row-level
+   * security does not raise here; it returns no rows. So this page would not
+   * fail for a receptionist, it would load — every read landing, no banner, no
+   * stated failure — and draw a gym with no members at all. That is the worst
+   * available answer, and it is the one part 530 spends forty lines refusing:
+   * a screen that says something false to somebody who has no way to tell.
+   *
+   * ── What the desk gets instead, and what would change this ───────────────
+   *
+   * /door, which is the screen the two widened policies actually cover, and
+   * which draws only the halves of itself that a receptionist can read. It
+   * carries the next of kin and the gym's medical note out of
+   * `gym_member_records` — the part of this page part 711 wanted the desk to
+   * have — for anybody in the building.
+   *
+   * Opening this screen needs a policy, not a gate: a staff SELECT on
+   * `memberships` and a staff read of members' names, which today live in
+   * `profiles` and are visible to a receptionist for nobody. Both are decisions
+   * for a part file, with the disclosure written out, in the shape part 711
+   * used for the two it did widen. Until one exists, this sentence is the
+   * honest version of this screen for the desk.
+   */
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/members">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
         <h1>Not your console</h1>
-        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '68ch' }}>
           The member record carries payments, so it is owner-only.
+        </p>
+        {me.role === 'receptionist' ? (
+          <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '68ch' }}>
+            The desk is not refused here because of the money, which could be left
+            out. It is refused because the roster on this screen is built from the
+            membership rows, and a reception account may not read those — so this
+            page would load without error and show a gym with nobody in it. The
+            door screen has the next of kin and the gym&rsquo;s note for everybody in
+            the building, which is the part of this record the desk is for.
+          </p>
+        ) : null}
+      </Shell>
+    );
+  }
+
+  // Before the roster, because the roster is the claim. Every tile, the search
+  // and all seven tables below are built from `rec`, and an owner reading "no
+  // members" off this screen concludes their gym has lost its roster — not
+  // that their own account has lost its gym, which is the thing somebody can
+  // actually put right.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
+        <h1>Members</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('members, memberships or visits')}
         </p>
       </Shell>
     );
   }
 
   const warning = partialWarning(rec);
+  // A separate sentence from the one above, deliberately. "We could not read the
+  // door log" and "we read the first thousand visits of more" are two different
+  // states of this page and a reader acts on them differently: the first is a
+  // fault to chase, the second is a figure to stop quoting.
+  const cut = truncationWarning(rec);
   const caveat = attendanceCaveat(rec);
+  // The gym's own calendar day. /door judges every pass against this and this
+  // screen judged the same passes against the UTC date, so for the four hours
+  // between local and UTC midnight the two screens gave a member two different
+  // answers about the same pass.
+  //
+  // The reader's own day was the second half of that same bug, and it is now
+  // the FALLBACK rather than the answer: a pass expires at the end of a day AT
+  // THE GYM, so an owner checking from Sydney was told a pass had run out while
+  // the member was standing at the turnstile with hours left on it. `isoDate`
+  // is kept for the gym that has not set a timezone, where the reader's clock
+  // is the only clock there is.
+  //
+  // And judged at the INSTANT this page read, like every dossier beside it.
+  // `dossiers` above is built at `nowMs`; a bare `Date.now()` here is a second
+  // clock on one screen, and the two disagree for as long as the tab has been
+  // open — a pass whose last day is today reading as expired in the Status
+  // column while the dossier around it is still answering about the read.
+  const today = gymDay(nowMs, zone) ?? isoDate(new Date(nowMs));
   const chosen = sel && dossiers ? dossiers.find((d) => d.memberId === sel) ?? null : null;
 
   // The headline this page exists to produce: members whose classes stopped but
@@ -233,14 +499,17 @@ export default function Members() {
   // honest here, and the gym-wide view at /retention gates the same two
   // figures the same way.
   const doorLive = active === true;
-  // Non-null after the role gate above: this screen refuses anybody without a
-  // tenant long before it reaches a write.
-  const tenantId = me.tenantId!;
+  // Non-null because the no-gym branch above returned. This said "after the
+  // ROLE gate", which refuses a non-owner and says nothing about a tenant — so
+  // the `!` was carrying a claim nothing on the page had checked, and an
+  // account with no gym reached every write form on this screen with an empty
+  // string in hand. The check exists now, so the assertion does not need to.
+  const tenantId = me.tenantId;
   const offTimetable = doorLive ? (reads?.filter((x) => x.r.stillTrainingOffTheTimetable) ?? null) : null;
   const absent = doorLive ? (reads?.filter((x) => x.r.absentFromLiveDoorLog) ?? null) : null;
 
   return (
-    <Shell me={me} gymName={gymName} current="/members">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
       <h1>Members</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         The whole record for one person: membership and plan, what they have
@@ -248,7 +517,11 @@ export default function Members() {
         against classes attended, one-to-ones and passes.
       </p>
 
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this roster" style={{ margin: '2px 0 16px' }} />
+
       {warning ? <Banner tone="crit">{warning}</Banner> : null}
+      {cut ? <Banner tone="crit">{cut}</Banner> : null}
       {caveat ? <Banner>{caveat}</Banner> : null}
 
       <div
@@ -261,13 +534,13 @@ export default function Members() {
         <Kpi
           label="On the roster"
           text={dossiers ? String(dossiers.length) : null}
-          note={rec.memberships.state === 'failed' ? 'memberships not read' : undefined}
+          note={sliceNote(rec.memberships, 'the membership list') ?? undefined}
         />
         <Kpi
           label="Seen this week"
           text={rec.visits.state === 'ready' ? seenWithin(dossiers, 7) : null}
           note={
-            rec.visits.state === 'failed' ? 'door log not read'
+            rec.visits.state !== 'ready' ? sliceNote(rec.visits, 'the door log') ?? undefined
               : active === false ? 'nothing at the door in 90 days'
               : undefined
           }
@@ -303,10 +576,21 @@ export default function Members() {
         </Banner>
       ) : null}
 
+      {/* Above the form that sends things, deliberately. It answers the question
+          an owner has just before pressing send — who will this actually reach —
+          rather than reporting it afterwards in `deliveryNote`'s count. */}
+      <AppAccounts rec={rec} nowMs={nowMs} />
+
       <Reach
         dossiers={dossiers} doorLogLive={doorLive} me={me} tenantId={tenantId}
         gymName={gymName} gymRecs={gymRecs}
+        onSent={() => setSentAt(Date.now())}
       />
+
+      {/* Directly under the form that writes it, because the form's own failure
+          copy sends a sender here to check whether their notice went out before
+          they send it a second time. */}
+      <SentNotices tenantId={tenantId} me={me} zone={zone} reloadKey={sentAt} />
 
       <Roster
         rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={pick} ccy={ccy}
@@ -316,8 +600,9 @@ export default function Members() {
       {chosen ? (
         <Dossier
           d={chosen} rec={rec} active={active} onClose={() => pick(null)} ccy={ccy}
+          today={today} zone={zone}
           gymRec={gymRecs?.get(chosen.memberId) ?? null} gymRecsRead={gymRecs !== null}
-          tenantId={tenantId} me={me} onSaved={() => load(tenantId)}
+          tenantId={tenantId} me={me} onSaved={refresh}
         />
       ) : (
         <Section title="One member" sub="Pick somebody above to open their record.">
@@ -328,6 +613,10 @@ export default function Members() {
           </p>
         </Section>
       )}
+
+      <PriceAgainstPaid rec={rec} plans={plans} invoices={invoices} />
+
+      <PriceAges plans={plans} stamps={stamps} zone={zone} nowMs={nowMs} />
     </Shell>
   );
 }
@@ -341,6 +630,26 @@ async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
     return sliceReady(await run());
   } catch (e: any) {
     return sliceFailed(e?.message ?? 'The read failed.');
+  }
+}
+
+/**
+ * The price book, and whether this database can date a price change.
+ *
+ * Its own reader rather than `slice()` because it returns two facts, and the
+ * second one has to survive a failure: `stamps` goes null when the read fails,
+ * which is a different sentence from 'no-column' and is why `priceAges` keeps
+ * 'unreadable' and 'no-column' apart. A failed read reported as "this database
+ * has no such column" would send an owner to apply a part they already have.
+ */
+async function readPriceBook(tenantId: string): Promise<{
+  plans: Slice<PricedPlan>; stamps: PriceStamps | null;
+}> {
+  try {
+    const book = await fetchPriceBook(supabase, tenantId);
+    return { plans: sliceReady(book.plans), stamps: book.stamps };
+  } catch (e: any) {
+    return { plans: sliceFailed(e?.message ?? 'The read failed.'), stamps: null };
   }
 }
 
@@ -460,17 +769,22 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
     },
     {
       key: 'paid', header: 'Paid', value: (d) => d.paidCents ?? null, numeric: true,
-      // `amount`, not `money`. This column sums a member's payments and has no
-      // row currency of its own, so `money()` wrote "AED" over it — while the
-      // payments table inside the same dossier prints each row with its real
-      // currency. One member's money, shown two ways, on one screen.
-      render: (d) => (
-        <Cell
-          state={rec.payments.state}
-          value={amount(d.paidCents, ccy)}
-          empty={d.paidCents != null && !ccy ? NO_CURRENCY_NOTE : 'nothing recorded'}
-        />
-      ),
+      // Grouped by currency before it is totalled, and refusing where that is
+      // more than one. It was `amount(d.paidCents, ccy)` — every payment added
+      // together and labelled with the gym's CURRENT setting — while the
+      // payments table inside the dossier prints each row with the currency it
+      // was actually taken in. One member's money, shown two ways, on one
+      // screen, and the wrong one is the one an owner quotes down the phone.
+      render: (d) => {
+        const t = paidTotal(rec.payments.state, d.payments);
+        return (
+          <Cell
+            state={rec.payments.state}
+            value={t.kind === 'one' ? money(t.minorUnits, t.currency) : null}
+            empty={paidNote(t) ?? 'nothing recorded'}
+          />
+        );
+      },
     },
     {
       key: 'read', header: 'Door vs timetable', value: (d) => {
@@ -526,8 +840,15 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
         <Failed reason={(rec.memberships as { reason: string }).reason}
                 what="the membership list" />
       ) : null}
+      {/* `dossiers` is null under a truncated read too — `rowsOf` withholds a
+          prefix — so this section rendered its heading over nothing at all and
+          said not one word about why. A headed, empty roster reads as a gym
+          with no members. */}
+      {rec.memberships.state === 'partial' ? (
+        <Truncated what="the membership list" cap={rec.memberships.cap} />
+      ) : null}
       {dossiers ? (
-        <DataTable
+        <DataTable noun="members"
           rows={shown} columns={cols} rowKey={(d) => d.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
@@ -536,11 +857,368 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
   );
 }
 
+/* ── who is on the app ─────────────────────────────────────────────────────── */
+
+/**
+ * Which of the people this gym calls members can actually be sent anything.
+ *
+ * A gym's roster is two kinds of record and this console drew them as one: the
+ * people holding memberships, every one of whom has a Repple account because
+ * `memberships.member_id` cannot point anywhere else, and the people the gym
+ * typed into the invite box who have never claimed one. The second group are
+ * members in every sense the gym means and are reachable by nothing this screen
+ * can send. Until now the only place that difference surfaced was `deliveryNote`
+ * AFTER a notice had gone out, as a number: "delivered to 34 of 41 inboxes".
+ *
+ * The two counts are never added. See `COUNTS_ARE_NOT_A_TOTAL`, which is on the
+ * screen under them: they count different records and this database cannot join
+ * them, so a sum would double-count exactly the people who were chased twice.
+ */
+function AppAccounts({ rec, nowMs }: { rec: MemberRecord; nowMs: number }) {
+  // `nowMs` is the instant the reads landed, handed down rather than read here:
+  // a clock read inside a memo keyed on rows is frozen at the render that built
+  // it, and an invite expiring at noon would stay "open" on a desk console left
+  // up all day.
+  const split = useMemo(
+    () => appAccountSplit(rec.memberships, rec.invites, nowMs),
+    [rec.memberships, rec.invites, nowMs],
+  );
+  const withheld = offAppWithheld(rec.memberships, rec.invites);
+  const c = split.counts;
+  const people = split.offTheApp;
+
+  const cols: Column<OffAppPerson>[] = [
+    {
+      key: 'name', header: 'Person', value: (p) => p.name ?? p.email ?? '￿',
+      render: (p) => p.name ?? <span className="dash">no name was typed</span>,
+    },
+    {
+      key: 'email', header: 'Address', value: (p) => p.email,
+      render: (p) => p.email
+        ? <span className="mono" style={{ fontSize: 12 }}>{p.email}</span>
+        : <span className="dash">none left</span>,
+    },
+    {
+      key: 'state', header: 'State', value: (p) => APP_ACCOUNT_LABEL[p.state],
+      render: (p) => APP_ACCOUNT_LABEL[p.state],
+    },
+  ];
+
+  // Only the states actually on the page get a sentence under it. A legend
+  // listing all four would explain an erased account to a gym that has never
+  // erased one, and the two that matter would be read past.
+  const legend = [...new Set((people ?? []).map((p) => p.state))];
+
+  return (
+    <Section
+      title="On the App"
+      sub="Everybody holding a membership has a Repple account — this database cannot record a membership without one. The people below are the ones the gym typed in, and nothing sent from this console reaches them."
+    >
+      <div
+        style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 1, background: 'var(--ring)', borderBottom: '1px solid var(--ring)',
+        }}
+      >
+        <Kpi
+          label={APP_ACCOUNT_LABEL['on-the-app']} value={c.onTheApp}
+          note={sliceNote(rec.memberships, 'the membership list') ?? 'people a notice reaches'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL.invited} value={c.invited}
+          tone={c.invited ? 'warn' : undefined}
+          note={sliceNote(rec.invites, 'the invitations') ?? 'reachable only by email'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL['invite-lapsed']} value={c.inviteLapsed}
+          note={sliceNote(rec.invites, 'the invitations') ?? 'needs sending again'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL['account-erased']} value={c.accountErased}
+          note={sliceNote(rec.memberships, 'the membership list') ?? 'the membership is kept for the books'}
+        />
+      </div>
+
+      <p style={{ margin: 0, padding: '11px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+        {/*
+          * numbers-ok: a SENTENCE, not a figure. `COUNTS_ARE_NOT_A_TOTAL` in
+          * src/lib/appAccounts.ts is the paragraph saying why the four tiles
+          * above may not be added together; check:numbers matches the bare word
+          * "total" inside the CONSTANT'S NAME, and there is no number on this
+          * line for a separator to go into.
+          *
+          * The same kind of claim as `kcalNote`, `grams` and `payrollMoney` on
+          * that gate's SMALL list — "is not a number at all" rather than "cannot
+          * reach 999" — made at the site rather than in SMALL, because SMALL is
+          * keyed on a NAME and this one belongs to one screen.
+          */}
+        {COUNTS_ARE_NOT_A_TOTAL}
+      </p>
+
+      {withheld ? (
+        <div style={{ padding: '0 14px 12px' }}>
+          <Banner>{cap(withheld)}</Banner>
+        </div>
+      ) : null}
+
+      {people ? (
+        <DataTable noun="people"
+          rows={people} columns={cols} rowKey={(p) => p.key}
+          empty="Everybody on this roster holds an account, and no invitation is outstanding. Anything posted from this screen reaches all of them." />
+      ) : null}
+
+      {legend.length ? (
+        <ul style={{ margin: 0, padding: '4px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {legend.map((s) => (
+            <li key={s}><strong style={{ color: 'var(--ink2)' }}>{APP_ACCOUNT_LABEL[s]}</strong>: {APP_ACCOUNT_MEANS[s]}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── the price book against what is actually charged ───────────────────────── */
+
+/**
+ * Every live membership beside the list price of the plan it was sold on.
+ *
+ * The drift is the point: a gym sets a price, then sells at the old one, keeps
+ * a founder on a 2019 figure, agrees a corporate rate on the phone and puts the
+ * list price up. Every one of those is deliberate and none of them was visible
+ * anywhere — /money draws the price book, the memberships and the payments in
+ * three tables and never puts two of them on one line.
+ *
+ * The two things this screen will not do are in src/lib/priceBook.ts and they
+ * are load-bearing: it never subtracts across two currencies, and it never
+ * folds a member whose price it could not read into "on the list price".
+ */
+function PriceAgainstPaid({ rec, plans, invoices }: {
+  rec: MemberRecord;
+  plans: Slice<PricedPlan>;
+  invoices: Slice<GymInvoiceRow>;
+}) {
+  const rows = useMemo(
+    () => priceRows({ memberships: rec.memberships, plans, invoices }),
+    [rec.memberships, plans, invoices],
+  );
+  const sum = rows ? summarisePrices(rows) : null;
+
+  const cols: Column<PriceRow>[] = [
+    {
+      key: 'name', header: 'Member', value: (r) => r.memberName ?? '￿',
+      render: (r) => r.memberName ?? <span className="dash">erased account</span>,
+    },
+    {
+      key: 'plan', header: 'Plan', value: (r) => r.planName,
+      render: (r) => r.planName ?? <span className="dash">none attached</span>,
+    },
+    {
+      key: 'list', header: 'List Price', value: (r) => r.listCents ?? null, numeric: true,
+      // Each side carries its OWN currency and is drawn in it. A column headed
+      // with one currency over figures denominated in two is how a gym reads a
+      // EUR bill as pounds.
+      //
+      // ── two silences, and only one of them is a failed read ────────────
+      //
+      // `money()` withholds for two quite different reasons and this cell used
+      // to answer "not read" for both. `PriceRow.listCurrency` is now the
+      // NORMALISED code out of `iso()` in src/lib/priceBook.ts, which admits
+      // only /^[A-Z]{3}$/ — and neither `membership_plans.currency` nor
+      // `gym_invoices.currency` is constrained to a currency code in the
+      // schema, so a hand-typed or imported plan priced "60.00 pounds" arrives
+      // here as a perfectly readable 6000 with a null code beside it.
+      //
+      // "Not read" about that row is false twice over: the price book came back
+      // whole, and it sends an owner to reload a page that will say the same
+      // thing forever. The row it belongs to is already labelled Amount Not
+      // Stated and PRICE_STATE_MEANS explains the case; this cell now says
+      // which of the two silences it is rather than blaming the query.
+      render: (r) => money(r.listCents, r.listCurrency)
+        ?? <span className="dash">{r.listCents == null
+          ? 'not read'
+          : 'priced, but not in a currency this app can name'}</span>,
+    },
+    {
+      key: 'billed', header: 'Last Bill', value: (r) => r.billedCents ?? null, numeric: true,
+      // The same three answers as the list price beside it, in the same order:
+      // no bill at all, a bill whose amount did not arrive, and a bill carrying
+      // an amount whose currency column holds something that is not a code.
+      render: (r) => money(r.billedCents, r.billedCurrency)
+        ?? <span className="dash">{r.state === 'not-billed' ? 'never billed'
+          : r.billedCents == null ? 'not read'
+          : 'billed, but not in a currency this app can name'}</span>,
+    },
+    {
+      key: 'diff', header: 'Difference', value: (r) => r.diffCents ?? null, numeric: true,
+      render: (r) => {
+        if (r.diffCents != null) {
+          const t = money(r.diffCents, r.listCurrency);
+          return t ? <span style={{ color: r.diffCents === 0 ? 'var(--ink3)' : 'var(--warn)' }}>{t}</span>
+            : <span className="dash">not stateable</span>;
+        }
+        // Not a dash on its own: this cell is the one an owner's eye goes to,
+        // and empty here would read as "no difference".
+        return <span className="dash">{r.state === 'other-currency' ? 'not compared' : 'not known'}</span>;
+      },
+    },
+    {
+      key: 'when', header: 'Billed On', value: (r) => r.billedOn,
+      // A bare YYYY-MM-DD off a `date` column: already a day, so it is spelled
+      // in the reader's locale and in no zone at all. `gymDateText` would move
+      // it by one for readers far enough east or west of the gym.
+      render: (r) => calendarDateText(r.billedOn) ?? <span className="dash">no bill</span>,
+    },
+    {
+      key: 'state', header: 'State', value: (r) => PRICE_STATE_LABEL[r.state],
+      render: (r) => (
+        <span style={{ color: r.state === 'on-list' ? 'var(--ink3)' : 'var(--ink)' }}>
+          {PRICE_STATE_LABEL[r.state]}
+        </span>
+      ),
+    },
+  ];
+
+  // One sentence per currency PAIR, not per member: the wording depends only on
+  // the two codes, so fifty EUR bills against a GBP plan produce one line.
+  const mixed = [...new Set((rows ?? []).map(otherCurrencyNote).filter((n): n is string => n != null))];
+  const legend = [...new Set((rows ?? []).map((r) => r.state))];
+
+  return (
+    <Section
+      title="The Price Book Against What Is Charged"
+      sub="Every live membership beside the list price of the plan it was sold on. What a member is CHARGED is the last invoice raised against their membership; what they have PAID is a different question and is on their record above."
+    >
+      {rows && sum ? (
+        <p style={{ margin: 0, padding: '11px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+          {driftLine(sum, rows.length)}
+        </p>
+      ) : null}
+
+      {rec.memberships.state === 'loading' ? <Loading /> : null}
+      {rec.memberships.state === 'failed' ? (
+        <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
+      ) : null}
+      {rec.memberships.state === 'partial' ? (
+        <Truncated what="the membership list" cap={rec.memberships.cap} />
+      ) : null}
+
+      {rows ? (
+        <DataTable noun="memberships"
+          rows={rows} columns={cols} rowKey={(r) => r.membershipId}
+          empty="No live membership to hold against the price book." />
+      ) : null}
+
+      {mixed.length ? (
+        <ul style={{ margin: 0, padding: '4px 14px 0 30px', fontSize: 12.5, color: 'var(--warn)' }}>
+          {mixed.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      ) : null}
+
+      {legend.length ? (
+        <ul style={{ margin: 0, padding: '10px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {legend.map((s) => (
+            <li key={s}><strong style={{ color: 'var(--ink2)' }}>{PRICE_STATE_LABEL[s]}</strong>: {PRICE_STATE_MEANS[s]}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── a price that has not moved ────────────────────────────────────────────── */
+
+/**
+ * How long each plan on sale has been at its price.
+ *
+ * Until supabase/parts/2880 is applied every row here says the same thing, and
+ * that is the honest output rather than a broken one: `membership_plans` carries
+ * the price and the day the ROW was made, `price_cents` is written over in
+ * place, and nothing in this database records when it last moved. The three
+ * things that look like an answer — `created_at`, a row-wide `updated_at`, and
+ * the absence of a 'price-changed' event — are each wrong in a way that would
+ * flag plans that were repriced last month, and an owner who acts on one of
+ * those never trusts the screen again. The part's header argues all three.
+ */
+function PriceAges({ plans, stamps, zone, nowMs }: {
+  plans: Slice<PricedPlan>;
+  stamps: PriceStamps | null;
+  zone: string | null;
+  nowMs: number;
+}) {
+  const ages = useMemo(() => priceAges(plans, stamps, nowMs), [plans, stamps, nowMs]);
+
+  const cols: Column<PriceAge>[] = [
+    { key: 'plan', header: 'Plan', value: (a) => a.planName },
+    {
+      key: 'when', header: 'Price Last Moved', value: (a) => a.changedAt,
+      // A `timestamptz`, so this one IS an instant and is drawn on the gym's
+      // clock like every other stamp on this page.
+      render: (a) => gymDateText(a.changedAt, zone) ?? <span className="dash">not recorded</span>,
+    },
+    {
+      key: 'days', header: 'Days at This Price', value: (a) => a.days ?? null, numeric: true,
+      render: (a) => a.days == null
+        ? <span className="dash">not known</span>
+        : String(a.days),
+    },
+    {
+      key: 'state', header: 'State', value: (a) => PRICE_AGE_LABEL[a.state],
+      render: (a) => (
+        <span style={{ color: a.state === 'stale' ? 'var(--warn)' : 'var(--ink)' }}>
+          {PRICE_AGE_LABEL[a.state]}
+        </span>
+      ),
+    },
+  ];
+
+  // One line per REASON, not per plan. Before the part is applied that is a
+  // single sentence for the whole table, which is exactly what it is.
+  const why = [...new Set((ages ?? []).map((a) => a.why).filter((w): w is NonNullable<typeof w> => w != null))];
+
+  return (
+    <Section
+      title="How Long a Price Has Sat Still"
+      sub={`Plans on sale, and how long each has been at its price. A year here is ${A_YEAR_DAYS} days. Retired plans are left out: nothing is sold on them.`}
+    >
+      {ages ? (
+        <p style={{ margin: 0, padding: '11px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+          {priceAgeLine(ages)}
+        </p>
+      ) : null}
+
+      {plans.state === 'loading' ? <Loading /> : null}
+      {plans.state === 'failed' ? (
+        <Failed reason={plans.reason} what="the price book" />
+      ) : null}
+      {plans.state === 'partial' ? <Truncated what="the price book" cap={plans.cap} /> : null}
+
+      {ages ? (
+        <DataTable noun="plans"
+          rows={ages} columns={cols} rowKey={(a) => a.planId}
+          empty="No plan is on sale, so there is no price to date." />
+      ) : null}
+
+      {why.length ? (
+        <ul style={{ margin: 0, padding: '10px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {why.map((w) => <li key={w}>{WHY_PRICE_AGE_IS_UNKNOWN[w]}</li>)}
+        </ul>
+      ) : null}
+    </Section>
+  );
+}
+
 /* ── one member ────────────────────────────────────────────────────────────── */
 
-function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, me, onSaved }: {
+function Dossier({ d, rec, active, onClose, ccy, today, zone, gymRec, gymRecsRead, tenantId, me, onSaved }: {
   d: MemberDossier; rec: MemberRecord; active: boolean | null; onClose: () => void;
   ccy: TenantCurrency;
+  /** `tenants.timezone`, or null when the gym has not set one. Every date in
+   *  this record is drawn on it. */
+  zone: string | null;
+  /** The gym's own calendar day, which is what a pass expiry is compared
+   *  against here and on /door. Passed in rather than computed twice. */
+  today: string;
   gymRec: GymMemberRecord | null;
   /** False when the gym-side records did not read. An empty form under a failed
    *  read invites the owner to retype an emergency contact that is already
@@ -555,6 +1233,19 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
     : null;
 
   const broken = brokenParts(rec);
+
+  /**
+   * What this member has paid, per currency.
+   *
+   * `d.paidCents` deliberately goes unused. It is a sum over `p.amountCents`
+   * with no regard to `p.currency`, and a sum across two currencies is not a
+   * total — it is a bigger number with the gym's current three letters stamped
+   * on it. `paidTotal` groups first and refuses second.
+   */
+  const paid = useMemo(
+    () => paidTotal(rec.payments.state, d.payments),
+    [rec.payments.state, d.payments],
+  );
 
   return (
     <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
@@ -579,14 +1270,26 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
         }}
       >
         <Kpi label="Membership" text={d.status ? cap(d.status) : null}
-             note={d.planName ?? (rec.memberships.state === 'failed' ? 'not read' : 'no plan attached')} />
-        <Kpi label="Paid, all time" text={amount(d.paidCents, ccy)}
-             note={
-               rec.payments.state === 'failed' ? 'payments not read'
-                 : d.paidCents != null && !ccy ? NO_CURRENCY_NOTE
-                 : d.lastPaidAt ? `last ${new Date(d.lastPaidAt).toLocaleDateString()}`
-                 : 'nothing recorded'
-             } />
+             note={d.planName ?? sliceNote(rec.memberships, 'the membership list') ?? 'no plan attached'} />
+        {/* ── one tile, one currency ─────────────────────────────────────
+            This was `amount(d.paidCents, ccy)`, where `paidCents` is
+            `pays.reduce((a, p) => a + p.amountCents, 0)` — every payment added
+            together with no regard to `p.currency` — and `ccy` is the gym's
+            CURRENT setting. So a gym that has ever changed currency showed one
+            tile reading AED 4,300 over a list of GBP and AED rows, three
+            inches below, each rendered honestly with its own code. This tile
+            is the figure an owner quotes down the phone when a member queries
+            their account.
+
+            `sumTaken` groups on the normalised currency before it totals
+            anything, which is what /analytics already does with the same
+            problem. One pot prints; two pots is not a bigger number and gets
+            the sentence instead. */}
+        <Kpi
+          label="Paid, all time"
+          text={paid.kind === 'one' ? money(paid.minorUnits, paid.currency) ?? null : null}
+          note={paidNote(paid, d.lastPaidAt ? `last ${gymDateText(d.lastPaidAt, zone) ?? 'on a date that could not be read'}` : undefined)}
+        />
         <Kpi
           label="Last at the door"
           text={
@@ -595,8 +1298,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
               : d.lastSeenDays === 0 ? 'today' : `${d.lastSeenDays} days`
           }
           note={
-            rec.visits.state === 'failed' ? 'door log not read'
-              : rec.visits.state === 'loading' ? undefined
+            rec.visits.state !== 'ready' ? sliceNote(rec.visits, 'the door log') ?? undefined
               : d.lastSeenDays == null ? `no visit in ${WINDOW_DAYS} days`
               : `${d.floorVisits} on the floor, ${d.classVisits} at a class`
           }
@@ -605,7 +1307,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
           label="Class attendance"
           text={d.showRate == null ? null : `${Math.round(d.showRate * 100)}%`}
           note={
-            rec.bookings.state === 'failed' ? 'bookings not read'
+            rec.bookings.state !== 'ready' ? sliceNote(rec.bookings, 'the class bookings') ?? undefined
               : d.booked === 0 ? 'booked nothing in the window'
               : d.booked == null ? undefined
               : `${d.attended} of ${d.booked} booked`
@@ -615,7 +1317,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
           label="One-to-ones"
           text={d.delivered == null ? null : String(d.delivered)}
           note={
-            rec.sessions.state === 'failed' ? 'sessions not read'
+            rec.sessions.state !== 'ready' ? sliceNote(rec.sessions, 'the sessions') ?? undefined
               : d.unmarked ? `${d.unmarked} still unmarked`
               : d.noShows ? `${d.noShows} no-show${d.noShows === 1 ? '' : 's'}`
               : undefined
@@ -624,7 +1326,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
         <Kpi
           label="Pass visits left"
           text={d.passVisitsLeft == null ? null : String(d.passVisitsLeft)}
-          note={rec.passes.state === 'failed' ? 'passes not read' : 'door and classes only'}
+          note={sliceNote(rec.passes, 'the passes') ?? 'door and classes only'}
         />
         {/* Counted apart from pass visits, because they buy different things: a
             PT credit pays for an hour with a coach and opens no turnstile. The
@@ -661,7 +1363,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title="Memberships" slice={rec.memberships} what="memberships">
         {d.memberships ? (
-          <DataTable
+          <DataTable noun="memberships"
             rows={d.memberships}
             columns={[
               { key: 'plan', header: 'Plan', value: (m: Membership) => m.planName },
@@ -677,11 +1379,11 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title="Payments" slice={rec.payments} what="payments">
         {d.payments ? (
-          <DataTable
+          <DataTable noun="payments"
             rows={d.payments}
             columns={[
               { key: 'when', header: 'Taken', value: (p: GymPayment) => p.takenAt,
-                render: (p: GymPayment) => new Date(p.takenAt).toLocaleDateString() },
+                render: (p: GymPayment) => gymDateText(p.takenAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'amt', header: 'Amount', value: (p: GymPayment) => p.amountCents, numeric: true,
                 render: (p: GymPayment) => money(p.amountCents, p.currency) },
               { key: 'how', header: 'Method', value: (p: GymPayment) => p.method.replace('_', ' ') },
@@ -695,11 +1397,11 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title={`Door log — last ${WINDOW_DAYS} days`} slice={rec.visits} what="the door log">
         {d.visits ? (
-          <DataTable
+          <DataTable noun="visits"
             rows={d.visits}
             columns={[
               { key: 'in', header: 'In', value: (v: Visit) => v.enteredAt,
-                render: (v: Visit) => new Date(v.enteredAt).toLocaleString() },
+                render: (v: Visit) => gymDateTimeText(v.enteredAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'stay', header: 'Stay', value: (v: Visit) => dwellMinutes(v) ?? null, numeric: true,
                 render: (v: Visit) => {
                   const m = dwellMinutes(v);
@@ -726,13 +1428,11 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title="Classes booked and attended" slice={rec.bookings} what="class bookings">
         {d.bookings ? (
-          <DataTable
+          <DataTable noun="class bookings"
             rows={d.bookings}
             columns={[
               { key: 'when', header: 'When', value: (b: MemberBooking) => b.startsAt,
-                render: (b: MemberBooking) => b.startsAt
-                  ? new Date(b.startsAt).toLocaleString()
-                  : <span className="dash">—</span> },
+                render: (b: MemberBooking) => gymDateTimeText(b.startsAt, zone) ?? <span className="dash">—</span> },
               { key: 'what', header: 'Class', value: (b: MemberBooking) => b.classTitle },
               { key: 'status', header: 'Booking', value: (b: MemberBooking) => b.status },
               { key: 'came', header: 'Turned up', value: (b: MemberBooking) => b.attendedAt,
@@ -750,20 +1450,35 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title="One-to-ones" slice={rec.sessions} what="one-to-ones">
         {d.sessions ? (
-          <DataTable
+          <DataTable noun="one-to-one sessions"
             rows={d.sessions}
             columns={[
               { key: 'when', header: 'When', value: (s: PtSession) => s.startsAt,
-                render: (s: PtSession) => new Date(s.startsAt).toLocaleString() },
+                render: (s: PtSession) => gymDateTimeText(s.startsAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'who', header: 'Trainer', value: (s: PtSession) => s.trainerName },
               { key: 'out', header: 'Outcome', value: (s: PtSession) => s.outcome,
                 render: (s: PtSession) => s.outcome
                   ? s.outcome.replace('_', ' ')
                   : <span className="dash">not recorded</span> },
+              // The currency the rate was SNAPSHOTTED in, never the gym's
+              // setting today. It was `amount(s.rateCents, ccy)`, which is the
+              // substitution `PtSession.rateCurrency` names as the defect in as
+              // many words: "It must be read as UNKNOWN and never as the gym's
+              // current currency — that substitution is the defect, not the
+              // fallback for it." A gym that has changed its currency had its
+              // whole PT history relabelled in this column, and a session
+              // delivered before supabase/parts/1010 carries no unit at all and
+              // was being given one. This screen already made the same repair
+              // twice for the money a member PAID — the Paid column and the
+              // "Paid, all time" tile — and left the money the gym OWES.
               { key: 'rate', header: 'Rate', value: (s: PtSession) => s.rateCents ?? null, numeric: true,
                 render: (s: PtSession) => s.rateCents == null
                   ? <span className="dash">—</span>
-                  : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+                  : (money(s.rateCents, s.rateCurrency) ?? (
+                      <span className="dash">
+                        {s.rateCurrency ? 'rate in a currency this console cannot write' : 'no currency was recorded with this rate'}
+                      </span>
+                    )) },
               // What the MEMBER paid with, which is a different question from
               // the Rate beside it: that is what the gym owes the coach. A
               // shortfall is the two of them disagreeing — an hour costed,
@@ -785,7 +1500,7 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
 
       <Part title="Passes" slice={rec.passes} what="passes">
         {d.passes ? (
-          <DataTable
+          <DataTable noun="passes"
             rows={d.passes}
             columns={[
               { key: 'type', header: 'Pass', value: (p: GymPass) => p.passTypeName },
@@ -802,8 +1517,15 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
                 render: (p: GymPass) => p.paidCents == null
                   ? <span className="dash">not recorded</span>
                   : money(p.paidCents, p.currency) },
-              { key: 'state', header: 'Status',
-                value: (p: GymPass) => passStatus(p, new Date().toISOString().slice(0, 10)) },
+              // `today` — the GYM's calendar day — and not
+              // `new Date().toISOString().slice(0, 10)`, which is UTC's. This
+              // product sells in AED, so the UTC date does not turn over until
+              // 04:00 local: for those four hours every evening this table
+              // called a pass expired that /door, which has always compared
+              // against the local day, was still admitting on. One pass, two
+              // expiry dates, and the two screens disagreeing about whether a
+              // member may come in.
+              { key: 'state', header: 'Status', value: (p: GymPass) => passStatus(p, today) },
             ]}
             rowKey={(p: GymPass) => p.id}
             empty="No pass has ever been issued to this member."
@@ -812,11 +1534,16 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
       </Part>
 
       <GymRecordEditor
-        memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead}
+        memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead} zone={zone}
         tenantId={tenantId} me={me} onSaved={onSaved}
       />
 
-      <Invites d={d} rec={rec} />
+      <Notes
+        memberId={d.memberId} name={d.name} legacy={gymRec?.note ?? null}
+        gymRecsRead={gymRecsRead} tenantId={tenantId} me={me} zone={zone}
+      />
+
+      <Invites d={d} rec={rec} zone={zone} />
     </section>
   );
 }
@@ -846,8 +1573,10 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
  * it is given. That matters because the row is shared: a note typed here must
  * not blank a phone number somebody entered at the desk five minutes ago.
  */
-function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
+function GymRecordEditor({ memberId, name, rec, read, zone, tenantId, me, onSaved }: {
   memberId: string; name: string | null; rec: GymMemberRecord | null; read: boolean;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
   tenantId: string; me: Me; onSaved: () => void;
 }) {
   const [phone, setPhone] = useState(rec?.phone ?? '');
@@ -855,10 +1584,9 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
   const [eName, setEName] = useState(rec?.emergencyName ?? '');
   const [ePhone, setEPhone] = useState(rec?.emergencyPhone ?? '');
   const [medical, setMedical] = useState(rec?.medicalNote ?? '');
-  const [note, setNote] = useState(rec?.note ?? '');
   const [tags, setTags] = useState(tagsText(rec?.tags));
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
 
   // Re-seeded when the selected member changes. Without this, opening a second
   // member shows the first one's phone number in the box — and saving it files
@@ -866,29 +1594,37 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
   useEffect(() => {
     setPhone(rec?.phone ?? ''); setEmail(rec?.email ?? '');
     setEName(rec?.emergencyName ?? ''); setEPhone(rec?.emergencyPhone ?? '');
-    setMedical(rec?.medicalNote ?? ''); setNote(rec?.note ?? '');
+    setMedical(rec?.medicalNote ?? '');
     setTags(tagsText(rec?.tags)); setMsg(null);
   }, [memberId, rec]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    // `note` is deliberately absent, and absent is not null: `saveMemberRecord`
+    // only sends the keys it is given, so the one-line note this form used to
+    // overwrite is left exactly as it is. Notes are written in the section
+    // below now, where they carry an author and a date and cannot be typed over.
     const patch: MemberRecordPatch = {
       phone, email, emergencyName: eName, emergencyPhone: ePhone,
-      medicalNote: medical, note, tags: parseTags(tags),
+      medicalNote: medical, tags: parseTags(tags),
     };
     // An all-blank form on a person with no record would write a row that says
     // nothing and then read back as "a record exists".
     if (!rec && isEmptyPatch(patch)) {
-      setMsg('Nothing to save yet — fill something in first.');
+      setMsg(refused('Nothing to save yet — fill something in first.'));
       return;
     }
     setBusy(true); setMsg(null);
     try {
       await saveMemberRecord(supabase, tenantId, memberId, patch, me.id ?? null);
-      setMsg('Saved.');
+      setMsg(wrote('Saved.'));
       onSaved();
     } catch (x: any) {
-      setMsg(x?.message ?? 'That was not saved, so the record is unchanged.');
+      setMsg(writeFailed(x, {
+        what: 'That record',
+        unchanged: 'the record is unchanged',
+        howToCheck: 'Reload this page: the boxes above are filled from whatever is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -903,6 +1639,12 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
           theirs, is written by them, and nothing here touches it.
         </p>
       </div>
+
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
 
       {!read ? (
         <p style={{ margin: 0, padding: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
@@ -927,9 +1669,6 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
           <input value={medical} onChange={(e) => setMedical(e.target.value)}
                  placeholder="What the floor needs to know — e.g. asthma, inhaler in their bag"
                  aria-label="Operational medical note" style={field} />
-          <input value={note} onChange={(e) => setNote(e.target.value)}
-                 placeholder="The desk’s note about this member"
-                 aria-label="Desk note" style={field} />
           <input value={tags} onChange={(e) => setTags(e.target.value)}
                  placeholder="Tags — student, corporate, do not call"
                  aria-label="Tags" style={field} />
@@ -937,33 +1676,174 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
             <button type="submit" disabled={busy} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
             {rec?.updatedAt ? (
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>
-                last changed {new Date(rec.updatedAt).toLocaleDateString()}
+                last changed {gymDateText(rec.updatedAt, zone) ?? 'on a date that could not be read'}
               </span>
             ) : (
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>nothing recorded yet</span>
             )}
           </div>
-          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
         </form>
       )}
     </div>
   );
 }
 
+/* ── what the desk wrote, and when, and who wrote it ───────────────────────── */
+
+/**
+ * The running list of notes about one member.
+ *
+ * ── What this replaces ────────────────────────────────────────────────────
+ *
+ * A single text input, written in place. "She complained about the 6am in
+ * March" was gone the moment somebody typed "renewing in June" over it — no
+ * author, no date, no history and no undo, on the record an owner would reach
+ * for in a dispute. The box above no longer writes that column at all; it is
+ * still shown, at the bottom of this list, labelled for what it is.
+ *
+ * ── Read here rather than with the other seven ────────────────────────────
+ *
+ * Because it is per-member and the page reads per-gym. Fetching every note in
+ * the gym to show one member's is a bigger read that gets slower for the gyms
+ * that use the feature most. The cost is that this section has its own three
+ * states, which it renders itself.
+ */
+function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me, zone }: {
+  memberId: string;
+  name: string | null;
+  /** The one-line note from `gym_member_records`, which predates this list. */
+  legacy: string | null;
+  /** False when that record could not be read — so the legacy line below is
+   *  unknown rather than absent, and this section has to say which. */
+  gymRecsRead: boolean;
+  tenantId: string;
+  me: Me;
+  /** `tenants.timezone`, or null when the gym has not set one. The date under
+   *  each note is the day the desk wrote it, which is a fact about the gym and
+   *  not about whichever laptop is open — a note written at 01:00 in Dubai read
+   *  from London is dated the previous day, on the one record an owner reaches
+   *  for when the day a thing was written on is what is being disputed. */
+  zone: string | null;
+}) {
+  const [notes, setNotes] = useState<MemberNote[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<Said>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setNotes(await fetchMemberNotes(supabase, tenantId, memberId));
+    } catch (e: any) {
+      // Null, never []. A read that failed drawn as "no notes yet" is how an
+      // owner concludes nothing was ever written about a member.
+      setNotes(null);
+      setFailed(e?.message ?? 'The notes could not be read.');
+    }
+  }, [tenantId, memberId]);
+
+  useEffect(() => { setNotes(null); setBody(''); setMsg(null); void load(); }, [load]);
+
+  const blocker = noteBlocker(body);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker) { setMsg(refused(blocker)); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await addMemberNote(supabase, tenantId, memberId, body, me.id ?? null);
+      setBody('');
+      setMsg(wrote('Added. It carries your name and the time, and nothing can type over it.'));
+      await load();
+    } catch (x: any) {
+      // The words stay in the box on a failure: they were written once.
+      setMsg(refused(x?.message, 'That note was not saved, so it is not on the record.'));
+    } finally { setBusy(false); }
+  };
+
+  const shown = notes ? withLegacy(notes, memberId, gymRecsRead ? legacy : null) : null;
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--ring)' }}>
+      <div style={{ padding: '11px 14px' }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Notes</h3>
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+          Appended, never overwritten. Each one keeps who wrote it and when, and none of them can be
+          edited or deleted afterwards — a note somebody can quietly rewrite is worth nothing in the
+          argument it exists for. Correct one by writing another.
+        </p>
+      </div>
+
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
+
+      <form onSubmit={add} style={{ display: 'grid', gap: 8, padding: '0 14px 14px' }}>
+        <textarea
+          value={body} onChange={(e) => setBody(e.target.value)}
+          rows={2} maxLength={MAX_NOTE}
+          placeholder={`What happened, in your own words${name ? ` — about ${name}` : ''}`}
+          aria-label="Add a note about this member"
+          style={{ ...field, resize: 'vertical' }}
+        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="submit" disabled={busy || !!blocker} style={{ ...btn, opacity: blocker ? 0.5 : 1 }}>
+            {busy ? 'Adding…' : 'Add note'}
+          </button>
+          {msg ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</span> : null}
+        </div>
+      </form>
+
+      {failed ? <Failed reason={failed} what="the notes on this member" /> : null}
+      {notes === null && !failed ? <Loading /> : null}
+      {shown ? (
+        shown.length === 0 ? (
+          <p style={{ margin: 0, padding: '0 14px 16px', fontSize: 13, color: 'var(--ink3)' }}>
+            Nothing has been written about {name ?? 'this member'} yet.
+          </p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: '0 14px 14px', display: 'grid', gap: 9 }}>
+            {shown.map((n) => (
+              <li
+                key={n.id ?? 'legacy'}
+                style={{
+                  border: '1px solid var(--ring)', background: 'var(--surface2)', padding: '9px 11px',
+                  // The unattributed line is drawn as what it is rather than
+                  // mixed in with the entries that carry a name.
+                  borderLeft: n.legacy ? '3px solid var(--ring2)' : '3px solid var(--brand)',
+                }}
+              >
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{n.body}</p>
+                <p style={{ margin: '5px 0 0', fontSize: 11.5, color: 'var(--ink3)' }}>
+                  {noteAttribution(n, zone)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 /** Invites are addressed to an email, not to an account, so they cannot be
  *  filtered by member id. Shown whole and labelled, rather than guessed at. */
-function Invites({ d, rec }: { d: MemberDossier; rec: MemberRecord }) {
+function Invites({ d, rec, zone }: { d: MemberDossier; rec: MemberRecord; zone: string | null }) {
   const mine = (d.invites ?? []).filter((i) => i.acceptedBy === d.memberId);
   return (
     <Part title="Invite" slice={rec.invites} what="invites">
       {d.invites ? (
-        <DataTable
+        <DataTable noun="invites"
           rows={mine}
           columns={[
             { key: 'to', header: 'Sent to', value: (i: MemberInvite) => i.email },
             { key: 'plan', header: 'Plan', value: (i: MemberInvite) => i.planName },
             { key: 'when', header: 'Sent', value: (i: MemberInvite) => i.createdAt,
-              render: (i: MemberInvite) => new Date(i.createdAt).toLocaleDateString() },
+              render: (i: MemberInvite) => gymDateText(i.createdAt, zone) ?? <span className="dash">not stated</span> },
             { key: 'state', header: 'State', value: (i: MemberInvite) => inviteState(i) },
           ]}
           rowKey={(i: MemberInvite) => i.id}
@@ -996,9 +1876,35 @@ function Part<T>({ title, slice, what, children }: {
       </div>
       {slice.state === 'loading' ? <Loading /> : null}
       {slice.state === 'failed' ? <Failed reason={slice.reason} what={what} /> : null}
+      {slice.state === 'partial' ? <Truncated what={what} cap={slice.cap} /> : null}
       {/* Loaded-and-empty is the DataTable's own empty sentence, written once
           per section beside the columns it describes. */}
       {slice.state === 'ready' ? children : null}
+    </div>
+  );
+}
+
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * The rows are real and there are more of them, so this is neither the failure
+ * banner nor the empty sentence. It does not draw the table beneath it: every
+ * figure on this screen is computed through `rowsOf`, which is null for a
+ * truncated read on purpose, so the table under this banner would be an empty
+ * one — "cut off" over "nothing recorded" is a worse page than the banner
+ * alone. A section that means to LIST a prefix reads its rows through
+ * `rowsToShow` and says so itself.
+ */
+function Truncated({ what, cap }: { what: string; cap: number }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: '0 14px 14px', borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Read the first {cap} rows of {what}, and there are more. This section is a{' '}
+      <strong>prefix</strong>, not the whole record, so nothing here is counted or totalled.
     </div>
   );
 }
@@ -1016,12 +1922,16 @@ function Failed({ reason, what }: { reason: string; what: string }) {
   );
 }
 
-/** A table cell that keeps "not read", "not loaded" and "nothing there" apart. */
+/** A table cell that keeps "not read", "not loaded", "part read" and "nothing
+ *  there" apart — four states, four cells. */
 function Cell({ state, value, empty }: {
   state: Slice<unknown>['state']; value: string | null; empty: string;
 }) {
   if (state === 'loading') return <span className="dash">…</span>;
   if (state === 'failed') return <span className="dash">not read</span>;
+  // The rows behind this figure are a prefix, so the figure over them is a
+  // subtotal. Withheld, and named as something other than a failure.
+  if (state === 'partial') return <span className="dash">part read</span>;
   if (value == null) return <span className="dash">{empty}</span>;
   return <>{value}</>;
 }
@@ -1095,18 +2005,22 @@ const ghostBtn = {
  * list model, an unsubscribe path and consent tracking, none of which exist, so
  * the export hands the list to whatever the gym already uses.
  */
-function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
+function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs, onSent }: {
   dossiers: MemberDossier[] | null;
   doorLogLive: boolean;
   me: Me;
   tenantId: string;
   gymName: string | null;
   gymRecs: Map<string, GymMemberRecord> | null;
+  /** Told after a post lands, so the record of it below re-reads. Called on the
+   *  send and not on the log write: the notice is what happened, and a failed
+   *  log entry is exactly what the list below has to be able to show missing. */
+  onSent: () => void;
 }) {
   const [segId, setSegId] = useState<SegmentId>('unseen');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   const [open, setOpen] = useState(false);
 
   const segments: Segment[] | null = useMemo(() => {
@@ -1126,23 +2040,55 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
   const send = async () => {
     if (!seg || !me.id) return;
     const stop = reachBlocker(body, seg.members.length);
-    if (stop) { setMsg(stop); return; }
+    if (stop) { setMsg(refused(stop)); return; }
     setBusy(true); setMsg(null);
     try {
+      const memberIds = seg.members.map((m) => m.memberId);
       const res = await postToSegment(supabase, {
         tenantId,
         authorId: me.id,
         body,
-        memberIds: seg.members.map((m) => m.memberId),
+        memberIds,
         gymName,
       });
-      setMsg(deliveryNote(res, seg.members.length));
+      // Written AFTER the send and never before it, exactly as the export log
+      // below is written after the file exists: a row saying a message went to
+      // forty people, when it did not, is a false statement about what forty
+      // members were told.
+      //
+      // The announcement itself carries the author and the words. What it does
+      // not carry — and what nothing in this schema carried — is WHO IT WENT
+      // TO: `notify_users` returns a count and writes rows that point back at
+      // no announcement. That is the half this row exists for.
+      const logErr = await logBroadcast(supabase, {
+        tenantId,
+        sentBy: me.id,
+        segmentId: seg.id,
+        segmentLabel: seg.label,
+        memberIds,
+        delivered: res.delivered,
+        body,
+      });
+      // `wrote`, not `refused`, even when `logErr` is set: the post HAPPENED.
+      // A logging gap is a gap in the record of it, said in the same breath —
+      // announcing it assertively would tell the sender their message did not
+      // go out, which is the one thing that is not true here.
+      setMsg(wrote([deliveryNote(res, seg.members.length), loggingNote(logErr)]
+        .filter((x): x is string => !!x).join(' ')));
       // Cleared only on a success. The words stay in the box after a refusal:
       // they were written once, and a cleared field after a failed send is how
       // a notice is lost between the owner and the server.
       setBody('');
+      onSent();
     } catch (e: any) {
-      setMsg(e?.message ?? 'Nothing was posted, so nobody has seen it. Your words are still here.');
+      // A notice sent twice is two notifications to every member of a segment,
+      // which is the one failure this form can produce that reaches people
+      // outside the gym.
+      setMsg(writeFailed(e, {
+        what: 'That notice',
+        unchanged: 'nobody has seen it, and your words are still here',
+        howToCheck: 'Reload this page and read the list of sent notices below before posting it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -1192,6 +2138,11 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
       title="Say something to a group"
       sub="Posts to the gym’s notice board and drops it in the chosen members’ inboxes. No push and no scheduling — the console can send neither, and says so rather than implying otherwise."
     >
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       {!open ? (
         <p style={{ margin: 0, padding: '16px 14px', fontSize: 13, color: 'var(--ink3)' }}>
           <button onClick={() => setOpen(true)} style={linkBtn}>Write to a group</button>
@@ -1202,8 +2153,12 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
         <div style={{ display: 'grid', gap: 10, padding: 14 }}>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
             {segments.map((x) => (
+              // `aria-pressed` — which group a message is being written to was
+              // carried by a background colour alone.
               <button
                 key={x.id}
+                type="button"
+                aria-pressed={x.id === segId}
                 onClick={() => setSegId(x.id)}
                 style={{
                   ...field, cursor: 'pointer',
@@ -1247,13 +2202,13 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
                   Better said here than discovered by a member reading half a
                   sentence. */}
               {willTruncateInbox(body) ? (
-                <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>
+                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>
                   The inbox copy is cut at {INBOX_BODY} characters by the database and yours is{' '}
                   {body.trim().length}. The full text stays on the notice board; the inbox line will
                   stop mid-sentence.
                 </p>
               ) : null}
-              {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+              {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p> : null}
 
               <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
                 <button onClick={send} disabled={busy || !!blocker} style={btn}>
@@ -1270,14 +2225,201 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
                 no unsubscribe register, so nothing here pretends to run a campaign. Taking it is
                 recorded, with who took it, when, and how many people were on it: the same record
                 the full export writes, because a route out of the console is a route out of the
-                console whichever screen it is on.
+                console whichever screen it is on. Posting is recorded the same way — who sent it,
+                the words, and the members it was addressed to — because a message in dozens of
+                inboxes that nothing can trace is the same gap pointing the other way.
               </p>
-              {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg}</p> : null}
+              {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg.text}</p> : null}
             </>
           ) : null}
         </div>
       )}
     </Section>
+  );
+}
+
+/* ── the notices already sent ──────────────────────────────────────────────── */
+
+/**
+ * Every message this gym has posted to a group, and who it went to.
+ *
+ * ── Why this had to exist ─────────────────────────────────────────────────
+ *
+ * `gym_broadcast_sends` has recorded the recipient list since part 691 and
+ * nothing has ever read it. The table, the policy, the index and the trigger
+ * were all paid for; the answer they were bought to give was unavailable to
+ * everybody, including the owner who inherits the gym and has to say what the
+ * members were told. The form above even tells a sender, on a failed post, to
+ * "read the list of sent notices below before posting it again" — and there was
+ * no list below to read.
+ *
+ * ── Why it is not a table ─────────────────────────────────────────────────
+ *
+ * The body is the point. A `DataTable` cell truncates it, and an abridged copy
+ * of what forty people were told reads as complete, which is the one thing this
+ * record must not be. So each notice is a block with its words in full.
+ *
+ * ── Three silences kept apart ─────────────────────────────────────────────
+ *
+ * A read that failed is not an empty log, a sender whose name could not be
+ * looked up is not a deleted account, and an unrecorded delivery count is not
+ * zero. src/lib/gymBroadcastLog.ts owns all three sentences so that this screen
+ * cannot quietly pick the confident one.
+ */
+function SentNotices({ tenantId, me, zone, reloadKey }: {
+  tenantId: string; me: Me; zone: string | null; reloadKey: number;
+}) {
+  const [log, setLog] = useState<BroadcastLog | null>(null);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLog(await fetchBroadcasts(supabase, tenantId));
+      setReadErr(null);
+    } catch (e: any) {
+      // NOT an empty log. "No notice has ever been posted from this console" is
+      // a claim about a gym's history, and a refused read saying it would be
+      // read as evidence that nothing was sent — which is precisely the
+      // conclusion the absence of this table used to force.
+      setLog(null);
+      setReadErr(e?.message ?? 'the read was refused');
+    }
+  }, [tenantId]);
+
+  // `reloadKey` changes when the form above posts something, so the notice a
+  // sender has just written appears without a page reload — and, more to the
+  // point, so the failure copy that sends them down here is true.
+  useEffect(() => { void load(); }, [load, reloadKey]);
+
+  const clockNote = whoseClockNote(zone);
+
+  return (
+    <Section
+      title="Notices already sent"
+      sub="Who was written to, when, by whom, and the words they were sent. Insert-only — nothing here can be edited or removed, by anybody."
+    >
+      {readErr ? (
+        <Banner tone="crit">
+          The record of sent notices could not be read: {readErr}. This is not an empty log —
+          whether anything has been posted to a group from this console is{' '}
+          <strong style={{ color: 'var(--ink)' }}>unknown</strong> while this line is showing.
+          Reload the page.
+        </Banner>
+      ) : log === null ? (
+        <Loading />
+      ) : log.rows.length === 0 ? (
+        <p style={{ margin: 0, padding: '22px 14px', color: 'var(--ink3)', fontSize: 13 }}>
+          Nothing has been posted to a group from this console yet. The two older broadcast tools —
+          the phone’s Ops screen and Promotions — go to everybody and are not recorded here.
+        </p>
+      ) : (
+        <div style={{ display: 'grid' }}>
+          <p style={{ margin: 0, padding: '10px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+            {logCaption(log)}
+            {clockNote ? ` Times are on the gym’s clock — ${clockNote}.` : ''}
+          </p>
+          {log.namesError ? (
+            <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--warn)' }}>
+              The senders’ names could not be looked up: {log.namesError}. Each notice below still
+              records who sent it; only the name is missing, which is not the same as an account
+              that has been removed.
+            </p>
+          ) : null}
+          {log.rows.map((b) => (
+            <article key={b.id} style={{ borderTop: '1px solid var(--ring)', padding: '12px 14px' }}>
+              <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                <strong style={{ fontSize: 13.5, color: 'var(--ink)' }}>{b.segmentLabel}</strong>
+                <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+                  {/* A timestamp that cannot be read is said, not blanked: the
+                      row is real and only its stamp is unreadable. */}
+                  {gymDateTimeText(b.sentAt, zone) ?? 'on a date that could not be read'}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+                {senderLine(b, { meId: me.id, namesError: log.namesError })}{' '}
+                {deliveredLine(b)}
+              </p>
+              {/* The words, whole. Pre-wrapped so the line breaks the sender
+                  typed are the line breaks the members read. */}
+              <p style={{ margin: '8px 0 0', fontSize: 13.5, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>
+                {b.body}
+              </p>
+              <div style={{ marginTop: 8 }}>
+                <button
+                  style={linkBtn}
+                  aria-expanded={openId === b.id}
+                  onClick={() => setOpenId(openId === b.id ? null : b.id)}
+                >
+                  {openId === b.id ? 'Hide who got it' : `Who got it · ${b.memberIds.length}`}
+                </button>
+              </div>
+              {openId === b.id ? <WhoGotIt ids={b.memberIds} /> : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * The names behind one notice's recipient list, read on demand.
+ *
+ * On demand because fifty notices to a hundred people each is five thousand ids
+ * nobody asked for, and the question "who exactly" is asked about one message at
+ * a time.
+ *
+ * An id with no profile behind it is NOT dropped. Part 691 keeps no foreign key
+ * on `member_ids` on purpose — the list is a statement about who was addressed
+ * at the time, and it stays true after somebody leaves the gym and their profile
+ * goes — so a departed member is counted and named as departed. Silently
+ * shortening the list would make a notice look like it went to fewer people
+ * than it did.
+ */
+function WhoGotIt({ ids }: { ids: string[] }) {
+  const [line, setLine] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setDone(false); setErr(null); setLine(null);
+    (async () => {
+      try {
+        const rows = await readByIds<any>(
+          ids,
+          (chunk, from, to) => supabase.from('profiles').select('id, full_name').in('id', chunk)
+            .order('id', { ascending: true }).range(from, to),
+          'the members this notice was sent to',
+        );
+        if (!live) return;
+        const byId = new Map<string, string>();
+        for (const r of rows) if (r?.id) byId.set(String(r.id), String(r.full_name ?? '').trim());
+        setLine(recipientLine(splitRecipients(ids, byId)));
+        setDone(true);
+      } catch (e: any) {
+        if (!live) return;
+        setErr(e?.message ?? 'the lookup was refused');
+        setDone(true);
+      }
+    })();
+    return () => { live = false; };
+  }, [ids]);
+
+  if (err) {
+    return (
+      <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--warn)' }}>
+        The {ids.length} {ids.length === 1 ? 'person' : 'people'} this went to are recorded, and
+        their names could not be read: {err}. That is a failed lookup, not an empty list.
+      </p>
+    );
+  }
+  if (!done) return <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>Reading the names…</p>;
+  return (
+    <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink2)' }}>
+      {line ?? 'This notice records no recipients at all — it was addressed to nobody.'}
+    </p>
   );
 }
 
@@ -1320,28 +2462,12 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

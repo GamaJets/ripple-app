@@ -26,7 +26,7 @@
 //    last section proves the two compose.
 
 import {
-  exerciseOutings, exerciseIndex, matchExercises, exerciseTrend,
+  exerciseOutings, exerciseIndex, matchExercises, exerciseTrend, readCoversRecord,
   type ExerciseOuting,
 } from './exerciseHistory';
 import type { BodyweightHistory } from './bodyweightSets';
@@ -203,6 +203,34 @@ eq(matchExercises(index, 'bench press').length, 1,
 eq(matchExercises(index, '').length, 3, 'an empty box is not a filter');
 eq(matchExercises(index, 'deadlift').length, 0, 'a movement nobody has done returns nothing rather than everything');
 
+/* ── the SHOWN name is searchable too ─────────────────────────────────────
+ *
+ * A log row stores the English name, because English is the identity — it is
+ * what `exercises.id` is the slug of. The list on screen shows the reader's own
+ * language where the catalogue has it. Matching only the stored name answered
+ * "Nothing logged matches that" about a movement that was on screen a second
+ * earlier; matching only the shown one would lose every coach and every member
+ * who learned the movement as "Bench Press" and types that. Both, therefore —
+ * the same rule `matchesSearch` in src/lib/catalogueLocale.ts already applies
+ * to the catalogue itself.
+ */
+const german = (e: { name: string }) =>
+  e.name.toUpperCase() === 'BENCH PRESS' ? 'Bankdrücken' : null;
+eq(matchExercises(index, 'Bankdrücken', german).length, 1,
+  'a German member finds the movement by the name they are reading');
+eq(matchExercises(index, 'Bankdrücken', german)[0]?.name, 'BENCH PRESS',
+  'and what comes back is still keyed by the English identity');
+eq(matchExercises(index, 'bench', german).length, 1,
+  'while the English name goes on working, which is what a coach types');
+eq(matchExercises(index, 'Bankdrücken').length, 0,
+  'with no resolver, nothing has changed: the translated name is not searchable');
+eq(matchExercises(index, 'deadlift', german).length, 0,
+  'and a resolver does not widen a query into a movement nobody has done');
+eq(matchExercises(index, '', german).length, 3, 'an empty box is still not a filter');
+eq(matchExercises(index, 'squat', () => null).length,
+  matchExercises(index, 'squat').length,
+  'a resolver that knows no translation is the same as no resolver at all');
+
 /* ── 5 · what a failed and a truncated read may say ───────────────────────── */
 
 const trail = exerciseOutings([
@@ -221,7 +249,7 @@ eq(exerciseTrend([], 'ready').outingCount, 0, 'which is a real count of nought, 
 const whole = exerciseTrend(trail, 'ready');
 eq(whole.state, 'some', 'a read with rows in it has some');
 eq(whole.outingCount, 3, 'counted, because the read was whole');
-eq(whole.whole, true, 'and the screen is told it may say "on record"');
+eq(whole.whole, true, 'and the screen is told nothing fell off the end of it');
 eq(whole.latest?.day, '2026-03-15', 'the newest outing is the newest');
 eq(whole.best?.day, '2026-03-15', 'and the best is the best');
 
@@ -241,6 +269,70 @@ eq(partial.outingCount, null, 'but never counted: a subtotal wearing a total\'s 
 eq(partial.whole, false, 'and the screen is told it may not say "first on record"');
 eq(partial.latest?.day, '2026-03-15',
   'the newest is still safe to state — the read is ordered newest first, so truncation cannot remove it');
+
+/* ── 5b · a read that was not cut, and was not the record either ───────────
+ *
+ * The defect `whole` could not see. app/(trainer)/client-training.tsx narrows
+ * its query to twelve weeks IN ORDER to get under PostgREST's ceiling, so the
+ * answer comes back short of the cap and the status is 'ready' — correctly,
+ * because nothing was truncated. The coach then followed the screen's own
+ * instruction, tapped 12 Weeks, and read "Best Est. 1RM 150 kg", "Since the
+ * First Day on Record" and "20 of the 34 movements on record" about a client
+ * who had benched 165 kg in March, with no truncation flag anywhere — because
+ * there was nothing to flag. The read was complete. It was not the record.
+ *
+ * So `whole` and `coversRecord` are separate answers and a windowed read is
+ * the first without the second. */
+
+const windowed = exerciseTrend(trail, { status: 'ready', windowDays: 84 });
+eq(windowed.whole, true, 'a windowed read is genuinely UNCUT: nothing fell off the end of it');
+eq(windowed.outingCount, 3, 'so the days it returned may be counted');
+eq(windowed.coversRecord, false, 'but it does not cover the record, and nothing may be worded as a lifetime');
+eq(windowed.recordOutingCount, null,
+  'so the figure a screen prints as "N days" beside the movement is withheld rather than quoting the window at the record');
+eq(windowed.best?.day, '2026-03-15',
+  'the best in the window is still named — it is a real day, it is simply not "the best on record"');
+
+const everything = exerciseTrend(trail, { status: 'ready', windowDays: null });
+eq(everything.coversRecord, true, 'a read that asked for everything and came back uncut IS the record');
+eq(everything.recordOutingCount, 3, 'and its count may be printed as one');
+
+eq(exerciseTrend(trail, { status: 'partial', windowDays: null }).coversRecord, false,
+  'a truncated read of everything is still not everything: both halves have to hold');
+eq(exerciseTrend([], { status: 'ready', windowDays: 84 }).recordOutingCount, null,
+  'and an empty window is not "never done" — the client may simply not have done it since June');
+eq(exerciseTrend([], { status: 'ready', windowDays: 84 }).outingCount, 0,
+  'though nought days in the window is a true count of the window');
+
+// Silence fails closed. A caller that passes a bare status has said nothing
+// about its window, and a coverage claim nobody made is not a coverage claim —
+// defaulting the other way is exactly the assumption that put twelve weeks
+// under the words "on record".
+eq(whole.coversRecord, false, 'a bare LoadStatus says nothing about the window, so it licenses nothing');
+eq(readCoversRecord('ready'), false, 'not even the healthiest one');
+eq(readCoversRecord(undefined), false, 'and neither does saying nothing at all');
+eq(readCoversRecord({ status: 'ready', windowDays: null }), true, 'only both halves together do');
+eq(readCoversRecord({ status: 'ready', windowDays: 0 }), false,
+  'a window of zero days is still a window — it is not the same value as "everything"');
+
+// The same distinction on the search index, whose `days` had no flag beside it
+// at all while `outingCount` had one: under a twelve-week read a movement
+// somebody has done for three years listed "84 days" as a fact about them.
+{
+  const log = [
+    entry('2026-03-01', 'Bench Press', [[10, 50]]),
+    entry('2026-03-08', 'Bench Press', [[8, 55]]),
+  ];
+  const cut = exerciseIndex(log, [], 'partial')[0];
+  eq(cut.days, 2, 'the count of what was READ is always available and always true of the read');
+  eq(cut.recordDays, null, 'and the same figure offered as a fact about the person is withheld');
+  eq(exerciseIndex(log, [], { status: 'ready', windowDays: 84 })[0].recordDays, null,
+    'a whole read of a window is not a fact about the record either');
+  eq(exerciseIndex(log, [], { status: 'ready', windowDays: null })[0].recordDays, 2,
+    'only a whole read of everything is');
+  eq(exerciseIndex(log)[0].recordDays, null, 'and a caller that says nothing gets nothing');
+  eq(exerciseIndex(log)[0].days, 2, 'while still getting the honest figure about its own read');
+}
 
 /* ── 6 · movement is a number of kilograms, and never a verdict ───────────── */
 

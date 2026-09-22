@@ -79,6 +79,67 @@
 // So this holds one rule completely and is silent about four more. The rest are
 // held by src/lib/units.test.ts, by the readers in src/lib (readLift,
 // readNumber, readFoodEdit, parseRate, parseTyped) and by review.
+//
+// ── why studio-web is NOT in ROOTS, written down rather than left as a hole ──
+//
+// A sweep over the gates found this one "does not walk the console" and offered
+// that as a gap to close. It is not one, and widening ROOTS would be the wrong
+// repair: this rule is `keyboardType="numeric"` on a React Native `<TextInput>`,
+// and `keyboardType` DOES NOT EXIST in the DOM. There is no such attribute on
+// an `<input>`, React DOM does not forward it, and a console file could not
+// fail this check however wrong its fields were. Adding `studio-web/app` here
+// buys a bigger scanned-file count and nothing else — which is worse than the
+// gap, because the passing line then says the console was checked.
+//
+// The console's equivalent is a DIFFERENT RULE and would have to be written as
+// one: `inputMode` on an `<input>`, where the fractional fields want
+// `inputMode="decimal"` and the whole ones `inputMode="numeric"`. Two things
+// make it a smaller prize than the phone's. The stakes are lower — `inputMode`
+// only HINTS a touch keyboard and restricts nothing, so a desk user with a
+// physical keyboard can always type the point that the iOS number pad
+// genuinely withheld. And the console already does it by hand: every money
+// field on /money, /costs, /payroll, /staff, /accounting and /settings carries
+// `inputMode="decimal"` today, and the counts carry `inputMode="numeric"`.
+//
+// So the sibling rule is worth having as a ratchet on that existing habit, and
+// it is not worth pretending this file is it. What it must NOT do is take the
+// FRACTIONAL word list below unchanged: `\brate\b`, `\bprice\b`, `\bfee\b`,
+// `\bamount\b` and `\bcost\b` are money, and money in this console is entered
+// and stored in MINOR UNITS, where the right hint depends on the currency —
+// `currencyDecimals()` returns null for one nobody has set, sixteen currencies
+// have no minor unit at all, and five have three. A rule that demanded
+// `inputMode="decimal"` on every money box would be asking a gym in Tokyo for
+// fractional yen. That is the argument that has to be settled before the
+// sibling is written, and it is why this is a description and not an
+// implementation.
+//
+// ── and why src/lib is NOT in ROOTS either, for a different reason ──────────
+//
+// The night check:numbers was widened to `src/lib` — because that is where the
+// report prose and notification bodies are built, and it was reading none of
+// them — this gate was asked the same question. The answer is no, and it is not
+// the studio-web answer above.
+//
+// This rule is a JSX attribute on a React Native `<TextInput>` element. `walk`
+// below takes `.tsx` files only, and src/lib holds 475 non-test `.ts` files and
+// ZERO `.tsx` files: it is the framework-free half of this codebase, the half
+// that returns sentences and conclusions to a screen and never renders one. The
+// three occurrences of `<TextInput` under src/lib are all inside comments —
+// units.ts explaining why `plain` may not group, because the string it produces
+// goes back into a text box.
+//
+// So adding it here buys nothing and costs the passing line its meaning. It
+// would cost more than that, in fact: `assertRootFloors` would refuse the run
+// outright, because src/lib's floor is 200 files and a `.tsx`-only walk of it
+// finds none. That is the guard working — a root that produces nothing is a
+// claim about a tree nobody opened — and it is the clearest possible statement
+// that this rule has no business there.
+//
+// The half of the decimal defect that DOES live in src/lib is the reader, not
+// the keyboard: `readNumber` in units.ts, which takes the comma an EU decimal
+// pad produces. That is asserted in src/lib/units.test.ts over every half
+// kilogram to 200 kg in both spellings, which is a better instrument than a
+// regex would be.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 

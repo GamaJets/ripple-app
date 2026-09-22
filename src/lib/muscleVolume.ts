@@ -40,7 +40,7 @@
 // board that quietly leaves them out — the same argument src/lib/bodyweightSets
 // makes about a tonnage that could not price every set.
 import type { WorkoutEntry } from './mockData';
-import { exerciseSlug } from './exerciseId';
+import { exerciseSlug, synonymAliases } from './exerciseId';
 import { entryTonnage, type BodyweightHistory } from './bodyweightSets';
 import { isTimedSet } from './timedSets';
 
@@ -53,6 +53,12 @@ export interface GroupedExercise {
   id: string;
   name: string;
   group: string | null;
+  /** The other names this movement goes by. Optional; absent gives the id
+   *  match alone, which is what this file did before. See `synonymAliases` in
+   *  src/lib/exerciseId.ts, and the same field on `MuscledExercise` — the two
+   *  joins have to agree about what a typed name resolves to, or one screen
+   *  files a set of crunches and the screen beside it does not. */
+  synonyms?: readonly string[] | null;
 }
 
 /** One muscle group's fortnight, or week, or whatever window was handed in. */
@@ -149,6 +155,9 @@ export function muscleBoard(
     const g = (row.group || '').trim();
     if (g) allGroups.add(g);
   }
+  // The names people type, pointing at the rows they mean. Same rule, same
+  // function and same order of asking as `muscleWorkBoard`.
+  const aliases = synonymAliases(catalogue);
 
   const work = new Map<string, MuscleWork>();
   const unmatched = new Map<string, number>();
@@ -168,7 +177,7 @@ export function muscleBoard(
     const setCount = e.sets.filter((s, i) => (s?.[0] ?? 0) > 0 || isTimedSet(e, i)).length;
     if (setCount <= 0) continue;
     const slug = exerciseSlug(e.exercise || '');
-    const row = slug ? bySlug.get(slug) : undefined;
+    const row = slug ? (bySlug.get(slug) ?? bySlug.get(aliases.get(slug) ?? '')) : undefined;
     const group = (row?.group || '').trim();
     if (!group) {
       const name = (e.exercise || '').trim() || 'Unnamed';
@@ -223,5 +232,5 @@ export function unmatchedNote(board: MuscleBoard): string | null {
   const n = board.unmatchedSets;
   const named = board.unmatched.slice(0, 3).join(', ');
   const more = board.unmatched.length > 3 ? `, and ${board.unmatched.length - 3} more` : '';
-  return `${n} set${n === 1 ? '' : 's'} are not in this — ${named}${more} ${board.unmatched.length === 1 ? 'is' : 'are'} not in the exercise catalogue, so we cannot say which muscle ${board.unmatched.length === 1 ? 'it' : 'they'} worked.`;
+  return `${n} set${n === 1 ? '' : 's'} are not in this: ${named}${more} ${board.unmatched.length === 1 ? 'is' : 'are'} not in the exercise catalogue, so we cannot say which muscle ${board.unmatched.length === 1 ? 'it' : 'they'} worked.`;
 }

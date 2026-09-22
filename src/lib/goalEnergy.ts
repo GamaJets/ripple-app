@@ -34,6 +34,7 @@ import {
   progressOf, projectionOf, startPoint, isMeasured, MIN_TREND_DAYS,
   type GoalTarget, type Point, type Projection,
 } from './goalTargets';
+import { localDate } from './localDate';
 
 /**
  * Energy in a kilogram of body mass. The Wishnofsky constant — 3,500 kcal per
@@ -204,7 +205,34 @@ export function energyPlanFor(input: EnergyPlanInput): EnergyPlan {
   if (!Number.isFinite(tdeeKcal) || tdeeKcal <= 0) return fall('no-maintenance');
   if (!goal.targetDateISO) return fall('no-target-date');
 
-  const targetDateMs = Date.parse(goal.targetDateISO);
+  // ── the END of the target day, in the reader's own zone ────────────────
+  //
+  // `goal_targets.target_date` is a bare `date` — '2026-09-12'. `Date.parse`
+  // reads that as UTC MIDNIGHT, which is the START of the day in UTC and the
+  // day before in every zone west of Greenwich. Two things went wrong:
+  //
+  //   · this module called a goal 'date-passed' from the first moment of its
+  //     target day, while `goalTargets.isOverdue` — on the same goal, at the
+  //     same instant — returned false. The two contradicted each other on
+  //     screen, which is the fault, not either answer on its own.
+  //   · `targetDateMs` is also the date the plan RENDERS, so a Los Angeles
+  //     member saw 11 December for a goal set on the 12th. Every reader west
+  //     of Greenwich was shown the wrong day for every dated goal.
+  //
+  // `isOverdue` already had this right and says why at length: a deadline is
+  // over when the DAY is over. Same construction here, so the two cannot
+  // disagree again.
+  //
+  // Only for a BARE date. A caller that hands over a full timestamp has already
+  // named an instant, and rolling that to the end of its local day would move a
+  // deadline somebody stated precisely — `localDate` draws the same distinction
+  // one layer down and for the same reason.
+  const targetDay = localDate(goal.targetDateISO);
+  if (!targetDay) return fall('no-target-date');
+  const bareDate = /^\d{4}-\d{2}-\d{2}$/.test(goal.targetDateISO.trim());
+  const targetDateMs = bareDate
+    ? new Date(targetDay.getFullYear(), targetDay.getMonth(), targetDay.getDate() + 1).getTime()
+    : targetDay.getTime();
   if (!Number.isFinite(targetDateMs)) return fall('no-target-date');
 
   const prog = progressOf(goal, weightSeries);
@@ -219,7 +247,14 @@ export function energyPlanFor(input: EnergyPlanInput): EnergyPlan {
   // was working before the date arrived, and dividing a 6 kg gap by four days
   // produces a rate that exists only as a number. Both fall back to the
   // enum's steady deficit, which is the truthful answer in each case.
-  if (days < 0) return fall('date-passed');
+  //
+  // `<= 0` and not `< 0`. `targetDateMs` for a bare date is the first instant
+  // AFTER the target day, so `days === 0` is the instant the day ended, and a
+  // day that has ended has gone by. `goalTargets.isOverdue` flips on exactly
+  // that side of exactly that instant (`nowMs >= dayIsOver`); with `< 0` the
+  // two contradicted each other for the millisecond the boundary is wide,
+  // which is the one thing the note above promises cannot happen again.
+  if (days <= 0) return fall('date-passed');
   if (!(days >= MIN_TREND_DAYS)) return fall('date-too-soon');
 
   const requiredRateKg = prog.remaining / (days / 7);

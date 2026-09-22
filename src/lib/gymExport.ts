@@ -81,6 +81,23 @@ import type { SignatureAttribution } from './gymSigning';
 import {
   type ExportWindow, isBounded, placeInWindow, windowSlug, describeWindow,
 } from './exportWindow';
+// The second runtime import, and the header above says there is one. It is now
+// two, and the reason is worth the amendment: how many minor units a currency
+// has is a question this file was answering wrongly, and coachMoney.ts is the
+// single place in the product that answers it. A second copy of the list is
+// the copy that drifts. The purity the header is actually about is intact —
+// coachMoney touches no Supabase, no browser and no clock, and evaluates
+// nothing at module scope.
+import { currencyDecimals } from './coachMoney';
+// The third, on the same amendment and the same grounds. Which DAY an instant
+// fell on is a question this file was also answering wrongly — it was reading
+// UTC's day off a stored timestamp and writing it into the column the importer
+// reads — and gymZone.ts is the single place in TypeScript where a zone becomes
+// a day. Its own header says so, and a second copy of that arithmetic is how a
+// Sunday's takings come to sit in two places. The purity the header is about
+// holds: gymZone evaluates nothing at module scope, imports nothing, and the
+// one function used here takes its zone as an argument and asks `Intl`.
+import { gymDay } from './gymZone';
 
 // Re-exported so a caller building a GymExportInput — a screen, or a test —
 // can name every row type from here rather than importing six modules to do it.
@@ -163,20 +180,58 @@ export function toCsv(header: string[], rows: Cell[][], bom = true): string {
  *
  * Deliberately string arithmetic. `(cents / 100).toFixed(2)` is a float
  * division and this is a ledger; the answer here is the same digits the
- * database holds with a point pushed two places left, which is a text
- * operation, not a numeric one.
+ * database holds with the point pushed left, which is a text operation, not a
+ * numeric one.
+ *
+ * ── And the point is not always two places left ───────────────────────────
+ *
+ * This padded to three digits and sliced two, for every currency there is. A
+ * gym in Tokyo exported ¥50,000 as "500.00" — an understatement of a hundred
+ * times, in the file it hands an accountant — and a gym in Kuwait exported
+ * KWD 12.340 as "123.40", ten times the sale. The readable half of the same
+ * bundle was right the whole way through, because `money()` asks
+ * `currencyDecimals`, so the two artefacts disagreed and neither said which to
+ * believe.
+ *
+ * It also broke the round trip in both directions at once. `parseMoneyCents`
+ * in src/lib/csvImport.ts is currency-aware now, so a file written at a flat
+ * two places would re-import as a different amount — which is worse than
+ * either fault alone, because an export that does not re-import is an export a
+ * gym cannot move on.
+ *
+ * `currencyDecimals` in src/lib/coachMoney.ts is the one answer to how many
+ * places this money has. Every caller below hands it the row's own currency,
+ * and there is no row in this bundle that carries an amount without one.
  *
  * Null is empty rather than "0.00" — a pass with no recorded price is not a
  * free pass, and that distinction is the whole reason `paidCents` is nullable.
+ * An UNKNOWN CURRENCY is empty for the same reason: `client_purchases` carries
+ * none for a sale whose package has been deleted, and "45.00" of nothing is a
+ * figure somebody would add up.
  */
-export function minorToDecimal(cents: number | null | undefined): string {
+export function minorToDecimal(cents: number | null | undefined, currency?: string | null): string {
   if (cents === null || cents === undefined) return '';
   if (!Number.isFinite(cents) || !Number.isInteger(cents)) return '';
+  // How many places this money has, asked rather than assumed. Null — not 2 —
+  // when nobody said which money it is, and an unstateable figure is an empty
+  // cell beside the stored integer rather than a number in no currency at all.
+  //
+  // Null now also covers a currency that is stated and is not a code, and an
+  // EXPORT is the consumer with the least room to guess: the cell is going into
+  // a file that leaves this product, gets added up by an accountant, and comes
+  // back through `parseMoneyCents` on the next import. A "50.00" written from a
+  // row labelled 'pounds' would re-import as 5000 minor units of something, so
+  // the guess would not merely be printed, it would be written back in.
+  // Empty is the honest cell; the stored integer and the raw currency string
+  // are both still in the bundle in their own columns.
+  const dp = currencyDecimals(currency);
+  if (dp == null) return '';
+  if (dp === 0) return String(cents);
   const neg = cents < 0;
-  const digits = String(Math.abs(cents)).padStart(3, '0');
-  const whole = digits.slice(0, -2);
-  const frac = digits.slice(-2);
-  return (neg ? '-' : '') + whole + '.' + frac;
+  // Padded to dp + 1 so a figure smaller than one whole unit keeps its leading
+  // nought — 5 fils is "0.005", never ".005", which a spreadsheet reads as text.
+  const digits = String(Math.abs(cents)).padStart(dp + 1, '0');
+  return (neg ? '-' : '') + digits.slice(0, -dp) + '.' + digits.slice(-dp);
 }
 
 /**
@@ -192,6 +247,59 @@ export function minorToDecimal(cents: number | null | undefined): string {
 export function isoDatePart(ts: string | null | undefined): string {
   if (!ts) return '';
   return /^\d{4}-\d{2}-\d{2}/.test(ts) ? ts.slice(0, 10) : '';
+}
+
+/**
+ * The day a stored instant fell on AT THE GYM, for the columns the importer
+ * reads — and the reason `isoDatePart` alone was not enough.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * `isoDatePart` reads UTC's day off the timestamp, because the first ten
+ * characters of an ISO instant are UTC's date and nobody else's. Every payment
+ * this product IMPORTED survives that: src/lib/gymImports.ts stamps them at
+ * `T12:00:00Z`, so there is no zone on earth that moves them off their day.
+ * A payment recorded natively at the desk carries the real instant — the money
+ * screen writes one only when somebody picks a date — and a gym far enough from
+ * UTC then exports the day either side of its own.
+ *
+ * That is not a cosmetic column. `date` is what `previewPayments` reads and
+ * `gymImports` re-stamps at midday, so a bundle exported at the wrong day
+ * RE-IMPORTS at the wrong day: the export a gym moves on with restates its own
+ * takings into the neighbouring day, and on a month boundary into the
+ * neighbouring month, on the file it hands an accountant. `taken_at` sits
+ * beside it unchanged and is still the stored instant, so nothing is lost —
+ * but the column that is read back is the one that has to be right.
+ *
+ * ── Why a zone-less gym still gets a day ──────────────────────────────────
+ *
+ * `gymDay` obeys the house rule and returns null when the gym has not set a
+ * timezone. That is the right answer for bucketing a month's takings and the
+ * wrong one here: blanking `date` for every gym that has not filled in a
+ * setting would break the round trip outright, which is a far larger failure
+ * than the one this closes. So it falls back to UTC's day, exactly as before,
+ * and the bundle SAYS SO — `daysAt` in the manifest, the note on payments.csv
+ * and the dates convention in the README all name which calendar was used.
+ * That is the same bargain `gymWhen.ts` strikes with `atGym`, argued there.
+ */
+export function gymDatePart(ts: string | null | undefined, zone: string | null | undefined): string {
+  return gymDay(ts, zone) ?? isoDatePart(ts);
+}
+
+/**
+ * Which calendar the date-only columns in this bundle were written on.
+ *
+ * Two values and no third: the gym's own zone, or UTC because the gym has not
+ * set one. Never "the reader's" — a bundle is a file that outlives the browser
+ * that made it, and a day taken off whichever laptop pressed the button is a
+ * fact about that laptop.
+ */
+export type ExportDaysAt = 'gym' | 'utc';
+
+export function daysAt(zone: string | null | undefined): ExportDaysAt {
+  // Asked through `gymDay` itself rather than through `isZone`, so this cannot
+  // answer 'gym' for a zone the formatter would then refuse.
+  return gymDay('2026-01-01T00:00:00.000Z', zone) ? 'gym' : 'utc';
 }
 
 /** A gym's name reduced to something safe in a filename. Empty names give ''. */
@@ -248,6 +356,37 @@ export function slug(name: string | null | undefined): string {
  *                  themselves are bytes in a bucket and cannot travel in a CSV;
  *                  the table says so in its own note rather than leaving a
  *                  reader to assume the export contained them.
+ *
+ * ── And the five after those ──────────────────────────────────────────────
+ *
+ * Four tables were still written by this product and readable by nobody
+ * leaving it, and one — the order book — was not readable by the gym AT ALL
+ * until src/lib/gymOrders.ts and /orders landed beside this round.
+ *
+ *   orders         `gym_orders`. Card money the gym took online, through a
+ *                  Stripe account it owns. `payments` is the DESK's register
+ *                  and does not contain these: an online sale that Stripe
+ *                  settled is a line the gym has to reconcile against a payout
+ *                  and could not export at all.
+ *   closes         `gym_month_closes`. The four figures a month was signed off
+ *                  on, as they stood, plus what the screen was refusing about
+ *                  if it was closed anyway. This is the only row in the
+ *                  database that says a human accepted a set of numbers, and
+ *                  it is the row an accountant reconciles a filed return to.
+ *   adjustments    `payroll_adjustments`. Bonuses, deductions, reimbursements
+ *                  and advances. `settlements` is what was HANDED OVER and
+ *                  these are the lines that made it that figure — a payslip a
+ *                  coach queries cannot be reconstructed from the total alone.
+ *   equipmentLog   `gym_equipment_log`. The maintenance history and the
+ *                  accident book. The equipment register says a machine
+ *                  exists; this says it was serviced in March and that
+ *                  somebody was hurt on it in June, which is the half an
+ *                  insurer and a claim actually turn on.
+ *   reconciles     `gym_reconcile_marks`. Which invoices and payments somebody
+ *                  ACCEPTED as explained and which they FLAGGED, with the
+ *                  reason the constraint makes them give. A reconciliation
+ *                  whose exceptions were taken off it by hand and left no
+ *                  exported trace is a reconciliation an auditor cannot check.
  */
 export type ExportPart =
   | 'plans'
@@ -272,13 +411,25 @@ export type ExportPart =
   | 'purchases'
   | 'agreements'
   | 'signatures'
-  | 'documents';
+  | 'documents'
+  | 'orders'
+  | 'closes'
+  | 'adjustments'
+  | 'equipmentLog'
+  | 'reconciles'
+  // What the gym PAID OUT. Every other money part here is money coming in or
+  // money going to staff; `gym_costs` is rent, power, the cleaner, the engineer,
+  // the music licence, insurance, stock and the accountant. Without it a bundle
+  // headed "the gym's record" holds one side of a ledger, and the month closes
+  // it does hold quote totals whose lines are in no file.
+  | 'costs';
 
 export const EXPORT_PARTS: ExportPart[] = [
   'plans', 'members', 'memberRecords', 'memberships', 'payments', 'invoices',
+  'orders', 'reconciles', 'costs', 'closes',
   'classes', 'attendance', 'sessions',
   'passTypes', 'passes', 'visits', 'invites',
-  'settlements', 'equipment', 'shifts',
+  'settlements', 'adjustments', 'equipment', 'equipmentLog', 'shifts',
   'interventions', 'promos', 'events', 'purchases',
   'agreements', 'signatures', 'documents',
 ];
@@ -450,6 +601,129 @@ export interface ExportDocument {
   uploadedById: string | null; uploadedByName: string | null; uploadedAt: string;
 }
 
+/* ── the five after those ──────────────────────────────────────────────────── */
+
+/**
+ * One row of `gym_orders` — card money taken online.
+ *
+ * `amountCents` is the QUOTE, and it is what the member was charged: the column
+ * is `not null` in supabase/parts/281, so a blank here means the read could not
+ * put a number on it rather than that the order was free. `stripeSessionId` and
+ * `stripePaymentIntent` travel because they are the join to the gym's own
+ * Stripe account — without them a payout line and an order line are two numbers
+ * that happen to be equal, and reconciling them afterwards is guesswork.
+ *
+ * `failureNote` is exported and is the reason this part is not merely nice to
+ * have. A 'failed' order is not a failed payment: part 281 defines it as Stripe
+ * having taken the money while the entitlement could not be written. A gym
+ * leaving the platform with those rows unexported takes no record that it owes
+ * somebody a membership it was paid for.
+ */
+export interface ExportOrder {
+  id: string; memberId: string | null; memberName: string | null;
+  kind: string | null; intent: string | null; status: string | null;
+  amountCents: number | null; currency: string | null;
+  planId: string | null; passTypeId: string | null;
+  termStartsOn: string | null; termEndsOn: string | null;
+  usesTotal: number | null; expiresOn: string | null;
+  membershipId: string | null; passId: string | null;
+  stripeAccountId: string | null; stripeSessionId: string | null;
+  stripePaymentIntent: string | null; failureNote: string | null;
+  createdAt: string | null; paidAt: string | null;
+}
+
+/**
+ * One row of `gym_month_closes` — a month somebody signed off, and on what.
+ *
+ * Every figure is nullable and every one of them exports blank rather than
+ * zero. Part 182 stores them nullable for exactly this reason: the screen was
+ * showing dashes, and a zero written into a filed record is a fabricated fact
+ * that reads as "this gym took nothing in March".
+ *
+ * `blockersAtClose` is the column that makes this row worth exporting at all.
+ * A month closed over a stated objection is a decision a person made, and the
+ * objection is what an auditor asks about. `reopenedAt` beside it means the
+ * close was undone — the row is kept, because a close that was later reopened
+ * is two facts and neither one cancels the other.
+ */
+export interface ExportClose {
+  id: string; monthKey: string;
+  closedAt: string | null; closedById: string | null; closedByName: string | null;
+  takenCents: number | null; invoicedCents: number | null;
+  outstandingCents: number | null; payrollCents: number | null;
+  currency: string | null; unmarkedSessions: number | null;
+  blockersAtClose: string | null; note: string | null;
+  reopenedAt: string | null; reopenedById: string | null;
+  reopenedByName: string | null; reopenReason: string | null;
+}
+
+/**
+ * One row of `payroll_adjustments` — a line that is not a session.
+ *
+ * `amountCents` is SIGNED and the sign is not cosmetic: part 183 constrains a
+ * deduction and an advance to be negative and a bonus and a reimbursement to be
+ * positive, so summing this column is the arithmetic and not an invitation to
+ * apply the kind twice. `kind` travels beside it anyway, because a bonus and a
+ * reimbursement add the same money and mean entirely different things on a
+ * payslip somebody files.
+ */
+export interface ExportAdjustment {
+  id: string; trainerId: string | null; trainerName: string | null;
+  kind: string | null; amountCents: number | null; currency: string | null;
+  note: string | null; appliesOn: string | null; settlementId: string | null;
+  createdAt: string | null; createdById: string | null; createdByName: string | null;
+}
+
+/**
+ * One row of `gym_equipment_log` — the maintenance history and the accident
+ * book, which are one table because they are one question after a claim.
+ *
+ * `equipmentLabel` is exported beside `equipmentId` and is not redundant: part
+ * 186 sets the id to NULL when a machine is retired precisely so that retiring
+ * it does not delete the record of the accident that happened on it, and the
+ * label is then the only thing saying what the machine was.
+ */
+export interface ExportEquipmentLog {
+  id: string; equipmentId: string | null; equipmentLabel: string | null;
+  kind: string | null; happenedOn: string | null; performedBy: string | null;
+  findings: string | null; costCents: number | null; currency: string | null;
+  documentId: string | null; reportedTo: string | null;
+  recordedById: string | null; recordedByName: string | null; createdAt: string | null;
+}
+
+/**
+ * One row of `gym_reconcile_marks` — an exception somebody took off the
+ * reconciliation, and why.
+ *
+ * `subjectId` is an invoice id OR a payment id and `subjectKind` says which:
+ * part 181 deliberately did not split it into two nullable foreign keys, so the
+ * two columns are read together or not at all. Both are exported, unresolved,
+ * because resolving them here would mean a join that can fail and a mark whose
+ * subject is missing is still a mark that was made.
+ */
+export interface ExportReconcileMark {
+  id: string; subjectKind: string | null; subjectId: string | null;
+  state: string | null; note: string | null;
+  markedById: string | null; markedByName: string | null; markedAt: string | null;
+}
+
+/**
+ * One row of `gym_costs` — money the gym paid out.
+ *
+ * Nullable amount and nullable currency for the same reason every other money
+ * shape here is: a cost with no amount is money of unknown size and must export
+ * as a blank, and an amount with no currency on it is not an amount of money.
+ * `paidOn` is a DATE column and stays one — it is the day the money went out,
+ * and turning it into an instant would move a Monday payment to Sunday for
+ * every gym west of Greenwich.
+ */
+export interface ExportCost {
+  id: string; description: string; supplier: string | null; category: string | null;
+  amountCents: number | null; currency: string | null;
+  paidOn: string | null; note: string | null;
+  recordedById: string | null; recordedByName: string | null; createdAt: string | null;
+}
+
 /** What each part is called in a sentence an owner reads. */
 export const EXPORT_LABEL: Record<ExportPart, string> = {
   plans: 'the price book',
@@ -475,6 +749,12 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   agreements: 'the documents people are asked to sign',
   signatures: 'signatures',
   documents: 'the filing cabinet',
+  orders: 'what members bought online',
+  closes: 'the months that were signed off',
+  adjustments: 'payroll adjustments',
+  equipmentLog: 'the maintenance and accident book',
+  reconciles: 'the reconciliation marks',
+  costs: 'what the gym paid out',
 };
 
 /** What leaving a part out of the bundle actually costs. Named so the warning
@@ -502,7 +782,13 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   purchases: 'what the coaches sold through their own checkout',
   agreements: 'the wording of every waiver, consent and set of terms, as each version stood',
   signatures: 'who signed what, when, and whether they signed it themselves',
-  documents: 'what is in the filing cabinet — the contracts, insurance, certificates and incident reports the gym holds',
+  documents: 'what is in the filing cabinet: the contracts, insurance, certificates and incident reports the gym holds',
+  orders: 'every card payment the gym took online, and the Stripe reference each one reconciles to',
+  closes: 'the figures each month was signed off on, who signed it, and what they were told was wrong at the time',
+  adjustments: 'the bonuses, deductions, reimbursements and advances behind what the staff were actually paid',
+  equipmentLog: 'when each machine was serviced, what the engineer found, and every incident recorded on one',
+  reconciles: 'which payments and invoices somebody accepted as explained, and the reason they gave',
+  costs: 'everything the gym spent: rent, power, staff off payroll, maintenance, stock, insurance and the rest of what leaves the account',
 };
 
 /** The basename each part writes to, before the bundle prefix. */
@@ -530,6 +816,12 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   agreements: 'agreements.csv',
   signatures: 'signatures.csv',
   documents: 'documents.csv',
+  orders: 'online-orders.csv',
+  closes: 'month-closes.csv',
+  adjustments: 'payroll-adjustments.csv',
+  equipmentLog: 'equipment-log.csv',
+  reconciles: 'reconciliation-marks.csv',
+  costs: 'costs.csv',
 };
 
 /* ── what a period does and does not narrow ────────────────────────────────── */
@@ -573,6 +865,21 @@ export const EXPORT_DATE_FIELD: Record<ExportPart, string | null> = {
   agreements: null,
   signatures: 'signed_at',
   documents: 'uploaded_at',
+  orders: 'created_at',
+  // The month the close is ABOUT, not the day somebody pressed the button. An
+  // accountant asking for a financial year means the twelve closes for those
+  // months, and bounding on `closed_at` would drop a December close signed off
+  // in the January after it — the one every year-end actually has.
+  closes: 'month_key',
+  // `applies_on` and not `created_at`, for the reason part 183 gives it: an
+  // adjustment for last month entered this month belongs to last month.
+  adjustments: 'applies_on',
+  equipmentLog: 'happened_on',
+  reconciles: 'marked_at',
+  // The day the money went out, which is also the day the month close counts it
+  // in — see src/lib/closeCosts.ts. A period asked for by an accountant and the
+  // period the gym signed off therefore hold the same lines.
+  costs: 'paid_on',
 };
 
 /**
@@ -610,6 +917,15 @@ export interface GymExportInput {
   tenantId: string | null;
   /** ISO instant the export was taken. Passed in so the output is testable. */
   generatedAt: string;
+  /**
+   * `tenants.timezone` — the calendar the date-only columns are written on.
+   *
+   * Null or unset is a real and common state, not an oversight, and it does not
+   * blank the columns: see `gymDatePart` for why they fall back to UTC's day
+   * and where the bundle says that it did. Passed in rather than read, like
+   * everything else here — this module touches no Supabase and no clock.
+   */
+  timezone?: string | null;
   /**
    * The period this export covers. Null on both sides is the whole record.
    *
@@ -651,6 +967,12 @@ export interface GymExportInput {
   agreements: Slice<ExportAgreement>;
   signatures: Slice<ExportSignature>;
   documents: Slice<ExportDocument>;
+  orders: Slice<ExportOrder>;
+  closes: Slice<ExportClose>;
+  adjustments: Slice<ExportAdjustment>;
+  equipmentLog: Slice<ExportEquipmentLog>;
+  reconciles: Slice<ExportReconcileMark>;
+  costs: Slice<ExportCost>;
 }
 
 /** The slice a part is read from. `members` rides on `memberships`. */
@@ -681,6 +1003,19 @@ export function partSlice(input: GymExportInput, part: ExportPart): Slice<unknow
     case 'agreements': return input.agreements;
     case 'signatures': return input.signatures;
     case 'documents': return input.documents;
+    case 'orders': return input.orders;
+    case 'closes': return input.closes;
+    case 'adjustments': return input.adjustments;
+    // Its own read, and deliberately not riding on `equipment`. A gym whose
+    // register would not load still has an accident book, and an accident book
+    // that came back empty because a different table failed is the worst file
+    // in this bundle to be silently wrong about.
+    case 'equipmentLog': return input.equipmentLog;
+    case 'reconciles': return input.reconciles;
+    // Its own read. The gym's outgoings are not derivable from anything else in
+    // this bundle — payroll settlements are one line of them and the month
+    // closes hold only totals.
+    case 'costs': return input.costs;
   }
 }
 
@@ -718,6 +1053,19 @@ export function rowDate(part: ExportPart, row: unknown): string | null {
     case 'purchases': return str('createdAt');
     case 'signatures': return str('signedAt');
     case 'documents': return str('uploadedAt');
+    case 'orders': return str('createdAt');
+    // 'YYYY-MM' is not a date and `instantOf` will not parse one, so the month
+    // is placed at its first day. A close is then INSIDE any window that
+    // contains the start of the month it is about — which is the reading an
+    // accountant asking for a quarter means, and the file says so.
+    case 'closes': {
+      const k = str('monthKey');
+      return k && /^\d{4}-\d{2}$/.test(k) ? `${k}-01` : null;
+    }
+    case 'adjustments': return str('appliesOn');
+    case 'costs': return str('paidOn');
+    case 'equipmentLog': return str('happenedOn');
+    case 'reconciles': return str('markedAt');
   }
 }
 
@@ -755,6 +1103,11 @@ export function windowSlices(input: GymExportInput, w: ExportWindow): GymExportI
     purchases: cut('purchases', input.purchases),
     signatures: cut('signatures', input.signatures),
     documents: cut('documents', input.documents),
+    orders: cut('orders', input.orders),
+    closes: cut('closes', input.closes),
+    adjustments: cut('adjustments', input.adjustments),
+    equipmentLog: cut('equipmentLog', input.equipmentLog),
+    reconciles: cut('reconciles', input.reconciles),
   };
 }
 
@@ -845,6 +1198,16 @@ export interface ExportManifest {
   gym: string | null;
   tenantId: string | null;
   exportedAt: string;
+  /**
+   * The gym's timezone as it stood, or null when it has not set one — and which
+   * calendar the date-only columns were therefore written on.
+   *
+   * Both, not one. `timezone: null` alone would leave a reader to guess what
+   * happened instead, and the two answers a reader could guess (UTC, or
+   * whichever laptop pressed the button) differ by a day for half the world.
+   */
+  timezone: string | null;
+  daysAt: ExportDaysAt;
   /** The period, and a sentence saying it. `bounded` is the field to read: null
    *  on both sides is the whole record, which is a different claim from a very
    *  wide window and used to be indistinguishable from one. */
@@ -903,7 +1266,7 @@ export function incompleteWarning(missing: MissingPart[]): string | null {
   const n = missing.length;
   return (
     `THIS EXPORT IS NOT YOUR WHOLE RECORD. Could not read ${names}. ` +
-    `${n === 1 ? 'That part is' : 'Those parts are'} MISSING from this bundle, not empty — ` +
+    `${n === 1 ? 'That part is' : 'Those parts are'} MISSING from this bundle, not empty. ` +
     `${costs} ${n === 1 ? 'is' : 'are'} absent from every file here. ` +
     `Fix the read and export again before treating this as the gym's record.`
   );
@@ -932,6 +1295,15 @@ export const MEMBER_PARTS: ExportPart[] = [
   'memberRecords',
   'memberships', 'payments', 'invoices', 'attendance', 'sessions',
   'passes', 'visits', 'invites', 'interventions', 'purchases', 'events',
+  // What they bought online. `payments` is the DESK's register and holds none
+  // of these, so a member who has only ever paid by card on their phone had an
+  // empty payments.csv and nothing else — a subject-access response saying the
+  // gym holds no record of their money.
+  'orders',
+  // What somebody wrote against their money. A mark reading "accepted — member
+  // says they paid cash in March" is a note the gym made ABOUT this person, and
+  // it is the kind of note a subject-access request is usually made to find.
+  'reconciles',
   // The paperwork. `agreements` is here because a signature without the wording
   // it points at names a document the bundle does not contain.
   'agreements', 'signatures', 'documents',
@@ -979,6 +1351,17 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     equipment: none(input.equipment),
     shifts: none(input.shifts),
     promos: none(input.promos),
+    // The gym's own books and its own building. A month close is four totals
+    // for the whole gym, an adjustment is a coach's pay, and the accident book
+    // carries no member column at all — none of the three is this person's
+    // record, and handing them over would answer a request nobody made.
+    closes: none(input.closes),
+    adjustments: none(input.adjustments),
+    equipmentLog: none(input.equipmentLog),
+    // The gym's purchase ledger. Rent, power and the engineer are the gym's
+    // commercial position and are about no member at all, so a subject-access
+    // response is EMPTY here rather than missing it — read fine, not theirs.
+    costs: none(input.costs),
 
     memberRecords: keep(input.memberRecords, (r) => r.memberId === memberId),
     memberships: keep(input.memberships, (m) => m.memberId === memberId),
@@ -1008,6 +1391,10 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     // wrong here — a document that no longer names anybody cannot be handed to
     // somebody as theirs on the strength of once having named someone.
     documents: keep(input.documents, (d) => d.memberId === memberId),
+    orders: keep(input.orders, (o) => o.memberId === memberId),
+    // Narrowed through the register the mark points AT, because the mark itself
+    // names an invoice or a payment and never a person.
+    reconciles: memberMarks(input, memberId),
     // The wording they agreed to, and only that. Narrowable only where the
     // signatures actually read: with that query refused there is no way to know
     // WHICH versions they signed, so the agreements travel whole rather than
@@ -1018,6 +1405,43 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
       ? keepSigned(input.agreements, input.signatures.rows, memberId)
       : input.agreements,
   };
+}
+
+/**
+ * The reconciliation marks that are about ONE member's money.
+ *
+ * `gym_reconcile_marks` names an invoice id or a payment id and never a member,
+ * so the only way to place a mark on a person is through the register it points
+ * at. That makes this the one part of a member bundle whose scope DEPENDS on
+ * two other reads, and the failure mode is the one this whole module exists to
+ * prevent: with the invoices refused, filtering on the ids that did load would
+ * produce a shorter list of marks and nothing anywhere would say it was short.
+ *
+ * So an unnarrowable part is UNREADABLE rather than empty. It comes out as the
+ * same loudly-named stub, with INCOMPLETE in the filename and a line in the
+ * README, and the sentence names the reason: the marks exist, they could not be
+ * matched to this person, and this bundle is not their whole record.
+ */
+function memberMarks(input: GymExportInput, memberId: string): Slice<ExportReconcileMark> {
+  const marks = input.reconciles;
+  if (marks.state !== 'ready') return marks;
+  if (input.invoices.state !== 'ready' || input.payments.state !== 'ready') {
+    const which = input.invoices.state !== 'ready' && input.payments.state !== 'ready'
+      ? 'the invoice register and the payments'
+      : input.invoices.state !== 'ready' ? 'the invoice register' : 'the payments';
+    return {
+      state: 'failed',
+      reason:
+        `a reconciliation mark names an invoice or a payment and never a member, so these could only be `
+        + `narrowed to this person through ${which}, which did not read. The marks are NOT empty and they `
+        + `are not included: they could not be matched.`,
+    };
+  }
+  const mine = new Set<string>([
+    ...input.invoices.rows.filter((i) => i.memberId === memberId).map((i) => i.id),
+    ...input.payments.rows.filter((p) => p.memberId === memberId).map((p) => p.id),
+  ]);
+  return { state: 'ready', rows: marks.rows.filter((m) => m.subjectId != null && mine.has(m.subjectId)) };
 }
 
 /** The agreement versions one member has a signature against. */
@@ -1076,6 +1500,33 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
         reason: s.reason,
         file: '',
       });
+    } else if (s.state === 'partial') {
+      // A TRUNCATED read is reported here rather than written out as a CSV,
+      // and that is a deliberate choice against the rows in hand.
+      //
+      // The rows are real. Writing them would produce a file that looks exactly
+      // like the whole set: same name, same columns, a plausible row count, and
+      // nothing anywhere in the bundle saying it is a prefix once the folder has
+      // been copied somewhere else. src/lib/rowCap.ts's header is about exactly
+      // this — a truncated read is worse than a failed one because it succeeds,
+      // quietly, with the wrong answer — and an export is the artefact most
+      // likely to outlive the screen that produced it and be read by somebody
+      // who never saw a banner.
+      //
+      // So it takes the same shape as a failure: a named stub, `complete` false,
+      // and INCOMPLETE in the filename. The reason says which of the two it is,
+      // because "we could not read this" and "we read the first thousand of it"
+      // send whoever fixes it to two different places.
+      missing.push({
+        part,
+        label: EXPORT_LABEL[part],
+        cost: EXPORT_COST[part],
+        reason:
+          `the read came back at its ${s.cap}-row limit, so what arrived is a PREFIX of this part ` +
+          `rather than all of it. A file holding part of a set, named as though it held the set, ` +
+          `is the one thing this bundle must never contain`,
+        file: '',
+      });
     }
   }
   // A part still loading is not a part that failed, but it is equally not in
@@ -1094,7 +1545,11 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
   missing.sort((a, b) => EXPORT_PARTS.indexOf(a.part) - EXPORT_PARTS.indexOf(b.part));
 
   const complete = missing.length === 0;
-  const day = isoDatePart(input.generatedAt) || 'undated';
+  // The gym's day, not UTC's, for the same reason the `date` column is: a
+  // bundle taken at 01:00 on 1 September in Auckland is a September export and
+  // filing it as `taken-2026-08-31` is how it gets sent as the wrong one. Falls
+  // back to UTC's day where the gym has no zone — `gymDatePart` says why.
+  const day = gymDatePart(input.generatedAt, input.timezone) || 'undated';
   // The period, in the filename, before the day it was taken. A bundle sitting
   // in a Downloads folder among four others is read by its NAME long before
   // anybody opens the README, and "this is the first quarter, not the record"
@@ -1178,7 +1633,7 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
         rows: null,
         reason: m.reason,
         columns: null,
-        note: `Not in this bundle. ${capitalise(EXPORT_COST[part])} is unknown here — absent, not zero.`,
+        note: `Not in this bundle. ${capitalise(EXPORT_COST[part])} is unknown here: absent, not zero.`,
         window: partWindow(part, bounded, null),
       });
       continue;
@@ -1215,6 +1670,8 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
     gym: input.gymName ?? null,
     tenantId: input.tenantId ?? null,
     exportedAt: input.generatedAt,
+    timezone: input.timezone ?? null,
+    daysAt: daysAt(input.timezone),
     window: {
       from: window.from,
       to: window.to,
@@ -1231,7 +1688,7 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
     warning: incompleteWarning(missing),
     parts: reports,
     caveats,
-    conventions: CONVENTIONS,
+    conventions: conventionsFor(input.timezone),
   };
 
   files.push({
@@ -1263,7 +1720,7 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'plans': return plansTable(readyRows(input.plans));
     case 'members': return membersTable(input);
     case 'memberships': return membershipsTable(readyRows(input.memberships));
-    case 'payments': return paymentsTable(readyRows(input.payments));
+    case 'payments': return paymentsTable(readyRows(input.payments), input.timezone);
     case 'classes': return classesTable(readyRows(input.classes));
     case 'attendance': return attendanceTable(readyRows(input.attendance));
     case 'sessions': return sessionsTable(readyRows(input.sessions));
@@ -1283,6 +1740,12 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'agreements': return agreementsTable(readyRows(input.agreements));
     case 'signatures': return signaturesTable(readyRows(input.signatures));
     case 'documents': return documentsTable(readyRows(input.documents));
+    case 'orders': return ordersTable(readyRows(input.orders));
+    case 'closes': return closesTable(readyRows(input.closes));
+    case 'adjustments': return adjustmentsTable(readyRows(input.adjustments));
+    case 'equipmentLog': return equipmentLogTable(readyRows(input.equipmentLog));
+    case 'reconciles': return reconcilesTable(readyRows(input.reconciles));
+    case 'costs': return costsTable(readyRows(input.costs));
   }
 }
 
@@ -1306,7 +1769,7 @@ function memberRecordsTable(rows: ExportMemberRecord[]): Table {
       r.tags.length ? r.tags.join('; ') : null,
       r.updatedAt,
     ]),
-    note: 'What the gym itself recorded about each person: how to reach them, who to ring, what it was told for the floor, and what the desk wrote. `medical_note` is the GYM\u2019s operational note and is not the member\u2019s own injury record, which is theirs and leaves from their own account. A blank emergency contact means none was ever recorded — it does not mean the member has nobody.',
+    note: 'What the gym itself recorded about each person: how to reach them, who to ring, what it was told for the floor, and what the desk wrote. `medical_note` is the GYM\u2019s operational note and is not the member\u2019s own injury record, which is theirs and leaves from their own account. A blank emergency contact means none was ever recorded. It does not mean the member has nobody.',
   };
 }
 
@@ -1363,7 +1826,7 @@ function signaturesTable(rows: ExportSignature[]): Table {
       g.guardianName, g.guardianRelationship, g.note,
       g.id, g.agreementId,
     ]),
-    note: 'Read the attribution column before relying on any row here. Only \u2018member\u2019 is the member\u2019s own act; \u2018staff\u2019 is somebody at the desk recording that they agreed, and \u2018unknown\u2019 is a row written before this product recorded which. The signed name is what was typed at the time and is kept apart from the account name on purpose — the name on a waiver IS the waiver. The wording each row points at is in agreements.csv.',
+    note: 'Read the attribution column before relying on any row here. Only \u2018member\u2019 is the member\u2019s own act; \u2018staff\u2019 is somebody at the desk recording that they agreed, and \u2018unknown\u2019 is a row written before this product recorded which. The signed name is what was typed at the time and is kept apart from the account name on purpose. The name on a waiver IS the waiver. The wording each row points at is in agreements.csv.',
   };
 }
 
@@ -1400,7 +1863,7 @@ function documentsTable(rows: ExportDocument[]): Table {
       d.equipmentId, d.expiresOn, d.mime, d.sizeBytes, d.note,
       d.uploadedByName, d.uploadedById, d.storagePath, d.id,
     ]),
-    note: 'THE FILES THEMSELVES ARE NOT IN THIS BUNDLE. This is the index in front of the gym-docs bucket — what each document is, what it is about and when it expires — and a CSV cannot carry a scan. `storage_path` is the key each file is stored under, so every row here is findable; downloading them is a separate act against the bucket. An empty expires_on means it does not expire or nobody said, and those two were never distinguished.',
+    note: 'THE FILES THEMSELVES ARE NOT IN THIS BUNDLE. This is the index in front of the gym-docs bucket (what each document is, what it is about and when it expires), and a CSV cannot carry a scan. `storage_path` is the key each file is stored under, so every row here is findable; downloading them is a separate act against the bucket. An empty expires_on means it does not expire or nobody said, and those two were never distinguished.',
   };
 }
 
@@ -1419,10 +1882,10 @@ function invoicesTable(rows: ExportInvoice[]): Table {
     header: ['invoice_number', 'issued_on', 'due_on', 'member_name', 'member_id', 'amount', 'currency', 'amount_cents', 'status', 'note', 'invoice_id'],
     rows: rows.map((i) => [
       i.number, i.issuedOn, i.dueOn, i.memberName, i.memberId,
-      minorToDecimal(i.amountCents), i.currency, i.amountCents,
+      minorToDecimal(i.amountCents, i.currency), i.currency, i.amountCents,
       i.status, i.note, i.id,
     ]),
-    note: 'What the gym billed. A blank amount is an invoice that records none — it is not a free one. `status` is the register\u2019s own word; overdue is computed from due_on and is not stored.',
+    note: 'What the gym billed. A blank amount is an invoice that records none. It is not a free one. `status` is the register\u2019s own word; overdue is computed from due_on and is not stored.',
   };
 }
 
@@ -1432,10 +1895,10 @@ function settlementsTable(rows: ExportSettlement[]): Table {
     header: ['settled_at', 'trainer_name', 'trainer_id', 'period_from', 'period_to', 'amount', 'currency', 'amount_cents', 'sessions', 'method', 'reversed_at', 'reverse_reason', 'settlement_id'],
     rows: rows.map((r) => [
       r.settledAt, r.trainerName, r.trainerId, r.periodFrom, r.periodTo,
-      minorToDecimal(r.amountCents), r.currency, r.amountCents,
+      minorToDecimal(r.amountCents, r.currency), r.currency, r.amountCents,
       r.sessionsCount, r.method, r.reversedAt, r.reverseReason, r.id,
     ]),
-    note: 'Amounts are snapshots of what was handed over and are never recomputed. A row with reversed_at set was TAKEN BACK — it is kept because a settlement that was recorded and then withdrawn is two facts, and it must not be counted as money out.',
+    note: 'Amounts are snapshots of what was handed over and are never recomputed. A row with reversed_at set was TAKEN BACK. It is kept because a settlement that was recorded and then withdrawn is two facts, and it must not be counted as money out.',
   };
 }
 
@@ -1447,7 +1910,7 @@ function equipmentTable(rows: ExportEquipment[]): Table {
       e.name, e.category, e.identifier, e.quantity, e.status, e.purchasedOn,
       e.serviceIntervalDays, e.lastServicedOn, e.note, e.id,
     ]),
-    note: 'A blank last_serviced_on beside a service interval means the schedule exists and nobody has recorded a service — which is not the same as serviced today.',
+    note: 'A blank last_serviced_on beside a service interval means the schedule exists and nobody has recorded a service, which is not the same as serviced today.',
   };
 }
 
@@ -1465,7 +1928,7 @@ function interventionsTable(rows: ExportIntervention[]): Table {
   return {
     header: ['at', 'member_name', 'member_id', 'channel', 'outcome', 'contacted_by', 'contacted_by_id', 'note', 'intervention_id'],
     rows: rows.map((i) => [i.at, i.memberName, i.memberId, i.channel, i.outcome, i.byName, i.byId, i.note, i.id]),
-    note: 'The only record in this product that a member was contacted about drifting away — it is what answers a member who says nobody ever got in touch. What FOLLOWED a contact is not here: that is computed from training either side of it, it changes as more training is recorded, and a snapshot of it in a file would be a judgement dressed as a fact.',
+    note: 'The only record in this product that a member was contacted about drifting away. It is what answers a member who says nobody ever got in touch. What FOLLOWED a contact is not here: that is computed from training either side of it, it changes as more training is recorded, and a snapshot of it in a file would be a judgement dressed as a fact.',
   };
 }
 
@@ -1483,7 +1946,7 @@ function eventsTable(rows: ExportEvent[]): Table {
   return {
     header: ['at', 'kind', 'summary', 'subject_id', 'actor_id', 'event_id'],
     rows: rows.map((e) => [e.at, e.kind, e.summary, e.subjectId, e.actorId, e.id]),
-    note: 'Written by database triggers as things happened, so nothing here was typed by anyone. The summary was composed at write time and names people as they were called then — it does not change when somebody is renamed or erased.',
+    note: 'Written by database triggers as things happened, so nothing here was typed by anyone. The summary was composed at write time and names people as they were called then. It does not change when somebody is renamed or erased.',
   };
 }
 
@@ -1493,10 +1956,158 @@ function purchasesTable(rows: ExportPurchase[]): Table {
     header: ['created_at', 'trainer_name', 'trainer_id', 'client_id', 'amount', 'currency', 'amount_cents', 'sessions_total', 'sessions_used', 'status', 'purchase_id'],
     rows: rows.map((p) => [
       p.createdAt, p.trainerName, p.trainerId, p.clientId,
-      minorToDecimal(p.amountCents), p.currency, p.amountCents,
+      minorToDecimal(p.amountCents, p.currency), p.currency, p.amountCents,
       p.sessionsTotal, p.sessionsUsed, p.status, p.id,
     ]),
-    note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster — a purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
+    note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster. A purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
+  };
+}
+
+/* ── the five after those ──────────────────────────────────────────────────── */
+
+/**
+ * The order book — card money taken online.
+ *
+ * Two money columns and both of them go through `minorToDecimal`, so a row
+ * whose amount could not be read is blank rather than free. `stripe_session_id`
+ * and `stripe_payment_intent` are here because they are the only join between
+ * this file and the gym's own Stripe payouts; without them an owner
+ * reconciling a settlement has two lists of amounts and no key.
+ */
+function ordersTable(rows: ExportOrder[]): Table {
+  return {
+    header: [
+      'created_at', 'paid_at', 'status', 'member_name', 'member_id', 'kind', 'intent',
+      'amount', 'currency', 'amount_cents',
+      'term_starts_on', 'term_ends_on', 'uses_total', 'expires_on',
+      'plan_id', 'pass_type_id', 'membership_id', 'pass_id',
+      'stripe_account_id', 'stripe_session_id', 'stripe_payment_intent', 'failure_note', 'order_id',
+    ],
+    rows: rows.map((o) => [
+      o.createdAt, o.paidAt, o.status, o.memberName, o.memberId, o.kind, o.intent,
+      minorToDecimal(o.amountCents, o.currency), o.currency, o.amountCents,
+      o.termStartsOn, o.termEndsOn, o.usesTotal, o.expiresOn,
+      o.planId, o.passTypeId, o.membershipId, o.passId,
+      o.stripeAccountId, o.stripeSessionId, o.stripePaymentIntent, o.failureNote, o.id,
+    ]),
+    note:
+      'Card money taken online, which is NOT in payments.csv. That file is the desk\u2019s own register. '
+      + 'A status of "failed" does not mean the payment failed: it means Stripe took the money and the '
+      + 'membership or pass could not be written, so a row with status=failed and an empty membership_id '
+      + 'is somebody who paid and got nothing. A "pending" row older than a day or two is an order Stripe '
+      + 'never told us the end of.',
+  };
+}
+
+/**
+ * The months that were signed off, and what was wrong at the time.
+ *
+ * Every figure is written blank where none was recorded. A close with an empty
+ * `taken` is a month somebody signed off while the takings were showing a dash,
+ * and printing a 0 there would turn "we did not know" into "we took nothing" in
+ * a file an accountant reconciles a return against.
+ */
+function closesTable(rows: ExportClose[]): Table {
+  return {
+    header: [
+      'month_key', 'closed_at', 'closed_by', 'closed_by_id',
+      'taken', 'invoiced', 'outstanding', 'payroll', 'currency',
+      'taken_cents', 'invoiced_cents', 'outstanding_cents', 'payroll_cents',
+      'unmarked_sessions', 'blockers_at_close', 'note',
+      'reopened_at', 'reopened_by', 'reopened_by_id', 'reopen_reason', 'close_id',
+    ],
+    rows: rows.map((c) => [
+      c.monthKey, c.closedAt, c.closedByName, c.closedById,
+      minorToDecimal(c.takenCents, c.currency), minorToDecimal(c.invoicedCents, c.currency),
+      minorToDecimal(c.outstandingCents, c.currency), minorToDecimal(c.payrollCents, c.currency), c.currency,
+      c.takenCents, c.invoicedCents, c.outstandingCents, c.payrollCents,
+      c.unmarkedSessions, c.blockersAtClose, c.note,
+      c.reopenedAt, c.reopenedByName, c.reopenedById, c.reopenReason, c.id,
+    ]),
+    note:
+      'The figures AS THEY STOOD when the month was signed off. They are snapshots and are never '
+      + 'recomputed, so a close will disagree with a fresh sum over the same month once anything is '
+      + 'backdated into it. That disagreement is the record, not an error. `blockers_at_close` is what '
+      + 'the screen was refusing about when somebody closed it anyway. A row with `reopened_at` set was '
+      + 'undone afterwards and is kept: a close and its reopening are two facts.',
+  };
+}
+
+/** Payroll adjustments — the lines that made a settlement the figure it was. */
+function adjustmentsTable(rows: ExportAdjustment[]): Table {
+  return {
+    header: ['applies_on', 'trainer_name', 'trainer_id', 'kind', 'amount', 'currency', 'amount_cents', 'note', 'settlement_id', 'created_at', 'created_by', 'created_by_id', 'adjustment_id'],
+    rows: rows.map((a) => [
+      a.appliesOn, a.trainerName, a.trainerId, a.kind,
+      minorToDecimal(a.amountCents, a.currency), a.currency, a.amountCents,
+      a.note, a.settlementId, a.createdAt, a.createdByName, a.createdById, a.id,
+    ]),
+    note:
+      'Amounts are SIGNED and the sign already carries the kind: a deduction and an advance are negative, '
+      + 'a bonus and a reimbursement positive. Sum the column as it stands; applying the kind a second time '
+      + 'doubles it. `applies_on` is the period the line belongs to, which is not the day it was entered. '
+      + 'A blank settlement_id is a line not yet paid out.',
+  };
+}
+
+/** The maintenance history and the accident book. */
+function equipmentLogTable(rows: ExportEquipmentLog[]): Table {
+  return {
+    header: ['happened_on', 'kind', 'equipment_label', 'equipment_id', 'performed_by', 'findings', 'cost', 'currency', 'cost_cents', 'reported_to', 'document_id', 'recorded_by', 'recorded_by_id', 'created_at', 'entry_id'],
+    rows: rows.map((e) => [
+      e.happenedOn, e.kind, e.equipmentLabel, e.equipmentId, e.performedBy, e.findings,
+      minorToDecimal(e.costCents, e.currency), e.currency, e.costCents,
+      e.reportedTo, e.documentId, e.recordedByName, e.recordedById, e.createdAt, e.id,
+    ]),
+    note:
+      'Servicing, repairs, inspections and INCIDENTS, in one file because they are one question after a '
+      + 'claim. A blank equipment_id beside a filled equipment_label is a machine that has since been '
+      + 'retired. The entry outlives it deliberately, because the record of an accident must not be '
+      + 'deleted by disposing of the machine it happened on. `document_id` points into documents.csv; the '
+      + 'file itself is bytes in a bucket and does not travel in a CSV bundle.',
+  };
+}
+
+/** Which lines somebody accepted, which they flagged, and why. */
+function reconcilesTable(rows: ExportReconcileMark[]): Table {
+  return {
+    header: ['marked_at', 'subject_kind', 'subject_id', 'state', 'note', 'marked_by', 'marked_by_id', 'mark_id'],
+    rows: rows.map((m) => [m.markedAt, m.subjectKind, m.subjectId, m.state, m.note, m.markedByName, m.markedById, m.id]),
+    note:
+      '`subject_id` is an invoice id when subject_kind is "invoice" and a payment id when it is "payment"; '
+      + 'join it to invoices.csv or payments.csv accordingly. One live mark per line: changing your mind '
+      + 'replaced the row rather than adding one, so this file is the current answer and not a history of '
+      + 'the arguing. An "accepted" row always carries a reason, because the database refuses one without.',
+  };
+}
+
+/**
+ * What the gym paid out.
+ *
+ * `amount` goes through `minorToDecimal`, which asks the currency how many
+ * places it has and returns an EMPTY cell where nobody stated one — the stored
+ * integer sits beside it in `amount_cents` and is the figure to believe. There
+ * is deliberately no total row and no total anywhere: a gym that has ever paid
+ * a supplier in another currency has two moneys in this file, and a column sum
+ * across them is not a bigger number about the same thing. The note says so, in
+ * the file, because the person adding the column up is doing it in a spreadsheet
+ * six months from now with none of this screen's caveats in the room.
+ */
+function costsTable(rows: ExportCost[]): Table {
+  return {
+    header: ['paid_on', 'description', 'supplier', 'category', 'amount', 'currency', 'amount_cents', 'note', 'recorded_by', 'recorded_by_id', 'recorded_at', 'cost_id'],
+    rows: rows.map((c) => [
+      c.paidOn, c.description, c.supplier, c.category,
+      minorToDecimal(c.amountCents, c.currency), c.currency, c.amountCents,
+      c.note, c.recordedByName, c.recordedById, c.createdAt, c.id,
+    ]),
+    note:
+      'Money OUT, as somebody at this gym wrote it down. It is not a complete picture of the gym\u2019s '
+      + 'outgoings by itself: what the gym settles with its trainers is in payroll-settlements.csv and '
+      + 'payroll-adjustments.csv and is deliberately not repeated here, so adding this file to those two '
+      + 'is the total that left the account and adding this one alone is not. A blank amount is a cost '
+      + 'recorded with no figure, not a free one. Rows may be in more than one currency; nothing here '
+      + 'is converted and no column may be summed across them.',
   };
 }
 
@@ -1514,14 +2125,14 @@ function plansTable(rows: MembershipPlan[]): Table {
     header: ['name', 'price', 'interval', 'currency', 'active', 'plan_id', 'price_cents'],
     rows: rows.map((p) => [
       p.name,
-      minorToDecimal(p.priceCents),
+      minorToDecimal(p.priceCents, p.currency),
       p.interval,
       p.currency,
       p.active,
       p.id,
       p.priceCents,
     ]),
-    note: 'Re-importable by previewPlans. price_cents is the stored figure; price is the same value for the importer.',
+    note: 'Re-importable by previewPlans. price_cents is the stored figure; price is the same value for the importer, written to the number of decimal places the row\u2019s own currency has (none in a yen, three in a Kuwaiti dinar), which is why the currency column has to travel beside it.',
   };
 }
 
@@ -1573,7 +2184,7 @@ function membersTable(input: GymExportInput): Table {
     rows,
     note: invites
       ? 'Re-importable by previewMembers. One row per member; email is present only where the gym recorded one on an invite.'
-      : 'Re-importable by previewMembers. NO email column — the invites read failed, and a blank column would have read as "no address".',
+      : 'Re-importable by previewMembers. NO email column: the invites read failed, and a blank column would have read as "no address".',
   };
 }
 
@@ -1607,7 +2218,8 @@ function membershipsTable(rows: Membership[]): Table {
  * a name nor an address is one the importer will rightly refuse to attribute,
  * and that refusal should be visible rather than caused by a missing column.
  */
-function paymentsTable(rows: GymPayment[]): Table {
+function paymentsTable(rows: GymPayment[], zone: string | null | undefined): Table {
+  const at = daysAt(zone);
   return {
     header: [
       'member', 'email', 'amount', 'date', 'method', 'note',
@@ -1616,8 +2228,8 @@ function paymentsTable(rows: GymPayment[]): Table {
     rows: rows.map((p) => [
       p.memberName,
       null,
-      minorToDecimal(p.amountCents),
-      isoDatePart(p.takenAt),
+      minorToDecimal(p.amountCents, p.currency),
+      gymDatePart(p.takenAt, zone),
       p.method,
       p.note,
       p.id,
@@ -1626,7 +2238,10 @@ function paymentsTable(rows: GymPayment[]): Table {
       p.currency,
       p.takenAt,
     ]),
-    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads.',
+    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads. `amount` is written to the number of decimal places `currency` has, so a file re-imported into a gym set to a DIFFERENT currency would be read at a different factor. previewPayments refuses any row whose currency column disagrees with the one it is importing in, rather than converting at par. '
+      + (at === 'gym'
+        ? `\`date\` is the day \`taken_at\` fell on IN THIS GYM'S OWN TIMEZONE (${String(zone)}), which is the day the till recorded and the day this file re-imports on. \`taken_at\` beside it is the stored instant, unchanged, and the two can name different days for a payment taken near midnight. That is not a disagreement, it is the same moment on two clocks.`
+        : '`date` is the UTC day of `taken_at`, because this gym has not set a timezone and there is no other calendar to use. The reader\u2019s own laptop is not one, since this file outlives the browser that made it. That is the day the gym recorded for every payment this product imported (they are stamped at midday UTC, so no zone moves them) but can be a day either side for one taken near midnight at a desk far from UTC. Set the gym\u2019s timezone in Settings and export again to have this column written on the gym\u2019s own calendar; `taken_at` beside it is the stored instant either way and is the one to believe.'),
   };
 }
 
@@ -1642,7 +2257,7 @@ function attendanceTable(rows: MemberBooking[]): Table {
   return {
     header: ['booking_id', 'class_id', 'class_title', 'class_starts_at', 'member_id', 'status', 'attended_at'],
     rows: rows.map((b) => [b.bookingId, b.classId, b.classTitle, b.startsAt || null, b.memberId, b.status, b.attendedAt]),
-    note: 'An empty attended_at means nobody ticked the member off — which is not the same as absent.',
+    note: 'An empty attended_at means nobody ticked the member off, which is not the same as absent.',
   };
 }
 
@@ -1656,7 +2271,7 @@ function sessionsTable(rows: PtSession[]): Table {
     rows: rows.map((s) => [
       s.id, s.trainerId, s.trainerName, s.clientId, s.clientName,
       s.startsAt, s.durationMin, s.status, s.outcome, s.outcomeAt,
-      s.rateCents, minorToDecimal(s.rateCents), s.settlementId,
+      s.rateCents, minorToDecimal(s.rateCents, s.rateCurrency), s.settlementId,
     ]),
     note: 'An empty outcome means nobody has said what happened. It is not a no-show, and it was never treated as one.',
   };
@@ -1665,7 +2280,7 @@ function sessionsTable(rows: PtSession[]): Table {
 function passTypesTable(rows: PassType[]): Table {
   return {
     header: ['pass_type_id', 'name', 'kind', 'price_cents', 'price', 'currency', 'uses', 'valid_days', 'active'],
-    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents), t.currency, t.uses, t.validDays, t.active]),
+    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents, t.currency), t.currency, t.uses, t.validDays, t.active]),
     note: 'An empty valid_days means the pass does not expire.',
   };
 }
@@ -1680,9 +2295,9 @@ function passesTable(rows: GymPass[]): Table {
     rows: rows.map((p) => [
       p.id, p.passTypeId, p.passTypeName, p.kind, p.holderId, p.holderName,
       p.hostMemberId, p.issuedOn, p.expiresOn, p.usesTotal, p.usesSpent,
-      p.paidCents, minorToDecimal(p.paidCents), p.currency, p.note,
+      p.paidCents, minorToDecimal(p.paidCents, p.currency), p.currency, p.note,
     ]),
-    note: 'uses_total and uses_spent are exported raw and never differenced here — a clamped "uses left" would hide a counter that is out of step. An empty paid_cents means no price was recorded, not that it was free.',
+    note: 'uses_total and uses_spent are exported raw and never differenced here. A clamped "uses left" would hide a counter that is out of step. An empty paid_cents means no price was recorded, not that it was free.',
   };
 }
 
@@ -1709,20 +2324,39 @@ function invitesTable(rows: MemberInvite[]): Table {
       i.id, i.email, i.fullName, i.planId, i.planName, i.invitedBy,
       i.status, i.createdAt, i.expiresAt, i.acceptedAt, i.acceptedBy,
     ]),
-    note: 'The invite token is deliberately NOT exported — it is a working join link, and a record should not carry live credentials.',
+    note: 'The invite token is deliberately NOT exported. It is a working join link, and a record should not carry live credentials.',
   };
 }
 
 /* ── the prose ─────────────────────────────────────────────────────────────── */
 
-const CONVENTIONS: Record<string, string> = {
+/**
+ * The reader's key to the whole bundle — and a function rather than a constant,
+ * because one line of it is a fact about THIS gym.
+ *
+ * It was a module constant, and two of its entries had gone stale against the
+ * code that writes the files: `money` still promised "two-decimal strings" long
+ * after `minorToDecimal` became currency-aware, which is a README telling a
+ * Japanese gym its yen column has a fractional part; and `dates` said nothing
+ * at all about which calendar the date-only columns are on, which is the entire
+ * question `gymDatePart` exists to answer.
+ */
+function conventionsFor(zone: string | null | undefined): Record<string, string> {
+  const at = daysAt(zone);
+  return {
   money:
     'Held and exported as integer minor units (fils/cents) in the *_cents columns. ' +
     'The plain price/amount/paid/rate columns are the same figures written as exact ' +
-    'two-decimal strings for spreadsheet and importer use. Nothing is rounded.',
+    'decimal strings for spreadsheet and importer use, to the number of places the ' +
+    'row’s own currency has: two for GBP, none at all for JPY, three for KWD. ' +
+    'An amount whose currency this gym never recorded is left EMPTY rather than ' +
+    'written at a number of places nobody chose. Nothing is rounded.',
   dates:
     'ISO 8601 exactly as stored. Timestamps keep their time and zone; the date-only ' +
-    'columns the importer reads sit beside them, never instead of them.',
+    'columns the importer reads sit beside them, never instead of them. ' +
+    (at === 'gym'
+      ? `Those date-only columns are written on THIS GYM'S calendar (${String(zone)}), so the day beside a payment is the day the till recorded it, which is a different day from the timestamp's UTC date for anything taken near midnight.`
+      : 'This gym has not set a timezone, so those date-only columns are UTC’s day. For a gym far from UTC that is a day either side of its own for anything recorded near midnight. Set the timezone in Settings and export again.'),
   empty:
     'An empty cell means the gym never recorded a value. It is never 0, never "null", ' +
     'and never a dash. A member with no recorded weight did not weigh nothing.',
@@ -1731,7 +2365,8 @@ const CONVENTIONS: Record<string, string> = {
     'quoted, and an inner quote is doubled. Names like O’Brien, "Bob" Smith and ' +
     'Smith, Jr. survive intact.',
   encoding: 'UTF-8 with a byte-order mark, CRLF line endings.',
-};
+  };
+}
 
 function notExportedText(m: MissingPart, input: GymExportInput): string {
   return [
@@ -1770,7 +2405,7 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
     out.push('='.repeat(72));
     out.push('');
     out.push('Anything the gym holds outside those dates is absent from every file here.');
-    out.push('Absent is not missing, not deleted and not zero — it was not asked for.');
+    out.push('Absent is not missing, not deleted and not zero. It was not asked for.');
     out.push('');
 
     const cut = manifest.parts.filter((p) => p.window.bounded);
@@ -1779,7 +2414,7 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
     // in the bundle shares the stem and the stem carries the period, so
     // repeating it on twenty-three lines buries the one word that differs.
     if (cut.length) {
-      out.push('Narrowed by the period — only rows dated inside it are here:');
+      out.push('Narrowed by the period. Only rows dated inside it are here:');
       for (const p of cut) {
         const stray = p.window.undated ? `; ${p.window.undated} row(s) carry no ${p.window.field} and are INCLUDED, because leaving them out would say they happened outside your dates` : '';
         out.push(`  - ${EXPORT_FILE[p.part]}  (by ${p.window.field}${stray})`);
@@ -1787,7 +2422,7 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
       out.push('');
     }
     if (whole.length) {
-      out.push('NOT narrowed — the whole set is here whatever period you asked for:');
+      out.push('NOT narrowed. The whole set is here whatever period you asked for:');
       for (const p of whole) {
         out.push(`  - ${EXPORT_FILE[p.part]}  ${p.window.why ?? ''}`);
       }
@@ -1821,18 +2456,18 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
     // had reason to doubt. See src/lib/rowCap.ts.
     out.push(manifest.wholeRecord
       ? 'This bundle is complete: every part of the record was read, and read whole.'
-      : 'Every part was read, and read whole — within the period above. Complete here means'
+      : 'Every part was read, and read whole, within the period above. Complete here means'
         + ' nothing was lost to a failed read. It does not mean this is the whole record.');
     out.push('');
     out.push('No read here can come back short without saying so. The database returns at most a');
     out.push('fixed number of rows per request and does not mention when it has stopped, so every');
-    out.push('read either asks for one row more than it will accept — and fails loudly if it gets');
-    out.push('it — or pages until the set is finished. A part that could not be read whole is a');
+    out.push('read either asks for one row more than it will accept (and fails loudly if it gets');
+    out.push('it) or pages until the set is finished. A part that could not be read whole is a');
     out.push('part listed as not exported, never a shorter file.');
     out.push('');
   }
 
-  out.push(`Repple — gym record export`);
+  out.push(`Repple gym record export`);
   out.push(`Gym:      ${manifest.gym ?? '(not read)'}`);
   out.push(`Tenant:   ${manifest.tenantId ?? '(not read)'}`);
   out.push(`Exported: ${manifest.exportedAt}`);
@@ -1840,15 +2475,21 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   // raw instants. "Covers: the whole record, with no period applied" is a
   // claim somebody can check; a missing line is one they have to infer.
   out.push(`Covers:   ${manifest.window.covers}`);
+  // Which calendar the day-only columns are on, beside the instant rather than
+  // buried in the conventions at the bottom. A reader who takes only this block
+  // away is the reader most likely to add a column up by day.
+  out.push(manifest.daysAt === 'gym'
+    ? `Days:     the gym’s own calendar, ${manifest.timezone}`
+    : 'Days:     UTC. This gym has not set a timezone, so the date-only columns are UTC’s day and can be a day either side of the gym’s own');
   out.push('');
 
   out.push('Files');
   out.push('-----');
   for (const p of manifest.parts) {
     if (p.status === 'exported') {
-      out.push(`${p.file}  — ${p.label}, ${p.rows} ${p.rows === 1 ? 'row' : 'rows'}`);
+      out.push(`${p.file}  ${p.label}, ${p.rows} ${p.rows === 1 ? 'row' : 'rows'}`);
     } else {
-      out.push(`${p.file}  — ${p.label}: NOT EXPORTED (${p.reason})`);
+      out.push(`${p.file}  ${p.label}: NOT EXPORTED (${p.reason})`);
     }
     if (p.note) out.push(`    ${p.note}`);
   }
@@ -1872,7 +2513,7 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   out.push('plans.csv, members.csv and payments.csv use the column names Repple’s own');
   out.push('CSV import understands, so a bundle from one gym loads into another without');
   out.push('anybody renaming a header. The extra id and *_cents columns are reported by');
-  out.push('the importer as unrecognised and ignored — they are there for other systems.');
+  out.push('the importer as unrecognised and ignored; they are there for other systems.');
   out.push('');
   out.push('The paperwork');
   out.push('-------------');
@@ -1880,7 +2521,7 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   out.push('every row carries a sentence saying what that means. Only “member” is the');
   out.push('member’s own act; “staff” is somebody at the desk recording that they agreed,');
   out.push('and “unknown” is a row written before this was recorded. Do not quote a row');
-  out.push('from this file without that column — it is the difference between a signature');
+  out.push('from this file without that column. It is the difference between a signature');
   out.push('and a note about one.');
   out.push('');
   out.push('agreements.csv carries the full wording each signature points at, as it stood.');

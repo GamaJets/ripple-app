@@ -26,8 +26,8 @@ import { View, Text, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
-import { Cta } from '../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { Cta, HeroCard } from '../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, font } from '../src/theme/scale';
 import { VARIANT } from '../src/lib/variant';
 import { useTenant } from '../src/ui/tenant';
 import { readNumber } from '../src/lib/units';
@@ -35,7 +35,7 @@ import { readNumber } from '../src/lib/units';
 export default function Onboarding() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant, updateTenant } = useTenant();
+  const { tenant, status: tenantStatus, updateTenant } = useTenant();
   // Not a question any more: the app the user installed decides this, the same
   // way it does on the sign-up screen. Asking again could only contradict it.
   const role = VARIANT;
@@ -71,10 +71,33 @@ export default function Onboarding() {
     // just typed, on the screen where they type it for the first time.
     if (Number.isFinite(f) && f > 0) patch.sessionFee = Math.round(f * 100) / 100;
     if (!Object.keys(patch).length) { router.replace('/(owner)/dashboard'); return; }
+    // ── a save that was never attempted must not be reported as one that failed
+    //
+    // `updateTenant` opens with `if (!USE_SUPABASE || !tenant) return false`, so
+    // on the ONE screen where an owner names their gym — reached by `replace`
+    // the instant the account is created, while TenantProvider's first read is
+    // still in flight — a false here could mean "the server refused" or "we had
+    // not read your gym yet and sent nothing". Both printed "Your gym details
+    // were not saved", and then this screen replaced itself with the dashboard,
+    // taking the typed name with it. The gym keeps the provisioning
+    // placeholder — "Tim's space" — which is the exact string the header of
+    // this file says is nobody's gym.
+    //
+    // The two are now told apart before anything is claimed, and the read that
+    // has not landed keeps the owner here with their typing intact.
+    if (!tenant) {
+      if (tenantStatus === 'loading') {
+        Alert.alert('One Moment', 'Your gym is still being set up. Nothing has been lost. Tap Open Studio again in a second.');
+        return;
+      }
+      Alert.alert('Not Saved', 'We could not reach your gym record, so nothing was saved and nothing was lost. The name and colour are under Brand; the session fee is under Ops.');
+      router.replace('/(owner)/dashboard');
+      return;
+    }
     setSaving(true);
     const okWrite = await updateTenant(patch);
     setSaving(false);
-    if (!okWrite) { Alert.alert('Could not save', 'Your gym details were not saved. The name and colour are under Brand; the session fee is under Ops.'); }
+    if (!okWrite) { Alert.alert('Could Not Save', 'Your gym details were not saved. The name and colour are under Brand; the session fee is under Ops.'); }
     router.replace('/(owner)/dashboard');
   };
 
@@ -83,22 +106,23 @@ export default function Onboarding() {
     router.replace(role === 'client' ? '/(client)/onboarding' : '/(trainer)/dashboard');
   };
 
-  const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+  const lab = { ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 } as const;
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xxl, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {role === 'owner' && (
           <View>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Step 1 of 1</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Name Your Gym</Text>
-            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-              This is what your members and trainers will see. You can change it later under Brand.
-            </Text>
+            {/* The step's night head: where you are, what this step is in
+                Sora, and one line. No progress bar — there is one step, and a
+                full bar over a form nobody has filled in would be a lie. */}
+            <HeroCard eyebrow="STEP 1 OF 1" title="Name Your Gym"
+              meta="What your members and trainers see. Change it later under Brand." />
 
-            <Text style={lab}>Gym name</Text>
+            <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
+            <Text style={lab}>Gym Name</Text>
             <TextInput
               value={gymName}
               onChangeText={setGymName}
@@ -107,33 +131,33 @@ export default function Onboarding() {
               autoCapitalize="words"
               returnKeyType="next"
               style={inp}
-              accessibilityLabel="Gym name"
+              accessibilityLabel="Gym Name"
             />
 
             {/* The very first money question the product asks an owner, and it
                 named a currency for them. `tenants.currency` exists; a gym
                 being set up has not chosen one yet, so the honest thing is to
                 ask for the number and not to put a currency on it. */}
-            <Text style={{ ...lab, marginTop: sp.lg }}>What one delivered session pays</Text>
+            <Text style={{ ...lab, marginTop: sp.lg }}>What One Delivered Session Pays</Text>
             <TextInput
               value={fee}
               onChangeText={setFee}
-              placeholder="Optional — leave blank if it varies"
+              placeholder="Optional. Leave blank if it varies"
               placeholderTextColor={t.ink3}
               keyboardType="decimal-pad"
               returnKeyType="done"
               onSubmitEditing={() => { void saveGym(); }}
               style={inp}
-              accessibilityLabel="What one delivered session pays"
+              accessibilityLabel="What One Delivered Session Pays"
             />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Payroll is counted against this. Left blank, the app shows a dash rather than
-              guessing at what you owe.
+              Payroll is counted against this. Left blank, payroll shows a dash, not a guess.
             </Text>
+            </View>
           </View>
         )}
 
-        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1, minHeight: sp.xl }} />
         <Cta wide onPress={next} label={role === 'owner' ? (saving ? 'Saving…' : 'Open Studio') : 'Enter Portal'} />
       </ScrollView>
     </SafeAreaView>

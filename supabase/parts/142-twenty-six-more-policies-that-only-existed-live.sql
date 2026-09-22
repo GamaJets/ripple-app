@@ -22,7 +22,7 @@
 -- database built from this repo — a new white-label tenant, a staging copy, a
 -- local stack — gets three tables with row level security on and not one
 -- policy, which denies everybody everything. Not a subtle failure: no client
--- can read a programme, no coach can write one, and nobody can see a charge.
+-- can read a program, no coach can write one, and nobody can see a charge.
 -- Production is fine only because production was never built from these files.
 --
 -- The remaining NINETEEN are on tables that do have declared policies (26 minus

@@ -32,24 +32,70 @@
 // client on the board — so a coach who spotted somebody sliding down it tapped
 // their name and landed on a page that says nothing about that person. The
 // unranked rows below already opened that client's own thread. Both do now.
+//
+// ── AND THE FIVE FACTS THE ROW WAS ALREADY HOLDING ────────────────────────
+//
+// Having refused to invent a figure, this screen then printed one twentieth of
+// what it knew. `useRoster` puts `joinedAt`, `lastActive`, `unread`, `injuries`
+// (each flagged when it was disclosed inside the last fortnight) and the latest
+// scan's `metrics` on every row before the board renders, and the board drew
+// none of them. Nothing here is a new read: it is the same rows, said out loud.
+//
+// It matters most exactly where this screen is weakest. The order is one
+// self-reported rating, and a rating is only legible against how long somebody
+// has been doing this: 60% from a client on day nine is a normal first
+// fortnight, and 60% from a client of two years who has not been seen in a
+// month with a message waiting is the call to make this morning. Same number,
+// opposite meanings, and the row had the join date in hand for both.
+//
+// The words are all in src/lib/leaderboardFacts.ts with their own test, for the
+// reason that module's header sets out: four of these five fields have an
+// absent state that a zero or a blank would misreport, and `unread` has the
+// expensive one — null means the count could not be read, 0 means nobody is
+// waiting, and a leaderboard that prints those alike tells a coach nobody has
+// messaged them on the one screen that exists to say who has. None of it is
+// folded into the order. They are facts printed beside the name, on exactly the
+// terms the weight delta has always been printed on.
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Notice, PageHead, KpiRow, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { useRoster } from '../../src/ui/roster';
+import { useToday } from '../../src/ui/today';
+import { rowFacts, rowSpoken, unreadMark, injuryMark } from '../../src/lib/leaderboardFacts';
+import { disclosureFact } from '../../src/lib/disclosureFact';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+
+/** The first three places: the word for each, and its medal's tone. */
+const PLACE = ['First', 'Second', 'Third'] as const;
+const MEDAL: Tone[] = ['amber', 'neutral', 'orange'];
 
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
   const wu = useSettings().weightUnit;
   const t = useTheme();
+  /** A medal's plate and ink, from the same tokens the kit's tones resolve to. */
+  const medal = (i: number): { soft: string; ink: string } =>
+    i === 0 ? { soft: t.data.amberSoft, ink: t.data.amberInk }
+      : i === 1 ? { soft: t.surface3, ink: t.ink2 }
+        : { soft: t.data.orangeSoft, ink: t.data.orangeInk };
   const router = useRouter();
-  const { roster, status } = useRoster();
+  const { roster, status, refresh } = useRoster();
+  // The reader's own calendar day, re-settled at midnight by the provider
+  // rather than frozen at mount — a tenure computed from the day this screen
+  // happened to open is wrong for every coach who leaves the app running.
+  const today = useToday();
+  // The roster is the whole of this screen. Every figure ranked here —
+  // adherence, weight change — arrives on the roster rows themselves, and
+  // they move when a client checks in on their own phone.
+  const pull = usePullToRefresh(useCallback(() => refresh(), [refresh]));
 
   // ── Who can be ranked at all ──────────────────────────────────────────────
   //
@@ -100,7 +146,30 @@ export default function Leaderboard() {
 
   // Everyone the board cannot place. Not a failure state and not a ranking —
   // a list of people nothing has been recorded about yet.
-  const unplaced = roster.filter((c) => c.adherence == null);
+  //
+  // ── And the third answer, which used to be folded into this one ──────────
+  //
+  // A client the coach typed into Add Client is a `coach_clients` row with no
+  // account behind it. `useRoster` cannot give such a row an `adherence` — there
+  // is no `clients` row for the check-in read to reach, and every policy that
+  // read passes through resolves `is_my_client()`, an EXISTS over `clients` — so
+  // it arrives here as null for a reason that has nothing to do with the person.
+  //
+  // They then landed in `unplaced`, under the heading "Not enough recorded to
+  // rank" and the sentence "These clients have never submitted a check-in", with
+  // "no check-ins · no scans yet" on the row and "Message {name}, who has not
+  // checked in" spoken to a screen reader. Every one of those is a statement
+  // about somebody's diligence, manufactured out of the absence of an account.
+  //
+  // `handAdded` is the only thing that can tell the two apart — the id cannot,
+  // because `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`. Only an
+  // explicit `true` moves a row, which is the rule `clientIsQueryable` states:
+  // `undefined` is "the roster has not said yet" and stays where it was rather
+  // than accusing a real client of not having an account. No read is withheld
+  // here and none was ever made — this screen reads nothing but the roster. What
+  // changes is which of three sentences a row is listed under.
+  const unplaced = roster.filter((c) => c.adherence == null && c.handAdded !== true);
+  const noAccount = roster.filter((c) => c.handAdded === true);
 
   /** That client's own thread. The same destination the unranked rows below
    *  have always used, and the one thing a coach who has just spotted somebody
@@ -112,43 +181,49 @@ export default function Leaderboard() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your roster</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Leaderboard</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Ordered by the last check-in rating each client gave themselves</Text>
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is in
+            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
+        <PageHead title="Leaderboard" subtitle="By each client’s last check-in rating" />
 
-        <Rule />
+        {/* ── the top of the board, as tiles ─────────────────────────────
+            Round five: the first three as the kit's tiles — gold, silver and
+            bronze in the amber, neutral and orange tones, each with the word
+            for its place, because a colour alone is not a rank. Only under a
+            WHOLE roster: on a short read the order is not final, and a podium
+            is the one drawing of it that looks final. The full list below is
+            still drawn on a short read, under its notice. */}
+        {isWhole(status) && scored.length ? (
+          <KpiRow tiles items={scored.slice(0, 3).map(({ c, rating }, i) => ({
+            label: `${PLACE[i]} · ${c.name.split(' ')[0]}`, value: `${rating}%`, tone: MEDAL[i],
+          }))} />
+        ) : null}
+
 
         <Section>
-          <SectionHead title="Ranking" note={scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
+          {/* `isWhole`, like the empty state below. A board read short is
+              still worth showing — the people on it are real — but how many
+              were ranked is a figure over an unknown fraction. */}
+          <SectionHead title="Ranking"
+            note={isWhole(status) && scored.length ? `${scored.length} Client${scored.length === 1 ? '' : 's'}` : undefined} />
           {/* What the order is, said before anybody reads it as a score. There
               is no composite behind this board and nothing on it was measured
               by the app: it is what each client last said about themselves, and
               a coach ringing somebody at the bottom of it is entitled to know
               that is what they are ringing about. */}
-          {scored.length ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-              This is each client’s own rating from their most recent check-in, out of five and shown
-              as a percentage. It is what they said about one day rather than something this app
-              measured, and nothing else is folded into it. Weight movement is printed beside the
-              name and is deliberately not added to it.
-            </Text>
-          ) : null}
-
           {/* An unread roster is not an empty one. Without this the screen tells
               a coach with a full book that they have no clients, which is the
               most expensive sentence it can say. */}
           {status === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nothing is ranked below because the roster did not come back — it does not mean nobody is on your book." />
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
+              note="Nothing is ranked below because the roster did not come back. It does not mean nobody is on your book." />
           ) : status === 'partial' ? (
-            <Notice tone={t.warn} kicker="Roster" title="This board is built from part of your book"
+            <Notice tone={t.warn} kicker="Roster" title="This Board Is Built from Part of Your Book"
               note="Your roster came back short, so the ranking below leaves people out and the order is not final." />
           ) : status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
@@ -161,29 +236,93 @@ export default function Leaderboard() {
               'partial' it would have said the same about a book that came back
               short. analytics.tsx gates the identical sentence on the identical
               provider with `rosterWhole`; this is that. */}
-          {scored.length === 0 && unplaced.length === 0 && isWhole(status) ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clients yet — your leaderboard fills in as clients join and log their workouts.
-            </Text>
+          {/* `noAccount` counts here too. A coach whose whole book is people
+              they typed in has clients — they are listed further down — and
+              "No clients yet" over them is the roster's own rows being denied. */}
+          {scored.length === 0 && unplaced.length === 0 && noAccount.length === 0 && isWhole(status) ? (
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet. Your leaderboard fills in as clients join and log their workouts.
+              </Text>
+              {/* The sentence waits for clients to join and, until now, gave a
+                  coach nothing to do about it. Same destination and same words
+                  as src/ui/EmptyRoster.tsx, which the eleven per-client screens
+                  use — this screen's own sentence is kept because it explains
+                  what fills the board, which "there is no X" does not. */}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
           ) : null}
 
+          {/* Said only of people who COULD have checked in. With `noAccount` in
+              the count this sentence told a coach whose book is two typed-in
+              names that nobody had checked in, which is true of nobody: not one
+              of them has an app to check in from. */}
           {scored.length === 0 && unplaced.length > 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody has checked in yet, so there is nothing to rank on. Everyone on your book is
               listed below.
             </Text>
+          ) : scored.length === 0 && noAccount.length > 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              There is nothing to rank on yet. Everyone on your book was added by hand, so none of
+              them has an app to check in from. They are listed below.
+            </Text>
           ) : null}
 
-          {scored.map(({ c, rating, scanned }, i) => (
+          {scored.map(({ c, rating, scanned }, i) => {
+            // Decided in src/lib/leaderboardFacts.ts, not here. Each of these is
+            // null when there is nothing honest to say, so the row draws or
+            // omits whole elements rather than printing a dash into a sentence.
+            const facts = rowFacts(c, today);
+            // `injuryMark` draws nothing for an empty list and nothing for a
+            // list that never arrived, and on a row those two nothings read the
+            // same: as an all-clear. The partition above already keeps the
+            // hand-added off this list, so what is left here is the STATUS
+            // question — under a failed roster read these rows are whatever
+            // survived the failure, and their disclosures were not read at all.
+            // src/lib/disclosureFact.ts answers which of the three it is; the
+            // badge is drawn only from an answer, and an absence says so in its
+            // own words instead of drawing nothing.
+            const disc = disclosureFact(status, c, c.id, c.name.split(' ')[0]);
+            const injury = disc.kind === 'asked' ? injuryMark(c.injuries) : null;
+            // Only the absences are spoken. A row that was asked and came back
+            // clear draws no badge and says nothing — which is honest HERE only
+            // because the line above guarantees that a silent row is an asked
+            // one. Saying "asked, and disclosed nothing" on twenty rows would
+            // bury the one row that is not.
+            const discSpoken = disc.kind === 'asked' ? null : disc.spoken;
+            const unread = unreadMark(c.unread);
+            return (
             <Pressable key={c.id} onPress={() => openClient(c)}
-              accessibilityRole="button" accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. Opens their messages.`}
+              accessibilityRole="button"
+              // Spoken in full. The badges below are a colour and a numeral,
+              // which are the two things a screen reader cannot read, and the
+              // sentence comes from the same rules that draw them so the two
+              // cannot drift apart.
+              // The absence is spoken as well as drawn. `rowSpoken` is built
+              // from the row's own fields and cannot see the status, so the one
+              // fact it has no way of carrying is added here rather than
+              // reworded there.
+              accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''} Opens their messages.`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...value(15), color: i === 0 ? t.brand : t.ink3, width: 20, textAlign: 'center' }}>{i + 1}</Text>
+              {/* A medal for the first three — the place's number on a plate of
+                  its tone, in that tone's ink — and the bare number after. The
+                  rank is spoken in the row's label either way. */}
+              {i < 3 ? (
+                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: medal(i).soft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...value(15), color: medal(i).ink }}>{i + 1}</Text>
+                </View>
+              ) : (
+                <Text style={{ ...value(15), color: t.ink3, width: 28, textAlign: 'center' }}>{i + 1}</Text>
+              )}
               <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                 {/* The coach's own unit, not the client's — this row is read by
                     the coach, and app/(trainer)/client-training.tsx already
                     draws that distinction. The delta is stored in kilograms and
@@ -194,41 +333,205 @@ export default function Leaderboard() {
                     progress depends on the goal and is said in words, because
                     it cannot honestly be said in a number. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${rating}% last check-in`} · {scanned ? `${deltaLabel(weightDeltaIn(c.weightDelta as number, wu), { since: null, unit: wu, noChange: 'no change', noBaseline: 'no change' })}${wantsLoss(c) ? ', aiming down' : ', aiming up'}` : 'never scanned'}</Text>
+                {/* The roster's own fields, on the row that already had them.
+                    Deliberately a SECOND line rather than more clauses on the
+                    first: the line above is what the order is made of, and
+                    these are the context it is read inside. */}
+                {facts.length ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{facts.join(' · ')}</Text>
+                ) : null}
+                {injury || unread || disc.kind === 'unread' ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: 5 }}>
+                    {/* An absence with a name on it. ink3, never amber: this is
+                        not an alert about the client, it is this screen saying
+                        it does not know — and the badge that IS an alert has to
+                        stay the only amber thing on the row. */}
+                    {disc.kind === 'unread' ? (
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries Not Read</Text>
+                    ) : null}
+                    {/* Amber only for a disclosure made inside the last
+                        fortnight — the ones a coach has probably not seen. An
+                        injury they have already talked about is a fact about
+                        the client, not an alert, and a row of permanent amber
+                        teaches a coach to read past the one that is new. */}
+                    {injury ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        {/* A DOT in the status colour, with the words in ink. `warn` is
+                            tuned to the 3:1 a mark needs and not the 4.5:1 text needs
+                            (scripts/check-contrast.mjs), and the badge already says the
+                            word "New" — colour is never the only channel carrying it. */}
+                        {injury.isNew ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
+                        <Text style={{ ...ty.micro, color: injury.isNew ? t.ink2 : t.ink3 }}>{injury.text}</Text>
+                      </View>
+                    ) : null}
+                    {/* `unread.known` false is the dash: the count could not be
+                        read. It is ink3 and never the brand colour, because an
+                        unknown must not wear the badge that means somebody is
+                        waiting — and a zero draws nothing at all, which is the
+                        state this pair exists to keep distinct. */}
+                    {unread ? (
+                      <Text style={{ ...ty.micro, color: unread.known ? t.brandText : t.ink3 }}>{unread.text}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
                 {/* The bar is the rating against its own scale — a hundred is a
                     five out of five — and never against the top of the board. A
                     bar drawn as a fraction of whoever happens to lead reads as a
                     gap to close, and it moves for everybody the moment one
                     person's figure changes. */}
-                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
-                  <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.max(0, Math.min(100, rating))}%` }} />
+                <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
+                  <View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: `${Math.max(0, Math.min(100, rating))}%` }} />
                 </View>
               </View>
               <Text style={{ ...value(18), color: t.ink }}>{rating}%</Text>
             </Pressable>
-          ))}
+            );
+          })}
         </Section>
+
+        {/* What the order is, word for word as it stood over the list — behind
+            a fold since round five, so the board opens on the board. One line
+            of it stays in the head: whose rating this is. */}
+        {scored.length ? (
+          <Expandable title="What This Order Is" note="Their own rating, and what is not folded into it">
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              This is each client’s own rating from their most recent check-in, out of five and shown
+              as a percentage. It is what they said about one day rather than something this app
+              measured, and nothing else is folded into it. Weight movement is printed beside the
+              name and is deliberately not added to it. Nor is anything on the second line (how long
+              they have been with you, when they were last seen, their last scan score) or the
+              injury and unread marks under it. Those are what the rating is read against, and none
+              of them moves anybody’s place.
+            </Text>
+          </Expandable>
+        ) : null}
+
 
         {unplaced.length > 0 ? (
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Not enough recorded to rank" note={`${unplaced.length}`} />
+              {/* The damaging one. "Not enough recorded to rank: 3" on a book
+                  of twenty-five, read short at twelve, tells a coach that
+                  twenty-two people are checking in — and finding who is NOT on
+                  the board is the whole point of a leaderboard. */}
+              <SectionHead title="Not Enough Recorded to Rank"
+                note={isWhole(status) ? `${unplaced.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 These clients have never submitted a check-in, so there is no adherence to compare.
-                That is not a low score — it is no score.
+                That is not a low score. It is no score.
               </Text>
-              {unplaced.map((c, i) => (
+              {/* The same five facts, and this is the half of the screen they
+                  are worth most on. Every row here says the identical thing
+                  about the ranking — there is nothing to rank on — so without
+                  them a coach cannot tell the client who joined on Friday from
+                  the one who has been on the book two years and stopped
+                  answering, and those are opposite phone calls. */}
+              {unplaced.map((c, i) => {
+                const facts = rowFacts(c, today);
+                // The same three facts as the ranked rows above, for the same
+                // reason: a row with no injury badge on it must be a row that
+                // was asked, not a row nobody could read.
+                const disc = disclosureFact(status, c, c.id, c.name.split(' ')[0]);
+                const injury = disc.kind === 'asked' ? injuryMark(c.injuries) : null;
+                const discSpoken = disc.kind === 'asked' ? null : disc.spoken;
+                const unread = unreadMark(c.unread);
+                return (
                 <Pressable key={c.id} onPress={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } })}
-                  accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in`}
+                  accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {c.goal} · no check-ins{c.weightDelta == null ? ' · no scans yet' : ''}
                     </Text>
+                    {facts.length ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{facts.join(' · ')}</Text>
+                    ) : null}
+                    {injury || unread || disc.kind === 'unread' ? (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: 5 }}>
+                        {disc.kind === 'unread' ? (
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries Not Read</Text>
+                        ) : null}
+                        {injury ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                            {/* A DOT in the status colour, with the words in ink. `warn` is
+                                tuned to the 3:1 a mark needs and not the 4.5:1 text needs
+                                (scripts/check-contrast.mjs), and the badge already says the
+                                word "New" — colour is never the only channel carrying it. */}
+                            {injury.isNew ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
+                            <Text style={{ ...ty.micro, color: injury.isNew ? t.ink2 : t.ink3 }}>{injury.text}</Text>
+                          </View>
+                        ) : null}
+                        {unread ? (
+                          <Text style={{ ...ty.micro, color: unread.known ? t.brandText : t.ink3 }}>{unread.text}</Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text>
+                </Pressable>
+                );
+              })}
+            </Section>
+          </View>
+        ) : null}
+
+        {/* ── the third answer ──────────────────────────────────────────────
+            Not "they are ranked" and not "they have never checked in". These
+            are names the coach typed into their own book: a `coach_clients`
+            row, no account, no app, and therefore no check-in that could ever
+            have been submitted and no scan that could ever have been taken.
+
+            They are listed rather than dropped, because a coach's book is who
+            is in it — but under their own heading, with their own sentence, and
+            with no per-row "no check-ins · no scans yet" underneath. The row
+            opens their client screen rather than a message thread: there is
+            nobody on the other end of the thread, and the one useful action is
+            to invite them, which is on that screen.
+
+            The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+            from `unreadable` in src/lib/coachWellness.ts. */}
+        {noAccount.length > 0 ? (
+          <View>
+            <Rule />
+            <Section>
+              <SectionHead title="Added by Hand, No Account Yet"
+                note={isWhole(status) ? `${noAccount.length}` : undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                You added these clients to your book yourself, so they have no Repple account and
+                nothing of theirs reaches this board. That is not a missing check-in and not a low
+                score. There is no app for them to check in from yet. Send them your coaching code
+                and they start appearing above from the day they join.
+              </Text>
+              {/* Said here because it is the one thing on this screen that is
+                  about their SAFETY rather than their ranking. Injuries are
+                  disclosed by the client in their own app, so these people have
+                  never been asked — and a row with no injury badge on it, in a
+                  list where every other row's badge is drawn from a real
+                  answer, reads as an all-clear. It is not one. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Nobody has asked them about injuries either. There is no screen for them to
+                disclose one on, so nothing on this page says they are uninjured.
+              </Text>
+              {noAccount.map((c, i) => (
+                <Pressable key={c.id}
+                  onPress={() => router.push({ pathname: '/(trainer)/client', params: { clientId: c.id, name: c.name } })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${c.name}, added by hand and has no Repple account yet. Opens their client screen.`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    {/* The goal is the one thing on this row that IS known: the
+                        coach typed it in themselves. Nothing else is said,
+                        because nothing else was ever read. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal}</Text>
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text>
                 </Pressable>
@@ -237,7 +540,6 @@ export default function Leaderboard() {
           </View>
         ) : null}
 
-        <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           Use the Broadcast button on Clients to celebrate the top of the board.

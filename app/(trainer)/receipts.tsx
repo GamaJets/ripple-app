@@ -49,10 +49,13 @@ import { View, Text, ScrollView, TextInput, Pressable, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead, FigureCard, Donut, Legend, Expandable, type Tone, type Slice } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
-import { isoToday } from '../../src/lib/dayPlan';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useToday } from '../../src/ui/today';
 import { isQueryableId } from '../../src/lib/clientDrift';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { invoiceDayLabel, plusDays } from '../../src/lib/coachInvoice';
@@ -61,11 +64,15 @@ import {
   RECEIPT_IS_YOUR_WORD, RECEIPT_IS_NOT_PAY, RECEIPT_MAY_DOUBLE_COUNT, RECEIPT_IS_NOT_A_DOCUMENT,
   type CoachReceipt, type ReceiptDraft, type ReceiptMethod,
 } from '../../src/lib/coachReceipts';
+import {
+  groupLines, linesByMonth, MONTHS_ARE_WHAT_YOU_WROTE_DOWN, type BookGroup, type BookLine,
+} from '../../src/lib/moneyBook';
 import { fetchMyReceipts, recordReceipt, deleteReceipt } from '../../src/ui/coachReceipts';
 import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachInvoices';
 import { supabase } from '../../src/lib/supabase';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
+import { myCurrencyLine } from '../../src/lib/currencySource';
 
 const DASH = '—';
 
@@ -76,7 +83,7 @@ export default function Receipts() {
 
   const [rows, setRows] = useState<CoachReceipt[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
-  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading' });
+  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading', gap: null });
   /** The signed-in coach's own id, for the one refusal in `receiptBlockers`.
    *  Null while it is being read, which makes the guard inert for that instant
    *  — acceptable because the same row is refused by a CHECK constraint in the
@@ -105,13 +112,105 @@ export default function Receipts() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // `load` is the receipts, the currency they are printed in and who is
+  // signed in, in one call; the roster beside it is where the client names on
+  // these rows come from. The currency travels with the amounts on purpose —
+  // a refreshed list under a stale currency is a wrong number, not an old one.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), roster.refresh()]),
+    [load, roster],
+  ));
 
-  // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
-  // recording a payment at 10am would otherwise date it yesterday.
-  const today = isoToday(new Date());
+  // ── the day this screen stamps on a payment ─────────────────────────
+  //
+  // `useToday()`, not `isoToday(new Date())`. This is not a label: `receivedOn`
+  // below is `dayText.trim() || today`, so when the coach does not type a date
+  // this value is WRITTEN as the day money arrived. And a bare read in the render body
+  // is only ever as fresh as the last render — this screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is never torn
+  // down, and does not re-render while nobody is touching it.
+  //
+  // So a coach who opened this screen on Sunday, went to another tab, and came
+  // back on Wednesday to write something up got it dated SUNDAY — under a
+  // placeholder that says "leave it for today". The record is the thing this
+  // screen exists to keep, the date is the part of it that decides which month
+  // it lands in, and nothing on screen would have shown the coach it was
+  // wrong.
+  //
+  // `check:frozen-day` looks for `useMemo(…, [])` and cannot see this shape.
+  // `useToday` re-reads at the next local midnight and on foreground, compares
+  // before it sets, and is still the DEVICE's day rather than the server's UTC
+  // one — which is the point the comment this replaces was making, and it is
+  // preserved: a coach in Auckland recording at 10am must not date it
+  // yesterday.
+  const today = useToday();
   const receivedOn = dayText.trim() || today;
 
   const taken = useMemo(() => receiptsTaken(rows), [rows]);
+
+  /* ── the cash book, broken down the way the costs book already is ───────
+     Every row here carries a method, a day and a payer, and none of the three
+     was on screen: one total per currency and a flat list was the whole of it,
+     while app/(trainer)/costs.tsx next door has answered "where did it go" per
+     category since it was written. The three questions a coach asks of a cash
+     book are how it reached them, which month it was in, and who it came from.
+
+     src/lib/moneyBook.ts does the folding, so the rule that currencies never
+     merge and never rank against each other is kept in one place rather than
+     re-derived per screen — which is how `receiptTakenRows` came to exist. */
+  const lines = useMemo((): BookLine[] => rows.map((r) => ({
+    id: r.id,
+    // The day the coach says the money ARRIVED, never the day the row was
+    // written. A month of cash written up in one evening belongs in the months
+    // it was taken in, and this is the field that decides that.
+    day: r.receivedOn,
+    amountCents: r.amountCents,
+    currency: r.currency,
+    label: r.paidBy,
+  })), [rows]);
+
+  const byMethod = useMemo(() => groupLines(lines, (l) => {
+    const r = rows.find((x) => x.id === l.id);
+    return String(r?.method ?? '');
+  }, (k) => methodLabel(k)), [lines, rows]);
+
+  const byMonth = useMemo(() => linesByMonth(lines), [lines]);
+
+  /* ── the mix, one ring per currency ──────────────────────────────────────
+   * Off the same `byMethod` the rows under the ring are drawn from, and only
+   * ever rendered inside the whole-read branch those rows sit in. */
+  const METHOD_TONE: Record<string, Tone> = { cash: 'amber', transfer: 'blue', card_at_gym: 'purple', other: 'neutral' };
+  const methodRings = taken.pots.map((pot) => {
+    const slices: Slice[] = byMethod.map((g) => {
+      const part = g.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+      return { label: g.label, tone: METHOD_TONE[g.key] ?? 'neutral', value: part, shown: sharePercent(part, pot.minorUnits) };
+    }).filter((x) => (x.value ?? 0) > 0);
+    const centre = minorMoney(pot.minorUnits, pot.currency);
+    return {
+      currency: pot.currency, slices, centre,
+      spoken: `How it reached you in ${pot.currency}, ${centre ?? 'no figure'}: ${slices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`,
+    };
+  });
+
+  /* Grouped by the NAME on the line and not by `client_id`.
+     Most of the people who pay a coach in cash were never given an account —
+     the sheet says so where the roster shortcut is offered — so `clientId` is
+     null on the majority of these rows. Keying on it would put one person in
+     two groups depending on whether the coach happened to tap the roster chip
+     or type the name, and would leave everybody else in one enormous "no
+     account" pile. The name is what is on the row, what the list shows and what
+     the coach thinks in. Case and spacing are normalised for the key so "Jane
+     Smith" and "jane smith " are one person; the label keeps the spelling the
+     coach used. */
+  const byPayer = useMemo(() => {
+    const spelling = new Map<string, string>();
+    for (const l of lines) {
+      const key = l.label.trim().toLowerCase();
+      if (key && !spelling.has(key)) spelling.set(key, l.label.trim());
+    }
+    return groupLines(lines, (l) => l.label.trim().toLowerCase(),
+      (k) => spelling.get(k) ?? 'Not stated', 'not stated');
+  }, [lines]);
 
   const draft = (): ReceiptDraft => ({
     paidBy, amountText, currency: ccy.currency, method, receivedOn,
@@ -125,12 +224,12 @@ export default function Receipts() {
   const onRecord = async () => {
     const d = draft();
     const problems = receiptBlockers(d);
-    if (problems.length) { Alert.alert('Not yet', problems.join('\n\n')); return; }
+    if (problems.length) { Alert.alert('Not Yet', problems.join('\n\n')); return; }
     setBusy(true);
     const res = await recordReceipt(d);
     setBusy(false);
     if (!res.ok) {
-      Alert.alert('That payment was not recorded', res.error || 'Nothing was written. Try again in a moment.');
+      Alert.alert('That Payment Was Not Recorded', res.error || 'Nothing was written. Try again in a moment.');
       return;
     }
     setOpen(false);
@@ -140,7 +239,7 @@ export default function Receipts() {
 
   const onRemove = (r: CoachReceipt) => {
     Alert.alert(
-      'Remove this line?',
+      'Remove This Line?',
       // The honest framing. There is no document to cancel and nobody was told,
       // so this is a private ledger line being corrected rather than a record
       // being destroyed — but it does leave the Money screen smaller, and the
@@ -155,7 +254,7 @@ export default function Receipts() {
             void (async () => {
               const gone = await deleteReceipt(r.id);
               if (!gone) {
-                Alert.alert('Still there', 'That line was not removed and it is still in your figures. Try again in a moment.');
+                Alert.alert('Still There', 'That line was not removed and it is still in your figures. Try again in a moment.');
                 return;
               }
               await load();
@@ -169,78 +268,180 @@ export default function Receipts() {
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
 
+  /* One slice of the book, drawn the way "Where It Went" on the costs screen
+     draws a category: a name, then one figure PER CURRENCY underneath it. Never
+     one figure per slice — a coach paid in dirhams by one client and in
+     sterling by another has two amounts of money and not a sum.
+
+     A plain function rather than a component defined in the render body: a
+     component declared here is a new type on every render and React remounts
+     the whole subtree for it, which is a real cost on a list and buys nothing
+     for a presentational leaf. */
+  const slice = (g: BookGroup, unit: string) => (
+    <View key={g.key} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+      <Text style={{ ...ty.label, color: t.ink2 }}>{g.label}</Text>
+      {g.taken.pots.map((p) => (
+        <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            {p.count} {p.count === 1 ? unit : `${unit}s`} in {p.currency}
+          </Text>
+          <Text style={{ ...ty.label, ...numeric, color: t.ink }}>
+            {minorMoney(p.minorUnits, p.currency) ?? DASH}
+          </Text>
+        </View>
+      ))}
+      {/* A row this app cannot put a unit or an amount on is counted out of the
+          figure above it and said so here, exactly as it is in the total. A
+          slice whose lines and whose figure disagree without saying why is the
+          thing that makes a coach stop trusting the screen. */}
+      {g.taken.unlabelled + g.taken.unpriced ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+          {g.taken.unlabelled + g.taken.unpriced} {g.taken.unlabelled + g.taken.unpriced === 1 ? 'line has' : 'lines have'} no readable amount and {g.taken.unlabelled + g.taken.unpriced === 1 ? 'is' : 'are'} in no figure here.
+        </Text>
+      ) : null}
+    </View>
+  );
+
   // The gate, said as a sentence a coach can act on and naming who sets it.
   // Four causes and not two: 'partial' and 'loading' are not settled facts
   // about the gym, and sending a coach to an owner over a query that failed
   // tells neither of them anything. src/lib/currencyGap.ts holds the wording.
+  //
+  // And 'unset' is itself several facts since part 940, which is why this now
+  // branches the way app/(trainer)/invoices.tsx does. A gym was once the only
+  // place a currency could live, so "no currency has been set for you" could
+  // safely end by naming a gym owner. A coach with no gym has no owner to
+  // name, and that sentence sent them to look for a person who does not exist
+  // — while the setting they could actually make sat one screen away in
+  // Settings. `ccy.gap` carries which it is: the gym has set none, they have
+  // chosen none, there is no coach record, or part 940 is not applied. Only
+  // the first names an owner.
   const curGap = currencyGapOfStatus({ currency: ccy.currency, status: ccy.status });
   const currencyBlocker = curGap
     ? curGap === 'unset'
-      ? 'No currency has been set for you, so there is nothing to record a payment in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
+      ? ccy.gap && ccy.gap !== 'gym-unset'
+        ? myCurrencyLine(ccy.gap, 'there is nothing to record a payment in')
+        : 'No currency has been set for you, so there is nothing to record a payment in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
       : currencyGapLine(curGap, 'nothing can be recorded')
     : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>The half Repple never sees</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Cash and Transfers</Text>
-          </View>
-        </View>
-
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="Money you were paid outside this app"
-            note={RECEIPT_IS_YOUR_WORD}
-          />
-        </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("The half Repple never sees") was a line of prose above the title; what it said is
+            still said by the first card below. */}
+        <PageHead title="Cash and Transfers" />
 
         {status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not read" title="Your recorded payments could not be read"
+          <Notice tone={t.crit} kicker="Not Read" title="Your Recorded Payments Could Not Be Read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
         ) : null}
         {status === 'partial' ? <PartialRead what="recorded payments" shown={rows.length} onPress={() => { void load(); }} /> : null}
 
         {currencyBlocker ? (
-          <Notice tone={t.crit} kicker="Nothing can be recorded yet" title="No currency" note={currencyBlocker} />
+          <Notice tone={t.crit} kicker="Nothing Can Be Recorded Yet" title="No Currency" note={currencyBlocker} />
         ) : null}
 
-        <Rule />
 
-        <Section>
-          <SectionHead title="What You Have Recorded" note="Counted by the day you say you were paid" />
-          {status !== 'ready' ? (
-            <Flag style={{ marginTop: sp.sm }}>{receiptsEmptyLine(status)}</Flag>
-          ) : taken.pots.length ? (
-            <View style={{ marginTop: sp.sm }}>
-              {taken.pots.map((p) => (
-                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>
-                    {p.count} {p.count === 1 ? 'payment' : 'payments'} in {p.currency}
-                  </Text>
-                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
-                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
-                  </Text>
+        {/* Round five: the screen opens on its figure. The kit's figure card,
+            one figure per currency and never one over both, with the green
+            mark this side of the book carries everywhere. A dash and
+            `receiptsEmptyLine`'s sentence under any read that was not whole; the word
+            "Nothing" — not a dash, and not a money nought, which would need a
+            currency — where the read was whole and there is nothing in it.
+
+            The card of prose that opened the page and the paragraph that
+            closed this card are behind What This Is, below, word for word;
+            one line of the caveat stays beside the figure it qualifies. */}
+        <FigureCard title="What You Have Recorded" period="All you have recorded" source="Your own record"
+          figure={status === 'ready' && !taken.pots.length ? 'Nothing' : null}
+          detail={status === 'ready' && taken.pots.length ? undefined : receiptsEmptyLine(status)}
+          figures={status === 'ready' && taken.pots.length ? taken.pots.map((p) => ({
+            key: p.currency,
+            figure: minorMoney(p.minorUnits, p.currency),
+            comparison: `${num(p.count)} ${p.count === 1 ? 'payment' : 'payments'} in ${p.currency}`,
+            tone: t.brand,
+            spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'no figure'}, ${num(p.count)} ${p.count === 1 ? 'payment' : 'payments'} in ${p.currency}`,
+          })) : undefined}>
+          {/* Currencies are never added together, here or anywhere. */}
+          {status === 'ready' && taken.pots.length > 1 ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              These are separate amounts of money and are deliberately not added together.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Record only what did not go through this app, or the same money is counted twice.</Text>
+        </FigureCard>
+
+        <Expandable title="What This Is" note="Your own record of what you were handed, and the double-count rule">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{RECEIPT_IS_YOUR_WORD}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+        </Expandable>
+
+        {/* ── the three breakdowns ────────────────────────────────────────
+            Every one of them is a figure over a set, so every one of them is
+            drawn only under `isWhole(status)`. A breakdown of a truncated read
+            is a subtotal wearing a total's clothes, and a breakdown of a
+            refused one is an assertion about somebody's income made out of our
+            own failure. The sentence for each of those states is already on
+            screen above, once, from `receiptsEmptyLine`. */}
+        {isWhole(status) && byMethod.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="How It Reached You" note={`${byMethod.length} ${byMethod.length === 1 ? 'way' : 'ways'}`} />
+              {/* The mix as a ring, ONE PER CURRENCY: a ring is a whole, and
+                  two moneys are not one. Each slice is this method's pot in
+                  that currency and the share is of that currency's own total.
+                  The rows under it keep every amount and every count. */}
+              {methodRings.map((d, i) => (
+                <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg, marginBottom: sp.md }}>
+                  <Donut slices={d.slices} centre={d.centre} sub="recorded" spoken={d.spoken} />
+                  <Legend items={d.slices} />
                 </View>
               ))}
-              {/* Currencies are never added together, here or anywhere. */}
-              {taken.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
+              {byMethod.map((g) => slice(g, 'payment'))}
+            </Section>
+          </>
+        ) : null}
+
+        {isWhole(status) && byMonth.months.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="By Month" note="Counted by the Day You Say You Were Paid" />
+              {byMonth.months.map((g) => slice(g, 'payment'))}
+              {/* A day that will not read is in NO month. Swept into this one it
+                  would make one month quietly too big; dropped in silence it
+                  would make the months add up to less than the book above, with
+                  nothing on screen to say why. */}
+              {byMonth.undated ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {byMonth.undated} {byMonth.undated === 1 ? 'payment has' : 'payments have'} a day that could not be read, so {byMonth.undated === 1 ? 'it is' : 'they are'} in none of these months. {byMonth.undated === 1 ? 'It is' : 'They are'} still in the total above.
                 </Flag>
               ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{receiptsEmptyLine(status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
-        </Section>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{MONTHS_ARE_WHAT_YOU_WROTE_DOWN}</Text>
+            </Section>
+          </>
+        ) : null}
 
-        <Rule />
+        {isWhole(status) && byPayer.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Who Paid You" note={`${byPayer.length} ${byPayer.length === 1 ? 'person' : 'people'}`} />
+              {byPayer.map((g) => slice(g, 'payment'))}
+              {/* Said out loud, because the grouping is by the name written on
+                  each line rather than by an account. Most people who pay a
+                  coach in cash were never given one. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                These are grouped by the name you wrote on each line, not by an account. Most people who pay in cash have never been given one. Two spellings of the same person are two rows here.
+              </Text>
+            </Section>
+          </>
+        ) : null}
+
 
         <Section>
           {/* A count is a claim about the coach's own records, so it is only
@@ -248,7 +449,7 @@ export default function Receipts() {
               `{rows: [], status: 'error'}` for a refused read, and "Nothing
               recorded yet" over that is a sentence about somebody's income that
               this app cannot support. */}
-          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing recorded yet') : 'What is on record'} />
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} Recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
           {rows.map((r) => (
             <View key={r.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
@@ -269,7 +470,7 @@ export default function Receipts() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                 <Pressable onPress={() => onRemove(r)} hitSlop={8} accessibilityRole="button"
                   accessibilityLabel={`Remove the payment from ${r.paidBy}`} style={{ paddingVertical: sp.xs }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Remove</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Remove</Text>
                 </Pressable>
               </View>
             </View>
@@ -297,12 +498,12 @@ export default function Receipts() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>A payment you took</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>A Payment You Took</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                 Only what did not go through this app. Anything Stripe took is already counted for you.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Who paid you</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Who Paid You</Text>
               <TextInput value={paidBy} onChangeText={(v) => { setPaidBy(v); setClientId(null); }}
                 placeholder="Their name" placeholderTextColor={t.ink3}
                 accessibilityLabel="Who paid you" style={inp} />
@@ -316,7 +517,7 @@ export default function Receipts() {
                       <Pressable key={c.id} onPress={() => { setPaidBy(c.name); setClientId(isQueryableId(c.id) ? c.id : null); }}
                         accessibilityRole="button" accessibilityLabel={`Paid by ${c.name}`}
                         style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: paidBy === c.name ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.caption, color: paidBy === c.name ? '#fff' : t.ink2 }}>{c.name}</Text>
+                        <Text style={{ ...ty.caption, color: paidBy === c.name ? t.brandInk : t.ink2 }}>{c.name}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -334,13 +535,13 @@ export default function Receipts() {
                 placeholder="200" placeholderTextColor={t.ink3}
                 accessibilityLabel="Amount" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How it reached you</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How It Reached You</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
                 {RECEIPT_METHODS.map((m) => (
                   <Pressable key={m.id} onPress={() => setMethod(m.id)} accessibilityRole="button"
                     accessibilityLabel={m.label} accessibilityState={{ selected: method === m.id }}
                     style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: method === m.id ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, color: method === m.id ? '#fff' : t.ink2 }}>{m.label}</Text>
+                    <Text style={{ ...ty.label, color: method === m.id ? t.brandInk : t.ink2 }}>{m.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -348,19 +549,19 @@ export default function Receipts() {
                 {RECEIPT_METHODS.find((m) => m.id === method)?.note}
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day you were paid</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The Day You Were Paid</Text>
               <TextInput value={dayText} onChangeText={setDayText} autoCapitalize="none" autoCorrect={false}
                 placeholder={`${today}, or leave it for today`} placeholderTextColor={t.ink3}
                 accessibilityLabel="The day you were paid" style={inp} />
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                {([['Today', 0], ['Yesterday', -1], ['A week ago', -7]] as [string, number][]).map(([label, n]) => {
+                {([['Today', 0], ['Yesterday', -1], ['A Week Ago', -7]] as [string, number][]).map(([label, n]) => {
                   const when = plusDays(today, n);
                   return (
                     <Pressable key={label} onPress={() => setDayText(dayText === when ? '' : when)}
                       accessibilityRole="button" accessibilityLabel={label}
                       accessibilityState={{ selected: receivedOn === when }}
                       style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: receivedOn === when ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: receivedOn === when ? '#fff' : t.ink2 }}>{label}</Text>
+                      <Text style={{ ...ty.micro, color: receivedOn === when ? t.brandInk : t.ink2 }}>{label}</Text>
                     </Pressable>
                   );
                 })}
@@ -369,7 +570,7 @@ export default function Receipts() {
                 The day the money arrived, not today. A month of cash written up in one evening belongs in the months it was taken in.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A Note, If You Want One (Optional)</Text>
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder="Second half of the ten pack" placeholderTextColor={t.ink3}
                 accessibilityLabel="Note" style={[inp, { minHeight: 70, textAlignVertical: 'top' }]} />

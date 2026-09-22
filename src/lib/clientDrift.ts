@@ -43,7 +43,8 @@
 // instance — it scored a trainer on bookings nobody had marked. Three places,
 // one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
-import { capLimit, capped } from './rowCap';
+import { capLimit, capped, ROW_CAP, TruncatedRead } from './rowCap';
+import { readCappedByIds } from './cappedByIds';
 
 type Queryable = { from: (table: string) => any };
 
@@ -121,6 +122,23 @@ export interface Drift {
   quietDays: number | null;
   /** Days of record this client has, from `since` or their first event. */
   observedDays: number | null;
+  /**
+   * How far back the events behind this verdict were actually read, in days —
+   * `windows.historyDays`, carried on the verdict rather than left with the
+   * caller.
+   *
+   * NO STATEMENT OF SILENCE MAY EXCEED IT. `observedDays` is measured from the
+   * day the client joined the book and has no ceiling; the events are read
+   * `historyDays` back and no further (`readClientActivity` bounds every one of
+   * its four reads on that window). For anybody who joined before that window
+   * opened the two are different numbers, and the sentences below were printing
+   * the first: a client of two years who stopped training in June read
+   * "Nothing recorded in 730 days on your book", and the coach's draft to them
+   * said "I've not had anything come through in the app from you since you
+   * joined 730 days ago". Both are claims about hundreds of days nobody looked
+   * at, and the second one is sent to the person who trained through them.
+   */
+  readSpanDays: number;
   /** How long they have been silent, for ordering the unknown band. Null when
    *  even that is unknowable. */
   silentDays: number | null;
@@ -300,6 +318,7 @@ export function assessDrift(
     score: null,
     quietDays,
     observedDays,
+    readSpanDays: windows.historyDays,
     silentDays,
     recentActiveDays,
     baselineActiveDays,
@@ -336,17 +355,45 @@ function unknownReason(
   eventCount: number,
 ): string {
   if (eventCount === 0) {
-    if (d.observedDays != null) {
-      return `Nothing recorded in ${d.observedDays} day${d.observedDays === 1 ? '' : 's'} on your book — no check-ins, no logged workouts, no visits.`;
+    // ── how far back the silence may be claimed to run ─────────────────
+    //
+    // `observedDays` counts from the day they joined the coach's book. The
+    // events are read `historyDays` back and no further, so for a client who
+    // joined before that window opened the two are different numbers and only
+    // the smaller one is evidence. This branch was printing the larger:
+    // "Nothing recorded in 730 days on your book — no check-ins, no logged
+    // workouts, no visits" about somebody who trained for two years and
+    // stopped in June, on the Clients list, on their client screen, in the
+    // nudge card, and stored verbatim into `client_nudges.observed`.
+    //
+    // The `observedDays` wording is kept for the client it was written for —
+    // the new one, whose whole record IS inside the window — and everybody
+    // older falls back to the window, which is what was actually looked at.
+    if (d.observedDays != null && d.observedDays <= windows.historyDays) {
+      // ── the day they joined ──────────────────────────────────────────
+      // `observedDays` floors, so somebody added this morning is 0, and the
+      // sentence read "Nothing recorded in 0 days on your book" — on the
+      // Clients screen, in the suggested-check-ins card, and again on
+      // Analytics under At-risk Clients. It is literally true and it reads as
+      // a broken template, and worse: it prompts a coach to chase a client
+      // for silence they have not had time to break. Their first day is not a
+      // gap in their record; it is the whole of it.
+      if (d.observedDays === 0) {
+        return 'On your book since today, with nothing recorded yet: no check-ins, no logged workouts, no visits.';
+      }
+      return `Nothing recorded in ${d.observedDays} day${d.observedDays === 1 ? '' : 's'} on your book: no check-ins, no logged workouts, no visits.`;
     }
-    return `Nothing recorded in the last ${windows.historyDays} days — no check-ins, no logged workouts, no visits.`;
+    return `Nothing recorded in the last ${windows.historyDays} days: no check-ins, no logged workouts, no visits.`;
   }
   if (d.baselineSpanDays == null || d.baselineSpanDays < MIN_BASELINE_SPAN_DAYS) {
     const days = d.observedDays ?? Math.round(d.baselineSpanDays ?? 0);
-    return `Only ${days} day${days === 1 ? '' : 's'} of record — too little to say whether anything has changed.`;
+    // Same floor, same reason as above: "Only 0 days of record" is what a
+    // client who joined and trained on the same morning produced.
+    if (days === 0) return 'Their record starts today, too little to say whether anything has changed.';
+    return `Only ${days} day${days === 1 ? '' : 's'} of record, too little to say whether anything has changed.`;
   }
   if (d.baselineActiveDays < MIN_BASELINE_ACTIVE_DAYS) {
-    return `${d.baselineActiveDays} active day${d.baselineActiveDays === 1 ? '' : 's'} before the last ${windows.recentDays} — no settled pattern to compare against.`;
+    return `${d.baselineActiveDays} active day${d.baselineActiveDays === 1 ? '' : 's'} before the last ${windows.recentDays}, so no settled pattern to compare against.`;
   }
   return `Not enough of a record to judge a change.`;
 }
@@ -357,10 +404,10 @@ function measuredReason(base: number, recent: number, drop: number, quietDays: n
     const q = quietDays == null ? null : quietDays;
     const was = `was ${base} day${base === 1 ? '' : 's'} a week`;
     return q == null
-      ? `Nothing at all lately — ${was}.`
-      : `Nothing for ${q} day${q === 1 ? '' : 's'} — ${was}.`;
+      ? `Nothing at all lately. It ${was}.`
+      : `Nothing for ${q} day${q === 1 ? '' : 's'}. It ${was}.`;
   }
-  if (drop >= WATCH_DROP) return `Down from ${base} to ${recent} days a week — ${pct}% below their own pattern.`;
+  if (drop >= WATCH_DROP) return `Down from ${base} to ${recent} days a week, ${pct}% below their own pattern.`;
   if (drop <= -0.15) return `Up from ${base} to ${recent} days a week.`;
   return `Holding at about ${recent} days a week (was ${base}).`;
 }
@@ -438,9 +485,9 @@ export function summariseDrift(list: Drift[] | null): DriftSummary | null {
 export function bandTitle(status: StatusLevel): string {
   switch (status) {
     case 'at_risk': return 'Drifting';
-    case 'idle': return 'Nothing recorded';
+    case 'idle': return 'Nothing Recorded';
     case 'watch': return 'Slipping';
-    default: return 'Holding their pattern';
+    default: return 'Holding Their Pattern';
   }
 }
 
@@ -448,7 +495,7 @@ export function bandTitle(status: StatusLevel): string {
 export function bandNote(status: StatusLevel, windows: DriftWindows = DEFAULT_WINDOWS): string {
   switch (status) {
     case 'at_risk': return `Well below their own rate over the last ${windows.recentDays} days.`;
-    case 'idle': return 'No pattern to judge. Not the same as fine — find out which.';
+    case 'idle': return 'No pattern to judge. Not the same as fine. Find out which.';
     case 'watch': return 'Down on their own rate, but not yet far.';
     default: return 'Doing about as much as they always have.';
   }
@@ -493,12 +540,53 @@ export function isQueryableId(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
 }
 
+/**
+ * The map alone, for a caller that only wants "when was each of these last
+ * active" and has no use for the shape of the read.
+ *
+ * ── Why this refuses a truncated read rather than returning a short map ────
+ *
+ * It used to be `(await readClientActivity(…)).byClient` and nothing else,
+ * which threw `truncated` away at the door. That is not the same defect as
+ * losing `notAsked`, and the two have to be separated:
+ *
+ *   notAsked  is a fact ABOUT NAMED IDS and it survives in the map. Those ids
+ *             are still keys, their entry is `[]`, and any caller can recover
+ *             the list exactly by filtering on `isQueryableId`, which is
+ *             exported beside this for that purpose. Nothing is lost that
+ *             cannot be got back, and refusing the whole read over a coach's
+ *             one hand-added client would take a working screen away — the
+ *             failure `isQueryableId` was written to end in the first place.
+ *
+ *   truncated is a fact ABOUT THE SET and it does not survive in the map at
+ *             all. There is no key to look at, no residue, nothing a caller
+ *             could inspect afterwards to discover it: a client whose rows fell
+ *             off the far side of the ceiling comes back with `[]`, which is
+ *             the same array as a client who has not trained since March. And
+ *             the four reads behind it carry no `.order()`, so WHICH clients
+ *             land on the wrong side is not even stable between two calls.
+ *
+ * The rule in src/lib/rowCap.ts is to throw, and this is the shape it was
+ * written for: the caller cannot act on a flag it never receives, and the map's
+ * emptiness reads downstream as a statement about a person. studio-web's staff
+ * page is the standing example — its own comment says an understated client
+ * count "waves through the removal of a coach whose clients are all past row
+ * 1000". Its `slice()` wrapper turns this throw into a named failed read, which
+ * is the honest outcome: the screen says the training record could not be read,
+ * instead of quietly reporting a book full of silent clients.
+ *
+ * A caller that genuinely wants the rows anyway — to LIST them rather than to
+ * infer silence from their absence — should call `readClientActivity` and carry
+ * `truncated` itself, which is what every caller in this tree does.
+ */
 export async function fetchClientActivity(
   sb: Queryable,
   clientIds: string[],
   opts: ActivityQuery = {},
 ): Promise<Record<string, ActivityEvent[]>> {
-  return (await readClientActivity(sb, clientIds, opts)).byClient;
+  const read = await readClientActivity(sb, clientIds, opts);
+  if (read.truncated) throw new TruncatedRead("these clients' training record", ROW_CAP);
+  return read.byClient;
 }
 
 /**
@@ -569,34 +657,62 @@ export async function readClientActivity(
     out[id].push({ at, kind });
   };
 
-  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', askable).gte('at', sinceIso).limit(capLimit());
+  // ── Why all four of these are chunked ──────────────────────────────────
+  //
+  // `askable` is every linked client a coach has: src/ui/nudges.ts intersects
+  // a `capLimit()` read of `clients` with the roster, so a gym-attached coach
+  // with three hundred members sends three hundred uuids, and up to a thousand
+  // is reachable. A uuid costs about 39 bytes inside a PostgREST `in.("…","…")`
+  // list, which puts three hundred of them past the 8KB request line nginx and
+  // most CDNs enforce by default. The proxy refuses at roughly two hundred, the
+  // refusal is a **414**, supabase-js does not reject on it, and it arrives as
+  // `data: null` — so `if (error) throw` never fires and `capped(null)` is an
+  // empty page.
+  //
+  // Empty is not a neutral answer here. This function's whole output is "when
+  // was each client last active", and no rows for everybody means EVERY client
+  // reads as silent. That is precisely the state the drift nudges exist to act
+  // on: the coach is handed a list saying their entire book has gone quiet, and
+  // messages three hundred people who have been training all month. The feature
+  // built to notice inactivity would have been manufacturing it.
+  //
+  // `readCappedByIds` rather than `readByIds`: the per-read cap is deliberate
+  // and `truncated` is already carried out of here to the caller, who suppresses
+  // rather than guesses. Finishing these would walk every check-in, workout,
+  // session and door swipe the window holds to compute a last-seen date the
+  // first page already answers.
+  const ci = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('check_ins').select('user_id, at')
+      .in('user_id', chunk).gte('at', sinceIso).limit(capLimit()));
   if (ci.error) throw ci.error;
-  const ciPage = capped<any>(ci.data);
-  truncated = truncated || ciPage.truncated;
-  for (const r of ciPage.rows) push(r.user_id, r.at, 'check_in');
+  truncated = truncated || ci.truncated;
+  for (const r of ci.rows) push(r.user_id, r.at, 'check_in');
 
-  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', askable).gte('performed_at', sinceIso).limit(capLimit());
+  const wo = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('workouts').select('user_id, performed_at')
+      .in('user_id', chunk).gte('performed_at', sinceIso).limit(capLimit()));
   if (wo.error) throw wo.error;
-  const woPage = capped<any>(wo.data);
-  truncated = truncated || woPage.truncated;
-  for (const r of woPage.rows) push(r.user_id, r.performed_at, 'workout');
+  truncated = truncated || wo.truncated;
+  for (const r of wo.rows) push(r.user_id, r.performed_at, 'workout');
 
   // Only sessions somebody confirmed took place. A booked slot whose clock has
   // passed is not evidence the client turned up — that inference is the bug
   // 33-session-outcomes.sql was written to end, and it would read here as a
   // client still attending when they had stopped.
-  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', askable).gte('starts_at', sinceIso).eq('outcome', 'completed').limit(capLimit());
+  const se = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('sessions').select('client_id, starts_at, outcome')
+      .in('client_id', chunk).gte('starts_at', sinceIso).eq('outcome', 'completed').limit(capLimit()));
   if (se.error) throw se.error;
-  const sePage = capped<any>(se.data);
-  truncated = truncated || sePage.truncated;
-  for (const r of sePage.rows) push(r.client_id, r.starts_at, 'session');
+  truncated = truncated || se.truncated;
+  for (const r of se.rows) push(r.client_id, r.starts_at, 'session');
 
   if (opts.tenantId) {
-    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', askable).gte('entered_at', sinceIso).limit(capLimit());
+    const vi = await readCappedByIds<any>(askable,
+      (chunk) => sb.from('gym_visits').select('member_id, entered_at')
+        .eq('tenant_id', opts.tenantId).in('member_id', chunk).gte('entered_at', sinceIso).limit(capLimit()));
     if (vi.error) throw vi.error;
-    const viPage = capped<any>(vi.data);
-    truncated = truncated || viPage.truncated;
-    for (const r of viPage.rows) push(r.member_id, r.entered_at, 'visit');
+    truncated = truncated || vi.truncated;
+    for (const r of vi.rows) push(r.member_id, r.entered_at, 'visit');
   }
 
   return { byClient: out, notAsked, truncated };

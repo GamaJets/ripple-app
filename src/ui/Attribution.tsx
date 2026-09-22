@@ -3,9 +3,17 @@
 // ── Why this is a component and not a line of text ─────────────────────────
 //
 // The exercise catalogue — every description, every illustration, the naming
-// itself — is licensed from RepDB under a free tier whose single condition is a
-// visible credit. That is not a formality we are honouring grudgingly: it is the
-// entire price of 601 illustrated movements with descriptions, and it is cheap.
+// itself — is licensed from RepDB. It arrived under a free tier whose single
+// condition is a visible credit; the catalogue and the artwork we ship today
+// come from the Standard tier, which downgrades attribution from a condition to
+// a request. We render it either way. Under the free tier it was the entire
+// price of an illustrated catalogue; under Standard it is simply true, and the
+// muscle heatmap under assets/muscle-heatmap is 76 more pieces of their work.
+//
+// Which licence governs which file is written down in data/repdb-PROVENANCE.md,
+// because the two archives ship byte-identical-looking WebPs under different
+// terms — and because Standard v1.2 excludes white-label builds, which is
+// Repple's second axis. That one is a purchase decision, not a code one.
 //
 // A credit works only if somebody can find it, so this is deliberately NOT a
 // grey footnote at the bottom of a settings list. It has its own card, its own

@@ -15,6 +15,10 @@ import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRe
 import { canRememberSleepAsk, hasAskedForSleep, markSleepAsked, shouldAutoAskForSleep } from './sleepAccess';
 import { canRememberGlucoseAsk, hasAskedForGlucose, markGlucoseAsked, shouldAutoAskForGlucose } from './glucoseAccess';
 import { parseHealthSamples, type GlucoseRead, type GlucoseReading } from '../glucose';
+// A sample with no readable number is not a reading of zero. See the header of
+// ../healthSamples.ts: the same four characters that made an average heart rate
+// of 36 out of one real measurement and one hole.
+import { avgSamples, newestReading, sampleValue, sumSamples } from '../healthSamples';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -26,22 +30,43 @@ const meta: ProviderMeta = {
 };
 
 // ── Lazy native module load ────────────────────────────────────────────────
+//
+// Served by src/lib/wearables/appleHealthShim.ts, not by react-native-health.
+// That package is a legacy-architecture module and does not register under RN
+// 0.86, so `NativeModules.AppleHealthKit` is undefined and every method below
+// it was missing while `Constants` — which it bolts on in JavaScript — was
+// present. The shim has the whole account of it; nothing else in this file
+// changed, because the shim answers in the shapes this file already parses.
 let HK: any = null;
 let tried = false;
 function hk(): any {
   if (tried) return HK;
   tried = true;
   try {
-    const mod = require('react-native-health');
-    HK = mod?.default ?? mod;
+    HK = require('./appleHealthShim').AppleHealthCompat ?? null;
   } catch {
-    HK = null; // package not installed yet
+    HK = null; // the library is not in this build
   }
   return HK;
 }
-/** True only in a real build where the native HealthKit module is compiled in. */
+/** True only where HealthKit actually exists and can be talked to.
+ *
+ *  `NativeModules.AppleHealthKit` used to be the test and can no longer answer:
+ *  that key is undefined on every build now, present framework or not, so it
+ *  reported "no HealthKit" on an iPhone that has it. `isHealthDataAvailable()`
+ *  is Apple's own answer to the same question. */
 function nativePresent(): boolean {
-  return Platform.OS === 'ios' && !!NativeModules.AppleHealthKit && !!hk();
+  if (Platform.OS !== 'ios') return false;
+  // Through `hk()` FIRST, which remembers a shim that would not load. The
+  // shim imports the HealthKit library at module scope, and on a build made
+  // without its native half that import throws — and Metro re-evaluates a
+  // module whose evaluation threw on every `require`, so this used to throw,
+  // and log, on every render of every screen that asked whether a watch was
+  // available. Seen on the 9 Sep simulator build, which has no NitroModules
+  // in its binary at all: the same build on a phone is a watch that says
+  // connected and never sends anything.
+  if (!hk()) return false;
+  try { return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
 }
 
 function isoStartOfToday(): string {
@@ -115,7 +140,44 @@ function requestAuth(): Promise<void> {
     () => new Promise<void>((resolve, reject) => {
       k.initHealthKit(permissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
     }),
-  );
+  ).then(() => sheetWasShown(k));
+}
+
+/**
+ * Refuse to call this "connected" when iOS never showed the sheet.
+ *
+ * `initHealthKit` resolves when the request was processed, and a request can
+ * be processed with nothing put in front of the member — a build without the
+ * HealthKit entitlement on its profile, or one whose usage strings did not
+ * make it into the binary, comes back at once with no sheet and every read
+ * answering empty for ever. Until now that resolved, the id was remembered,
+ * the row said Connected, and heart rate never appeared. This asks the one
+ * question HealthKit does answer about permission — has this set been
+ * presented — and turns "still needs asking" into a failure with the fix in
+ * it. A member who saw the sheet and declined is `unnecessary` and is not
+ * touched by this; their refusal is a decision the screens already respect.
+ *
+ * Unknown is let through. It is the answer on an old module or an OS that
+ * will not say, and refusing on it would disconnect a working watch to be
+ * safe against a fault we cannot see.
+ */
+function sheetWasShown(k: any): Promise<void> {
+  if (typeof k.getRequestStatus !== 'function') return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    k.getRequestStatus(permissionSet(k), (err: any, res: string | null) => {
+      if (err) { resolve(); return; } // could not find out; not a reason to refuse
+      if (res === 'shouldRequest') {
+        reject(new Error(
+          'iOS did not show the Apple Health permission sheet, so nothing has been allowed and no '
+          + 'reading can arrive. This is a problem with the build, not with your watch: the app is '
+          + 'missing its HealthKit entitlement or its Health usage descriptions. Please report it: '
+          + 'a rebuild is needed, and reconnecting will not help until then.',
+        ));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 /**
@@ -175,17 +237,75 @@ export function writeAuthStatus(): Promise<WriteAuth> {
   });
 }
 
-function sumValues(res: any): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(res.reduce((s: number, x: any) => s + (Number(x?.value) || 0), 0));
+// ── the three sample readers ────────────────────────────────────────────────
+//
+// All three used to be `Number(x?.value) || 0` over rows from the native
+// bridge, which counted a sample the bridge could not describe as a reading of
+// ZERO — and `avgValues` then divided by `res.length`, so the hole was in the
+// denominator too. Two heart-rate samples, one of 72 bpm and one unreadable,
+// averaged to 36. The arithmetic and the account of it are in
+// ../healthSamples.ts, which is a plain module precisely so a test can reach
+// it: nothing in THIS file can be loaded under `node`, because it imports
+// react-native, which is how the coercion sat here untested while it was wrong.
+//
+// `sumSamples` and `avgSamples` are called straight from `fetchToday`. What
+// stays here is the pair below, because WHICH sample is the newest one is a
+// fact about how this file's own queries were sorted.
+/**
+ * The MOST RECENT sample's value — which is not "the last element" unless you
+ * know how the list was sorted, and this file sorted its two heart-rate reads
+ * differently.
+ *
+ * `lastValue` took `res[res.length - 1]` from both. The resting read asks for
+ * `ascending: false`, so its last element is the OLDEST resting reading of the
+ * day, and that is the number the app has been showing as somebody's resting
+ * heart rate.
+ *
+ * The live read is worse, because it fails only sometimes. It asked ascending
+ * with `limit: 10000`, and a limit applied to an ascending query keeps the
+ * OLDEST ten thousand — so a member whose watch has written more than that
+ * since midnight gets a "latest" heart rate from earlier in the day, on the
+ * screen showing it live during a session. It is the row-cap trap this codebase
+ * has elsewhere: a capped read is only a top-N if it is sorted the way you are
+ * reading it.
+ *
+ * So the caller states the sort and this picks the right end.
+ *
+ * It also used to end in `Number(r?.value) || 0`, so a newest sample the bridge
+ * could not describe was published as a heart rate of ZERO BPM — a resting
+ * pulse of nothing, on the Recovery screen, about somebody who is demonstrably
+ * alive. `newestReading` skips rows that carry no number and answers null when
+ * none of them does, which the field is already typed for and the screen
+ * already draws as a dash.
+ */
+function newestValue(res: any, ascending: boolean): number | null {
+  const hit = newestReading(res, ascending);
+  return hit ? Math.round(hit.value) : null;
 }
-function avgValues(res: any): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(res.reduce((s: number, x: any) => s + (Number(x?.value) || 0), 0) / res.length);
-}
-function lastValue(res: any): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(Number(res[res.length - 1]?.value) || 0);
+
+/**
+ * WHEN the newest sample was taken, ISO, or null when it does not say.
+ *
+ * THE SAME SAMPLE `newestValue` reads, for its time instead of its number —
+ * and that is now guaranteed rather than assumed. Both used to index the list
+ * independently, which was harmless only while neither of them could skip a
+ * row; the moment `newestValue` began stepping past a sample with no readable
+ * number, two independent walks would have put one sample's figure under
+ * another sample's clock, and `hrFreshness` would have called a stale reading
+ * live on the strength of it.
+ *
+ * `startDate` before `endDate`: a heart-rate sample is an instant and the two
+ * are equal, but a sample type that spans time is stamped by when it BEGAN,
+ * and taking the end would age it by its own duration.
+ */
+function newestAt(res: any, ascending: boolean): string | null {
+  const hit = newestReading(res, ascending);
+  if (!hit) return null;
+  const r = hit.sample as any;
+  const raw = r?.startDate ?? r?.start ?? r?.endDate ?? r?.end ?? null;
+  if (!raw) return null;
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 // ── Sleep ───────────────────────────────────────────────────────────────────
@@ -243,7 +363,7 @@ function readSleepRows(options: any): Promise<{ ok: true; rows: any[] } | { ok: 
   return new Promise((resolve) => {
     const k = hk();
     if (!k || typeof k.getSleepSamples !== 'function') {
-      return resolve({ ok: false, missing: true, reason: 'This build’s Apple Health module has no sleep reader — a native rebuild adds it.' });
+      return resolve({ ok: false, missing: true, reason: 'This build’s Apple Health module has no sleep reader. A native rebuild adds it.' });
     }
     try {
       k.getSleepSamples(options, (err: any, res: any) => {
@@ -332,8 +452,23 @@ const HK_TO_EXERCISE: Record<string, string> = {
   'Functional Strength Training': 'Circuit', 'Traditional Strength Training': 'Strength',
   Cooldown: 'Stretching', Flexibility: 'Stretching', 'Mixed Cardio': 'Cardio', Dance: 'Dance',
 };
+/**
+ * Looked up with the spaces and the case taken out of the question.
+ *
+ * Half the keys above are spaced ('Traditional Strength Training') and half are
+ * not ('StairClimbing'), because two libraries spelt the same activity two ways
+ * and both spellings were added as they turned up. HealthKit's own name for it
+ * is one word — `WorkoutActivityType.traditionalStrengthTraining` — which is
+ * what src/lib/wearables/appleHealthShim.ts now publishes, and what
+ * HK_WRITE_ACTIVITIES in appleHealthWrite.ts has always used, so a lookup that
+ * cares about the spaces matches on 'StairClimbing' and misses on the five
+ * spaced keys beside it. Normalising both sides means neither spelling can be
+ * the wrong one, and it costs one Object.entries at module load.
+ */
+const HK_TO_EXERCISE_KEY: Record<string, string> = Object.entries(HK_TO_EXERCISE)
+  .reduce<Record<string, string>>((a, [k, v]) => { a[k.replace(/\s+/g, '').toLowerCase()] = v; return a; }, {});
 function mapActivity(name: string): string {
-  return HK_TO_EXERCISE[name] || name || 'Workout';
+  return HK_TO_EXERCISE_KEY[String(name ?? '').replace(/\s+/g, '').toLowerCase()] || name || 'Workout';
 }
 
 // Named rather than inlined on the provider so the sleep reader can give the
@@ -342,7 +477,37 @@ function mapActivity(name: string): string {
 function unavailable(): string | null {
   if (Platform.OS !== 'ios') return 'Apple Health is iPhone-only.';
   if (nativePresent()) return null;
-  return 'Needs the Repple app build (Apple Health can’t run inside Expo Go).';
+
+  // ── two different situations, and they used to share one sentence ────────
+  //
+  // This said “Needs the Repple app build (Apple Health can’t run inside Expo
+  // Go)” to everybody, which is right in Expo Go and actively misleading in the
+  // commoner case: somebody holding a REAL Repple build that was compiled
+  // before `react-native-health` was added to it. They read “needs the Repple
+  // app build”, look at the Repple app they are holding, and have nowhere to go.
+  //
+  // The distinction matters because the remedy differs and one of them is a
+  // thing an update cannot do. HealthKit is native code. It is compiled into a
+  // binary; an over-the-air update replaces JavaScript and nothing else. So a
+  // build without it stays without it however many updates it takes, and
+  // saying so is the difference between waiting and installing.
+  //
+  // Apple Watch is the reason this is worth the words: the watch has no Repple
+  // app on it and needs none — it syncs into the iPhone’s Health app and we
+  // read from there. So “my watch is not working” is nearly always this, and
+  // the answer is a new build rather than anything about the watch.
+  let inExpoGo = false;
+  try {
+    // 'storeClient' is Expo Go. A real build is 'standalone' or 'bare'.
+    inExpoGo = require('expo-constants').default?.executionEnvironment === 'storeClient';
+  } catch { /* no expo-constants: treat as a real build, which is the safer sentence */ }
+
+  return inExpoGo
+    ? 'Apple Health cannot run inside Expo Go. Open Repple’s own build instead.'
+    : 'This build of Repple was made before Apple Health was added, so it has no way to read it. '
+      + 'It needs a new build. An over-the-air update cannot add it, because Apple Health is part '
+      + 'of the app itself rather than something we can send. Your watch does not need anything: it '
+      + 'syncs into the iPhone’s Health app and Repple reads it from there.';
 }
 
 export const appleHealth: WearableProvider = {
@@ -352,7 +517,7 @@ export const appleHealth: WearableProvider = {
 
   async connect() {
     if (Platform.OS !== 'ios') throw new Error('Apple Health is iPhone-only.');
-    if (!nativePresent()) throw new Error('Open the Repple dev build to connect Apple Health — it can’t read HealthKit inside Expo Go.');
+    if (!nativePresent()) throw new Error('Open the Repple dev build to connect Apple Health. It can’t read HealthKit inside Expo Go.');
     await requestAuth();
   },
 
@@ -370,23 +535,43 @@ export const appleHealth: WearableProvider = {
     const [active, steps, hr, rhr, workouts] = await Promise.all([
       read('getActiveEnergyBurned', sampleOpts),
       read('getStepCount', options),
-      read('getHeartRateSamples', sampleOpts),
+      // Newest first, so that the ten-thousand cap keeps the END of the day
+      // rather than the start of it. The average below does not care about the
+      // order; the live reading cares about nothing else.
+      read('getHeartRateSamples', { ...sampleOpts, ascending: false }),
       read('getRestingHeartRateSamples', { ...sampleOpts, ascending: false }),
       read('getSamples', { ...options, type: 'Workout', limit: 100 }),
     ]);
     const m = emptyMetrics('apple');
-    m.activeKcal = sumValues(active);
-    m.steps = steps && typeof steps.value === 'number' ? Math.round(steps.value) : sumValues(steps);
-    m.heartRateAvg = avgValues(hr);
-    m.heartRateLatest = lastValue(hr);
-    m.heartRateResting = lastValue(rhr);
+    m.activeKcal = sumSamples(active);
+    // `getStepCount` is an aggregate: one row with a `value`, not a list. It is
+    // read through the same `sampleValue` as everything else so that a NaN
+    // cannot reach the field — `typeof NaN === 'number'` passed the old guard,
+    // and `Math.round(NaN)` is NaN, which a `number | null` field accepts and
+    // no screen has a sentence for.
+    const stepsAggregate = sampleValue(steps);
+    m.steps = stepsAggregate != null ? Math.round(stepsAggregate) : sumSamples(steps);
+    m.heartRateAvg = avgSamples(hr);
+    m.heartRateLatest = newestValue(hr, false);
+    m.heartRateLatestAt = newestAt(hr, false);
+    m.heartRateResting = newestValue(rhr, false);
     if (Array.isArray(workouts) && workouts.length) {
-      const mins = workouts.reduce((s: number, w: any) => {
+      // A workout whose start or end would not parse contributes NOTHING, and
+      // is not counted. It used to add a zero into the same total, so an
+      // afternoon of sessions with one unreadable stamp reported less time than
+      // the watch recorded, with nothing to say a row had been dropped. When no
+      // row parses at all the answer is null — an unreadable list is not a day
+      // with no training in it.
+      let mins = 0;
+      let read = 0;
+      for (const w of workouts as any[]) {
         const a = Date.parse(w?.start ?? w?.startDate);
         const b = Date.parse(w?.end ?? w?.endDate);
-        return s + (isFinite(a) && isFinite(b) ? (b - a) / 60000 : 0);
-      }, 0);
-      m.workoutMins = Math.round(mins) || null;
+        if (!isFinite(a) || !isFinite(b) || b <= a) continue;
+        mins += (b - a) / 60000;
+        read++;
+      }
+      m.workoutMins = read > 0 ? (Math.round(mins) || null) : null;
     }
     return m;
   },
@@ -491,9 +676,13 @@ export const appleHealth: WearableProvider = {
     return { provider: 'apple', status: 'ready', readings };
   },
 
-  // Heart-rate samples in a window (a workout session, or a whole day) for the
-  // zone chart. Downsamples to <=180 points so the SVG stays light.
-  async fetchHeartRateSeries(startISO: string, endISO: string): Promise<HrPoint[]> {
+  // Every heart-rate sample the watch recorded in a window, in full.
+  //
+  // This is the read; `fetchHeartRateSeries` below is the same read thinned for
+  // drawing. They are separate because thinning is fine for a line and wrong
+  // for a total: it keeps every Nth sample, so thirty seconds spent in zone 4
+  // can vanish, and a splat point is a minute at zone 4 or above.
+  async fetchHeartRateSamples(startISO: string, endISO: string): Promise<HrPoint[]> {
     if (!nativePresent()) return [];
     const res = await read('getHeartRateSamples', { startDate: startISO, endDate: endISO, limit: 10000, ascending: true });
     if (!Array.isArray(res)) return [];
@@ -504,6 +693,14 @@ export const appleHealth: WearableProvider = {
       if (isFinite(bpm) && bpm > 0 && t) raw.push({ t: new Date(t).toISOString(), bpm: Math.round(bpm) });
     }
     raw.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    return raw;
+  },
+
+  // The same window for the zone chart. Downsamples to <=180 points so the SVG
+  // stays light — see the note above on why that shape must not be used for
+  // arithmetic.
+  async fetchHeartRateSeries(startISO: string, endISO: string): Promise<HrPoint[]> {
+    const raw = await this.fetchHeartRateSamples!(startISO, endISO);
     const MAX = 180;
     if (raw.length <= MAX) return raw;
     const step = Math.ceil(raw.length / MAX);

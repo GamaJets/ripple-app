@@ -83,27 +83,27 @@ export interface MessageTemplate {
 export const STARTERS: readonly MessageTemplate[] = [
   {
     id: null, position: 100, title: 'Welcome',
-    body: 'Hey {name} — really glad to have you on board. I have set up your plan, so have a look in the Train tab when you get a minute and tell me if anything does not look right. Anything you want me to know before we start, just say.',
+    body: 'Hey {name}, really glad to have you on board. I have set up your plan, so have a look in the Train tab when you get a minute and tell me if anything does not look right. Anything you want me to know before we start, just say.',
   },
   {
     id: null, position: 200, title: 'Before Your First Session',
-    body: 'Hey {name} — looking forward to our first session. Bring water and something you can move in, get there five minutes early if you can, and eat something light an hour or so before. Let me know if anything is sore or bothering you and I will build around it.',
+    body: 'Hey {name}, looking forward to our first session. Bring water and something you can move in, get there five minutes early if you can, and eat something light an hour or so before. Let me know if anything is sore or bothering you and I will build around it.',
   },
   {
     id: null, position: 300, title: 'Moving A Session',
-    body: 'Hey {name} — I need to move our session. Sorry about the short notice. What does the rest of the week look like for you? Happy to work around whatever suits.',
+    body: 'Hey {name}, I need to move our session. Sorry about the short notice. What does the rest of the week look like for you? Happy to work around whatever suits.',
   },
   {
     id: null, position: 400, title: 'End Of A Block',
-    body: 'Hey {name} — that is the block done. You have put real work into it. Have a look back at where you started and let me know how you feel about it, and I will get the next one written for you.',
+    body: 'Hey {name}, that is the block done. You have put real work into it. Have a look back at where you started and let me know how you feel about it, and I will get the next one written for you.',
   },
   {
     id: null, position: 500, title: 'Checking In',
-    body: 'Hey {name} — checking in on how the week is going. Anything getting in the way? Even a quick reply helps me keep your plan honest.',
+    body: 'Hey {name}, checking in on how the week is going. Anything getting in the way? Even a quick reply helps me keep your plan honest.',
   },
   {
     id: null, position: 600, title: 'Paperwork Still Outstanding',
-    body: 'Hey {name} — I still need your form back before we can get going properly. It takes two minutes and it is in the app. Give me a shout if you cannot find it.',
+    body: 'Hey {name}, I still need your form back before we can get going properly. It takes two minutes and it is in the app. Give me a shout if you cannot find it.',
   },
 ];
 
@@ -142,7 +142,7 @@ export function templateBlockers(t: { title: string; body: string }): string[] {
   // sent to a client verbatim.
   const nearMiss = /\{\s*(name|coach)\s*\}/i.exec(body);
   if (nearMiss && !body.includes(nearMiss[0].toLowerCase().replace(/\s/g, ''))) {
-    out.push(`“${nearMiss[0]}” is not one of the placeholders. They are ${NAME_TOKEN} and ${COACH_TOKEN}, in lower case with no spaces — anything else is sent to your client exactly as it is written.`);
+    out.push(`“${nearMiss[0]}” is not one of the placeholders. They are ${NAME_TOKEN} and ${COACH_TOKEN}, in lower case with no spaces. Anything else is sent to your client exactly as it is written.`);
   }
   return out;
 }
@@ -170,7 +170,7 @@ export function hasUnfilledToken(text: string): boolean {
 
 /** The sentence for that. Sentence case; it goes under the composer. */
 export const UNFILLED_TOKEN_NOTE =
-  'This still has a placeholder in it, because the name it needed was not known. Type over it before you send — it goes to your client exactly as it appears here.';
+  'This still has a placeholder in it, because the name it needed was not known. Type over it before you send. It goes to your client exactly as it appears here.';
 
 /* ── the list, and what an empty one means ────────────────────────────────── */
 
@@ -185,7 +185,7 @@ export const UNFILLED_TOKEN_NOTE =
 export function templatesEmptyLine(status: LoadStatus): string {
   if (status === 'loading') return 'Reading your templates…';
   if (status === 'error') {
-    return 'Your templates could not be read, so this is not "you have none". Anything you have saved is still on your account — writing a new one now would sit alongside it rather than replace it.';
+    return 'Your templates could not be read, so this is not "you have none". Anything you have saved is still on your account. Writing a new one now would sit alongside it rather than replace it.';
   }
   if (status === 'partial') return 'There are more templates than came back in one request, so this is not all of them.';
   return 'You have no saved messages yet. Save the ones you type every week and they are one tap away in any thread.';

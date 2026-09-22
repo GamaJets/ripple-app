@@ -53,9 +53,14 @@ const vplan = buildPlan({ id: 'c1', weightKg: 67, bodyFatPct: 28, activity: 1.45
 ok(vplan.plan.length === 4, 'plan honours meals-per-day');
 ok(vplan.plan.every((m) => !m.ing.some(([, , , dept]) => dept === 'Meat & Seafood')), 'vegan plan must contain no meat/seafood');
 ok(near(vplan.tot.K, vplan.target.kcal, vplan.target.kcal * 0.2), 'meal-engine total near kcal target');
-// swap advances the index and stays in range
+// swap advances to a DIFFERENT DISH and stays in range. It used to advance by
+// exactly one, which moves the last and least substantial component pool —
+// FLAVORS for a main, a zero-calorie style word for a breakfast — so "swap
+// this meal" handed the member the same chicken with a different sauce.
 const si = swapIndex('meat', 'Lunch', 3);
-ok(si === 4 % catalogSize('meat', 'Lunch'), 'swapIndex should advance by one, wrapping');
+ok(si >= 0 && si < catalogSize('meat', 'Lunch'), 'swapIndex stays in range');
+ok(mealAt('meat', 'Lunch', si).ing[0][0] !== mealAt('meat', 'Lunch', 3).ing[0][0],
+  'swapIndex should advance to a different dish, not a different seasoning');
 // override pins a specific meal
 const pinned: PlanInput = { id: 'c1', weightKg: 67, bodyFatPct: 28, activity: 1.45, goal: 'tone', diet: 'meat', mealsPerDay: 3, mealOverride: { 0: 5 } };
 ok(buildPlan(pinned).plan[0].idx === 5 % catalogSize('meat', 'Breakfast'), 'override should pin the meal index');

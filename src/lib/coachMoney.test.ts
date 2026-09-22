@@ -39,7 +39,7 @@
 //    the counts of unlabelled and unpriced rows ADD rather than being taken
 //    from whichever side had more, and neither subtotal is modified — the
 //    screen renders both of them beside the total.
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow, minorFromWhole, majorFromMinor} from './coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow, minorFromWhole, majorFromMinor, minorFromDecimal} from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -74,6 +74,45 @@ eq(minorMoney(null, 'aed'), null, 'no amount is not zero');
 eq(minorMoney(0, 'aed'), 'AED 0.00', 'a real zero is a real zero and is still printed');
 eq(moneyIn(Number.NaN, 'aed', true), null, 'NaN is not a figure');
 
+/* ── a currency that is not a currency ─────────────────────────────────────
+ *
+ * The rule above rejected only the EMPTY string, so everything else non-empty
+ * was upper-cased and printed as though it were a code: `minorMoney(6000,
+ * 'pounds')` rendered "POUNDS 60.00", a figure with a made-up unit in front of
+ * it, reading exactly as considered as "GBP 60.00" does.
+ *
+ * It is reachable from a real row — `gym_passes`, `gym_pass_types`,
+ * `membership_plans`, `gym_invoices`, `gym_orders` and `gym_payments` all hold
+ * `currency` with no format check of any kind, so 'pounds' satisfies `not null`
+ * — and `money()` in src/lib/gymRecord.ts delegates straight here, so every gym
+ * screen in the product inherited it.
+ *
+ * `/^[A-Z]{3}$/`: the same test ./priceBook, ./coachCosts, ./coachInvoice,
+ * ./costBudgets, ./coachReceipts and ./csvImport already apply, and the same
+ * one ./gymRecord's `normaliseCurrency` now applies.
+ */
+eq(minorMoney(6000, 'pounds'), null, 'THE DEFECT: `pounds` is not a currency, so there is no amount to print');
+eq(minorMoney(6000, 'POUNDS'), null, 'and shouting it does not make it one');
+eq(minorMoney(6000, 'GB'), null, 'two letters is not ISO 4217');
+eq(minorMoney(6000, 'GBPX'), null, 'and neither is four');
+eq(minorMoney(6000, '£'), null, 'a symbol is not a code');
+eq(minorMoney(6000, 'GB1'), null, 'nor is a code with a digit in it');
+eq(wholeMoney(60, 'pounds'), null, 'the whole-unit door is the same door and refuses the same value');
+
+// The refusal is narrow. It withholds exactly the amounts nobody can spell and
+// nothing else — including the two currencies whose minor unit is not a
+// hundredth, which is where a clumsy fix would do its damage.
+eq(minorMoney(6000, 'gbp'), 'GBP 60.00', 'a real code in lower case still prints, upper-cased');
+eq(minorMoney(6000, ' gbp '), 'GBP 60.00', 'and a padded one is trimmed rather than refused');
+eq(minorMoney(6000, 'jpy'), 'JPY 6,000', 'a zero-decimal currency is untouched by the check');
+eq(minorMoney(12340, 'KWD'), 'KWD 12.340', 'and so is a three-decimal one');
+
+// Null is never a zero and never the gym's own money. The amount still exists;
+// it is the caller's row and the caller still holds it — see `unspellablePaid`
+// in ./gymOrders, which counts exactly these rather than dropping them.
+ok(minorMoney(6000, 'pounds') !== 'GBP 60.00', 'a withheld figure is never quietly relabelled');
+ok(minorMoney(6000, 'pounds') !== 'POUNDS 0.00', 'and never quietly zeroed');
+
 /* ── how many decimal places this money has ───────────────────────────────── */
 
 eq(currencyDecimals('gbp'), 2, 'most of the world has two');
@@ -81,6 +120,74 @@ eq(currencyDecimals('JPY'), 0, 'and a yen has none');
 eq(currencyDecimals('kwd'), 3, 'and a dinar has three — a thousand fils in it, not a hundred');
 eq(currencyDecimals(null), null, 'and a currency nobody stated has no answer at all, which is not two');
 eq(currencyDecimals('  '), null, 'a blank currency is no currency here either');
+
+/* ── and a currency that is STATED and is not a currency ──────────────────
+ *
+ * `moneyIn` above had the three-letter rule and this function did not, so the
+ * two disagreed about what a currency is and the WHOLE FAMILY took the looser
+ * answer. `currencyDecimals('pounds')` was 2, which is not a formatting
+ * opinion: every function below scales by `10 ** dp` and rounds the result, so
+ * a wrong `dp` is a wrong AMOUNT. The figures beside each case are what this
+ * repo actually produced before the rule was applied here.
+ */
+eq(currencyDecimals('pounds'), null, 'a word is not a code, however much it names a currency — this was 2');
+eq(currencyDecimals('£'), null, 'nor is a symbol — this was 2');
+eq(currencyDecimals('GB'), null, 'two letters is not a code — this was 2');
+eq(currencyDecimals('GBPX'), null, 'and four letters is not one either — this was 2');
+eq(currencyDecimals('gb p'), null, 'nor is a code with a space in the middle of it');
+
+// The other half of the rule, and it is deliberate rather than an oversight: a
+// three-letter code this build has not been told about by name is a REAL
+// currency with two places, because the two exception lists above are Stripe's
+// own and complete. An allowlist here would answer null for the dirham and
+// break a gym on a currency that works perfectly well.
+eq(currencyDecimals('ZZZ'), 2, 'a stated but unrecognised code is two places, which is an answer and not a default');
+eq(currencyDecimals('aed'), 2, 'and a real currency outside both lists is two — this must not become null');
+eq(currencyDecimals('CHF'), 2, 'the case of the code is not the question');
+eq(currencyDecimals('  gbp  '), 2, 'surrounding space is still trimmed off a good code');
+
+// What the null actually prevented, function by function. Each left-hand side
+// is the value this repo returned for 'pounds' before the rule reached here.
+eq(majorFromMinor(5000, 'pounds'), '', 'the price a coach is shown to edit — this was "50.00"');
+eq(minorFromWhole(50, 'pounds'), null, 'the rate written to a payroll snapshot — this was 5000');
+eq(minorFromDecimal('50.00', 'pounds'), null, 'an outside system’s ad spend — this was 5000');
+eq(moneyIn(5000, 'pounds', true), null, 'and the formatter itself, which already refused, still does');
+
+// The one that changes a figure a person typed rather than one they read.
+{
+  const r = readMinorAmount('12.340', 'pounds', false);
+  eq(r.ok, false, 'a typed amount against a non-currency is refused, not read at two places as 1234');
+  ok(!r.ok && /not a currency code/.test(r.reason),
+    'and the refusal says the currency is unreadable rather than that the figure has too many places');
+  ok(!r.ok && /POUNDS/.test(r.reason),
+    'naming the value that is actually in the column, because that is the thing to go and fix');
+  ok(!r.ok && !/No currency is recorded/.test(r.reason),
+    'never "no currency is recorded" — that sends somebody to a setting that already has a value in it');
+}
+{
+  // The absent case keeps its own sentence. Two situations, two fixes.
+  const r = readMinorAmount('12.50', '', false);
+  ok(!r.ok && /No currency is recorded/.test(r.reason), 'an ABSENT currency still gets the sentence written for it');
+}
+
+/* ── the two rules are ONE rule ───────────────────────────────────────────
+ *
+ * `moneyIn` keeps its own `/^[A-Z]{3}$/` because it needs the upper-cased code
+ * to print beside the figure, so it holds the string anyway. Two copies of a
+ * rule is two things to relax separately, and that is exactly how this defect
+ * lived: `moneyIn` had the three-letter test, `currencyDecimals` did not, the
+ * two disagreed about what a currency is, and every other consumer took the
+ * looser answer.
+ *
+ * So the agreement is asserted rather than assumed. This is the assertion that
+ * fails if somebody relaxes the regex above while a `?? 2` is anywhere near it
+ * — which is the shape the old code was one edit away from.
+ */
+for (const c of ['GBP', 'gbp', '  GBP  ', 'JPY', 'KWD', 'AED', 'ZZZ', 'pounds', '£', 'GB', 'GBPX', 'gb p', '', '   ']) {
+  eq(moneyIn(5000, c, true) == null, currencyDecimals(c) == null,
+    `moneyIn and currencyDecimals must agree about whether ${JSON.stringify(c)} is a currency`);
+}
+eq(moneyIn(5000, null, true) == null, currencyDecimals(null) == null, 'including about null');
 
 // The figure a hundred times out. Stripe stores a KWD amount in fils, so 12340
 // of them is KWD 12.340 — printed at two places it read as KWD 123.40.
@@ -326,6 +433,78 @@ eq(minorFromWhole(1e18, 'kwd'), null, 'a figure past safe integers is refused ra
 // fee, store minor units, show it back. It has to survive both odd families.
 eq(majorFromMinor(minorFromWhole(40, 'kwd'), 'kwd'), '40.000', 'a dinar fee reads back as the fee');
 eq(majorFromMinor(minorFromWhole(6300, 'jpy'), 'jpy'), '6300', 'and so does a yen one');
+
+/* ── minorFromDecimal: a figure an OUTSIDE system stated ───────────────────
+ *
+ * The third door, and the one whose right of refusal differs. Meta and TikTok
+ * report a decimal in the ad account's currency and Google's micros arrive as
+ * one; a provider figure with more places than the money has must be ROUNDED,
+ * because refusing it drops a real cost out of a coach's own spend and reports
+ * it as unknown. Everything is done on the digits, so no float is multiplied. */
+eq(minorFromDecimal('120.00', 'gbp'), 12000, 'a two-place currency scales by a hundred');
+eq(minorFromDecimal('1234', 'jpy'), 1234, 'a yen has no minor unit, so the figure is already in them');
+eq(minorFromDecimal('12.340', 'kwd'), 12340, 'a dinar has a thousand fils in it');
+eq(minorFromDecimal('12.345', 'kwd'), 12345, 'and a third place is kept — this is not a Stripe charge');
+eq(minorFromDecimal('12.3456', 'kwd'), 12346, 'a fourth place is rounded rather than refusing the whole figure');
+eq(minorFromDecimal('12.345', 'gbp'), 1235, 'rounding is half-up');
+eq(minorFromDecimal('12.344', 'gbp'), 1234, 'and down below the half');
+eq(minorFromDecimal('1234.5', 'jpy'), 1235, 'a fraction a yen does not have is rounded, not dropped');
+eq(minorFromDecimal('0', 'gbp'), 0, 'a real zero is a real figure — an ad that ran and cost nothing');
+eq(minorFromDecimal('1,250.50', 'gbp'), 125050, 'a provider grouping is not ambiguity: a machine wrote it');
+eq(minorFromDecimal('120.00', null), null, 'no currency, no factor, no figure');
+eq(minorFromDecimal('120.00', ''), null, 'and a blank currency is the same silence');
+eq(minorFromDecimal(null, 'gbp'), null, 'a missing amount is unknown, never a zero');
+eq(minorFromDecimal('unknown', 'gbp'), null, 'and so is a word');
+eq(minorFromDecimal('-5', 'gbp'), null, 'a negative is not something an ad account reports');
+// Deliberately NOT a float multiplication. 12.345 * 100 is 1234.4999999999998
+// in binary, which truncates to 1234 and loses a penny per ad.
+eq(minorFromDecimal('12.345', 'gbp'), Math.round(12.345 * 100), 'and it agrees with the rounding a float would have reached, without doing one');
+
+/* ── readMinorAmount refuses Stripe's rule only where Stripe is involved ─── */
+const kwdCharge = readMinorAmount('12.345', 'KWD');
+ok(!kwdCharge.ok, 'a dinar amount Stripe cannot charge is refused in a box whose value goes to Stripe');
+const kwdStated = readMinorAmount('12.345', 'KWD', false);
+ok(kwdStated.ok && kwdStated.minorUnits === 12345,
+  'and accepted where the coach is stating what something already cost them, which Stripe has no opinion about');
+const stillAmbiguous = readMinorAmount('1,234', 'GBP', false);
+ok(!stillAmbiguous.ok, 'every other refusal still stands: a thousands separator is ambiguity, not a charging rule');
+ok(!readMinorAmount('250.50', 'JPY', false).ok, 'and a yen still has nothing after the point');
+ok(!readMinorAmount('250', null, false).ok, 'and no currency is still no amount');
+
+/* ── the box a three-decimal currency could not be typed into ─────────────
+   The flag was right and eleven of the seventeen call sites were not passing
+   it, so every non-Stripe money box in the product refused an ordinary Gulf
+   amount. The case that reported it: a member hands 82.505 KWD across the front
+   desk in cash, `82505 % 10` is 5, and the desk was told the last place must be
+   a nought — about money already in the till, with Stripe nowhere near it. */
+
+const kwdDesk = readMinorAmount('82.505', 'KWD', false);
+ok(kwdDesk.ok && kwdDesk.minorUnits === 82505,
+  'cash counted at a desk is recorded as the amount handed over, not refused by a rule about card charges');
+ok(!readMinorAmount('82.505', 'KWD').ok,
+  'while the same figure in a box whose value goes to Stripe is still refused rather than rounded');
+
+// All five, both ways. The rule is per-currency and a list with one of them
+// missing is the exact shape of the bug this file exists to stop.
+for (const cur of ['BHD', 'JOD', 'KWD', 'OMR', 'TND']) {
+  const stated = readMinorAmount('12.345', cur, false);
+  ok(stated.ok && stated.minorUnits === 12345,
+    `a ${cur} figure whose last place is not a nought is still an amount somebody paid`);
+  ok(!readMinorAmount('12.345', cur).ok, `and ${cur} still cannot be CHARGED one`);
+}
+
+// The flag switches off ONE refusal and no others, in the same currency.
+ok(!readMinorAmount('12.3456', 'KWD', false).ok, 'a fourth place is more places than the dinar has, charge or not');
+ok(!readMinorAmount('1.234,5', 'OMR', false).ok, 'and two separators are not a number in a rial either');
+const kwdWholeTen = readMinorAmount('450.000', 'KWD', false);
+ok(kwdWholeTen.ok && kwdWholeTen.minorUnits === 450000, 'an amount that WOULD pass the whole-ten rule is unaffected by the flag');
+
+// And it changes nothing at all for the money most gyms take, because the rule
+// it lifts only ever applied to the three-place five.
+eq((readMinorAmount('12.55', 'GBP', false) as { minorUnits: number }).minorUnits, 1255,
+  'a two-place currency has no whole-ten rule to switch off');
+eq((readMinorAmount('5000', 'JPY', false) as { minorUnits: number }).minorUnits, 5000,
+  'and neither has one with no minor unit at all');
 
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
 console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

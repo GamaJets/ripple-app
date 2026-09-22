@@ -44,9 +44,11 @@
 // Framework-agnostic like the rest of src/lib: the client arrives as an
 // argument, so the console and the phone can both use this.
 
-import { assertWhole, capLimit, readAll } from './rowCap';
+import { assertWhole, capLimit, capped, readAll } from './rowCap';
+import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
 import { attributionOf, type SignatureAttribution } from './gymSigning';
+import { num1 } from './format';
 
 type Queryable = { from: (table: string) => any; storage?: any };
 
@@ -123,7 +125,7 @@ export function agreementBlocker(title: string, body: string): string | null {
   if (!title.trim()) return 'Give it a title. It is what appears on the list of things a member is asked to sign.';
   if (!body.trim()) return 'An agreement with no words in it is not something anybody can agree to.';
   if (body.trim().length < 40) {
-    return 'That is shorter than any agreement anybody could rely on. Paste the whole text — this is the document produced when it is disputed, and a summary of it is worth nothing.';
+    return 'That is shorter than any agreement anybody could rely on. Paste the whole text. This is the document produced when it is disputed, and a summary of it is worth nothing.';
   }
   return null;
 }
@@ -230,6 +232,10 @@ export async function publishAgreement(
   // retiring would be refused with 23505 — and the owner would be told their
   // new terms could not be published because their old terms exist, which is
   // true and useless.
+  // no-count-ok: zero rows retired is the FIRST publish of this kind, where
+  // there is no live version to retire — the common case, not a failure. A
+  // refusal cannot hide behind it either: the same policy governs the insert
+  // three lines down, whose error is read and thrown.
   const off = await sb.from('gym_agreements')
     .update({ active: false })
     .eq('tenant_id', tenantId)
@@ -295,7 +301,7 @@ export function signatureBlocker(
 ): string | null {
   if (!memberId) return 'Choose who is signing.';
   if (!signedName.trim()) {
-    return 'The name they signed with is the signature. It is kept separately from their account name on purpose — it is what the document says, and it must survive them changing it.';
+    return 'The name they signed with is the signature. It is kept separately from their account name on purpose. It is what the document says, and it must survive them changing it.';
   }
   if (kind === 'guardian_consent' && !guardianName.trim()) {
     return 'A guardian consent has to name the adult giving it. Without that it records only that somebody typed something.';
@@ -435,7 +441,7 @@ export function documentBlocker(
   if (!title.trim()) return 'Give it a title. A bucket full of IMG_4471.jpg is a folder, not a record.';
   if (!file) return 'Choose the file.';
   if (file.size > MAX_DOCUMENT_BYTES) {
-    return `That file is ${(file.size / 1048576).toFixed(1)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5 — the setting to change is the scanner's, not this.`;
+    return `That file is ${num1(file.size / 1048576)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5. The setting to change is the scanner's, not this.`;
   }
   if (file.size === 0) return 'That file is empty.';
   if (file.type && !DOCUMENT_MIME.includes(file.type)) {
@@ -461,6 +467,13 @@ export function documentBlocker(
  */
 export function documentPath(tenantId: string, fileName: string): string {
   const clean = fileName.replace(/[^A-Za-z0-9._-]/g, '-').slice(-60) || 'document';
+  // utc-day-ok: a storage key, not a date anybody is shown. Nothing reads this
+  // segment back — the document's real dates are `issued_on` and `expires_on`,
+  // which are columns — and the random segment on the next line is what makes
+  // the path unique, so the stamp is only there to keep a bucket listing in
+  // rough order for a human scrolling it. It is the same day for every reader
+  // by construction, which is the one property a path prefix wants and a figure
+  // must never have.
   const stamp = new Date().toISOString().slice(0, 10);
   const rand = Math.random().toString(36).slice(2, 10);
   return `${tenantId}/${stamp}-${rand}-${clean}`;
@@ -645,7 +658,7 @@ export async function removeDocumentObject(sb: Queryable, path: string): Promise
   const { data, error } = await b.remove([path]);
   if (error) {
     throw new Error(
-      `That file could not be deleted from storage: ${errText(error)}. Nothing has been removed — the `
+      `That file could not be deleted from storage: ${errText(error)}. Nothing has been removed. The `
       + 'document is still on file and still readable by everybody the policy admits.',
     );
   }
@@ -664,7 +677,7 @@ export async function removeDocumentObject(sb: Queryable, path: string): Promise
   }
   if (!absentFromListing(path, listing.data)) {
     throw new Error(
-      'Storage accepted the delete and removed nothing — the file is still in the bucket. That usually '
+      'Storage accepted the delete and removed nothing. The file is still in the bucket. That usually '
       + 'means the delete was refused rather than performed. The document is still on file.',
     );
   }
@@ -737,19 +750,229 @@ function errText(e: unknown): string {
  * this product could previously say so.
  */
 export function expiring(docs: GymDocument[], today: string, withinDays = 30): GymDocument[] {
-  const limit = new Date(Date.parse(`${today}T00:00:00Z`) + withinDays * 86400000)
-    .toISOString().slice(0, 10);
+  // utc-day-ok: `today` arrives as a bare day string and is anchored at UTC
+  // midnight one line down purely so that adding days is arithmetic; the same
+  // day string comes back out, so UTC is the carrier and it cancels. It has to
+  // cancel, because the value is compared with `<=` against `expires_on`, which
+  // is a `date` column and therefore already a bare day with no zone in it.
+  // Reading this back with the local getters would shift the horizon by a day
+  // for half the world and quietly change which certificates a gym is warned
+  // about. Whose day `today` is remains the caller's decision, which is why it
+  // is a parameter.
+  const limit = new Date(Date.parse(`${today}T00:00:00Z`) + withinDays * 86400000).toISOString().slice(0, 10);
   return docs
     .filter((d) => d.expiresOn != null && d.expiresOn <= limit)
     .sort((a, b) => (a.expiresOn ?? '').localeCompare(b.expiresOn ?? ''));
 }
 
+/**
+ * Member and uploader names, by id.
+ *
+ * CHUNKED, and the limit being argued about is the REQUEST LINE, not the row
+ * ceiling. Both callers moved to `readAll`, which PAGES — so the id list is
+ * bounded by `PAGE_CEILING`, fifty thousand, and not by a thousand any more.
+ * A uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list, so even
+ * a modest gym's document history builds a query string past the 8KB request
+ * line nginx and most CDNs enforce by default. The proxy refuses it at roughly
+ * two hundred ids with a **414**, supabase-js does not reject on it, and it
+ * arrives as `data: null`.
+ *
+ * no-error-ok (about the ROW ceiling, which one row per id in chunks of 150
+ * cannot reach): an unreadable name renders as a dash beside the document; the
+ * document itself is still listed. That argument was always sound and is
+ * silent about the 414, which is not one name lost to RLS — it is EVERY name
+ * at once, so a gym's signature register becomes a page of dated dashes and
+ * there is nobody on it to chase for a lapsed waiver.
+ */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash beside the document; the document itself is still listed
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
+  let rows: any[] = [];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      // `.order('id')` on a primary-key lookup is total, which is the contract
+      // `readAll` requires of every page it is handed.
+      (chunk, from, to) => sb.from('profiles').select('id, full_name')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names on this gym’s documents',
+    );
+  } catch { return new Map(); }
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]: [string, string]) => !!n));
+}
+
+/* ── who opened one ────────────────────────────────────────────────────────── */
+
+// `recordDocumentRead` above has written `gym_document_reads` since part 390 and
+// nothing has ever read it back. The table is the gate — a member's document
+// does not open unless the row writes — so it is the only complete record of
+// who was handed a key to somebody's file.
+//
+// ── Why the activity feed is not this ─────────────────────────────────────
+//
+// /compliance already draws `gym_events`, and part 390's trigger files a
+// `document-opened` event on every insert here, so the feed LOOKS like the
+// answer. It is not, and the difference is written into part 187: `log_gym_event`
+// swallows its own failures on purpose, because a log that can fail a payment is
+// worse than a gap in the log. So `gym_events` is best-effort and this table is
+// not. A link issued while the event write failed appears in the feed nowhere
+// and in this table exactly once, and the question being asked — who has been
+// given access to this member's file — is one that has to be answered from the
+// record that cannot be missing rows.
+//
+// The feed is also one stream of nineteen event kinds with a filter on top. "Has
+// anybody opened Sarah's contract" is a question about a document, and answering
+// it by scrolling a gym-wide feed is the same as not answering it.
+
+/**
+ * How many openings one read brings back.
+ *
+ * Two hundred rather than everything, and the SCREEN is told which it got.
+ * `readSummary` below refuses to say "never opened" about a document when the
+ * page is a page, because the older rows it cannot see are exactly the ones
+ * that would contradict it.
+ */
+export const DOCUMENT_READS_PAGE = 200;
+
+/** One link, cut for one member-attached document. */
+export interface DocumentRead {
+  id: string;
+  /** Null once the document has been deleted — `on delete set null`, because
+   *  the document being removed is precisely when this row is worth having. */
+  documentId: string | null;
+  /** Denormalised at write time, so the row stays legible from itself. It is
+   *  also what matches a read to a document after `documentId` has gone. */
+  storagePath: string;
+  docKind: string;
+  docTitle: string;
+  /** Null means the account has been removed, NOT that nobody opened it. */
+  readBy: string | null;
+  readByName: string | null;
+  linkIssuedAt: string;
+}
+
+/** A page of the access log, and everything a screen must know before it says
+ *  anything in its own voice about what is not in it. */
+export interface DocumentReadLog {
+  rows: DocumentRead[];
+  /** There are older openings than these. */
+  truncated: boolean;
+  /** The oldest opening in the page — the furthest back this page can speak
+   *  for. Null when the page is empty. */
+  oldest: string | null;
+  /** Why the readers' names could not be looked up, or null. Kept apart from a
+   *  null name for the reason `senderLine` keeps them apart in
+   *  src/lib/gymBroadcastLog.ts: a failed lookup is not a deleted account. */
+  namesError: string | null;
+}
+
+/**
+ * Who has been handed a link to this gym's member documents, most recent first.
+ *
+ * `link_issued_at` alone is not a total order — two links cut in the same
+ * millisecond are two rows Postgres may hand back in either order — so `id`
+ * breaks the tie, exactly as `fetchSignatures` above does.
+ */
+export async function fetchDocumentReads(
+  sb: Queryable, tenantId: string, limit: number = DOCUMENT_READS_PAGE,
+): Promise<DocumentReadLog> {
+  const { data, error } = await sb
+    .from('gym_document_reads')
+    .select('id, document_id, storage_path, doc_kind, doc_title, read_by, link_issued_at')
+    .eq('tenant_id', tenantId)
+    .order('link_issued_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(capLimit(limit));
+  if (error) throw error;
+  const page = capped<any>((data ?? []) as any[], limit);
+
+  const rows: DocumentRead[] = page.rows.map((r: any) => ({
+    id: String(r.id),
+    documentId: r.document_id ?? null,
+    storagePath: String(r.storage_path ?? ''),
+    docKind: String(r.doc_kind ?? ''),
+    docTitle: String(r.doc_title ?? ''),
+    readBy: r.read_by ?? null,
+    readByName: null,
+    linkIssuedAt: String(r.link_issued_at),
+  }));
+
+  let namesError: string | null = null;
+  const readers = rows.map((r) => r.readBy).filter((x): x is string => !!x);
+  if (readers.length) {
+    try {
+      const found = await readByIds<any>(
+        readers,
+        (chunk, from, to) => sb.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the people who opened these documents',
+      );
+      const byId = new Map<string, string>();
+      for (const p of found) if (p?.id) byId.set(String(p.id), String(p.full_name ?? '').trim());
+      for (const r of rows) if (r.readBy) r.readByName = byId.get(r.readBy) ?? null;
+    } catch (e: any) {
+      // Not `namesFor`, which returns an empty Map on failure. That is
+      // survivable where a missing name is cosmetic; here the whole point of
+      // the row is WHO, and a blank that might mean "the lookup failed" is not
+      // an answer anybody can act on.
+      namesError = e?.message ?? 'the lookup was refused';
+    }
+  }
+
+  return {
+    rows,
+    truncated: page.truncated,
+    oldest: rows.length ? rows[rows.length - 1].linkIssuedAt : null,
+    namesError,
+  };
+}
+
+/**
+ * The openings in this page that belong to one document.
+ *
+ * Matched on the id and on the storage path. The path is the fallback and not
+ * the other way round: `document_id` is `on delete set null`, so a row whose
+ * document has been deleted and re-filed at the same path would otherwise be
+ * attributed to the new document. Both are checked because a path is unique per
+ * upload (`documentPath` puts a random segment in it) and an id can go missing.
+ */
+export function readsFor(log: DocumentReadLog | null, d: { id: string; storagePath: string }): DocumentRead[] {
+  if (!log) return [];
+  return log.rows.filter((r) => (r.documentId ? r.documentId === d.id : r.storagePath === d.storagePath));
+}
+
+/**
+ * What may be said about how often one document has been opened.
+ *
+ * Null when the log could not be read at all — the caller says "unknown" in its
+ * own words, and must not say "never".
+ *
+ * ── The sentence this function exists to refuse ───────────────────────────
+ *
+ * "Never opened", over a page. This read is bounded at two hundred rows, so a
+ * document with nothing in the page has either never been opened or was last
+ * opened before the page begins, and those are not the same answer to a
+ * question about who has seen somebody's medical note. Under `truncated` the
+ * claim is narrowed to the window the page can actually speak for.
+ */
+export function readSummary(log: DocumentReadLog | null, reads: DocumentRead[]): string | null {
+  if (!log) return null;
+  if (reads.length === 0) {
+    return log.truncated
+      ? 'Not in the most recent openings on record; older ones are not on this screen.'
+      : 'Never opened.';
+  }
+  const times = reads.length === 1 ? 'Opened once' : `Opened ${reads.length} times`;
+  return log.truncated ? `${times} in the most recent openings on record.` : `${times}.`;
+}
+
+/**
+ * Who cut the link, in the words that keep the three silences apart: the
+ * account is gone, the name could not be read, and the account has no name.
+ */
+export function readerLine(r: DocumentRead, ctx: { meId?: string | null; namesError?: string | null }): string {
+  if (!r.readBy) return 'an account that has since been removed';
+  if (ctx.meId && r.readBy === ctx.meId) return 'you';
+  if (ctx.namesError) return 'somebody whose name could not be read';
+  return r.readByName || 'an account with no name on it';
 }

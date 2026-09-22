@@ -6,6 +6,7 @@
 // accepted; declining just marks it declined. Both are real writes — the
 // client's "Request pending" state on their side reflects this row.
 import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { useTheme } from './components';
@@ -14,13 +15,40 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+// A failed auth read is not a signed-out coach. See src/lib/authReadFate.ts:
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` used to mean "nobody is signed in, or we could not ask,
+// and this component cannot tell which".
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
+
+import { readByIds } from '../lib/idLookup';
 import { notifySuccess } from './haptics';
 import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
 import { capLimit, capped } from '../lib/rowCap';
+// ── The other half of the request ─────────────────────────────────────────
+//
+// app/(client)/trainers.tsx pushes the coach the moment somebody asks. Nothing
+// pushed the client when the coach answered, and nothing wrote them a row
+// either: `coach_requests_notify_trainer` (supabase/parts/158) is `after
+// insert` only, and its header says why — "the client's side of that answer is
+// a separate decision about wording that has not been taken."
+//
+// So Accept rewrote the client's roster membership, their `clients.trainer_id`
+// and the request's status in one tap, told the coach "Client added", and told
+// the person it was about nothing at all. Decline is the half that matters
+// more: an accepted client eventually notices their Coach screen has filled
+// in, while a declined one sees exactly what they saw yesterday — a request
+// they believe is still pending — because `coach_requests` is not rendered on
+// the client side once the row leaves 'pending'.
+//
+// The wording is in src/lib/notifyCopy.ts with the rest of it, and pure.
+import { coachAnswerConfirmation, coachAnswerNotification } from '../lib/notifyCopy';
+import { sendPushChecked } from './pushNotifications';
 
 interface Req { id: string; clientId: string; name: string; mode: CoachedMode; at: string }
 
-export function CoachRequests() {
+export function CoachRequests({ reload }: { reload?: number } = {}) {
   const t = useTheme();
   const [reqs, setReqs] = useState<Req[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,10 +61,22 @@ export function CoachRequests() {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) return;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return;
+      // The bare `if (!uid) return` that stood here was the one outcome the
+      // comment on the read below forbids. An outage resolves `getUser()` with
+      // `user: null` and a discarded retryable error, so this returned before
+      // touching `unread`, the component rendered nothing at all, and nothing
+      // at all is how it says "no client has asked to be coached by you". A
+      // client who asked that morning is on the other side of that silence.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('coachRequests.load');
+      if (who.fate === 'unreadable') { setUnread(true); return; }
+      // Genuinely signed out: there is no roster to read requests against, and
+      // the auth gate on the screen above is the thing that should speak.
+      if (who.fate !== null) return;
+      const uid = who.uid;
       const { data: rows, error } = await supabase
+
         .from('coach_requests')
         .select('id, client_id, mode, created_at')
         .eq('trainer_id', uid)
@@ -58,10 +98,31 @@ export function CoachRequests() {
       setTruncated(page.truncated);
       const ids = page.rows.map((r: any) => r.client_id);
       if (ids.length === 0) { setReqs([]); return; }
-      // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read falls back to 'A client'; the request is still shown and actionable
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-      const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
+      // CHUNKED, and the limit this is about is the REQUEST LINE, not the row
+      // ceiling. `ids` is bounded by the `capLimit()` read above, so up to a
+      // thousand uuids at ~39 bytes each inside `in.("…","…")` — a ~39KB query
+      // string against the 8KB nginx and most CDNs enforce by default. The
+      // proxy refuses past roughly two hundred with a 414, supabase-js does not
+      // reject on it, and it arrives as `data: null`.
+      //
+      // no-error-ok (about the ROW ceiling, which one row per id in chunks of
+      // 150 cannot reach): a name we cannot read falls back to 'A client'; the
+      // request is still shown and actionable. The 414 was never in that
+      // argument — it is EVERY name at once, so a coach opens the join flow and
+      // finds a column of people all called "A client", with no way to tell
+      // which of them they know.
+      const nameById = new Map<string, string>();
+      try {
+        const profs = await readByIds<any>(
+          ids,
+          // `.order('id')` on a primary-key lookup is total, which is the
+          // contract `readAll` requires of every page it is handed.
+          (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+            .in('id', chunk).order('id', { ascending: true }).range(from, to),
+          'the names of the people asking to be coached',
+        );
+        profs.forEach((p: any) => { if (p?.id) nameById.set(p.id, p.full_name); });
+      } catch { /* a name that will not read falls back to 'A client'; the request is still actionable */ }
       setReqs(page.rows.map((r: any) => ({
         id: r.id,
         clientId: r.client_id,
@@ -74,13 +135,58 @@ export function CoachRequests() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── the read that only ever happened once ─────────────────────────────────
+  //
+  // `useEffect(…, [load])` runs on mount and never again, and this component
+  // owns its own state so the dashboard's pull-to-refresh does not reach it.
+  //
+  // That is the whole of a reported defect. A coach with the app already open
+  // gets the push, taps it, and is routed to the dashboard — which is ALREADY
+  // MOUNTED, so nothing re-reads. They land on a screen still showing what it
+  // fetched before the request existed: no request, no accept, no decline, and
+  // no reason given. The only way to see it was to kill the app and relaunch.
+  //
+  // Re-read on focus, which covers the push arriving while the app is open, a
+  // coach coming back from another tab, and returning from the background.
+  // `load` already guards its own failure and sets `unread`, so a refused
+  // re-read says so rather than emptying the list.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // And a pull on the screen this sits in. `reload` is a nonce the dashboard
+  // bumps; the effect ignores its value and re-reads on any change, which is
+  // the same shape every other provider on that screen uses.
+  useEffect(() => { if (reload !== undefined) load(); }, [reload, load]);
+
   const respond = useCallback(async (r: Req, accept: boolean) => {
     setBusy(r.id);
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return;
+      // ── the tap that did nothing and said nothing ────────────────────────
+      //
+      // This was `if (!uid) return`, and it returned out of the whole callback
+      // — past the `setBusy(null)` at the bottom, which is OUTSIDE the
+      // try/catch and is therefore skipped by an early return. So during an
+      // outage a coach tapped Accept, the button went to its busy state and
+      // stayed there, no alert appeared, and the request was neither accepted
+      // nor declined. The client went on waiting.
+      //
+      // No write happens on either fate — this returns before `link_coaching`
+      // and before the status update — so the 'unreadable' sentence's "nothing
+      // has been changed" is true, and it is worth saying out loud that the
+      // person on the other end has not been told anything either.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('coachRequests.respond');
+      if (who.fate !== null) {
+        Alert.alert(
+          who.fate === 'signed-out' ? 'Signed Out' : 'We couldn’t check your account',
+          `${authGateMessage(who.fate)} ${r.name} has not been told anything either way and is still waiting.`,
+        );
+        setBusy(null);
+        return;
+      }
+      const uid = who.uid;
       if (accept) {
+
         // link_coaching FIRST, and this ordering is the fix rather than a
         // detail. Accepting used to write only coach_clients, which is a
         // roster and nothing more. Every log a coach actually wants —
@@ -101,7 +207,7 @@ export function CoachRequests() {
           // Stop here. Writing the roster row after this failed is what
           // produced a coach who could see a name and nothing behind it.
           reportError('coachRequests.link', linkErr);
-          Alert.alert('Could not accept', `${r.name} was not added. ${linkErr.message}`);
+          Alert.alert('Could Not Accept', `${r.name} was not added. ${linkErr.message}`);
           setBusy(null); return;
         }
         // NO roster write here, and its absence is the fix.
@@ -131,15 +237,84 @@ export function CoachRequests() {
         // If a roster row is ever missing after an accept, the bug is in that
         // function and belongs there — not in a second write from here.
       }
-      const { error: uErr } = await supabase.from('coach_requests')
+      // `.eq('status', 'pending')` and `.select('id')`, and both are load-bearing
+      // now that an answer sends a notification.
+      //
+      // The update used to be keyed on the id alone, so answering a request that
+      // had already been answered — a second tap, a second handset, the same
+      // card left open on a tablet — succeeded silently and restamped
+      // `responded_at`. That was harmless while nothing followed it. It is not
+      // harmless now: it would tell the client a second time, and the second
+      // time could say the opposite of the first.
+      //
+      // So the write is only a write if it MOVED the row out of 'pending', and
+      // the notification hangs off the row coming back rather than off the
+      // absence of an error. An empty answer is somebody else having got there
+      // first, which is not a failure and is not a reason to send anything.
+      const { data: answered, error: uErr } = await supabase.from('coach_requests')
         .update({ status: accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })
-        .eq('id', r.id);
-      if (uErr) { Alert.alert('Could not update the request', uErr.message); setBusy(null); return; }
+        .eq('id', r.id)
+        .eq('status', 'pending')
+        .select('id');
+      if (uErr) { Alert.alert('Could Not Update the Request', uErr.message); setBusy(null); return; }
       setReqs((p) => p.filter((x) => x.id !== r.id));
-      if (accept) { notifySuccess(); Alert.alert('Client added', `${r.name} is now on your roster.`); }
+      if (!(answered ?? []).length) {
+        // Not an error, and not a send. The accept branch's `link_coaching`
+        // above is idempotent, so the roster is right either way; what is wrong
+        // is claiming to have just done something somebody else already did.
+        Alert.alert('Already Answered',
+          `${r.name}'s request had already been answered, from another device or by a second tap. Nothing has changed and they have not been told twice.`);
+        setBusy(null); return;
+      }
+
+      // The coach's own name, for the client's sentence. Read rather than
+      // assumed: this notification is read on a lock screen by somebody who may
+      // have asked two coaches, so the subject is never dropped.
+      // no-error-ok: a name that could not be read becomes "The coach you
+      // asked" in coachAnswerNotification — the answer itself is already
+      // written at this point, so a failure here costs a name and nothing else.
+      const { data: mine, error: mineErr } = await supabase
+        .from('profiles').select('full_name').eq('id', uid).maybeSingle();
+      const myName = mineErr ? '' : (mine?.full_name || '').trim();
+
+      // No channel. The six in COACH_CHANNELS are a COACH's switches and this
+      // is addressed to a client, who has never been shown one — passing a
+      // channel name here would filter the send against a preference they could
+      // not have set.
+      const note = coachAnswerNotification(accept, myName);
+      const told = await sendPushChecked([r.clientId], note.title, note.body, { route: note.route });
+
+      if (accept) notifySuccess();
+      // One sentence for both branches, and it says which of the two things
+      // actually happened rather than claiming a send either way.
+      Alert.alert(accept ? 'Client Added' : 'Request Declined',
+        coachAnswerConfirmation(accept, r.name, told));
     } catch (e) {
       reportError('coachRequests.respond', e);
-      Alert.alert('Something went wrong', 'Check your connection and try again.');
+      // ── why this one does NOT take `retryLine` ────────────────────────────
+      //
+      // "Something went wrong. Check your connection and try again." blamed the
+      // coach's network for something this code has no evidence about, so it is
+      // gone. But the replacement is not `retryLine`, and that is a decision
+      // rather than an oversight.
+      //
+      // `retryLine` is documented as "the sentence to put in front of somebody
+      // whose write did not land", and BOTH of its answers assert that — "so
+      // nothing was sent", "so nothing has changed". This catch cannot support
+      // either. The `try` above spans `link_coaching`, the status update and
+      // the push, and the two errors it can name are already handled and
+      // returned on above; what lands here is a throw at an unknown point, so
+      // the client may be linked with the request still pending, or the request
+      // answered with the client never told. Appending a sentence that says
+      // nothing happened would be a claim beyond what the code knows, printed
+      // in the same alert as the sentence saying we do not know.
+      //
+      // What IS true is where the answer is kept: a request still on this card
+      // has not been answered. That is the thing a coach can act on.
+      Alert.alert(
+        'Not sure that went through',
+        `We could not tell whether ${r.name}'s request was answered. Pull down to read the list again. If it is still there, they are still waiting.`,
+      );
     }
     setBusy(null);
   }, []);
@@ -153,11 +328,11 @@ export function CoachRequests() {
       <Card tone={t.warn} style={{ marginBottom: sp.lg }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <Icon name="people" size={15} color={t.warn} />
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching requests</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching Requests</Text>
         </View>
         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-          We couldn’t check whether anyone has asked to be coached by you. Pull down to try again —
-          if a client is waiting, they can’t tell the difference between you declining and this.
+          We couldn’t check whether anyone has asked to be coached by you. Pull down to try again.
+          If a client is waiting, they can’t tell the difference between you declining and this.
         </Text>
       </Card>
     );
@@ -183,10 +358,29 @@ export function CoachRequests() {
             Asked for {COACHED_MODE_SHORT[r.mode].toLowerCase()} coaching. Accepting adds them to your roster.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: 6 }}>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)} style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
+            {/* Named, and the name is the person. Both buttons carried no
+                role and no label, so their only label was the word inside
+                them: a coach with three requests waiting heard "Decline,
+                Accept, Decline, Accept, Decline, Accept" and had no way to
+                tell whose was whose. Accepting is not a preference — it puts
+                somebody on the roster — and accepting the wrong one of three
+                identical buttons is the kind of mistake that has to be undone
+                by hand and by apology.
+
+                `accessibilityState.disabled` is the other half: while a
+                response is in flight the control is dimmed, and dimming is a
+                colour, not a sentence. */}
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)}
+              accessibilityRole="button" accessibilityLabel={`Decline ${r.name}’s coaching request`}
+              accessibilityState={{ disabled: busy === r.id }}
+              style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Decline</Text>
             </Pressable>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)} style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Accept ${r.name}’s coaching request. This adds them to your roster.`}
+              accessibilityState={{ disabled: busy === r.id }}
+              style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Accept</Text>
             </Pressable>
           </View>

@@ -35,8 +35,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { sessionUid } from '../lib/sessionUid';
 import { useAuthRevision } from './authRevision';
-import { myTenantCurrency } from '../lib/subscriptions';
+import { fetchMyCurrency } from '../lib/myCurrency';
+import { currencyStepDone } from '../lib/currencyStep';
+import type { MyCurrency } from '../lib/currencySource';
 import type { LoadStatus } from './loadStatus';
 import type { CoachSetupFacts } from '../lib/coachFirstRun';
 
@@ -50,10 +53,15 @@ export const UNKNOWN_SETUP: CoachSetupFacts = {
 export interface CoachSetupRead {
   facts: CoachSetupFacts;
   /** 'loading' until the first pass lands; 'ready' once it has, whatever the
-   *  individual answers were. There is no 'error' state for the whole read
-   *  because the eight are independent — a screen-level error banner over
-   *  seven good answers would hide them. The per-fact nulls carry the failure,
-   *  which is the point of the shape. */
+   *  individual answers were. The eight reads' own failures are NOT reported
+   *  here — they are independent, a screen-level error banner over seven good
+   *  answers would hide them, and the per-fact nulls carry them, which is the
+   *  point of the shape.
+   *
+   *  'error' means something else and only one thing: who is signed in could
+   *  not be established, so none of the eight was asked. That is not seven good
+   *  answers and one bad one, it is no answers at all, and it is the one failure
+   *  the per-fact nulls cannot distinguish from eight refused reads. */
   status: LoadStatus;
   reload: () => Promise<void>;
 }
@@ -83,6 +91,51 @@ async function anyRow(label: string, q: any): Promise<boolean | null> {
   }
 }
 
+/**
+ * Whether `trainers.session_fee` holds a rate somebody actually set.
+ *
+ * `> 0`, and NOT `!= null`, and the difference is not pedantry — it is the one
+ * row on the Getting Started list that could tick itself off nothing.
+ *
+ * ── is 0 ever a rate a coach chose? ───────────────────────────────────────
+ *
+ * No. It is not expressible as one anywhere in this product, and it is a
+ * legacy value in three of the eight production rows:
+ *
+ *   · `trainers.session_fee` was `not null default 0` before the column was
+ *     made nullable, so every row written before that carries a 0 nobody
+ *     typed. src/ui/coachProfile.tsx says so and maps a stored 0 back to null
+ *     on read — "Read as a rate, that zero came out the other end of Analytics
+ *     as 'AED 0.00 at your AED 0.00 session rate'".
+ *   · app/(trainer)/profile.tsx cannot store one: a typed 0 in the Session
+ *     Rate box calls `setSessionFee(null)`. So a coach who wants to charge
+ *     nothing has no way to say it here, and no coach on the live database can
+ *     have said it since.
+ *   · src/ui/sessions.tsx applies the same rule to the late-cancellation fee —
+ *     `!(fee > 0)` blocks the policy — under the sentence "a fee of nothing is
+ *     a policy that does not apply".
+ *
+ * A free intro session is a real thing a coach offers, and it is a PACKAGE
+ * priced at nothing or an hour they simply do not charge for — not their
+ * standing per-session rate, which is what this column is. Nothing downstream
+ * can read a 0 as a price either: every consumer of `sessionFee` already
+ * branches on null and says "Set a session rate in your profile".
+ *
+ * So `!= null` ticked "Set Your Session Rate" for three of eight live coaches
+ * who have not set one, and drove the list to "9 of 9 done · That is
+ * everything" — while app/(trainer)/profile.tsx, reading the same column
+ * through `fee > 0`, said "— no rate set" two taps away.
+ *
+ * PostgREST hands `numeric` back as a string often enough to matter, so the
+ * value is coerced rather than compared raw. A null, an undefined, an empty
+ * string or anything unparseable is not a rate.
+ */
+function hasRate(v: unknown): boolean {
+  if (v == null) return false;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0;
+}
+
 export function useCoachSetup(): CoachSetupRead {
   const authRev = useAuthRevision();
   const [facts, setFacts] = useState<CoachSetupFacts>(UNKNOWN_SETUP);
@@ -90,27 +143,51 @@ export function useCoachSetup(): CoachSetupRead {
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setFacts(UNKNOWN_SETUP); setStatus('ready'); return; }
-    // getSession and not getUser: getUser REJECTS when nobody is signed in,
-    // which would latch this screen into eight dashes forever on a build that
-    // has simply not logged in yet. The same choice src/ui/nudges.ts makes.
-    let uid: string | null = null;
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      uid = sess?.session?.user?.id ?? null;
-    } catch (e) { reportError('coachSetup.session', e); }
+    // `getSession()` and not `getUser()`, and it stays that way: the session is
+    // read from local storage and answers on a phone with no signal, which is
+    // where a coach opens a checklist.
+    //
+    // (The reason the line here used to give was that `getUser()` REJECTS when
+    // nobody is signed in. It does not. `_getUser` catches every AuthError — a
+    // missing session included — and RESOLVES `{ data: { user: null }, error }`.
+    // The choice is still right, for the reason above; the reason it gave was
+    // not true, and it is not the difference that mattered anyway.)
+    //
+    // What mattered is that `getSession()` ALSO resolves — with
+    // `{ data: { session: null }, error }` — when it has to refresh an expired
+    // token and the auth server cannot be reached. Discarded, that error was
+    // indistinguishable from a handset nobody has signed in on, and this screen
+    // published eight dashes under 'ready': a claim that the pass landed and
+    // that these are its answers, when not one of the eight questions had been
+    // asked. `status` is the only thing here that can carry that difference, so
+    // it carries it.
+    const who = await sessionUid('coachSetup.session');
+    // Told apart by `fate`, never by `!uid`. `authGateFault` has already
+    // recorded the outage under this same key from inside `sessionUid`.
+    if (who.fate === 'unreadable') { setFacts(UNKNOWN_SETUP); setStatus('error'); return; }
+    const uid = who.uid;
+    // Genuinely signed out: nothing established, and nothing that could have
+    // been. Nine dashes under 'ready' is the honest answer, and it is what the
+    // build that has simply not logged in yet has always got.
     if (!uid) { setFacts(UNKNOWN_SETUP); setStatus('ready'); return; }
 
     const settled = await Promise.allSettled([
-      // 1 · the currency. `myTenantCurrency` already returns the two answers
-      //     apart — a code, or a null WITH the error that caused it — which is
-      //     the whole reason src/lib/currencyGap.ts exists. A null currency with
-      //     no error is genuinely unset; with an error it is unknown.
-      myTenantCurrency(),
+      // 1 · the currency. `fetchMyCurrency` and NOT `myTenantCurrency`, which
+      //     asks about a gym: since part 940 a coach with no gym has a currency
+      //     of their own on `trainers.currency`, and the gym-only read answered
+      //     "not set" for them whatever they had chosen — so this step could
+      //     never tick for an independent coach, however many times they went
+      //     to Settings and set one. The resolver applies the precedence rule
+      //     (gym first, always; the coach's own column only when there is
+      //     provably no gym) and names WHICH of six things is missing, which is
+      //     what lets a failed read stay a dash instead of becoming a nag. See
+      //     src/lib/currencyStep.ts.
+      fetchMyCurrency(),
       // 2 · the rate, AND how they coach. Two facts, one row, one read: both
       //     live on `trainers` and asking twice would let the same row answer
-      //     one question and fail the other. `session_fee` is nullable and 0 is
-      //     a rate a coach may really charge, so `!= null` is the test and
-      //     never truthiness. `delivery_mode` (part 410) is nullable too, and
+      //     one question and fail the other. `session_fee` is nullable, and a
+      //     stored 0 is NOT a rate — see `hasRate` below for why `!= null` was
+      //     the wrong test. `delivery_mode` (part 410) is nullable too, and
       //     ITS null is the coach not having answered — which is a real
       //     answer, and is why a refused read on this row has to blank both
       //     facts rather than report an unanswered question.
@@ -144,7 +221,7 @@ export function useCoachSetup(): CoachSetupRead {
     const val = <T,>(i: number): T | null =>
       settled[i].status === 'fulfilled' ? ((settled[i] as PromiseFulfilledResult<T>).value) : null;
 
-    const cur = val<{ currency: string | null; error: string | null }>(0);
+    const cur = val<MyCurrency>(0);
     const rateRow = val<{ data: any; error: any }>(1);
     const linked = val<boolean | null>(2);
     const written = val<boolean | null>(3);
@@ -165,8 +242,12 @@ export function useCoachSetup(): CoachSetupRead {
       // back. Reading the data before the error is exactly how a refusal
       // becomes a nag to answer a question they already answered.
       mode: rateRow == null || rateRow.error ? null : (rateRow.data?.delivery_mode ?? null) != null,
-      currency: cur == null ? null : cur.currency ? true : cur.error ? null : false,
-      rate: rateRow == null || rateRow.error ? null : (rateRow.data?.session_fee ?? null) != null,
+      currency: currencyStepDone(cur),
+      // A refused read is still null. Past that, `hasRate` and not `!= null`:
+      // the stored 0 three live rows carry is the column's old default, not a
+      // price, and it must not tick a checklist item the Profile screen — which
+      // reads the same column through `fee > 0` — reports as unset.
+      rate: rateRow == null || rateRow.error ? null : hasRate(rateRow.data?.session_fee),
       client,
       availability: val<boolean | null>(4),
       package: val<boolean | null>(5),

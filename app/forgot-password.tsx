@@ -17,8 +17,8 @@ import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
-import { Card, Cta } from '../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { Card, Cta, HeroCard } from '../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, font } from '../src/theme/scale';
 
 export default function ForgotPassword() {
   const t = useTheme();
@@ -45,21 +45,23 @@ export default function ForgotPassword() {
     } finally { setBusy(false); }
   };
 
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
+  // The door's field — see app/welcome.tsx: a 52pt `surface2` pill on the card.
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md, marginBottom: sp.md } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Reset Your Password</Text>
-          <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.md, marginBottom: sp.xl }}>
-            {sent
-              ? `If an account exists for that email, we've sent a link to reset your ${appName} password. It works for your Client, Trainer, or Owner access — they all share one login.`
-              : `Enter the email on your ${appName} account and we'll send you a link to set a new password.`}
-          </Text>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {/* The door's night head, carried onto this step. "If an account
+              exists" stays word for word: it is the sentence that stops this
+              screen telling anybody which addresses are registered. */}
+          <HeroCard eyebrow={appName.toUpperCase()} title={sent ? 'Check Your Email' : 'Reset Your Password'}
+            meta={sent
+              ? `If an account exists for that email, a reset link is on its way. One login covers every ${appName} app.`
+              : `We'll email you a link to set a new one.`} />
 
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
           {error ? (
             <Card tone={t.crit} style={{ marginBottom: sp.md }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
@@ -73,19 +75,20 @@ export default function ForgotPassword() {
             <Cta wide label="Back to Sign In" onPress={() => router.back()} />
           ) : (
             <>
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Email</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Email</Text>
               <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" autoFocus />
               <View style={{ marginTop: sp.sm }}>
                 <Cta wide disabled={!canGo} onPress={send} label={busy ? 'Sending…' : 'Send Reset Link'} />
               </View>
-              <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to sign in" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Back to Sign In</Text>
+              <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to Sign In" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Back to Sign In</Text>
               </Pressable>
               {!USE_SUPABASE ? (
-                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>Demo mode — no email is actually sent. Real reset links go out once the backend is connected.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>Demo mode: no email is actually sent. Real reset links go out once the backend is connected.</Text>
               ) : null}
             </>
           )}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

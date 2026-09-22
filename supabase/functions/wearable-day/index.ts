@@ -41,7 +41,13 @@ async function refresh(provider: string, refreshToken: string) {
 
   const postForm = base();
   postForm.set('client_secret', clientSecret);
-  const attempts = [
+  // Annotated rather than inferred. Left bare, TypeScript gives this array a
+  // UNION element type — the first entry has no `Authorization` key, the second
+  // does — and `a.headers` below is then a union that `fetch` will not accept as
+  // `HeadersInit`. Deno's own types are laxer and let it through, which is why
+  // it deploys; the check:functions type gate reads it with the DOM lib and is
+  // right to object. `Record<string, string>` is what both entries actually are.
+  const attempts: { headers: Record<string, string>; body: URLSearchParams }[] = [
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: postForm },
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${clientId}:${clientSecret}`) }, body: base() },
   ];
@@ -56,10 +62,42 @@ async function refresh(provider: string, refreshToken: string) {
   return null;
 }
 
+// ── Whose day is "today"? ──────────────────────────────────────────────────
+//
+// `today()` above is a UTC date slice, and this file's own sleep section says at
+// length (see the ⚠ block) that a calendar day may never be derived away from
+// the reader's clock. The DAY roll-up was doing exactly that, on every vendor,
+// and it is not a rounding error — it is a whole day out for most of the
+// planet's population for part of every day:
+//
+//   · Los Angeles, 5pm local. UTC is already tomorrow. Fitbit and Oura file the
+//     day in the client's OWN profile timezone, so both were asked for a day
+//     that has not started yet. Steps, calories and resting heart rate came
+//     back empty from late afternoon until midnight — every day, for exactly
+//     the hours somebody checks after training.
+//   · Auckland, 9am local. UTC is still yesterday. The same two calls returned
+//     YESTERDAY's totals, printed under today's date, so a client saw a full
+//     day's steps before they had got out of the car.
+//
+// Neither is fixed by asking the phone what day it is: this function has no
+// caller change to lean on and a date in a request body is a date somebody can
+// set. Both are fixed with what the vendors themselves already state.
+const OURA_DAY_SLACK_MS = 86400000;
+/** A UTC date string offset by whole days. Used ONLY to widen a request window,
+ *  never to attribute a reading to a day — the vendor's own `day` field does
+ *  that below. Same rule, and the same reason, as `sleepWindow`. */
+const dayShift = (isoDay: string, days: number) =>
+  new Date(Date.parse(isoDay + 'T00:00:00Z') + days * OURA_DAY_SLACK_MS).toISOString().slice(0, 10);
+
 // ── Per-vendor readers → normalized shape ──────────────────────────────────
 async function fitbitDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
-  const d = today();
+  // Fitbit's own word, not a date this server computed. The Web API documents
+  // `today` as an accepted value everywhere it takes a date, and resolves it in
+  // the MEMBER's profile timezone — which is the only clock that can be right
+  // here. A `yyyy-MM-dd` from this runtime is UTC's answer to a question only
+  // the client's own timezone can answer.
+  const d = 'today';
   const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
   try {
     const a = await (await fetch(`https://api.fitbit.com/1/user/-/activities/date/${d}.json`, { headers: h })).json();
@@ -81,10 +119,28 @@ async function fitbitDay(token: string) {
 async function ouraDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
   const d = today();
+  // Oura has no `today`, so the window is widened a day either side and OURA's
+  // OWN `day` field decides which row is the latest. Every document in these
+  // collections carries the local day it belongs to; picking the newest is
+  // right whichever side of UTC the client is on — Oura has not written
+  // tomorrow's row for anybody, so the newest row IS their current day. Asking
+  // for `start_date=end_date=<UTC today>` returned an empty list for every
+  // client west of Greenwich after their local afternoon, and yesterday's row
+  // for every client east of it before their local afternoon.
+  const from = dayShift(d, -1);
+  const to = dayShift(d, 1);
+  /** The document for the client's own most recent day, by Oura's `day`. */
+  const newestByDay = (rows: any) => {
+    let best: any = null;
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!best || String(r?.day || '') > String(best?.day || '')) best = r;
+    }
+    return best;
+  };
   const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, hrv: null, recoveryPct: null, strain: null };
   try {
-    const a = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_activity?start_date=${d}&end_date=${d}`, { headers: h })).json();
-    const row = a?.data?.[0];
+    const a = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_activity?start_date=${from}&end_date=${to}`, { headers: h })).json();
+    const row = newestByDay(a?.data);
     out.activeKcal = numOr(row?.active_calories);
     out.totalKcal = numOr(row?.total_calories);
     out.steps = numOr(row?.steps);
@@ -97,9 +153,15 @@ async function ouraDay(token: string) {
   // readiness one. Reading the wrong `score` here would put a figure on the
   // Recovery screen under the word Readiness that Oura's own app disagrees
   // with, which is worse than the blank it replaces.
+  //
+  // Same window and same `day`-picking as the activity read above, and for the
+  // same reason: a readiness score is filed against the client's own local day.
+  // Asked for the UTC day alone it was blank all afternoon in the Americas and
+  // a day stale all morning in Asia and Oceania — on the screen whose whole job
+  // is to say whether they should train THIS morning.
   try {
-    const r = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_readiness?start_date=${d}&end_date=${d}`, { headers: h })).json();
-    out.recoveryPct = numOr(r?.data?.[0]?.score);
+    const r = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_readiness?start_date=${from}&end_date=${to}`, { headers: h })).json();
+    out.recoveryPct = numOr(newestByDay(r?.data)?.score);
   } catch { /* leave null */ }
   // HRV, from the night rather than the day. Oura publishes `average_hrv` on
   // the SLEEP document in milliseconds already — no conversion, unlike WHOOP
@@ -110,9 +172,14 @@ async function ouraDay(token: string) {
   // woke up on and Oura files it by bedtime; asking only for today would miss
   // last night for anybody who went to bed before midnight. The newest document
   // wins, which is the most recent night either way.
+  //
+  // The window closes a day LATE as well, which it did not: a client ahead of
+  // UTC has last night filed under a `day` this runtime has not reached yet, so
+  // an `end_date` of the UTC day dropped the very night being asked about. This
+  // is the same one-day slack on both ends that `sleepWindow` further down uses,
+  // and for the same reason. Extra documents are free — the newest wins.
   try {
-    const start = new Date(Date.parse(d + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
-    const sl = await (await fetch(`https://api.ouraring.com/v2/usercollection/sleep?start_date=${start}&end_date=${d}`, { headers: h })).json();
+    const sl = await (await fetch(`https://api.ouraring.com/v2/usercollection/sleep?start_date=${from}&end_date=${to}`, { headers: h })).json();
     const docs = Array.isArray(sl?.data) ? sl.data : [];
     let newest: any = null;
     for (const doc of docs) {
@@ -124,6 +191,37 @@ async function ouraDay(token: string) {
   // No strain. Oura publishes no equivalent of WHOOP's 0–21 scale, and
   // substituting its activity score would print a 78 where a 14.2 belongs.
   return out;
+}
+
+/**
+ * How many rings are on this Oura account.
+ *
+ * The answer to a report this whole file could not previously distinguish from
+ * a quiet day: "Oura ring says that my ring is connected, I have created an
+ * account but I have no ring associated with the Oura account." Every Oura
+ * collection answers `{ data: [] }` for such an account, which is byte for byte
+ * what a brand-new ring that has not synced yet returns, so the client could
+ * only ever offer the member both possibilities and ask them to go and look.
+ *
+ * `ring_configuration` is Oura's own list of the hardware on the account, and
+ * an empty list means there is none. Asked ONLY when the day came back with
+ * nothing in it — on every normal day this costs no request at all.
+ *
+ * Null, not false, when the question could not be asked: a 401 here, or a
+ * network fault, is not evidence that somebody owns no ring, and the client
+ * must not be handed a definite answer we did not get.
+ */
+async function ouraRingCount(token: string): Promise<number | null> {
+  try {
+    const res = await fetch('https://api.ouraring.com/v2/usercollection/ring_configuration', {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return Array.isArray(j?.data) ? j.data.length : null;
+  } catch {
+    return null;
+  }
 }
 
 async function whoopDay(token: string) {
@@ -157,14 +255,24 @@ async function whoopDay(token: string) {
     const rs = r?.records?.[0]?.score;
     out.heartRateResting = numOr(rs?.resting_heart_rate);
     out.recoveryPct = numOr(rs?.recovery_score);
-    // `hrv_rmssd_milli` is WHOOP's own field name and it is a LIE about the
-    // unit: the published example is 0.0621 for a 62 ms RMSSD, i.e. seconds.
-    // Storing it verbatim would put "0.1 ms" on the Recovery screen, which
-    // reads as a catastrophic reading rather than as a unit mistake. The
-    // conversion lives here, next to the field, and DailyMetrics.hrv states the
-    // unit it arrives in so nobody converts it a second time.
+    // `hrv_rmssd_milli` has meant two different units in two API versions, and
+    // this line has now been wrong in both directions.
+    //
+    // In v1 the name was a LIE: the published example was 0.0621 for a 62 ms
+    // RMSSD, i.e. seconds, so the code multiplied by a thousand. The call above
+    // is v2, where the name is honest and the value arrives as 64.212 — and
+    // that same multiply turned it into "64212 ms HRV" on the Recovery screen.
+    // A reading a thousand times too large reads as a broken sensor rather than
+    // as a unit mistake, which is exactly the failure the multiply was added to
+    // prevent, produced by the fix itself.
+    //
+    // So the unit is now DETECTED rather than assumed. A human RMSSD in
+    // milliseconds runs roughly 5-300; the same figure in seconds is 0.005-0.3.
+    // Nothing real lands near 1 from either side, so the threshold separates
+    // them with room to spare and keeps working if WHOOP changes its mind
+    // again — which, on the evidence of this field, it does.
     const rmssd = numOr(rs?.hrv_rmssd_milli);
-    out.hrv = rmssd == null ? null : Math.round(rmssd * 1000);
+    out.hrv = rmssd == null ? null : Math.round(rmssd < 1 ? rmssd * 1000 : rmssd);
   } catch { /* leave nulls */ }
   // Sum today's workout durations, and roll up time-in-zone.
   //
@@ -183,10 +291,55 @@ async function whoopDay(token: string) {
   // The previous mapping folded zone_two and zone_three together into one band,
   // which merged what the app now calls Light and Base — the two zones a client
   // most needs to tell apart. This is a straight 1:1 apart from the zero fold.
+  //
+  // ── and WHOSE today ────────────────────────────────────────────────────
+  //
+  // The window was `today() + 'T00:00:00.000Z'` — UTC midnight — which is the
+  // start of somebody's day only on the Greenwich meridian. In Los Angeles it
+  // is 5pm the previous afternoon, so last night's session was counted into
+  // this morning's "workout minutes today" and into today's time-in-zone; in
+  // Auckland it is 1pm the same afternoon, so a morning session was counted
+  // into the following day's. A client's zone minutes are what a coach loads
+  // the next session off, so this is a wrong number somebody trains on.
+  //
+  // WHOOP states the offset itself. Every workout record carries
+  // `timezone_offset` (the sleep reader further down already forwards it), so
+  // the window is opened a day early and the records are then kept only if
+  // they START on the same LOCAL day as now, in the offset WHOOP reported for
+  // the most recent one. Nothing is guessed: with no offset stated anywhere
+  // this falls back to the UTC day it always used.
   try {
-    const start = today() + 'T00:00:00.000Z';
+    const start = new Date(Date.parse(today() + 'T00:00:00.000Z') - 86400000).toISOString();
     const w = await (await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=${WHOOP_PAGE_LIMIT}`, { headers: h })).json();
-    const recs = Array.isArray(w?.records) ? w.records : [];
+    const all = Array.isArray(w?.records) ? w.records : [];
+    // `+13:00` / `-07:00` to minutes. WHOOP documents the field as a
+    // signed HH:MM string; anything else is treated as absent.
+    const offsetMinutes = (v: unknown): number | null => {
+      const m = /^([+-])(\d{2}):?(\d{2})$/.exec(String(v ?? '').trim());
+      if (!m) return null;
+      return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+    };
+    /** The client's own clock, as WHOOP most recently reported it. */
+    let found: number | null = null;
+    for (const rec of all) {
+      const o = offsetMinutes(rec?.timezone_offset);
+      if (o != null) { found = o; break; }
+    }
+    const localDay = (ms: number, off: number) => new Date(ms + off * 60000).toISOString().slice(0, 10);
+    let recs: any[];
+    if (found == null) {
+      // WHOOP stated no offset on anything in the window. The UTC day is the
+      // answer it always gave and is no worse than it was; a filter invented
+      // here would be a clock nobody reported.
+      recs = all.filter((rec: any) => String(rec?.start ?? '').slice(0, 10) === today());
+    } else {
+      const off = found;
+      const wanted = localDay(Date.now(), off);
+      recs = all.filter((rec: any) => {
+        const t = Date.parse(String(rec?.start ?? ''));
+        return Number.isFinite(t) && localDay(t, off) === wanted;
+      });
+    }
     let mins = 0;
     const zones = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
     let maxHrSeen = 0;
@@ -628,12 +781,50 @@ Deno.serve(async (req) => {
   try {
     const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
     userId = data?.user?.id || '';
-  } catch { /* ignore */ }
+  } catch (e) {
+    // A THROW, not a rejected token: supabase-js resolves `{ data, error }` for
+    // a token it can read and refuse, so reaching here means the auth service
+    // could not be asked at all. Failing closed is right — this function reads
+    // the caller's JWT and that is its entire security boundary, so an
+    // unverifiable caller is not a caller — but it was also silent, and an auth
+    // outage looked to every client exactly like everyone's session expiring
+    // at once. The 401 below still stands; what is added is the log.
+    console.error('wearable-day: could not verify the caller’s token for a ' + provider + ' read, so the request is refused as unauthenticated:', (e as Error).message);
+  }
   if (!userId) return json({ error: 'no user' }, 401);
 
-  const { data: row } = await service.from('wearable_tokens').select('*').eq('user_id', userId).eq('provider', provider).maybeSingle();
+  const { data: row, error: rowErr } = await service.from('wearable_tokens').select('*').eq('user_id', userId).eq('provider', provider).maybeSingle();
+  // ── "WE COULD NOT LOOK" IS NOT "YOU ARE NOT CONNECTED" ───────────────────
+  //
+  // This was `const { data: row } = await …` with the error dropped, and
+  // supabase-js resolves with `{ data: null, error }` rather than throwing — so
+  // a transient PostgREST fault fell straight through to the `connected: false`
+  // below, which the comment under it correctly calls "a real signal".
+  //
+  // It is a real signal, and that is exactly what made dropping the error
+  // expensive. `fetchVendorDay` in src/lib/wearables/oauth.ts answers
+  // `connected: false` by calling `noteTokenDead(id, …)` and throwing
+  // `WearableNotConnectedError`. `noteTokenDead` WRITES TO THE LEDGER: the row
+  // on Watch & Devices stops saying "Repple is reading it" and starts telling
+  // the client their connection has died and to reconnect. So one failed read
+  // of `wearable_tokens` — a row that is sitting there, perfectly valid — filed
+  // a permanent fact about somebody's device on the strength of a network
+  // blip, and the remedy it then recommends is to tear down a working OAuth
+  // connection and build it again.
+  //
+  // A read that FAILED is answered with an error instead. Every caller in
+  // oauth.ts treats an invoke error as "we could not reach the server" and
+  // records NOTHING — `fetchVendorDay` returns null without touching the
+  // ledger, and `fetchVendorSleep` answers `ok: false` with a reason, which is
+  // the distinction that whole file exists to preserve.
+  if (rowErr) {
+    console.error('wearable-day: could not read the stored ' + provider + ' connection for ' + userId + ', so this request answers "we could not look" rather than "not connected":', rowErr.message);
+    return json({ metrics: null, error: 'could not read the connection' }, 500);
+  }
   // connected:false is a real signal, not just 'no data' — the client uses it to
-  // stop claiming a dead connection is live.
+  // stop claiming a dead connection is live. Reached only on a read that
+  // SUCCEEDED and found no row, which is a connection that genuinely is not
+  // there.
   if (!row) return json({ metrics: null, connected: false });
 
   let access = row.access_token as string;
@@ -647,12 +838,28 @@ Deno.serve(async (req) => {
     const t = await refresh(provider, row.refresh_token);
     if (!t?.access_token) return json({ metrics: null, connected: false, reason: 'refresh_failed' });
     access = t.access_token;
-    await service.from('wearable_tokens').update({
+    // A ROTATED refresh token that is not stored is a connection that is over.
+    //
+    // This write was unchecked, and supabase-js resolves with `{ error }` rather
+    // than throwing, so a failure was silent. That is survivable for the access
+    // token — the next call just refreshes again. It is NOT survivable for the
+    // refresh token, because WHOOP rotates it: asking with `scope=offline`
+    // returns a new one and retires the one that was sent. So a lost write
+    // leaves this row holding a refresh token WHOOP will never accept again.
+    // Every later call answers `refresh_failed`, the client's recovery, strain
+    // and sleep quietly stop, and the only remedy — disconnect and reconnect —
+    // is one nothing tells them to take.
+    //
+    // Still not fatal to THIS request: the access token in hand is good for the
+    // next hour and the reading below is what the client asked for. Logged, so
+    // that a connection dying this way is findable rather than a mystery.
+    const { error: tokErr } = await service.from('wearable_tokens').update({
       access_token: t.access_token,
       refresh_token: t.refresh_token ?? row.refresh_token,
       expires_at: new Date(Date.now() + (Number(t.expires_in) || 3600) * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('user_id', userId).eq('provider', provider);
+    if (tokErr) console.error('wearable-day: refreshed the ' + provider + ' token for ' + userId + ' and could not store it, so the stored refresh token may now be retired at the vendor and this connection will need reconnecting:', tokErr.message);
   }
 
   if (String(body.action || '') === 'workouts') {
@@ -661,8 +868,27 @@ Deno.serve(async (req) => {
       const days = Math.min(365, Math.max(1, Number(body.sinceDays) || 14));
       const workouts = await whoopWorkouts(access, days);
       return json({ workouts, connected: true });
-    } catch (_e) {
-      return json({ workouts: [], connected: true, error: 'could not read workouts' });
+    } catch (e) {
+      // ── A READ THAT FAILED IS NOT A FORTNIGHT WITH NO TRAINING ──────────
+      //
+      // This answered 200 with `{ workouts: [], connected: true }` and an
+      // `error` key nobody reads. `fetchVendorWorkouts` in
+      // src/lib/wearables/oauth.ts checks the INVOKE error and the `connected`
+      // flag, finds neither, and so calls `noteTokenAlive(id)` and returns the
+      // empty list — recording that this token was proven to work on a request
+      // where WHOOP never answered, and handing the import screen a fortnight
+      // of no sessions that is indistinguishable from a real one.
+      //
+      // `noteTokenAlive` is not a cosmetic note: `accountProvenAlive` is what
+      // lets a later refusal on the sleep endpoint be read as a scope gap
+      // rather than as a dead account, so a false one there mis-classifies a
+      // genuinely dead connection as a working one with a missing scope.
+      //
+      // A 5xx instead. The same caller then returns an empty list WITHOUT
+      // claiming anything about the token, which is the honest outcome — and
+      // the throw is logged, because until now nothing recorded it at all.
+      console.error('wearable-day: could not read ' + provider + ' workouts for ' + userId + ', so none are offered for import. This is NOT the same as none having been recorded:', (e as Error).message);
+      return json({ workouts: [], error: 'could not read workouts' }, 502);
     }
   }
 
@@ -692,5 +918,15 @@ Deno.serve(async (req) => {
   }
 
   const metrics = await readVendor(provider, access);
+  // A day with not one number in it is the only case worth asking the vendor
+  // what is on the account — see `ouraRingCount`. The key is omitted entirely
+  // unless there is a definite answer, because the client reads a MISSING
+  // `hardware` as "nobody asked" and only an explicit `present: false` as "the
+  // vendor says there is no device". Telling somebody with a working ring that
+  // they have none would be a worse bug than the one this closes.
+  if (provider === 'oura' && metrics && !Object.values(metrics).some((v) => typeof v === 'number' && isFinite(v))) {
+    const rings = await ouraRingCount(access);
+    if (rings != null) return json({ metrics, connected: true, hardware: { present: rings > 0, count: rings } });
+  }
   return json({ metrics, connected: true });
 });

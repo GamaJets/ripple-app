@@ -22,7 +22,7 @@ eq(gate().reason, 'none', 'reason is none when the button is on screen');
 // them mounted the runner with an empty array and threw out of an effect,
 // which replaces every tab in the app with the error screen.
 ok(!gate({ runnable: 0, removed: 5 }).canStart,
-   'a day whose every exercise was removed cannot be started, however many the programme wrote');
+   'a day whose every exercise was removed cannot be started, however many the program wrote');
 ok(!gate({ runnable: 0, injuryHidden: 5 }).canStart,
    'a day whose every movement is held back for a severe injury cannot be started');
 ok(!gate({ planned: 3, runnable: 0, removed: 1, injuryHidden: 2 }).canStart,
@@ -38,7 +38,7 @@ ok(gate({ planned: 6, runnable: 5, injuryHidden: 1 }).canStart, 'nor does one mo
 // ── What it says, and when it says nothing ────────────────────────────────
 eq(gate({ isStrength: false, runnable: 0 }).reason, 'not-strength', 'the cardio tab is a different log, not a missing button');
 eq(gate({ isStrength: false, runnable: 0 }).note, null, 'so nothing is explained there');
-eq(gate({ planned: 0, runnable: 0 }).reason, 'rest-day', 'a day the programme left empty is a rest day');
+eq(gate({ planned: 0, runnable: 0 }).reason, 'rest-day', 'a day the program left empty is a rest day');
 eq(gate({ planned: 0, runnable: 0 }).note, null, 'which the hero and the list below already say');
 
 // The injury case is the one the member cannot work out for themselves: the

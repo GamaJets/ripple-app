@@ -96,8 +96,8 @@ export const FRAME_MS = 900;
  *  diagram deserve different trust, and the client should be told which. */
 export function demoCaption(source: string | null | undefined, frames: number): string | null {
   if (frames <= 0) return null;
-  if (source === 'repdb') return 'Illustration — start and peak position.';
-  if (source === 'free-exercise-db') return 'Reference illustration — start and end position.';
+  if (source === 'repdb') return 'Illustration: start and peak position.';
+  if (source === 'free-exercise-db') return 'Reference illustration: start and end position.';
   return null;
 }
 

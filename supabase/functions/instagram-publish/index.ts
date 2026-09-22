@@ -63,10 +63,18 @@
 // here, and it is reported in those words so a coach is not left thinking
 // Repple is broken.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import {
   CARD_BUCKET, CARD_OBJECT_TTL_MIN, cardObjectAbsent, cardObjectKey, cardObjectRemoved,
   cardPublicUrl, isJpegBytes, ratioAccepted, tooLarge,
 } from '../../../src/lib/instagramPublish.ts';
+import { secretConfigured, secretMatches } from '../../../src/lib/sharedSecret.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-sweep-secret' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -174,17 +182,62 @@ async function removeCardObject(service: any, key: string): Promise<{ removed: b
     return { removed: false, why: `storage accepted the delete without saying what it removed, and the bucket could not be listed to check: ${listing.error.message || 'no reason given'}` };
   }
   if (!cardObjectAbsent(key, listing.data)) {
-    return { removed: false, why: 'storage accepted the delete and removed nothing — the object is still in the bucket' };
+    return { removed: false, why: 'storage accepted the delete and removed nothing. The object is still in the bucket' };
   }
   return { removed: true, why: null };
 }
 
-/** Record the outcome of a removal on the ledger row, whichever way it went. */
-async function markRemoval(service: any, key: string, r: { removed: boolean; why: string | null }) {
-  await service.from('share_card_objects').update({
+/**
+ * Record the outcome of a removal on the ledger row, whichever way it went.
+ *
+ * Answers whether the ledger actually took it, and both halves of that are
+ * checked because neither was.
+ *
+ * The result used not to be bound at all, so `error` was not read and nor was
+ * the row count — and a PostgREST UPDATE that matches ZERO rows is a 204 with a
+ * null error, indistinguishable from one that changed something. This table is
+ * the only record of what this product has put on the public internet, and the
+ * only thing that will ever come back for an object: `sweep` selects the rows
+ * whose `removed_at` is null. So a ledger row that is not there is an object no
+ * sweep will ever look for again.
+ *
+ * The key is 32 hex characters of `crypto.getRandomValues` and the client is
+ * the service role, so nothing filters this update and zero rows has exactly
+ * one meaning: the row is gone. Paired with a removal that could NOT be
+ * confirmed, that is a public object nothing knows about — the state the ledger
+ * exists to make impossible, and the state the caller is otherwise about to
+ * promise a coach the sweep will clear.
+ *
+ * Logged rather than thrown. Five of the six call sites are already returning
+ * somebody Meta's own refusal, which is the actionable half of what they have
+ * to say; the sixth is a published post. Only that sixth changes what the coach
+ * is told, and only when the object is still up.
+ */
+async function markRemoval(service: any, key: string, r: { removed: boolean; why: string | null }): Promise<boolean> {
+  const { error, count } = await service.from('share_card_objects').update({
     removed_at: r.removed ? new Date().toISOString() : null,
     remove_failure: r.why,
-  }).eq('object_key', key);
+  }, { count: 'exact' }).eq('object_key', key);
+  if (error) {
+    console.error(
+      'instagram-publish: card object ' + key + ' ' + (r.removed ? 'was removed' : 'could NOT be removed')
+      + ' and the ledger refused the record of it: ' + error.message
+      + (r.removed ? '' : ' The object is still public and the sweep will still find it.'),
+    );
+    return false;
+  }
+  if (!count) {
+    console.error(
+      'instagram-publish: card object ' + key + ' ' + (r.removed ? 'was removed' : 'could NOT be removed')
+      + ' and share_card_objects has no row for it to be recorded on.'
+      + (r.removed
+        ? ' Nothing is public and nothing is owed.'
+        : ' THE OBJECT IS STILL PUBLIC AND NO SWEEP WILL FIND IT. The sweep reads this table. Remove ' + key
+          + ' from the ' + CARD_BUCKET + ' bucket by hand.'),
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -243,24 +296,45 @@ Deno.serve(async (req) => {
    * unauthenticated. */
   if (action === 'sweep') {
     const secret = Deno.env.get('SWEEP_SECRET') || '';
-    if (!secret) return fail('The sweep is not configured on this project. Set SWEEP_SECRET as a Supabase secret to schedule it.');
-    if ((req.headers.get('x-sweep-secret') || '') !== secret) return json({ ok: false, error: 'no' }, 401);
+    if (!secretConfigured(secret)) return fail('The sweep is not configured on this project. Set SWEEP_SECRET as a Supabase secret to schedule it.');
+    // One secret guarding two endpoints should not be compared two ways — and
+    // for a while it was compared three, because notify-message holds a shared
+    // secret too and was still on a bare `!==`. The rule is now stated once, in
+    // src/lib/sharedSecret.ts, and tested there.
+    const offered = req.headers.get('x-sweep-secret') || '';
+    if (!secretMatches(offered, secret)) {
+      return json({ ok: false, error: 'no' }, 401);
+    }
     return json({ ok: true, ...(await sweep(service)) });
   }
 
   const clientId = Deno.env.get('INSTAGRAM_CLIENT_ID') || '';
   const clientSecret = Deno.env.get('INSTAGRAM_CLIENT_SECRET') || '';
   if (!clientId || !clientSecret) {
-    return fail('Posting to Instagram is not configured on the server yet — the owner sets INSTAGRAM_CLIENT_ID and INSTAGRAM_CLIENT_SECRET as Supabase secrets.');
+    return fail('Posting to Instagram is not configured on the server yet. The owner sets INSTAGRAM_CLIENT_ID and INSTAGRAM_CLIENT_SECRET as Supabase secrets.');
   }
 
   // Who is asking, from their JWT alone. Never from the body: a trainer id in a
   // request body is a request to post to somebody else's Instagram account.
   let trainerId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
+    + 'Nothing has been posted and nothing about your Instagram connection has changed. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    trainerId = data?.user?.id || '';
-  } catch { /* falls through to the check below */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return fail(CANNOT_ASK);
+    } else {
+      trainerId = data?.user?.id || '';
+    }
+  } catch { return fail(CANNOT_ASK); }
   if (!trainerId) return json({ ok: false, error: 'Sign in to Repple and try again.' }, 401);
 
   // Before anything else this request does. An orphan from a previous publish
@@ -318,7 +392,49 @@ Deno.serve(async (req) => {
     // client's gym Page would otherwise have a card posted to the wrong
     // business's feed, silently, and there is no undoing a post.
     const withIg = pages.filter((p) => p.igUserId);
-    const chosen = withIg.length === 1 ? withIg[0] : null;
+    let chosen = withIg.length === 1 ? withIg[0] : null;
+
+    /* ── a reconnect may not destroy a working connection ────────────────
+     *
+     * The upsert below replaces every column of the row, and it used to write
+     * `ig_user_id: chosen?.igUserId ?? null` unconditionally. `chosen` is null
+     * whenever the login reaches anything other than exactly one Instagram
+     * account — so a coach who was posting yesterday, and who tapped Connect
+     * because the app told them their token expires within the week, had their
+     * account UNSET by the act of renewing it. Renewing a credential is the
+     * commonest reason to be here and it was the destructive path.
+     *
+     * Two rules, in order:
+     *
+     *   · If this login still reaches the Page the row already names, that
+     *     Page is kept and its token refreshed. That IS the renewal, and it
+     *     needs no decision from the coach because they made it already.
+     *
+     *   · If it does not, and the row was working, NOTHING IS WRITTEN. A
+     *     sign-in that cannot replace a connection does not get to end it.
+     *     Switching accounts stays available and stays explicit: disconnect,
+     *     then connect.
+     *
+     * A row that was half-made — authorised, no account chosen — has nothing
+     * to protect and falls through to the write as before, which is what puts
+     * a fresh list in front of the coach.
+     */
+    // no-error-ok: a row that cannot be read is treated as no row, which sends
+    // this down the same path as a first connection — a fresh write. The only
+    // thing lost is the protection below, and asserting a connection exists on
+    // the strength of a failed read would be worse.
+    const { data: existing } = await service
+      .from('instagram_accounts').select('page_id, ig_user_id, ig_username').eq('trainer_id', trainerId).maybeSingle();
+    const hadPage = String(existing?.page_id || '');
+    const wasReady = !!existing?.ig_user_id;
+    if (!chosen && hadPage) chosen = withIg.find((p) => p.id === hadPage) ?? null;
+    if (!chosen && wasReady) {
+      const had = existing?.ig_username ? `@${existing.ig_username}` : 'the Instagram account';
+      return fail(
+        `That Meta login does not reach ${had} that Repple posts to, so nothing has been changed and your existing connection still works. `
+        + 'To post from a different account, disconnect first and then connect.',
+      );
+    }
 
     const { error } = await service.from('instagram_accounts').upsert({
       trainer_id: trainerId,
@@ -366,15 +482,23 @@ Deno.serve(async (req) => {
       return fail('That Page has no Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.');
     }
 
-    const { error } = await service.from('instagram_accounts').update({
+    // Counted. The response below names the Page back to the coach as the one
+    // they are now posting from, and that sentence is only true if a row took
+    // the choice. This runs under the service role, so nothing filters it: zero
+    // rows means the connection was removed between the read a few lines above
+    // and this write. Left unchecked the coach is shown a chosen Page, posts
+    // against a connection that is not there, and finds out at the first
+    // publish — by which time they have written the caption.
+    const { error, count } = await service.from('instagram_accounts').update({
       page_id: chosen.id,
       page_name: chosen.name,
       ig_user_id: chosen.igUserId,
       ig_username: chosen.igUsername,
       access_token: chosen.token || token,
       updated_at: new Date().toISOString(),
-    }).eq('trainer_id', trainerId);
+    }, { count: 'exact' }).eq('trainer_id', trainerId);
     if (error) return fail(`That account was verified but not saved: ${error.message}`);
+    if (!count) return fail('That account was verified, but the Instagram connection it belongs to is no longer there to save it onto. Connect Instagram again.');
 
     return json({ ok: true, chosen: { id: chosen.id, name: chosen.name, igUsername: chosen.igUsername } });
   }
@@ -456,12 +580,32 @@ Deno.serve(async (req) => {
     // removed rather than marked as deleted. A row saying an object was removed
     // when it never existed is a false entry in the one table that says what
     // has been public.
-    await service.from('share_card_objects').delete().eq('object_key', key);
+    //
+    // no-count-ok: zero rows deleted is the outcome this line asks for. The row
+    // was inserted a few lines above under the service role, the key is 32 hex
+    // characters of `crypto.getRandomValues` and nothing else filters this, so
+    // zero rows means the row is already absent — and an absent row is exactly
+    // what "no false entry" means. Unlike `markRemoval` above, there is no
+    // public object on the other side of this: the upload is the thing that
+    // just failed, so there is nothing for a sweep to be deprived of.
+    const { error: cleanupErr } = await service.from('share_card_objects').delete().eq('object_key', key);
+    if (cleanupErr) {
+      // Not returned: the coach is about to be told, in the next line, the one
+      // thing they can act on — the upload failed and nothing was posted. What
+      // this leaves behind is a ledger row for an object that was never
+      // created, which the sweep will confirm absent and close at the ceiling.
+      console.error('instagram-publish: upload of ' + key + ' failed and its ledger row could not be cleared: ' + cleanupErr.message);
+    }
     return fail(`The card could not be put where Instagram can fetch it: ${up.error.message}. Nothing has been posted.`);
   }
 
+  // The error is READ, not inferred from the absence of a throw. supabase-js
+  // resolves on a failed insert, so `await service.from(…).insert(…)` with
+  // nothing destructured off it succeeds in exactly the same way whether the
+  // row landed or not — and this is the row that records that a post did NOT
+  // go up. Losing it silently is how a failure becomes invisible twice.
   const recordFailure = async (why: string, containerId: string | null) => {
-    await service.from('instagram_posts').insert({
+    const { error: ledgerErr } = await service.from('instagram_posts').insert({
       trainer_id: trainerId,
       status: containerId ? 'container' : 'failed',
       container_id: containerId,
@@ -470,6 +614,9 @@ Deno.serve(async (req) => {
       object_key: key,
       failure: why.slice(0, 500),
     });
+    if (ledgerErr) {
+      console.error('instagram-publish: a failed post could not be recorded for ' + key + ': ' + ledgerErr.message);
+    }
   };
 
   /* ── 1. the container. This is the call Meta fetches the URL during ──── */
@@ -557,7 +704,14 @@ Deno.serve(async (req) => {
   const link = await graph(`${GRAPH}/${encodeURIComponent(mediaId)}?fields=permalink&access_token=${encodeURIComponent(token)}`);
   if (link.ok && link.body?.permalink) permalink = String(link.body.permalink);
 
-  await service.from('instagram_posts').insert({
+  // Same rule as `recordFailure` above, on the row that says the post DID go
+  // up. This insert was awaited and never destructured, so a rejected write —
+  // a policy refusal, a column that moved, the database briefly unreachable —
+  // was indistinguishable from a successful one, and the coach's post history
+  // would simply not contain a post that is live on their feed. The post is up
+  // either way and `ok` stays true; what is not true is that Repple recorded
+  // it, so that is said rather than left to be discovered.
+  const { error: ledgerErr } = await service.from('instagram_posts').insert({
     trainer_id: trainerId,
     status: 'published',
     container_id: containerId,
@@ -567,6 +721,9 @@ Deno.serve(async (req) => {
     object_key: key,
     published_at: new Date().toISOString(),
   });
+  if (ledgerErr) {
+    console.error('instagram-publish: a published post could not be recorded for ' + key + ': ' + ledgerErr.message);
+  }
 
   // Meta has the media. The public object has done its whole job and goes now,
   // with the removal CONFIRMED rather than assumed. A removal that cannot be
@@ -574,7 +731,7 @@ Deno.serve(async (req) => {
   // post is up either way, and a warning about a temporary file is a different
   // thing from a post that failed.
   const removal = await removeCardObject(service, key);
-  await markRemoval(service, key, removal);
+  const recorded = await markRemoval(service, key, removal);
 
   return json({
     ok: true,
@@ -582,8 +739,24 @@ Deno.serve(async (req) => {
     containerId,
     permalink,
     objectRemoved: removal.removed,
-    warning: removal.removed ? undefined
-      : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.',
+    // Three states, not two, because the sweep is a promise this function can
+    // only keep while the ledger row exists. An object that could not be
+    // confirmed deleted AND could not be recorded is one the sweep reads no row
+    // for and will never come back to, so saying "Repple will remove it" there
+    // would be a claim about a thing that is not going to happen.
+    // A fourth state, and it outranks the other three: if the ledger row did
+    // not land, the post is on Instagram and absent from Repple's history of
+    // it. That is a discrepancy the coach should hear about from us rather
+    // than notice later, so it is said first and the sweep note follows.
+    warning: [
+      ledgerErr
+        ? 'Your post is up on Instagram, but Repple could not record it, so it will not appear in your post history here. Nothing needs reposting. The post is live.'
+        : undefined,
+      removal.removed ? undefined
+        : recorded
+          ? 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.'
+          : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, and Repple has no record left to sweep it from, so it will not be removed on its own. Tell whoever runs this Repple, and quote ' + key + '.',
+    ].filter(Boolean).join(' ') || undefined,
   });
 });
 
@@ -600,3 +773,4 @@ function randomHex32(): string {
   crypto.getRandomValues(b);
   return Array.from(b).map((n) => n.toString(16).padStart(2, '0')).join('');
 }
+

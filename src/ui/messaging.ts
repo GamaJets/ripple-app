@@ -46,20 +46,28 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { sendPush } from './pushNotifications';
 import { ensureMediaPermission } from './permissions';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
-import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { legacyThreadCacheKey, threadCacheKey } from '../lib/threadCache';
 import { classifyWrite } from '../lib/offlineQueue';
+// The record of what the server DECLINED, which is the third outcome and the
+// only one no screen used to hear about. src/lib/refusedMessages.ts is the
+// whole argument; this file is the storage and the two writers.
+import {
+  readRefusedMessages, recordRefusal, refusedMessagesKey, writeRefusedMessages,
+  type RefusedMessage,
+} from '../lib/refusedMessages';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
+import { currentReach } from '../lib/reachability';
 import {
-  blockStateOf, looksLikeThreadRefusal, REPORT_FAILED_NOTE, SEND_REFUSED_NOTE,
+  blockStateOf, looksLikeThreadRefusal, reportFailedNote, SEND_REFUSED_NOTE,
   type BlockRow, type BlockState, type ReportCategory,
 } from '../lib/threadSafety';
 import {
@@ -70,9 +78,6 @@ import {
 } from '../lib/messageAttachments';
 
 export type ChatRole = 'client' | 'coach';
-
-/** Where a thread is kept on this device, keyed by the thread's own id. */
-const THREAD_SCOPE = 'thread';
 
 /**
  * How stale a cached thread may be before it stops being worth opening.
@@ -337,10 +342,21 @@ export async function signAttachment(path: string): Promise<string | null> {
  * Take an object back out of the bucket.
  *
  * Called on one path only: an attachment that uploaded and whose message row
- * was then refused. That file is unreachable — nothing points at it, and the
- * account-deletion purge described in supabase/parts/124 does not exist yet —
- * so removing it here is what stops the bucket accumulating photographs nobody
- * can see and nobody asked to keep.
+ * was then refused. That file is unreachable: nothing points at it.
+ *
+ * This used to say the account-deletion purge part 124's operator note asked
+ * for "does not exist yet". It does now — part 1120 built the queue, the hook
+ * and the drain, and `message-media` is one of the six buckets in
+ * `object_purge_bucket_is_ours` (1120's three plus 1152's coach-logos,
+ * coach-docs and exercise-videos). It is matched on BOTH path segments, so the
+ * orphan goes whether the erased account is the thread's or the sender's.
+ *
+ * That does not make this call redundant, and the difference is the whole
+ * reason it is still here. The purge is fired by an account being erased. Both
+ * participants may go on using the app for years, and until one of them leaves
+ * nothing in the database will ever look at this key. Removing it now is what
+ * stops the bucket accumulating photographs nobody can see and nobody asked to
+ * keep, for as long as the accounts live.
  *
  * Returns whether it went. Best effort by design: the send has already failed
  * and the sender is being told so, and a failure to clean up must not turn into
@@ -451,8 +467,25 @@ export function useThread(clientId: string | null, role: ChatRole) {
    *  re-renders nothing and the queued bubbles would not appear until something
    *  else happened to cause a render. */
   const [threadId, setThreadId] = useState<string | null>(clientId);
-  /** Bumped to re-read the thread. See the effect below: the only thing that
-   *  bumps it is a queued message of ours having gone. */
+  /** Bumped to re-read the thread. Two things bump it: a queued message of
+   *  ours having gone (see the effect below), and `reload` — the screen asking
+   *  for the conversation again, which is what a pull-to-refresh on a chat is.
+   *
+   *  This said "There is no realtime subscription on this thread", and it was
+   *  flatly wrong about the code two hundred lines below it: the effect opens
+   *  `.channel('msg:' + cid)` and subscribes to INSERTs on `messages` filtered
+   *  to this thread, appending anything `seen` has not already got. The false
+   *  sentence outlived several readings of this file and generated a roadmap
+   *  item to build the subscription that was already here;
+   *  app/(client)/messages.tsx carries the same correction against its own
+   *  copy of it, and this is the copy that sentence was read from.
+   *
+   *  What is TRUE, and what `reload` is actually for, is that the subscription
+   *  is BEST-EFFORT: it is opened inside a try/catch whose own comment reads
+   *  "realtime optional", so a project without the publication, a network that
+   *  will not open a websocket, or a socket dropped while the phone was asleep
+   *  each leave the thread live-looking and silently static with nothing on
+   *  screen to say so. Re-reading is the only way out of that. */
   const [reloadTick, setReloadTick] = useState(0);
   /**
    * Whether there is more thread ABOVE what is on screen.
@@ -511,20 +544,53 @@ export function useThread(clientId: string | null, role: ChatRole) {
     setHasOlder(false);
     setLoadingOlder(false);
     setOlderError(null);
+    // …and so does the cached-at stamp, which used to be the one piece of
+    // thread state this reset forgot. It is cleared only on the SUCCESS path
+    // below, so a coach moving from a client whose thread came off the device
+    // to one whose read then FAILED kept the first client's stamp: an empty
+    // screen carrying "last confirmed on Tuesday", which is a claim about a
+    // conversation that was never read. Nothing is on screen from the device
+    // until the block below puts it there, so null is the only true value here.
+    setCachedAt(null);
     let cancelled = false;
     let channel: any = null;
     (async () => {
       let cid = clientId;
-      if (!cid && role === 'client') {
-        try {
-          const { data: sess } = await supabase.auth.getSession();
-          if (cancelled) return;
+      /**
+       * WHO IS READING, which is half of the cache key below.
+       *
+       * The thread key alone was the whole of it, and on the coach's side the
+       * thread key is the CLIENT's id — so two coaches signed into the same
+       * handset who both have that client on their roster shared one cached
+       * page of their conversation. src/lib/threadCache.ts is the whole
+       * argument and the whole fix; this is only where the second half is read.
+       *
+       * `getSession` and not `getUser`: it is local, it costs no round trip,
+       * and a cache key does not need the server's opinion of the token. Null
+       * here is not an error — it means no cache, which is the safe direction.
+       */
+      let viewer: string | null = null;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        viewer = sess?.session?.user?.id ?? null;
+        if (!cid && role === 'client') {
           if (!sess?.session) { setStatus('ready'); setReady(true); return; }
           const { data: auth, error: authErr } = await supabase.auth.getUser();
+          if (cancelled) return;
           // Not knowing who you are is a failure, not an empty thread.
-          if (authErr) { if (!cancelled) { setStatus('error'); setReady(true); } return; }
+          if (authErr) { setStatus('error'); setReady(true); return; }
           cid = auth?.user?.id ?? null;
-        } catch { if (!cancelled) { setStatus('error'); setReady(true); } return; }
+          if (auth?.user?.id) viewer = auth.user.id;
+        }
+      } catch {
+        if (cancelled) return;
+        // A client's own thread has no key without this, so it is a failed
+        // read. A coach's key came from the roster and the read below can still
+        // happen — with no cache, because a cache this device cannot attribute
+        // to an account is one it must not open.
+        if (!cid) { setStatus('error'); setReady(true); return; }
+        viewer = null;
       }
       if (cancelled) return;
       tid.current = cid;
@@ -549,8 +615,21 @@ export function useThread(clientId: string | null, role: ChatRole) {
       // the same as an empty thread and must never render as one — the empty
       // state on this screen is "No messages yet. Say hello.", said to somebody
       // whose coach wrote to them that morning.
+      //
+      // Null when there is no account to attribute it to, and then this device
+      // holds nothing for this thread at all — see src/lib/threadCache.ts.
+      const ck = threadCacheKey(cid, viewer);
+      // The key this used to be written under, which names the thread and not
+      // the reader. REMOVED UNREAD, and that is the whole of the migration: the
+      // bytes carry no account, so no build can say whose conversation they
+      // were, and the honest thing to do with them is stop keeping them. The
+      // first read with signal writes the scoped key.
+      {
+        const legacy = legacyThreadCacheKey(cid);
+        if (legacy) AsyncStorage.removeItem(legacy).catch(() => { /* gone next launch either way */ });
+      }
       try {
-        const cached = readCache<any>(await AsyncStorage.getItem(cacheKey(THREAD_SCOPE, cid)));
+        const cached = ck ? readCache<any>(await AsyncStorage.getItem(ck)) : { rows: null, at: null };
         if (cancelled) return;
         if (cached.rows && cached.rows.length && withinHorizon(cached.at, Date.now(), THREAD_CACHE_HORIZON_MS)) {
           const rows = cached.rows.map(rowToMsg);
@@ -607,18 +686,36 @@ export function useThread(clientId: string | null, role: ChatRole) {
           // of a thread that is already longer than the cap, the rows on screen
           // are the same rows the live read shows, and the alternative is a
           // member with a long history having no cached thread at all.
-          AsyncStorage.setItem(cacheKey(THREAD_SCOPE, cid), packCache(rows))
-            .catch(() => { /* the thread is right this session either way */ });
+          //
+          // Only under a key that names the reader. With no account there is
+          // nowhere to write it that would not be device-global, and this
+          // session's thread is correct on screen either way.
+          if (ck) {
+            AsyncStorage.setItem(ck, packCache(rows))
+              .catch(() => { /* the thread is right this session either way */ });
+          }
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);
-      // Opening the thread is what marks it read, for whichever side opened it.
-      // The side is inferred server-side from who is calling, so this cannot
-      // clear the other person's unread count. Failing costs an unread badge
-      // that stays up, which is the harmless direction — it never hides a
-      // message, it only keeps claiming one is waiting.
-      // no-error-ok: an unmarked thread keeps showing as unread, which overstates rather than hides
-      try { await supabase.rpc('mark_thread_read', { p_client: cid }); } catch { /* the badge stays up */ }
+      // Marking the thread read used to happen HERE, unconditionally, the
+      // instant this read settled. It has moved to `useReadReceipt`
+      // (src/ui/readReceipts.ts), and the move is the fix rather than a
+      // refactor of it:
+      //
+      //   · opening a thread is not reading it. `mark_thread_read` writes
+      //     `now()`, so a thread left at the top — or, on the coach's side, a
+      //     chat screen still mounted behind whatever they opened next, which
+      //     it always is — cleared every unread message in it. That overstated
+      //     to the badge's own owner, and now that the other person is shown
+      //     the word "Read" it would overstate to somebody else.
+      //   · this hook is mounted for `send` alone by app/(trainer)/nudges.tsx
+      //     and app/(trainer)/credentials.tsx. Opening either of those sheets
+      //     marked a client's thread read without a word of it being drawn.
+      //
+      // The two screens that actually draw the conversation mount the hook, and
+      // it writes the newest SERVER-CONFIRMED message's own timestamp — the
+      // same column `coach_unread_counts()` compares against — only while the
+      // end of the list is on screen, focused and in the foreground.
       try {
         channel = supabase
           .channel('msg:' + cid)
@@ -780,8 +877,11 @@ export function useThread(clientId: string | null, role: ChatRole) {
       }).select().single();
       if (error || !data) {
         // The file is up and nothing points at it. Take it back out rather than
-        // leave an object in the bucket that no row references and no purge
-        // exists for (the operator note in supabase/parts/124).
+        // leave an object in the bucket that no row references. This used to
+        // add "and no purge exists for", citing part 124's operator note; part
+        // 1120 has since written that purge and `message-media` is in it. But
+        // that purge only runs when one of the two accounts is erased, which
+        // may be never, so the orphan is still this call's to remove.
         if (stored) await removeMessageAttachment(stored.path);
         // A REFUSAL is not a failure to reach the server, and since part 240 it
         // is a state a member can put this thread into on purpose. Saying "that
@@ -810,30 +910,70 @@ export function useThread(clientId: string | null, role: ChatRole) {
       setMessages((p) => p.map((m) => (m.id === localId
         ? { ...rowToMsg(data), local: att ? { uri: att.uri, kind: att.kind } : null }
         : m)));
-      // What the push says when the message is a photograph and nothing else.
-      // It does not quote a caption that was never written, and it does not say
-      // "sent you a message" either — the notification is most of what the
-      // other person sees before they open it.
-      const preview = b || (stored ? `Sent you a ${attachmentNoun(stored.kind)}` : '');
-      // notify the other side (coach -> client push; client side needs the coach id, skipped)
-      if (role === 'coach' && tid.current) sendPush([tid.current], 'New message from your coach', preview, { route: '/(client)/messages' });
-      // The coach's route carries the thread key. It used to be the bare
-      // '/(trainer)/chat', and the tap handler pushes that string straight at
-      // the router — so a coach who opened the notification landed on a chat
-      // with no clientId: an empty thread headed "Client", and a reply that went
-      // nowhere because `send` has no thread to insert into. The client's route
-      // needs no key; their thread is their own id, resolved from auth.
-      // 'chat' — the coach can mute this category on its own without losing
-      // bookings or a failed subscription payment with it. The filter is
-      // applied in the send-push edge function, not here; see the note on
-      // `PushChannel` in src/ui/pushNotifications.ts. The push to the CLIENT
-      // above carries no channel, because the channels are the coach's and a
-      // member's own controls are src/lib/notifyPrefs.ts.
-      else if (role === 'client' && coachId.current && tid.current) sendPush([coachId.current], 'New message from your client', preview, { route: '/(trainer)/chat?clientId=' + encodeURIComponent(tid.current) }, 'chat');
+      // ── THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S ──────────────────
+      //
+      // There used to be a `sendPush` here, and the row's own trigger pushes
+      // too, so every message in this product arrived on the recipient's phone
+      // TWICE — two banners, seconds apart, in two different wordings. Both
+      // halves of the duplicate were written down and neither was removed:
+      // supabase/functions/notify-message says "it was masked because
+      // src/ui/messaging.ts fires a second, correctly-routed push for the same
+      // message", and `PUSHED_BY_ITS_WRITER` in src/lib/notifyDispatch.ts warns
+      // that a third pusher "would make every message in the product arrive
+      // twice" — of a message that was already arriving twice.
+      //
+      // It is the same defect supabase/parts/2392 fixed for a coaching request
+      // and a called-off class, and 2392's own words for why it matters are
+      // src/lib/notifyCopy.ts's: double-pushing "is the thing that gets
+      // notifications turned off", and turning them off is what took the money
+      // channel down with the chat channel.
+      //
+      // THE SERVER'S COPY IS THE ONE THAT SURVIVES, for four reasons, none of
+      // them a preference:
+      //
+      //   · it fires on the ROW, so it also covers the outbox flush below, the
+      //     coach's fan-out in `sendCoachMessages`, the nudge on the trainer
+      //     dashboard and anything else that ever writes a `messages` row. A
+      //     handset push covers only the call site that remembered it.
+      //   · it writes the inbox row (`icon: 'message'`), and
+      //     src/lib/notifyInbox.ts already refuses to record the handset's copy
+      //     — so this side has been pushing a banner with no record behind it.
+      //   · it titles the client's banner with the COACH'S OWN NAME rather than
+      //     'New message from your coach', which is what the bell shows.
+      //   · it applies the 'chat' channel mute and quiet hours to BOTH sides.
+      //     The push removed from here passed no channel on the coach → client
+      //     leg at all, so a member who had muted chat was buzzed anyway.
+      //
+      // `messagePreview` stays in src/lib/messagePreview.ts and is still
+      // asserted by messagePreview.test.ts; notify-message repeats those words
+      // under Deno because it cannot import them, which is the duplication that
+      // file's own header describes.
       return { ok: true };
     } catch (e) {
       reportError('messaging.send', e);
-      if (stored) await removeMessageAttachment(stored.path);
+      // THE FILE IS DELIBERATELY LEFT WHERE IT IS.
+      //
+      // The `error` branch above removes it, and may: supabase-js resolved with
+      // a refusal, so the row certainly does not exist and the object certainly
+      // has nothing pointing at it. This branch is the other case, and it is
+      // not the same case. A thrown fetch is "no answer" — the insert may have
+      // COMMITTED and the response been lost on the way back, which is the
+      // ordinary shape of a connection dropping mid-request. Deleting the bytes
+      // here on that assumption produces the one state the order of these two
+      // steps exists to make impossible: a delivered message pointing at an
+      // attachment that is not there, permanently, on the recipient's screen.
+      //
+      // So the trade is stated rather than taken silently. An unreferenced
+      // object costs storage nobody is looking at; a message whose photograph
+      // will never load costs the conversation the photograph was the point of.
+      // The path is reported so it is findable. That used to read "when the
+      // purge described in supabase/parts/124 is eventually written"; it was
+      // written, in part 1120, and this key will be queued and deleted when
+      // either participant erases their account. Reporting it still matters,
+      // because until then nothing else names it: if the insert did commit,
+      // the object is referenced and healthy, and if it did not, it is an
+      // orphan this branch deliberately declined to remove.
+      if (stored) reportError('messaging.maybe-orphan', e, { path: stored.path });
       // Nobody answered at all — the offline case this whole path exists for.
       return keepForLater(localId, b, att);
     }
@@ -950,6 +1090,11 @@ export function useThread(clientId: string | null, role: ChatRole) {
     ready,
     status,
     unsent: shownUnsent,
+    /** The thread key this hook settled on — the `clientId` it was given, or
+     *  the signed-in member's own id when it was given none. Null until it is
+     *  resolved, and null again for a screen opened without one. `useReadReceipt`
+     *  needs it and the client's screen has no other way to know it. */
+    threadId,
     /** The sentence for a thread read off this device rather than the server,
      *  or null when it was confirmed. Goes with `status === 'error'`. */
     cachedNote: cachedAtLine(cachedAt),
@@ -963,7 +1108,182 @@ export function useThread(clientId: string | null, role: ChatRole) {
     olderError,
     /** One page further back. Safe to call when there is nothing to fetch. */
     loadOlder,
+    /** Read the thread again from the top.
+     *
+     *  Goes through `reloadTick` rather than calling the read directly, so the
+     *  merge rules and the `seen` bookkeeping in that effect are not duplicated
+     *  — and so pages already stepped back to with `loadOlder` are handled the
+     *  same way they are on any other re-read. */
+    reload: () => setReloadTick((n) => n + 1),
   };
+}
+
+/* ── the third outcome, kept ───────────────────────────────────────────────
+ *
+ * `stored`, `unsent` and `refused` are three different facts and only the first
+ * two ever reached a screen. A refused message is dropped from the outbox by
+ * `flush` — correctly; offering it again gets the same answer — and until this
+ * existed that was the end of it: the "waiting to send" mark came off the row
+ * and the row then looked exactly like one that had been delivered.
+ *
+ * src/lib/refusedMessages.ts holds every decision and every sentence. What is
+ * here is the two halves that cannot be pure: the AsyncStorage round trip, and
+ * a way for the screens to learn that the store changed while they were open.
+ */
+
+/** Mounted `useRefusedMessages` hooks, so a refusal recorded by the outbox
+ *  handler reaches a list that is already on screen. Without it the coach's
+ *  inbox would not admit the refusal until it next remounted, which for an
+ *  `href: null` tab is not until the app is killed. */
+const refusedListeners = new Set<() => void>();
+
+function refusedChanged(): void {
+  // A copy, and each call guarded: a listener that throws must not stop the
+  // others from being told.
+  for (const fn of Array.from(refusedListeners)) { try { fn(); } catch { /* the rest still get told */ } }
+}
+
+/**
+ * Who is signed in, for the key — and whether that answer is knowable.
+ *
+ * `getSession` is local and costs no round trip, but it still reads the
+ * handset's own store and can fail, and its failure is NOT the same fact as
+ * nobody being signed in. The two lead to the same action on the WRITE side —
+ * there is no account to attribute a record to, so nothing is persisted — and
+ * to opposite ones on the READ side, where a device that could not say who is
+ * using it must not answer "nothing of yours was refused". So both halves are
+ * returned and the callers below decide separately.
+ */
+async function refusedUid(): Promise<{ uid: string | null; readable: boolean }> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    // auth-js resolves with an error rather than rejecting, so this is the only
+    // place the difference is visible. Lane 114's finding, applied here.
+    if (error) return { uid: null, readable: false };
+    return { uid: data?.session?.user?.id ?? null, readable: true };
+  } catch { return { uid: null, readable: false }; }
+}
+
+/**
+ * Write one refusal down.
+ *
+ * The read and the write are inside ONE try on purpose: a `getItem` that threw
+ * means this device could not say what it is holding, and writing over bytes we
+ * could not read would destroy somebody else's record of a message that never
+ * went. That is the same rule `enqueue` states in src/ui/outbox.tsx — "an
+ * outbox we could not read is one we must not write".
+ */
+async function keepRefusal(entry: RefusedMessage): Promise<void> {
+  const who = await refusedUid();
+  const key = refusedMessagesKey(who.uid);
+  if (!key) {
+    // Nothing is written. Falling back to an unqualified key would put one
+    // person's words where the next account reads them, which is worse than
+    // losing them — but it IS a loss whenever the cause was an unreadable
+    // session rather than a signed-out handset, so that half is reported.
+    if (!who.readable) reportError('messaging.refused-keep-uid', new Error('session unreadable'));
+    return;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    await AsyncStorage.setItem(key, writeRefusedMessages(recordRefusal(readRefusedMessages(raw), entry)));
+    refusedChanged();
+  } catch (e) {
+    // Nothing else will ever raise this refusal, so a failure to keep it is
+    // worth reporting rather than swallowing.
+    reportError('messaging.refused-keep', e);
+  }
+}
+
+/** What a screen gets. `refused` is null when this device could not read its
+ *  own record — NOT an empty list, which is the claim "nothing of yours was
+ *  refused" and the one thing that must not be invented here. */
+export interface RefusedRecord {
+  refused: RefusedMessage[] | null;
+  /** The DEVICE's read of its own store. Never the server's opinion of
+   *  anything — the server has already given that, and it was no. */
+  status: LoadStatus;
+  /** The person has read one. It comes off the device with it, because nothing
+   *  else will ever tell them again. */
+  forget: (id: string) => void;
+}
+
+/**
+ * The messages the server refused, for this account, on this handset.
+ *
+ * Re-read on every auth revision, and the state is dropped BEFORE that read
+ * lands rather than after it: a key change means what is in state belongs to
+ * the previous account, and a read for the new one that is slow or that fails
+ * would otherwise leave a stranger's words on screen. That is the trap
+ * src/lib/accountScopedState.ts writes down, applied here.
+ */
+export function useRefusedMessages(): RefusedRecord {
+  const authRev = useAuthRevision();
+  const [refused, setRefused] = useState<RefusedMessage[] | null>(null);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const keyRef = useRef<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!USE_SUPABASE) { keyRef.current = null; setRefused([]); setStatus('ready'); return null; }
+    const who = await refusedUid();
+    const key = refusedMessagesKey(who.uid);
+    if (key !== keyRef.current) {
+      keyRef.current = key;
+      setRefused(null);
+      setStatus('loading');
+    }
+    if (!key) {
+      if (!who.readable) {
+        // This handset could not say who is using it. That is a doubt, not an
+        // empty record, and the screens say so — "nothing of yours was refused"
+        // is the one answer that must never be invented out of a failed read.
+        setRefused(null);
+        setStatus('partial');
+        return null;
+      }
+      // Nobody is signed in, which IS knowledge: there is no account here whose
+      // refusals could exist. An empty list rather than a doubt, so a signed-out
+      // handset is not alarming about nothing.
+      setRefused([]);
+      setStatus('ready');
+      return null;
+    }
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      setRefused(readRefusedMessages(raw));
+      setStatus('ready');
+    } catch (e) {
+      // An unread store is not an empty one. 'partial' is what the screens
+      // turn into the sentence saying the marks below may be incomplete.
+      setRefused(null);
+      setStatus('partial');
+      reportError('messaging.refused-read', e);
+    }
+    return key;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => { if (!cancelled) { load().catch(() => { /* reported inside */ }); } };
+    run();
+    refusedListeners.add(run);
+    return () => { cancelled = true; refusedListeners.delete(run); };
+  }, [load, authRev]);
+
+  const forget = useCallback((id: string) => {
+    const key = keyRef.current;
+    setRefused((p) => (p ? p.filter((r) => r.id !== id) : p));
+    if (!key) return;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        const next = readRefusedMessages(raw).filter((r) => r.id !== id);
+        await AsyncStorage.setItem(key, writeRefusedMessages(next));
+      } catch (e) { reportError('messaging.refused-forget', e); }
+    })();
+  }, []);
+
+  return { refused, status, forget };
 }
 
 /**
@@ -990,7 +1310,15 @@ export function MessageOutboxHandler(): null {
       // A payload this file cannot read is one nothing can ever send. 'refused'
       // takes it out of the queue rather than leaving it to be retried on every
       // reconnect for the life of the install.
-      if (!q) return 'refused';
+      //
+      // Recorded on the way out, with no thread and no words, because those are
+      // exactly what could not be read. It is still somebody's message and it
+      // still never went: `unaddressedRefused` counts it against the total so
+      // the per-row marks are never presented as the whole of it.
+      if (!q) {
+        await keepRefusal({ id: item.id, clientId: '', sender: 'client', body: '', at: item.at });
+        return 'refused';
+      }
       try {
         const { data, error } = await supabase.from('messages').insert({
           client_id: q.clientId, sender: q.sender, body: q.body,
@@ -998,25 +1326,31 @@ export function MessageOutboxHandler(): null {
         }).select('id');
         const out = classifyWrite(error as any, data ? data.length : 0);
         if (out !== 'stored') {
-          if (out === 'refused') reportError('messaging.outbox', error);
+          if (out === 'refused') {
+            reportError('messaging.outbox', error);
+            // …and told to the person, which `reportError` does not do. The
+            // flush is about to drop this item, and dropping it is right — the
+            // server has answered and the answer will not change. What was
+            // wrong was that the drop also took away the only mark on the
+            // screen saying the message had not gone, leaving a row that looks
+            // exactly like a delivered one. See src/lib/refusedMessages.ts.
+            await keepRefusal({
+              id: item.id, clientId: q.clientId, sender: q.sender, body: q.body, at: item.at,
+            });
+          }
           return out;
         }
-        // Best effort, and deliberately after the row. A failed push costs a
-        // notification; a failed row costs the message, and the row is already
-        // safe by the time this runs.
-        try {
-          if (q.sender === 'coach') {
-            sendPush([q.clientId], 'New message from your coach', q.body, { route: '/(client)/messages' });
-          } else {
-            // no-error-ok: addressing for a notification; without it the message is still delivered and visible in the thread
-            const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', q.clientId).single();
-            const coach = (cr as any)?.trainer_id ?? null;
-            if (coach) {
-              sendPush([coach], 'New message from your client', q.body,
-                { route: '/(trainer)/chat?clientId=' + encodeURIComponent(q.clientId) });
-            }
-          }
-        } catch { /* the message is delivered either way */ }
+        // No push from here either, and this call site is the clearest case of
+        // the four. The row has just landed, so the AFTER INSERT trigger on
+        // `messages` has already posted it to notify-message — which resolves
+        // the recipient itself and therefore needs neither the `clients` read
+        // that used to happen here for addressing, nor this device to have
+        // remembered which side sent it. See the long note in `send` above for
+        // why the server's copy is the one that survives.
+        //
+        // What is deliberately NOT lost: a message typed in a basement still
+        // reaches the other person's phone the moment it goes up, because the
+        // push follows the row rather than the send.
         return 'stored';
       } catch {
         // Still no answer. It stays in the outbox, stays counted, and is tried
@@ -1118,11 +1452,12 @@ export async function sendCoachMessages(
     }
   }));
 
-  const landed = results.filter((r) => r.ok).map((r) => r.clientId);
-  // Addressed only to the rows that exist. A failing push costs a notification,
-  // not the message, so it stays best-effort — but it can never announce one
-  // that was not written.
-  if (landed.length) sendPush(landed, 'New message from your coach', b, { route: '/(client)/messages' });
+  // No push from here. Each of these is an ordinary `messages` row and the
+  // trigger on that table pushes each one, addressed to the client whose row it
+  // is — which is the property this call site cared about ("it can never
+  // announce one that was not written") arrived at by construction rather than
+  // by filtering a list afterwards. A fan-out of twelve used to buzz twelve
+  // phones twice. See the note in `send`.
   return results;
 }
 
@@ -1408,7 +1743,7 @@ export function useThreadSafety(clientId: string | null, role: ChatRole): Thread
         return { ok: false, error: 'That did not save, so they are still blocked.' };
       }
       if (!((data ?? []) as any[]).length) {
-        return { ok: false, error: 'Nothing was unblocked. Open this screen again — the block may already have been lifted somewhere else.' };
+        return { ok: false, error: 'Nothing was unblocked. Open this screen again. The block may already have been lifted somewhere else.' };
       }
       reload();
       return { ok: true, error: null };
@@ -1437,12 +1772,19 @@ export function useThreadSafety(clientId: string | null, role: ChatRole): Thread
       });
       if (error || !data) {
         reportError('messaging.report', error ?? new Error('report_abuse returned no id'));
-        return { id: null, error: REPORT_FAILED_NOTE };
+        // `currentReach()` rather than `useReachability()`, and read HERE
+        // rather than at the top of the hook. `observedFetch` files the verdict
+        // for this very RPC before supabase-js hands the error back, so this is
+        // the freshest reading there is — and the sentence is produced once and
+        // carried in `error`, so there is nothing for a hook to re-render.
+        // Subscribing every consumer of `useThreadSafety` to reachability would
+        // re-render a chat screen on a fact it never draws.
+        return { id: null, error: reportFailedNote(currentReach()) };
       }
       return { id: String(data), error: null };
     } catch (e) {
       reportError('messaging.report', e);
-      return { id: null, error: REPORT_FAILED_NOTE };
+      return { id: null, error: reportFailedNote(currentReach()) };
     }
   };
 

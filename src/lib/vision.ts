@@ -3,30 +3,50 @@
 // Falls back gracefully (returns null) when the backend isn't configured yet,
 // so the UI keeps its editable-estimate path until you deploy the function.
 import { supabase } from './supabase';
-import { USE_SUPABASE } from './config';
 import type { ScanMetrics } from './inbodyMetrics';
-// Vision uses the deployed vision-analyze edge function. It's on whenever the
-// backend is on (USE_SUPABASE) OR the explicit EXPO_PUBLIC_ENABLE_VISION flag is
-// set — so an OTA that didn't carry the build flag still gets AI reading.
+import { readMealResult, readMachineResult, type MealVision, type MachineVision } from './readerAnswer';
+// The two shapes with a confidence on them live in src/lib/readerAnswer.ts,
+// beside the rule that reads them, so that rule can be asserted under plain
+// node — this file imports `./supabase` and cannot be. Re-exported under the
+// names they have always had, because every caller in app/ names them.
+export type { MealVision, MachineVision } from './readerAnswer';
+// ── One switch for every door to the model ────────────────────────────────
+//
+// This used to read `USE_SUPABASE || EXPO_PUBLIC_ENABLE_VISION === '1'`, while
+// the AI Coach's door — `coachAvailable` in src/lib/coach.ts, the one that
+// asks the member first — read the flag alone. Two gates on two paths to the
+// same api.anthropic.com, and the looser one was on the path that asked
+// nothing: every build with a backend sent photographs, INCLUDING builds where
+// the door that does ask had been deliberately switched off. The unasked path
+// outlived the asked one, which is exactly the wrong way round.
+//
+// So it is the flag, and only the flag, and `coachAvailable` defers to this
+// function so there is one answer rather than two that can drift. Turning the
+// flag off now turns off every path to the model, which is what somebody
+// turning it off believes they are doing. Every published profile in eas.json
+// sets it, so nothing in the field changes.
 
-export interface MealVision {
-  name: string;
-  kcal: number;
-  /** Null when the reader did not give us one. These were `?? 0`, so a model
-   *  that returned calories and nothing else recorded a zero-protein meal that
-   *  then fed the day's remaining-macro figures. A zero is a measurement and
-   *  "we were not told" is not one — src/lib/foodPortion.ts refuses to build a
-   *  loggable food out of a gap, and the member fills it in. */
-  protein: number | null;
-  carbs: number | null;
-  fat: number | null;
-  confidence: number;
-}
+// ── the confidence this file used to invent ───────────────────────────────
+//
+// `MealVision` and `MachineVision` used to declare `confidence: number` and
+// fill it with `toNum(r.confidence) ?? 0.6` — a figure no model produced, in
+// the one field whose entire job is to say how far to trust the others. The
+// macros beside it had already been widened for exactly this argument ("a zero
+// is a measurement and 'we were not told' is not one"), and the confidence was
+// the sharpest case of it and the last one left.
+//
+// `vision-analyze` now reports `confidenceGiven` on every read, so there is no
+// longer even a question about whether the reader offered one. Both fields are
+// `number | null` and the null travels. Nothing in app/ or src/ reads either
+// one today, which is why this was a latent defect rather than a live one —
+// and why it is worth closing now, before the first sentence written from it
+// inherits the 0.6.
 export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null; metrics?: ScanMetrics }
 
-/** True when the vision function is reachable — backend on, or the flag is set. */
+/** True when the vision function is reachable. The single gate for every door
+ *  to the model — see the note above, and `coachAvailable`, which calls this. */
 export function visionAvailable(): boolean {
-  return USE_SUPABASE || process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
+  return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
 }
 
 // Coerce a model value to a number: accepts real numbers AND numeric strings
@@ -65,15 +85,7 @@ async function call(mode: string, imageBase64: string, mediaType = 'image/jpeg')
 }
 
 export async function analyzeMeal(imageBase64: string, mediaType?: string): Promise<MealVision | null> {
-  const r = await call('meal', imageBase64, mediaType);
-  const kcal = toNum(r?.kcal);
-  if (!r || kcal == null) return null;
-  const macro = (v: any): number | null => { const n = toNum(v); return n == null ? null : Math.round(n); };
-  return {
-    name: String(r.name ?? 'Meal'),
-    kcal: Math.round(kcal), protein: macro(r.protein), carbs: macro(r.carbs), fat: macro(r.fat),
-    confidence: toNum(r.confidence) ?? 0.6,
-  };
+  return readMealResult(await call('meal', imageBase64, mediaType));
 }
 
 export interface PhysiqueVision { bodyFatPct: number | null; notes: string; focusAreas: string[] }
@@ -83,12 +95,8 @@ export async function analyzePhysique(imageBase64: string, mediaType?: string): 
   return { bodyFatPct: toNum(r.bodyFatPct), notes: String(r.notes ?? ''), focusAreas: Array.isArray(r.focusAreas) ? r.focusAreas.map(String).slice(0, 4) : [] };
 }
 
-export interface MachineVision { name: string; muscleGroup: string; isCardio: boolean; confidence: number }
 export async function analyzeMachine(imageBase64: string, mediaType?: string): Promise<MachineVision | null> {
-  const r = await call('machine', imageBase64, mediaType);
-  const name = r?.name ? String(r.name).trim() : '';
-  if (!name) return null;
-  return { name, muscleGroup: String(r.muscleGroup ?? ''), isCardio: !!r.isCardio, confidence: toNum(r.confidence) ?? 0.6 };
+  return readMachineResult(await call('machine', imageBase64, mediaType));
 }
 
 export async function analyzeInBody(imageBase64: string, mediaType?: string): Promise<InBodyVision | null> {

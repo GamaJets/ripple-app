@@ -12,8 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { ListRow, Ghost } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { ListRow, PageHead, Section } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty } from '../../src/theme/scale';
 import { OWNER_NAV, searchNav } from '../../src/lib/features';
 
 export default function Explore() {
@@ -27,18 +27,12 @@ export default function Explore() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Owner portal</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Explore</Text>
-          </View>
-        </View>
+        <PageHead title="Explore" />
 
         {/* ── the field is the screen ────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg, marginBottom: sp.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.md, marginTop: sp.lg, marginBottom: sp.sm, ...elevation.card }}>
           <Icon name="search" size={16} color={t.ink3} />
-          <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={t.ink3} autoCapitalize="none"
+          <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={t.ink3} autoCapitalize="none" accessibilityLabel="Search"
             style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
           {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
         </View>
@@ -49,11 +43,13 @@ export default function Explore() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nothing matches “{q}”.</Text>
           </View>
         ) : (
-          <View>
+          /* On a surface card with the kit's toned plates, as every other
+             list of destinations in the three apps is now drawn. */
+          <Section>
             {list.map((h) => (
-              <ListRow key={h.key} icon={h.icon} title={h.label} note={h.note} onPress={() => router.push(h.route as any)} />
+              <ListRow key={h.key} icon={h.icon} tone="brand" title={h.label} note={h.note} onPress={() => router.push(h.route as any)} />
             ))}
-          </View>
+          </Section>
         )}
       </ScrollView>
     </SafeAreaView>

@@ -1,5 +1,13 @@
-// Owner · Operations. The session fee, notices to members, a support inbox and
-// the gym's activity log.
+// Owner · Operations. The session fee, where the gym is, notices to members, a
+// support inbox and the gym's activity log.
+//
+// WHERE THE GYM IS was added last and is the one setting on this screen that
+// is WRONG rather than empty while it is unset. `tenants.timezone` had a single
+// writer in the whole product — the web console — and all 54 gyms in the live
+// database had it null, so six console screens print the words "in the gym's
+// own timezone" over figures bucketed on whichever laptop is open. See the
+// section itself, and src/lib/zonePicker.ts for why the picker refuses to offer
+// `Etc/GMT+4` and why there is no "use this phone's zone" button.
 //
 // The Announce tab was a notepad. It wrote to a `useState` in
 // src/ui/ownerOps.tsx and its own confirmation said so — "Saved to this device
@@ -27,6 +35,19 @@
 // No hero: this is a three-task console (write · triage · read), not a screen
 // with one live number to lead with.
 //
+// ── The order, since the data-layout review ────────────────────────────────
+//
+// Five groups, in the order an owner needs them: NEEDS ACTION (a merchant
+// problem, open support items, the deletion clock, kit due a service, and the
+// settings every figure elsewhere is waiting on) above everything, whichever
+// tab is open; then the three tabs, where the first now opens on MEMBER
+// OPERATIONS — the notice and what has been sent — with COMMERCIAL
+// CONFIGURATION under it (session fee, pay policy, class cancellations, card
+// payments) and the gym's clock after that; then PEOPLE AND FLOOR and
+// ADMINISTRATION, which are the old "Everywhere Else" split in two. Nothing was
+// removed and no route moved. The tab called Announce used to open on the
+// session fee, which is the reason for the first of those moves.
+//
 // Every list starts empty and fills from real activity — notices the owner
 // posts, and tickets from `useOwnerOps` plus real in-app feedback rows.
 // Nothing is seeded, so each tab now says so honestly instead of rendering a
@@ -48,43 +69,127 @@
 // somebody forgot one, and an owner reading a gap cannot tell a quiet Tuesday
 // from a missing writer. Nothing holds insert rights on it, so it cannot be
 // forged either.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, ListRow, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost, Segmented, AttentionRow, HeroCard } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
-import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
+import { fetchAllFeedbackPage, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
+// Both cancellation-policy fields. The fee is MONEY and is read through the
+// currency that denominates it; the hours are a COUNT and the column is an
+// `integer`. One shared `Number()` was the right reader for neither — see the
+// header of src/lib/cancelPolicy.ts for the list of what it accepted.
+import { parseCancelFee, parseCancelHours } from '../../src/lib/cancelPolicy';
 import { fetchGymMerchant, merchantState, startGymOnboarding, type GymMerchant } from '../../src/lib/gymMerchant';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { WEB_ORIGIN } from '../../src/lib/deepLink';
 
-/**
- * The currencies a gym can be priced in.
+/*
+ * The currencies a gym can be priced in — THE SHARED LIST, at last.
  *
- * A short list rather than every ISO code: this is a one-off setup question,
- * and a scroller of 180 options is a worse answer than eight and a note. It is
- * not a closed set in the database — `tenants.currency` is free text — so
- * adding one here is the whole of adding one.
+ * This was its own literal: `['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD',
+ * 'ZAR']`. Eight codes, every one of them a hundredths currency, defended above
+ * as "a short list rather than every ISO code… a scroller of 180 options is a
+ * worse answer than eight and a note".
+ *
+ * The note was the problem. Ops is the ONLY place in this product a gym's
+ * currency can be set, so an owner in Japan, Korea, Kuwait, Bahrain or Oman had
+ * two options: pick money they do not charge in, or leave the gym unpriced —
+ * and unpriced blocks the payment form, the plan form, payroll and the close.
+ * "Adding one here is the whole of adding one" is true and it is not something
+ * an owner in Tokyo can do at eight in the morning.
+ *
+ * `CURRENCY_CHOICES` in src/lib/coachCurrency.ts is forty codes covering every
+ * member of `ZERO_DECIMAL` and `THREE_DECIMAL`, and its own header named this
+ * file and predicted this exact defect: "two pickers writing currencies into
+ * one product that offer different sets is a coach and their owner disagreeing
+ * about what money exists — and until it does, a gym owner in Tokyo has the
+ * same problem this list has just fixed for a coach." It does now.
+ *
+ * Forty rather than eight is not a scroller: they are pill chips in a wrapping
+ * row, alphabetical, the same control the coach's picker draws from the same
+ * constant. Alphabetical matters — any other order nominates a favourite, and
+ * the eight opened with AED for no reason except where this product was written.
  *
  * currency-ok: this is the list an owner CHOOSES from. Naming currencies is the
  * entire job of a currency picker, and it is the one place in the product where
  * an ISO code beside nothing is correct — nothing here is a figure, and nothing
  * here is applied to a gym until somebody taps it.
  */
-const CURRENCIES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
-import { capLimit } from '../../src/lib/rowCap';
+import { CURRENCY_CHOICES } from '../../src/lib/coachCurrency';
+import { capLimit, capped } from '../../src/lib/rowCap';
+
+/** How far back the gym's activity feed reaches. A BOUND — the screen says
+ *  "the most recent hundred" — and a read that comes back at it is a prefix,
+ *  which is 'partial' rather than 'ready'. */
+const EVENT_LIMIT = 100;
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+/* ── where the gym is ──────────────────────────────────────────────────────
+ *
+ * `tenants.timezone` (supabase/parts/710) had exactly one writer in the whole
+ * product — the web console's Gym settings screen — and on 4 September 2026
+ * all 54 gyms in the live database had it null. Six console screens print the
+ * words "in the gym's own timezone" over figures bucketed with the READER's
+ * clock while it is unset, and this app, the one an owner actually carries,
+ * could not set it at all.
+ *
+ * The write goes through `saveGymProfile` rather than `updateTenant`: the
+ * provider's patch type does not admit the column (src/ui/tenant.tsx), and
+ * `saveGymProfile` already carries the rule that matters — it checks the row
+ * COUNT, so an UPDATE that RLS matched nothing against is reported as a
+ * refusal instead of drawing "Saved" over an unchanged row.
+ */
+import { saveGymProfile } from '../../src/lib/gymPolicy';
+/* ── the two queues "Needs Action" reads that this screen never held ─────────
+ *
+ * The review's first group for Ops is what needs the owner: a merchant
+ * problem, open support items, the deletion clock and kit due a service. The
+ * first two were already read here. The other two lived only behind rows in
+ * "Everywhere Else", which named the screens and said nothing about whether
+ * anything was waiting in them — and one of the two is a statutory clock.
+ *
+ * Both go through the readers their own screens use, so this console cannot
+ * come to a different answer from the screen it sends the owner to:
+ * `fetchEquipment` pages the register and throws rather than degrading, and
+ * `summariseRegister` is the same count /equipment prints. The deletion queue
+ * is the `pending_deletions` view, which is security_invoker and already
+ * scoped to the caller's gym (see the header of app/(owner)/deletions.tsx).
+ */
+import { fetchEquipment, summariseRegister, type Equipment } from '../../src/lib/gymEquipment';
+import { gymTodayWindow } from '../../src/lib/gymToday';
+/* ── what this gym pays a coach FOR ────────────────────────────────────────
+ *
+ * `tenants.session_pay_policy` is written from the web console and from nowhere
+ * else, and `useTenant` does not read the column at all — so the owner's own app
+ * had no sight of the setting every payroll figure in the product is computed
+ * from, while every COACH could read it on theirs (src/ui/coachPayTerms.ts).
+ *
+ * Read-only here, deliberately. See the header of src/lib/ownerPayPolicy.ts:
+ * changing it re-prices months already worked and not yet settled, which is a
+ * decision taken with a payroll run on the screen rather than on a train.
+ */
+import { useGymPayPolicy } from '../../src/ui/gymPayPolicy';
+import {
+  payOutcomeLines, policyHeadNote, WHERE_THE_POLICY_IS_SET,
+  POLICY_UNREAD_NOTE, POLICY_NO_GYM_NOTE, POLICY_UNSET_NOTE,
+} from '../../src/lib/ownerPayPolicy';
+import {
+  parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, fetchGymZone,
+} from '../../src/lib/gymZone';
+import { searchZones, NO_ZONE_LIST_NOTE, type ZoneChoice } from '../../src/lib/zonePicker';
 
 /** One row of the gym's event feed. */
 interface GymEvent { id: string; kind: string; summary: string; at: string }
@@ -132,6 +237,37 @@ function ago(iso: string) {
 }
 
 /** An honest "nothing here yet" line — these lists genuinely start empty. */
+/**
+ * One zone, offered.
+ *
+ * The clock is on the row rather than only on the stored value, because the
+ * choice is made HERE: an owner picking between Europe/London and
+ * Europe/Lisbon is choosing between 14:32 and 14:32 in March and 14:32 and
+ * 13:32 in July, and the row is where that is visible. A null clock means this
+ * runtime cannot resolve the zone, and the row says so instead of drawing a
+ * blank beside a name.
+ */
+function ZoneRow({ zone, where, tick, busy, onPress }: {
+  zone: string; where: string; tick: number | null; busy: boolean; onPress: () => void;
+}) {
+  const t = useTheme();
+  const clock = gymTimeLabel(tick, zone);
+  const city = zone.split('/').slice(-1)[0].replace(/_/g, ' ');
+  return (
+    <Pressable onPress={onPress} disabled={busy} accessibilityRole="button"
+      accessibilityLabel={clock ? `Set this gym to ${zone}, where it is ${clock}` : `Set this gym to ${zone}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: busy ? 0.5 : 1 }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, color: t.ink }}>{city}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{where ? `${where} · ${zone}` : zone}</Text>
+      </View>
+      <Text style={{ ...ty.label, ...numeric, color: clock ? t.ink2 : t.ink3 }}>
+        {clock ?? 'no clock'}
+      </Text>
+    </Pressable>
+  );
+}
+
 function Empty({ tone, children }: { tone: string; children: string }) {
   return <Text style={{ ...ty.label, color: tone }}>{children}</Text>;
 }
@@ -148,7 +284,7 @@ export default function OwnerOps() {
   // (src/ui/announcements.tsx); only the ticket half of that provider is read
   // here.
   const { tickets, resolveTicket, openTickets } = useOwnerOps();
-  const { addGymAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
+  const { addGymAnnouncement, mine: myNotices, status: noticeStatus, reload: reloadNotices } = useAnnouncements();
 
   // ── the session fee ──────────────────────────────────────────────────────
   //
@@ -164,16 +300,43 @@ export default function OwnerOps() {
   // 31 of them, none of them chosen) and payroll, value-per-client and the
   // revenue hero were all quietly multiplying by it. The fallback copy those
   // three screens carry for a null fee could never have drawn.
-  const { tenant, status: tenantStatus, updateTenant } = useTenant();
+  const { tenant, status: tenantStatus, updateTenant, refresh: refreshTenant } = useTenant();
+  // The fee's other half: what the fee is multiplied BY. Its own read rather
+  // than a wider `useTenant`, for the reason src/ui/gymPayPolicy.ts gives.
+  const payPolicy = useGymPayPolicy();
+  const { refresh: refreshPayPolicy } = payPolicy;
   const cur = tenant?.currency ?? null;
   // Null means "the owner has not touched the field", so it mirrors the tenant
   // as that read lands. A useState seeded from `tenant` would seed from null —
   // the provider is still in flight when this screen mounts — and then never
   // catch up.
   const [feeDraft, setFeeDraft] = useState<string | null>(null);
-  const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null);
+  const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null, tenant?.currency ?? null);
   const [feeBusy, setFeeBusy] = useState(false);
+  /* The currency picker's own in-flight flag. It had none: every pill stayed
+   * live while a write was going, so two taps sent two UPDATEs whose order
+   * nothing controls, and the gym ended up priced in whichever one the server
+   * happened to finish last while the message on screen named the other. */
+  const [curBusy, setCurBusy] = useState(false);
   const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
+
+  /* ── what a late class cancellation costs ────────────────────────────────
+     src/lib/classCancel.ts has told every member since it was written that
+     "this app does not hold that policy", because there was no column and no
+     screen. supabase/parts/2615 is the column; this is the screen.
+
+     Two fields and both clearable, because null is a real state an owner may
+     want to return to: it produces the honest "we do not hold your gym's
+     policy" sentence rather than a claim. An empty notice field is NOT a
+     zero-hour window and an empty fee is NOT a free cancellation — both of
+     those are things a gym can state, and stating them is a different act
+     from never having said. */
+  const [noticeDraft, setNoticeDraft] = useState<string | null>(null);
+  const [cancelFeeDraft, setCancelFeeDraft] = useState<string | null>(null);
+  const noticeField = noticeDraft ?? (tenant?.classCancelHours == null ? '' : String(tenant.classCancelHours));
+  const cancelFeeField = cancelFeeDraft ?? (tenant?.classCancelFee == null ? '' : String(tenant.classCancelFee));
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyMsg, setPolicyMsg] = useState<{ bad: boolean; text: string } | null>(null);
 
   /* ── whether the gym can take a card at all ──────────────────────────────
      null is "no account row", which is every gym today and a real, sayable
@@ -188,10 +351,25 @@ export default function OwnerOps() {
   const [merchantMsg, setMerchantMsg] = useState<string | null>(null);
   /** Bumped by the Refresh control. */
   const [merchantTick, setMerchantTick] = useState(0);
+  /**
+   * Bumped by the same control, and read by the three effects below that had no
+   * way to be run twice at all: the resolved-ticket map, the gym event feed and
+   * the support inbox. All three were `useEffect(..., [])` — read once at mount
+   * and then fixed for the life of the screen — on the console tab an owner
+   * leaves open on a desk all day. The Refresh line only ever re-read the
+   * merchant row, so "Read just now" sat over a support inbox from this morning.
+   */
+  const [readTick, setReadTick] = useState(0);
   /** When the merchant read LANDED. `r.ok` only — a refusal leaves the stamp
    *  on the answer currently on screen, which is what "payouts are on" was
    *  read off. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [merchantAt, setMerchantAt] = useState<number | null>(null);
+  /** And the other three server reads on this tab, each stamped where it lands
+   *  and each leaving the stamp alone when it does not. */
+  const [resolvedAtStamp, setResolvedAtStamp] = useState<number | null>(null);
+  const [eventsAt, setEventsAt] = useState<number | null>(null);
+  const [inboxAt, setInboxAt] = useState<number | null>(null);
+  const [noticesAt, setNoticesAt] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -201,7 +379,7 @@ export default function OwnerOps() {
       setMerchantStatus('loading');
       const r = await fetchGymMerchant(supabase as any, tenant.id);
       if (!live) return;
-      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); setFetchedAt(Date.now()); }
+      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); setMerchantAt(Date.now()); }
       else { reportError('ops.gymMerchant', new Error(r.reason)); setMerchantStatus('error'); }
     })();
     return () => { live = false; };
@@ -231,9 +409,198 @@ export default function OwnerOps() {
   // be offered as one: saving over it would write a value read off a failed
   // read. 'partial' cannot happen here — it is a single row — but worstStatus
   // semantics are respected by asking for 'ready' rather than not-'error'.
+  /* ── where this gym is ────────────────────────────────────────────────────
+   *
+   * Its own read, and three states rather than two: `zoneErr` set means nobody
+   * could ask, `zone` null with no error means the gym has not said. Rendering
+   * the first as the second would tell an owner their gym has no timezone on
+   * the strength of a query that never answered, and they would set one that
+   * is already set — over the top of whatever is really there.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+  const [zoneRead, setZoneRead] = useState(false);
+  const [zoneQuery, setZoneQuery] = useState('');
+  const [zoneBusy, setZoneBusy] = useState(false);
+  const [zoneMsg, setZoneMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  /**
+   * A clock, ticking, beside the zone.
+   *
+   * The one test of this setting a person can actually perform: nobody can
+   * check whether 'Asia/Dubai' is the right STRING, and anybody can check
+   * whether the time next to it matches the clock on the wall behind them. The
+   * console does the same thing for the same reason.
+   *
+   * Fifteen seconds rather than one: the label has minute resolution, and a
+   * per-second timer on a screen an owner leaves open is a battery cost for a
+   * digit that does not change.
+   */
+  const [tick, setTick] = useState<number | null>(null);
+  useEffect(() => {
+    setTick(Date.now());
+    const id = setInterval(() => setTick(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      // Settled either way. Without this the demo build — which has no
+      // Supabase at all — sits on "Reading your gym…" for ever, which is the
+      // one sentence that means "wait, this is coming".
+      if (!USE_SUPABASE) { setZoneRead(true); return; }
+      if (!tenant?.id) return;
+      const r = await fetchGymZone(supabase as any, tenant.id);
+      if (!live) return;
+      setZone(r.zone); setZoneErr(r.error); setZoneRead(true);
+    })();
+    return () => { live = false; };
+  }, [tenant?.id, readTick]);
+
+  /**
+   * Every zone this runtime knows, minus the ones a gym must never be in.
+   *
+   * Empty is a real answer — `zoneOptions()` returns `[]` on a runtime without
+   * `Intl.supportedValuesOf`, which is a live possibility on Hermes — and the
+   * screen then offers a typed field with `NO_ZONE_LIST_NOTE` beside it rather
+   * than an empty picker. `parseGymZone` is the gate either way.
+   */
+  const zoneAll = zoneOptions();
+  const zoneHits: ZoneChoice[] = searchZones(zoneAll, zoneQuery);
+  /** What the owner has typed, when it is itself a valid zone name. This is
+   *  what makes the screen usable at all on a runtime with no list: the field
+   *  is a search AND the field. */
+  const typedZone = parseGymZone(zoneQuery);
+  /**
+   * Replacing a zone is asked about; setting the first one is not.
+   *
+   * Setting a zone for the first time only ever improves what is on the
+   * screens — before it, every date was drawn on whichever machine read it.
+   * CHANGING one moves the boundary of every month that has already been
+   * closed: a class at 23:30 on the 31st can leave the month it was filed in.
+   * That is not irreversible, and it is not obvious either, so the question is
+   * asked and it names both zones rather than saying "are you sure".
+   */
+  const askZone = (next: string) => {
+    if (!zone || zone === next) { void saveZone(next); return; }
+    Alert.alert(
+      'Change This Gym’s Timezone?',
+      `This gym is measured in ${zone}. Changing it to ${next} re-cuts every day, month and payroll period in the owner console, including months already closed, where a late class can move into the month next door.`,
+      [
+        { text: 'Keep ' + zone, style: 'cancel' },
+        { text: 'Use ' + next, style: 'destructive', onPress: () => { void saveZone(next); } },
+      ],
+    );
+  };
+
+  const saveZone = async (next: string) => {
+    if (!tenant?.id) return;
+    setZoneBusy(true); setZoneMsg(null);
+    try {
+      // The count is checked inside `saveGymProfile`, so a refused UPDATE
+      // arrives here as a throw rather than as a silent success.
+      await saveGymProfile(supabase as any, tenant.id, { timezone: next });
+      setZone(next); setZoneQuery(''); setZoneErr(null);
+      setZoneMsg({
+        bad: false,
+        text: `This gym’s day is now measured in ${next}. Every date and time on the owner console (the month close, the payroll month, footfall by hour) is drawn on it from here on, and figures already on a screen change when it is next read.`,
+      });
+    } catch (e: any) {
+      reportError('ops.saveZone', e);
+      setZoneMsg({
+        bad: true,
+        text: zone
+          ? `Not saved. This gym is still measured in ${zone}.`
+          : 'Not saved. This gym still has no timezone, so every date in the console is still drawn on whichever machine it is read from.',
+      });
+    } finally { setZoneBusy(false); }
+  };
+
   const feeKnown = tenantStatus === 'ready' && !!tenant;
+  /**
+   * Save the class cancellation policy, or withdraw it.
+   *
+   * Parsed here rather than trusted: an empty field is null (withdrawn), and a
+   * value that is not a number refuses IN PLACE rather than writing NaN, which
+   * PostgREST would send as a null and which would silently look like a
+   * withdrawal. The database checks the range again — negative, or over two
+   * weeks of notice, is refused there too — so a value that got past this is
+   * still refused rather than stored.
+   */
+  const savePolicy = async () => {
+    /* Each field is refused in its own words, rather than by the single shared
+     * "those are not numbers this can save" that used to cover both: an owner
+     * who typed a fine notice period and a bad fee was told neither which field
+     * was wrong nor what about it. The hours are checked first because that is
+     * the order they are read on screen. */
+    const hours = parseCancelHours(noticeField);
+    if (!hours.ok) { setPolicyMsg({ bad: true, text: hours.reason }); return; }
+    const fee = parseCancelFee(cancelFeeField, cur);
+    if (!fee.ok) { setPolicyMsg({ bad: true, text: fee.reason }); return; }
+    setPolicyBusy(true);
+    const saved = await updateTenant({ classCancelHours: hours.value, classCancelFee: fee.value });
+    setPolicyBusy(false);
+    if (!saved) {
+      setPolicyMsg({ bad: true, text: 'Not saved. Your policy is unchanged, and members are still being told this app does not hold it.' });
+      return;
+    }
+    setNoticeDraft(null);
+    setCancelFeeDraft(null);
+    setPolicyMsg({
+      bad: false,
+      text: hours.value == null
+        ? 'Withdrawn. Members are told this app does not hold your policy, which is true again.'
+        : 'Saved. Members cancelling inside that window are now told so before they confirm.',
+    });
+  };
+
+  /* ── changing what a gym is priced in ───────────────────────────────────
+   *
+   * The same shape as `askZone` above, for the same reason and with the same
+   * two branches: setting a currency a gym has never had is harmless and goes
+   * straight through, and CHANGING one is not, so it is confirmed first.
+   *
+   * This picker had neither the confirm nor the guard. One mis-tap on a pill
+   * beside the one an owner meant split their ledger permanently — nothing
+   * already recorded is re-denominated, by design, so from that moment the gym
+   * holds two currencies and every total that spans them is withheld rather
+   * than added up. That is the correct behaviour for the DATA and a very poor
+   * thing to be able to do by brushing a screen. The timezone two sections up
+   * has been asking first all along.
+   *
+   * `saved` is `updateTenant`'s row COUNT, not the absence of an error: a
+   * refused UPDATE under RLS raises nothing and touches nothing. */
+  const askCurrency = (next: string) => {
+    if (curBusy || next === cur) return;
+    if (!cur) { void saveCurrency(next); return; }
+    Alert.alert(
+      'Change What This Gym Is Priced In?',
+      `This gym is priced in ${cur}. Nothing already recorded is re-denominated. Payments, plans and passes keep the currency they were written in, so this gym would hold both ${cur} and ${next}, and any total that mixes them is withheld rather than added up.`,
+      [
+        { text: `Keep ${cur}`, style: 'cancel' },
+        { text: `Use ${next}`, style: 'destructive', onPress: () => { void saveCurrency(next); } },
+      ],
+    );
+  };
+
+  const saveCurrency = async (next: string) => {
+    setCurBusy(true); setFeeMsg(null);
+    const saved = await updateTenant({ currency: next });
+    setCurBusy(false);
+    // No claim about what came before, and no claim that anything already
+    // recorded has moved. The rows keep the currency they were written in — a
+    // payment is a historical fact.
+    setFeeMsg(saved
+      ? {
+          bad: false,
+          text: cur
+            ? `Your gym is now priced in ${next}. Nothing already recorded has been re-denominated: payments, plans and passes keep the currency they were written in, and any total that mixes the two is withheld rather than added up.`
+            : `Your gym is priced in ${next}. That is what every figure written from here on is denominated in.`,
+        }
+      : { bad: true, text: cur ? `Not saved. Your gym is still priced in ${cur}.` : 'Not saved. Your gym still has no currency set.' });
+  };
+
   const saveFee = async () => {
-    const parsed = parseSessionFee(feeField);
+    const parsed = parseSessionFee(feeField, tenant?.currency ?? null);
     if (parsed.kind === 'bad') { setFeeMsg({ bad: true, text: parsed.reason }); return; }
     const next = parsed.kind === 'clear' ? null : parsed.fee;
     setFeeBusy(true); setFeeMsg(null);
@@ -242,7 +609,7 @@ export default function OwnerOps() {
     const saved = await updateTenant({ sessionFee: next });
     setFeeBusy(false);
     if (!saved) {
-      setFeeMsg({ bad: true, text: 'Not saved. Your session fee is unchanged — nothing on the other screens has moved.' });
+      setFeeMsg({ bad: true, text: 'Not saved. Your session fee is unchanged, and nothing on the other screens has moved.' });
       return;
     }
     setFeeDraft(null);
@@ -269,7 +636,7 @@ export default function OwnerOps() {
   // columns an update touches, and the value of this inbox is that the words in
   // it are the tester's.
   //
-  // Read separately from fetchAllFeedback() rather than through it: that
+  // Read separately from fetchAllFeedbackPage() rather than through it: that
   // function is shared with the Feedback screen and its row shape is not this
   // screen's to change.
   //
@@ -279,6 +646,8 @@ export default function OwnerOps() {
   // Which of the two nulls that is — still reading, or refused. Same pair the
   // inbox read carries, for the same reason.
   const [resolvedFailed, setResolvedFailed] = useState(false);
+  /** And whether the resolved-state read was the whole of it. */
+  const [resolvedTruncated, setResolvedTruncated] = useState(false);
   useEffect(() => {
     if (!USE_SUPABASE) { setResolvedAt({}); return; }
     let off = false;
@@ -286,13 +655,19 @@ export default function OwnerOps() {
       const { data, error } = await supabase.from('feedback').select('id, resolved_at')
         .order('created_at', { ascending: false }).limit(capLimit());
       if (off) return;
-      if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); return; }
+      if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); setResolvedTruncated(false); return; }
+      // `capLimit()` above asks for one row past the ceiling precisely so a
+      // full page and a truncated one stop looking identical, and nothing was
+      // reading the answer. Every ticket whose resolved_at row fell past the cap
+      // is drawn as OPEN — the mirror of the "3 open over a failed read" bug the
+      // note above this effect was written about, arriving by the other door.
+      const page = capped(data);
       const map: Record<string, string> = {};
-      for (const r of data ?? []) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
-      setResolvedAt(map); setResolvedFailed(false);
+      for (const r of page.rows) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
+      setResolvedAt(map); setResolvedFailed(false); setResolvedTruncated(page.truncated); setResolvedAtStamp(Date.now());
     })();
     return () => { off = true; };
-  }, []);
+  }, [readTick]);
 
   // The feed. Read here rather than through a provider because exactly one
   // screen shows it, and a provider would be a second place for it to go stale.
@@ -306,19 +681,27 @@ export default function OwnerOps() {
       // so the policy already returns this owner's gym and nobody else's.
       const { data, error } = await supabase
         .from('gym_events').select('id, kind, summary, created_at')
-        .order('created_at', { ascending: false }).limit(100);
+        .order('created_at', { ascending: false }).limit(EVENT_LIMIT);
       if (off) return;
       if (error) { reportError('ownerOps.events', error); setEvStatus('error'); return; }
-      setEvents((data ?? []).map((r: any) => ({
+      const rows = data ?? [];
+      setEvents(rows.map((r: any) => ({
         id: String(r.id), kind: String(r.kind), summary: String(r.summary), at: String(r.created_at),
       })));
-      setEvStatus('ready');
+      // `.limit(100)` is a bound, not a cap, and a read that came back AT its
+      // bound is a prefix — which is what 'partial' means in this codebase's
+      // vocabulary. It was reported as 'ready' unconditionally, and the section
+      // header then printed the bare numeral 100 as the gym's activity count.
+      // The caption under the list already said "the most recent hundred"; the
+      // figure above it did not.
+      setEvStatus(rows.length >= EVENT_LIMIT ? 'partial' : 'ready');
+      setEventsAt(Date.now());
     })();
     return () => { off = true; };
-  }, []);
+  }, [readTick]);
   // null is the inbox we do not have: it is the initial value AND what
-  // fetchAllFeedback returns for a refused read, which is deliberate — see the
-  // note on that function. It used to be collapsed here with `d ?? []`, one line
+  // fetchAllFeedbackPage returns for a refused read, which is deliberate — see
+  // the note on that function. It used to be collapsed here with `d ?? []`, one line
   // under a comment saying null means unread rather than empty, and the tab then
   // asserted "No tickets. Feedback sent from inside the app lands here." That is
   // the sentence you least want to be wrong about during a test round: it says
@@ -327,22 +710,126 @@ export default function OwnerOps() {
   // Which of the two nulls this is. Without it "still reading" and "the read
   // came back refused" draw the same screen and neither can be acted on.
   const [fbFailed, setFbFailed] = useState(false);
+  /** And whether the inbox that DID come back is the whole inbox. Every count
+   *  on this tab is over these rows, and a subtotal called "All resolved" is
+   *  the worst thing this screen can say. */
+  const [fbTruncated, setFbTruncated] = useState(false);
   // The await is guarded: an unhandled rejection here left the support inbox on
   // its initial [] with no record that anything had gone wrong, and the tab
   // stated "No tickets." over a read that never returned.
   useEffect(() => {
     let c = false;
     (async () => {
-      try { const d = await fetchAllFeedback(); if (!c) { setFbRows(d); setFbFailed(d === null); } }
-      catch (e) { reportError('ownerOps.feedback', e); if (!c) { setFbRows(null); setFbFailed(true); } }
+      // `fetchAllFeedbackPage`, not `fetchAllFeedback`. The latter is a thin
+      // wrapper that returns `page && page.rows` — it THROWS THE TRUNCATION FLAG
+      // AWAY. Under a capped read this tab held a thousand-row prefix with
+      // `inboxKnown` true, and stated "3 open" and, worse, "All resolved" over
+      // tickets it had never read. app/(owner)/feedback.tsx moved to the paged
+      // call for exactly this reason and this screen was not moved with it.
+      try {
+        const page = await fetchAllFeedbackPage();
+        if (!c) {
+          setFbRows(page ? page.rows : null);
+          setFbFailed(page === null);
+          setFbTruncated(page?.truncated ?? false);
+          if (page !== null) setInboxAt(Date.now());
+        }
+      }
+      catch (e) { reportError('ownerOps.feedback', e); if (!c) { setFbRows(null); setFbFailed(true); setFbTruncated(false); } }
     })();
     return () => { c = true; };
-  }, []);
+  }, [readTick]);
   // BOTH reads. Which tickets there are, and which of them are dealt with, are
   // two questions and the tab answers with both — "3 open" over a resolved-state
   // read that failed is every ticket counted as open, which reads as a backlog
   // that is not there.
-  const inboxKnown = fbRows != null && resolvedAt != null;
+  useEffect(() => { if (noticeStatus === 'ready') setNoticesAt(Date.now()); }, [noticeStatus]);
+
+  /* ── the deletion clock, for Needs Action ────────────────────────────────
+     Only the clocks are read — this console says how many are waiting and how
+     long the soonest has, and the names stay on the screen that actions them.
+     Null is "not known": a refused read must never be able to say "nobody is
+     waiting", which is the false all-clear app/(owner)/deletions.tsx calls the
+     single worst thing that screen could do. It is no better one screen up. */
+  const [delQueue, setDelQueue] = useState<{ count: number; overdue: number; soonest: number | null } | null>(null);
+  const [delStatus, setDelStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [delAt, setDelAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE) { setDelStatus('ready'); return; }
+    let off = false;
+    (async () => {
+      const { data, error } = await supabase.from('pending_deletions').select('days_remaining')
+        .order('deletion_requested_at', { ascending: true }).limit(capLimit());
+      if (off) return;
+      if (error) { reportError('ownerOps.deletions', error); setDelStatus('error'); return; }
+      // One row past the ceiling is asked for so a full page and a truncated
+      // one stop looking identical; a prefix of the queue carries no count.
+      const page = capped(data);
+      const clocks = page.rows.map((r: any) => (typeof r.days_remaining === 'number' ? r.days_remaining as number : null));
+      const known = clocks.filter((d): d is number => d != null);
+      setDelQueue({
+        count: page.rows.length,
+        overdue: known.filter((d) => d <= 0).length,
+        soonest: known.length ? Math.min(...known) : null,
+      });
+      setDelStatus(page.truncated ? 'partial' : 'ready');
+      setDelAt(Date.now());
+    })();
+    return () => { off = true; };
+  }, [readTick]);
+
+  /* ── and the equipment register ──────────────────────────────────────────
+     `fetchEquipment` throws on a refusal and on a truncation alike, so what
+     lands here is the whole register or nothing. Null stays "not known". */
+  const [kit, setKit] = useState<Equipment[] | null>(null);
+  const [kitStatus, setKitStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [kitAt, setKitAt] = useState<number | null>(null);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      if (!USE_SUPABASE) { setKitStatus('ready'); return; }
+      // No gym to read a register for. Settled rather than left on 'loading',
+      // and as 'error' only when the tenant read itself failed — the same
+      // ladder the merchant read above climbs.
+      if (!tenant?.id) { if (tenantStatus !== 'loading') setKitStatus(tenantStatus === 'error' ? 'error' : 'ready'); return; }
+      try {
+        const rows = await fetchEquipment(supabase as any, tenant.id);
+        if (off) return;
+        setKit(rows); setKitStatus('ready'); setKitAt(Date.now());
+      } catch (e) {
+        if (off) return;
+        reportError('ownerOps.equipment', e);
+        setKitStatus('error');
+      }
+    })();
+    return () => { off = true; };
+  }, [tenant?.id, tenantStatus, readTick]);
+  /** One line over seven reads, and it is the age of the oldest of them. */
+  const fetchedAt = oldestFetch(merchantAt, resolvedAtStamp, eventsAt, inboxAt, noticesAt, delAt, kitAt);
+  /**
+   * Everything on this tab, read again — the merchant row, the support inbox
+   * and its resolved-state map, the event feed, the notices this owner has sent
+   * and the gym row the session fee is stored on.
+   */
+  const refreshAll = useCallback(() => {
+    setMerchantTick((n) => n + 1);
+    setReadTick((n) => n + 1);
+    reloadNotices();
+    refreshTenant();
+    // The pay policy is a sixth read and not part of the tenant row this
+    // provider holds, so a Refresh that skipped it would leave one section on
+    // the tab older than the line claiming when the tab was read.
+    refreshPayPolicy();
+  }, [reloadNotices, refreshTenant, refreshPayPolicy]);
+  const pull = usePullToRefresh(refreshAll);
+
+  // Both reads landed AND both are whole. Either one being a prefix makes
+  // `openCount` a count over an unknown fraction, and "All resolved" a claim
+  // about tickets nobody read.
+  const inboxKnown = fbRows != null && resolvedAt != null && !fbTruncated && !resolvedTruncated;
+  /** Read, but not all of it — the state that needs a sentence rather than a
+   *  figure. Distinct from `fbFailed`, which has no rows at all. */
+  const inboxShort = fbRows != null && resolvedAt != null && (fbTruncated || resolvedTruncated);
   const fbTickets = (fbRows ?? []).map((r) => ({
     id: 'fb' + r.id,
     subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''),
@@ -360,7 +847,7 @@ export default function OwnerOps() {
     const { data, error } = await supabase.rpc('resolve_feedback', { p_id: rowId, p_resolved: true });
     if (error || !data) {
       if (error) reportError('ownerOps.resolveTicket', error);
-      Alert.alert('Not resolved', 'This ticket is still open — nothing was saved. Try again in a moment.');
+      Alert.alert('Not Resolved', 'This ticket is still open. Nothing was saved. Try again in a moment.');
       return;
     }
     setResolvedAt((p) => ({ ...(p ?? {}), [rowId]: String(data) }));
@@ -376,178 +863,201 @@ export default function OwnerOps() {
   const [openT, setOpenT] = useState<string | null>(null);
   const G = layout.gutter;
 
+  /* ── Needs Action ─────────────────────────────────────────────────────────
+   *
+   * Every row is a fact one of this screen's reads returned, with the reason in
+   * the row and the way to deal with it on the tap. Three rules hold it honest:
+   *
+   *  · a source that FAILED is named as unchecked, never left out — an empty
+   *    queue under a failed read is the false all-clear;
+   *  · "nothing needs you" is only said when every source came back whole;
+   *  · the count in the head is only offered under the same condition, because
+   *    a count over the sources that happened to answer is a subtotal.
+   */
+  const scroller = useRef<ScrollView>(null);
+  /** Where each in-page section sits, for the rows that lead to one. `tab` is
+   *  the y of the tab's own wrapper; the rest are relative to it. */
+  const ys = useRef<Record<string, number>>({});
+  const goTo = (key: 'fee' | 'zone' | 'cards') => {
+    setTab('announce');
+    // After the tab has had a frame to lay out. When the tab was already open
+    // the positions are in hand and this is only a short delay.
+    setTimeout(() => {
+      const y = (ys.current.tab ?? 0) + (ys.current[key] ?? 0);
+      scroller.current?.scrollTo({ y: Math.max(0, y - sp.md), animated: true });
+    }, 80);
+  };
+  const mState = merchantStatus === 'ready' && tenant ? merchantState(merchant) : null;
+  const kitSum = kit ? summariseRegister(kit, gymTodayWindow(zone).day) : null;
+  type Need = { key: string; icon: 'wrench' | 'message' | 'clock' | 'settings' | 'calendar' | 'info'; name: string; reason: string; status: string; tone: string; age?: string; onPress: () => void };
+  const needs: Need[] = [];
+  // Only the two merchant states somebody HERE can act on. "Stripe is still
+  // verifying" is waiting on nobody in this building, and "never started" is
+  // an offer rather than a problem — both stay in the Card Payments section.
+  if (mState?.kind === 'blocked') {
+    needs.push({ key: 'cards', icon: 'info', name: 'Card Payments', tone: t.crit, status: 'Blocked',
+      reason: 'Your gym’s Stripe account is not the kind that can take payments, and Stripe will not change it. Contact support.',
+      onPress: () => goTo('cards') });
+  } else if (mState?.kind === 'pending' && merchant && !merchant.detailsSubmitted) {
+    needs.push({ key: 'cards', icon: 'info', name: 'Card Payments', tone: t.warn, status: 'Unfinished',
+      reason: 'Stripe setup was started and not finished, so nothing can be bought in the app yet.',
+      onPress: () => goTo('cards') });
+  }
+  if (inboxKnown && openCount > 0) {
+    needs.push({ key: 'support', icon: 'message', name: 'Support Inbox', tone: t.warn, status: 'Open',
+      reason: `${openCount} item${openCount === 1 ? '' : 's'} nobody has marked resolved.`,
+      onPress: () => setTab('support') });
+  }
+  if (delQueue && isWhole(delStatus) && delQueue.count > 0) {
+    needs.push({ key: 'deletions', icon: 'clock', name: 'Deletion Requests',
+      tone: delQueue.overdue > 0 ? t.crit : t.warn,
+      status: delQueue.overdue > 0 ? 'Overdue' : 'Clock Running',
+      reason: delQueue.overdue > 0
+        ? `${delQueue.overdue} of ${delQueue.count} ${delQueue.overdue === 1 ? 'is' : 'are'} past the 30 days members are promised.`
+        : `${delQueue.count} member${delQueue.count === 1 ? ' has' : 's have'} asked to be erased.`,
+      age: delQueue.overdue > 0 || delQueue.soonest == null ? undefined
+        : `Soonest has ${delQueue.soonest} day${delQueue.soonest === 1 ? '' : 's'} left`,
+      onPress: () => router.push('/(owner)/deletions') });
+  }
+  if (kitSum && (kitSum.overdue > 0 || kitSum.due > 0 || kitSum.unrecorded > 0)) {
+    const parts = [
+      kitSum.overdue > 0 ? `${kitSum.overdue} overdue a service` : '',
+      kitSum.due > 0 ? `${kitSum.due} due` : '',
+      kitSum.unrecorded > 0 ? `${kitSum.unrecorded} on a schedule with no service ever logged` : '',
+    ].filter(Boolean);
+    needs.push({ key: 'kit', icon: 'wrench', name: 'Equipment',
+      tone: kitSum.overdue > 0 ? t.crit : kitSum.due > 0 ? t.warn : t.ink3,
+      status: kitSum.overdue > 0 ? 'Overdue' : kitSum.due > 0 ? 'Due' : 'Never Serviced',
+      reason: `${parts.join(' · ')}.`,
+      onPress: () => router.push('/(owner)/equipment') });
+  }
+  // The settings other screens are waiting on. Each is asked only of a read
+  // that answered: an unset fee under a failed tenant read is not an unset fee.
+  if (feeKnown && tenant?.currency == null) {
+    needs.push({ key: 'currency', icon: 'settings', name: 'Currency', tone: t.warn, status: 'Not Set',
+      reason: 'Your gym has no currency, so every money figure in the app is a dash.',
+      onPress: () => goTo('fee') });
+  }
+  if (feeKnown && tenant?.sessionFee == null) {
+    needs.push({ key: 'fee', icon: 'settings', name: 'Session Fee', tone: t.warn, status: 'Not Set',
+      reason: 'Delivered sessions cannot be valued, so payroll on Overview, Revenue and Trainers is withheld.',
+      onPress: () => goTo('fee') });
+  }
+  if (USE_SUPABASE && zoneRead && !zoneErr && !zone && tenant) {
+    needs.push({ key: 'zone', icon: 'calendar', name: 'Timezone', tone: t.warn, status: 'Not Set',
+      reason: 'Every date in the console is drawn on whichever machine reads it until this gym says where it is.',
+      onPress: () => goTo('zone') });
+  }
+  /** What could not be asked. Named, because each of these is a queue that may
+   *  have something in it. */
+  const unchecked = [
+    merchantStatus === 'error' ? 'card payments' : '',
+    fbFailed || resolvedFailed ? 'the support inbox' : '',
+    delStatus === 'error' ? 'deletion requests' : '',
+    kitStatus === 'error' ? 'the equipment register' : '',
+    tenantStatus === 'error' ? 'your gym’s settings' : '',
+    zoneErr ? 'your gym’s timezone' : '',
+  ].filter(Boolean);
+  /** Read, and not all of it — no count is offered over these. */
+  const shortRead = [
+    inboxShort ? 'the support inbox' : '',
+    delStatus === 'partial' ? 'deletion requests' : '',
+  ].filter(Boolean);
+  const needsReading = merchantStatus === 'loading' || (!inboxKnown && !fbFailed && !resolvedFailed && !inboxShort)
+    || delStatus === 'loading' || kitStatus === 'loading' || tenantStatus === 'loading';
+  const needsWhole = !needsReading && unchecked.length === 0 && shortRead.length === 0;
+  const listOf = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          {/* "Platform" named Repple, not this gym — the same drift Overview
-              settled when it dropped "Repple HQ · Platform". Everything on this
-              screen belongs to the owner's own gym. */}
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
-          {/* Whether card payments are switched on is read off one query. An
-              owner in a plant room with no signal reading "payouts enabled"
-              from a read half an hour old is being told something about their
-              money that may no longer be true. */}
-          <Fetched at={fetchedAt} busy={merchantStatus === 'loading'}
-            onRefresh={() => setMerchantTick((n) => n + 1)} />
-        </View>
+        {/* The board's tab-root opening, from the kit rather than by hand.
+            "Platform" named Repple, not this gym — the same drift Overview
+            settled when it dropped "Repple HQ · Platform". Everything on this
+            screen belongs to the owner's own gym. */}
+        {/* The same search control the Overview tab carries. Studio's hidden
+            screens hang off Overview (13 of them) and Ops (5), so an owner
+            standing on any other tab root had no way into
+            app/(owner)/explore.tsx and its search over OWNER_NAV. */}
+        <ScreenHeader eyebrow="Your Gym" title="Operations"
+          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />} />
+
+        {/* ── the state, in one night hero ────────────────────────────────
+            The count is a count only when every source answered: a queue built
+            from four reads out of five is a smaller number than the truth and
+            reads as the whole of it, so a short read says "Needs You" with no
+            figure and a failed one says it was not checked. The rows, the
+            failed sources by name and the retry are in the card below. */}
+        <HeroCard eyebrow="NEEDS ACTION"
+          title={needsReading && !needs.length ? 'Checking…'
+            : needsWhole ? (needs.length ? `${needs.length} Need${needs.length === 1 ? 's' : ''} You` : 'All Clear')
+            : needs.length ? 'Needs You' : 'Not Checked'}
+          meta={needsReading && !needs.length ? undefined
+            : !needsWhole ? 'Not everything could be checked. See below.'
+            : needs.length ? needs.slice(0, 2).map((n) => n.name).join(' · ')
+            : 'Payments, support, deletions, equipment and settings all read.'} />
+
+        {/* ── 1 · needs action ───────────────────────────────────────────── */}
+        {/* Above the bar, because it is about the gym and not about a tab: an
+            overdue deletion is as overdue on Activity as it is on Announce. */}
+        <Section>
+          <SectionHead title="Needs Action" note={needsWhole && needs.length ? String(needs.length) : undefined} />
+          {needs.map((n, i) => (
+            <AttentionRow key={n.key} divider={i > 0} icon={n.icon} name={n.name} reason={n.reason}
+              status={n.status} tone={n.tone} age={n.age} onPress={n.onPress} />
+          ))}
+          {/* A failed read is never an empty queue. Said even when other rows
+              are showing, since the rows that ARE here say nothing about the
+              source that did not answer. */}
+          {unchecked.length > 0 ? (
+            <Flag tone={t.warn} style={{ marginTop: needs.length ? sp.md : 0 }}>
+              {`Could not be checked: ${listOf(unchecked)}. That is a read that failed, not an all-clear. Pull down to try again.`}
+            </Flag>
+          ) : null}
+          {shortRead.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {`Only part of ${listOf(shortRead)} came back, so nothing here counts ${shortRead.length === 1 ? 'it' : 'them'}.`}
+            </Text>
+          ) : null}
+          {needsReading ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: needs.length || unchecked.length ? sp.md : 0 }}>Checking what needs you…</Text>
+          ) : needsWhole && needs.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing outstanding in any of the five.</Text>
+          ) : null}
+        </Section>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
-          {/* The open count is only offered when the inbox is actually in hand:
-              a badge counting the tickets we managed to read is a smaller
-              number than the truth, and reads as the whole of it. */}
-          {([['announce', 'Announce'], ['support', `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => (
-            <Pressable key={k} onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: tab === k ? t.brand : 'transparent' }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: tab === k ? t.brandInk : t.ink3 }}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        {/* The board's segmented bar: a pill of `surface2`, equal segments,
+            the chosen one filled in ink. Said as tabs, which is what they are. */}
+        {/* The kit's Segmented — the tab roles, the selected state and what
+            the bar does at large text are its business now, not this file's. */}
+        <Segmented style={{ marginTop: sp.lg }} value={tab} onChange={setTab}
+          options={[
+            { key: 'announce', label: 'Announce' },
+            /* The open count is only offered when the inbox is actually in hand:
+               a badge counting the tickets we managed to read is a smaller
+               number than the truth, and reads as the whole of it. */
+            { key: 'support', label: `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}` },
+            { key: 'activity', label: 'Activity' },
+          ] as const} />
+
+        {/* The age of this screen. It began as the merchant read alone —
+            "payouts enabled" from a read half an hour old, read by an owner
+            in a plant room with no signal, is something about their money
+            that may no longer be true — and it now speaks for all seven reads
+            this screen draws on, at the age of the oldest. Refresh and the
+            pull gesture both run every one of them. Under the bar rather than
+            in the header, so the header is the board's. */}
+        <Fetched at={fetchedAt} busy={merchantStatus === 'loading'} onRefresh={refreshAll} />
 
         {tab === 'announce' ? (
-          <View>
-            {/* ── the session fee three other screens send owners here for ──── */}
-            <Section>
-              <SectionHead title="Session Fee"
-                note={feeKnown && tenant?.sessionFee != null ? (gymMoney(tenant.sessionFee, cur) ?? undefined) : undefined} />
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                What one delivered session is worth. Payroll, value per client and every "at your session fee"
-                figure on Overview, Revenue and Trainers is counted against this.
-              </Text>
-              {tenantStatus === 'loading' ? (
-                <Empty tone={t.ink3}>Reading your gym…</Empty>
-              ) : tenantStatus === 'error' ? (
-                // An empty field under a failed read is not "no fee set", and
-                // saving over it would write a value read off a failure.
-                <Empty tone={t.warn}>
-                  Your gym could not be read, so the fee it currently holds is not known — this is not a
-                  statement that none is set. Nothing can be changed until it can be read.
-                </Empty>
-              ) : !tenant ? (
-                <Empty tone={t.ink3}>This account is not attached to a gym, so there is no fee to set.</Empty>
-              ) : (<>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
-                  <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
-                    placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
-                    accessibilityLabel={`Session fee in ${cur ?? GYM_CURRENCY}`}
-                    style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-                </View>
-                {/* ── the currency, ALWAYS offered ────────────────────────
-                    This whole block was `{cur ? null : (…)}` — the picker
-                    appeared only while the gym had no currency, and disappeared
-                    the instant one was chosen. So a gym that picked the wrong
-                    one on day one had no path back from ANY surface in the
-                    product: the console's /settings did not exist yet, and this
-                    was the only control. The write itself was never the problem
-                    — `updateTenant` has always admitted `currency` — the gate
-                    was.
-
-                    supabase/parts/150 removed every money column's default
-                    precisely so a wrong currency could not hide. A control that
-                    hides itself once a wrong answer is stored undoes that. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {cur
-                    ? `This gym is priced in ${cur}. Everything written from here on is denominated in it.`
-                    : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                  {CURRENCIES.map((c) => {
-                    const on = c === cur;
-                    return (
-                      <Pressable key={c} onPress={async () => {
-                        if (on) return;
-                        const saved = await updateTenant({ currency: c });
-                        // No claim about what came before, and no claim that
-                        // anything already recorded has moved. The rows keep
-                        // the currency they were written in — a payment is a
-                        // historical fact — so a gym that changes this has two
-                        // currencies in its ledger and every total that mixes
-                        // them is withheld rather than added up.
-                        setFeeMsg(saved
-                          ? {
-                              bad: false,
-                              text: cur
-                                ? `Your gym is now priced in ${c}. Nothing already recorded has been re-denominated: payments, plans and passes keep the currency they were written in, and any total that mixes the two is withheld rather than added up.`
-                                : `Your gym is priced in ${c}. That is what every figure written from here on is denominated in.`,
-                            }
-                          : { bad: true, text: cur ? `Not saved. Your gym is still priced in ${cur}.` : 'Not saved. Your gym still has no currency set.' });
-                      }} accessibilityRole="button"
-                        accessibilityState={{ selected: on }}
-                        accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
-                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                {feeMsg ? (
-                  feeMsg.bad
-                    ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
-                    : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
-                ) : (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {tenant.sessionFee == null
-                      ? 'Not set. Until it is, delivered sessions are counted but not valued.'
-                      : 'Clear the field and save to withdraw it — an empty fee is not a fee of zero.'}
-                  </Text>
-                )}
-                <View style={{ marginTop: sp.lg }}>
-                  <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
-                    onPress={() => { void saveFee(); }} />
-                </View>
-              </>)}
-            </Section>
-
-            <Rule />
-
-            {/* ── the gym's own Stripe account ─────────────────────────────
-                Until this exists, a member can read the price of the plan they
-                are on and cannot buy it, renew it or move off it, and the gym's
-                price book is a document rather than a shop. `gym_connect_
-                accounts` (part 280) is one row per GYM and it is deliberately
-                NOT the owner's own coach row in `connect_accounts`: a
-                membership sold on a coach's account makes a different legal
-                entity the merchant of record for it, and nothing in the app
-                would look wrong about that until a chargeback arrived.
-
-                Four states and three of them need different words. "Never
-                started" is one tap from starting; "Stripe is still verifying"
-                is waiting on nobody here; and an account of the wrong KIND can
-                never take payments, because Stripe fixes an account's type at
-                creation and will not change it. A read that FAILED is the
-                fourth and says nothing about the gym at all. */}
-            <Section>
-              <SectionHead title="Card Payments"
-                note={merchantStatus === 'ready' ? (merchant && merchantState(merchant).kind === 'live' ? 'On' : 'Off') : undefined} />
-              {merchantStatus === 'loading' ? (
-                <Empty tone={t.ink3}>Reading your gym’s payment account…</Empty>
-              ) : merchantStatus === 'error' ? (
-                <Empty tone={t.warn}>
-                  Your gym’s payment account could not be read, so whether it takes cards is not known. This is
-                  not a statement that it does not.
-                </Empty>
-              ) : !tenant ? (
-                <Empty tone={t.ink3}>This account is not attached to a gym, so there is nothing to set up.</Empty>
-              ) : (<>
-                <Text style={{ ...ty.label, color: t.ink3 }}>{merchantState(merchant).note}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  The account is your gym’s own, in your gym’s name. Stripe holds your gym responsible for
-                  refunds and disputes on it, and the money never passes through a coach’s account.
-                </Text>
-                <View style={{ marginTop: sp.lg }}>
-                  <Cta wide label={merchantBusy ? 'Opening…' : merchantState(merchant).cta} disabled={merchantBusy}
-                    onPress={() => { void openStripeSetup(); }} />
-                </View>
-                {merchantMsg ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{merchantMsg}</Flag> : null}
-              </>)}
-            </Section>
-
-            <Rule />
-
+          <View onLayout={(e) => { ys.current.tab = e.nativeEvent.layout.y; }}>
+            {/* ── 2 · member operations ─────────────────────────────────────
+                First in the tab called Announce, which used to open on the
+                session fee. What the gym is telling its members, and what it
+                has told them; what is happening in the gym is the Activity
+                tab beside this one. */}
         {/* ── a notice to the gym's members ─────────────────────────────────
                 This section used to write to a `useState` in src/ui/ownerOps.tsx
                 and say so — "Saved to this device only — announcements do not
@@ -573,7 +1083,12 @@ export default function OwnerOps() {
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 Every member of your gym sees this in their notifications and on their Notices screen, where it stays after today.
               </Text>
-              <TextInput value={text} onChangeText={setText} placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
+              {/* Named. A placeholder disappears the moment somebody types, so
+                  it is not a label for anybody — and this is the box whose
+                  contents reach every member's phone. */}
+              <TextInput value={text} onChangeText={setText}
+                accessibilityLabel="The notice every member of your gym will see"
+                placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
 
               {/* The push is a separate decision with its consequence written
@@ -583,16 +1098,23 @@ export default function OwnerOps() {
                   only truthful offer is "now, wherever they are". */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also Send a Push</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
                 </View>
-                <Switch value={annPush} onValueChange={setAnnPush} />
+                {/* This switch is the difference between a note in the app and
+                    a push notification to every member of the gym, and it
+                    announced nothing at all: to a screen reader it was "switch,
+                    on" with no statement of what was on. The sentence beside it
+                    is sighted-only. */}
+                <Switch value={annPush} onValueChange={setAnnPush}
+                  accessibilityLabel="Also send this as a push notification to every member"
+                  accessibilityHint={pushConsequence('gym', null)} />
               </View>
 
               <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
                 <Cta wide label={annBusy ? 'Posting…' : 'Post to Members'}
                   onPress={async () => {
-                    if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; }
+                    if (!text.trim()) { Alert.alert('Write Something', 'Enter an announcement.'); return; }
                     setAnnBusy(true);
                     let res;
                     try { res = await addGymAnnouncement(text, { push: annPush }); } finally { setAnnBusy(false); }
@@ -600,7 +1122,7 @@ export default function OwnerOps() {
                     // once, and a cleared field after a refused write is how a
                     // notice gets lost between the owner and the server.
                     if (!res.ok || !res.delivery) {
-                      Alert.alert('Not posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
+                      Alert.alert('Not Posted', 'That could not be posted, so no member has seen it. Your words are still here. Try again in a moment.');
                       return;
                     }
                     setText(''); setAnnPush(false);
@@ -616,12 +1138,22 @@ export default function OwnerOps() {
                   list in hand is whatever survived, and "0 sent" to an owner
                   who posted three on Friday is the sentence
                   src/ui/loadStatus.ts exists to stop. */}
-              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} sent` : undefined} />
+              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} Sent` : undefined} />
               {noticeStatus === 'error' ? (
                 <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
               ) : myNotices.length === 0 ? (
                 <Empty tone={t.ink3}>
-                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing sent yet — notices you post appear here.'}
+                  {/* Only 'error' and 'loading' were branched, so 'partial' fell
+                      into the assertion. `useAnnouncements` reads the gym's
+                      announcements newest-first at `capLimit()` and reports
+                      'partial' on truncation — so an owner whose own notices are
+                      older than the newest thousand TENANT-WIDE rows was told
+                      they had sent none. The count one line up was already gated
+                      on 'ready'; the sentence below it was not. */}
+                  {noticeStatus === 'loading' ? 'Reading your notices…'
+                    : !isWhole(noticeStatus)
+                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none. Pull down to read them again.'
+                    : 'Nothing sent yet. Notices you post appear here.'}
                 </Empty>
               ) : myNotices.map((a, i) => (
                 <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -630,19 +1162,424 @@ export default function OwnerOps() {
                 </View>
               ))}
             </Section>
+
+            {/* ── 3 · commercial configuration ─────────────────────────────
+                What a session is worth, what a coach is paid for, what a late
+                cancellation costs and whether the gym can take a card. Set
+                rarely and read by every money figure in the app, so they sit
+                together under the day-to-day work rather than above it. The
+                rows in Needs Action scroll here when one of them is unset. */}
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.xl, marginBottom: sp.xs }}>Commercial Configuration</Text>
+            <View onLayout={(e) => { ys.current.fee = e.nativeEvent.layout.y; }}>
+              {/* ── the session fee three other screens send owners here for ──── */}
+              <Section>
+                <SectionHead title="Session Fee"
+                  note={feeKnown && tenant?.sessionFee != null ? (gymMoney(tenant.sessionFee, cur) ?? undefined) : undefined} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  What one delivered session is worth. Payroll, value per client and every "at your session fee"
+                  figure on Overview, Revenue and Trainers is counted against this.
+                </Text>
+                {tenantStatus === 'loading' ? (
+                  <Empty tone={t.ink3}>Reading your gym…</Empty>
+                ) : tenantStatus === 'error' ? (
+                  // An empty field under a failed read is not "no fee set", and
+                  // saving over it would write a value read off a failure.
+                  <Empty tone={t.warn}>
+                    Your gym could not be read, so the fee it currently holds is not known. This is not a
+                    statement that none is set. Nothing can be changed until it can be read.
+                  </Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is no fee to set.</Empty>
+                ) : (<>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
+                    {/* ── the caveat the one person who cannot see it was missing ──
+                        The label was `Session fee in ${cur ?? GYM_CURRENCY}`, so a
+                        gym that has not set a currency told a screen reader,
+                        flatly, that the box is in dirhams — while the caption
+                        below explained to everybody else that AED is only a
+                        placeholder. The reader who cannot see that caption is the
+                        one told the gym charges in AED, on the field that sets
+                        what every session in the product is priced at.
+                        src/ui/tenant.tsx:106 states the rule: pass the currency
+                        honestly, `?? null`, never `|| GYM_CURRENCY`. */}
+                    <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
+                      placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
+                      accessibilityLabel={cur
+                        ? `Session fee in ${cur}`
+                        : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency below first.`}
+                      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                  </View>
+                  {/* ── the currency, ALWAYS offered ────────────────────────
+                      This whole block was `{cur ? null : (…)}` — the picker
+                      appeared only while the gym had no currency, and disappeared
+                      the instant one was chosen. So a gym that picked the wrong
+                      one on day one had no path back from ANY surface in the
+                      product: the console's /settings did not exist yet, and this
+                      was the only control. The write itself was never the problem
+                      — `updateTenant` has always admitted `currency` — the gate
+                      was.
+
+                      supabase/parts/150 removed every money column's default
+                      precisely so a wrong currency could not hide. A control that
+                      hides itself once a wrong answer is stored undoes that. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {cur
+                      ? `This gym is priced in ${cur}. Everything written from here on is denominated in it.`
+                      : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                    {CURRENCY_CHOICES.map((c) => {
+                      const on = c === cur;
+                      return (
+                        <Pressable key={c} onPress={() => { askCurrency(c); }}
+                          disabled={curBusy || on} accessibilityRole="button"
+                          accessibilityState={{ selected: on, disabled: curBusy || on }}
+                          accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
+                          style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                          <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  {feeMsg ? (
+                    feeMsg.bad
+                      ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {tenant.sessionFee == null
+                        ? 'Not set. Until it is, delivered sessions are counted but not valued.'
+                        : 'Clear the field and save to withdraw it. An empty fee is not a fee of zero.'}
+                    </Text>
+                  )}
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
+                      onPress={() => { void saveFee(); }} />
+                  </View>
+                </>)}
+              </Section>
+            </View>
+
+            <Rule />
+
+            {/* ── what this gym pays a coach FOR ───────────────────────────
+                The other half of the fee above, and the half the owner could
+                not see. The fee says what a session is worth; this says which
+                sessions count — and `payrollOf` multiplies the two.
+
+                Shown and not set, which is the whole design of the section:
+                `GymProfilePatch` records that a change here re-prices months
+                already worked and not yet settled, and that is a decision taken
+                over a payroll run rather than on a phone. See the header of
+                src/lib/ownerPayPolicy.ts. */}
+            <Section>
+              <SectionHead title="What You Pay Coaches For"
+                note={policyHeadNote(payPolicy.view) ?? undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Which outcomes a coach is paid for. Payroll, Staff and the month close each count payable
+                sessions against this, and every coach reads the same answer in their own app.
+              </Text>
+              {payPolicy.status === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : payPolicy.view.kind === 'unread' ? (
+                <Notice tone={t.warn} kicker="Pay Policy" title="What You Pay for Could Not Be Read"
+                  note={POLICY_UNREAD_NOTE}>
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label="Try Again" onPress={payPolicy.refresh}
+                      a11yLabel="Read what this gym pays coaches for again" />
+                  </View>
+                </Notice>
+              ) : payPolicy.view.kind === 'no_gym' ? (
+                <Empty tone={t.ink3}>{POLICY_NO_GYM_NOTE}</Empty>
+              ) : (<>
+                {payPolicy.view.kind === 'unset' ? (
+                  // A Flag rather than warn-coloured words: check:contrast
+                  // refuses a status hue as text ink, and the tone belongs on
+                  // the mark. Said above the lines rather than below, because
+                  // the lines under an unset policy are three "not stated"s and
+                  // this is the sentence that explains them.
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{POLICY_UNSET_NOTE}</Flag>
+                ) : null}
+                {payOutcomeLines(payPolicy.view).map((line, i) => (
+                  <View key={line.outcome} style={{
+                    flexDirection: 'row', alignItems: 'flex-start', gap: sp.md,
+                    paddingVertical: sp.md,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                    {/* Three states, three marks, and the words beside them say
+                        the same thing — the dot is never the only channel. */}
+                    <View style={{
+                      width: 6, height: 6, borderRadius: 3, marginTop: 6,
+                      backgroundColor: line.answer === 'paid' ? t.good
+                        : line.answer === 'unstated' ? t.warn : t.ink3,
+                    }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
+                        {line.outcome} · {line.answer === 'paid' ? 'Paid'
+                          : line.answer === 'unpaid' ? 'Not Paid' : 'Not Stated'}
+                      </Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line.note}</Text>
+                    </View>
+                  </View>
+                ))}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {WHERE_THE_POLICY_IS_SET}
+                </Text>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            {/* ── what a late class cancellation costs ──────────────────────
+                Beside the session fee because they are the same kind of fact:
+                a number this gym charges, which several screens quote and
+                which nobody could set. The member-facing half is
+                src/lib/classCancel.ts, whose header has said since it was
+                written that "there is no column for it, no screen where an
+                owner sets one". This is that screen. */}
+            <Section>
+              <SectionHead title="Class Cancellations"
+                note={tenant?.classCancelHours == null ? 'Not Stated' : `${tenant.classCancelHours}h Notice`} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                How much notice a member must give before a class, and what you charge if they give less.
+                Until you set this, members cancelling a class are told plainly that this app does not hold
+                your policy and that they should ask you.
+              </Text>
+              {tenantStatus === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : tenantStatus === 'error' ? (
+                <Empty tone={t.warn}>
+                  Your gym could not be read, so the policy it currently holds is not known. This is not a
+                  statement that none is set. Nothing can be changed until it can be read.
+                </Empty>
+              ) : (<>
+                <View style={{ flexDirection: 'row', gap: sp.md }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>NOTICE (HOURS)</Text>
+                    <TextInput
+                      value={noticeField}
+                      onChangeText={(v) => { setNoticeDraft(v); if (policyMsg) setPolicyMsg(null); }}
+                      placeholder="—"
+                      placeholderTextColor={t.ink3}
+                      /* decimal-ok: hours of notice are whole — a gym does not
+                         run a 12.5-hour window — and `savePolicy` now refuses
+                         a non-integer in as many words. This comment used to
+                         claim that refusal while the code did no such thing:
+                         `Number('12.5')` is finite and non-negative, so it
+                         passed, and the `integer` column rounded it. */
+                      keyboardType="number-pad"
+                      accessibilityLabel="Hours of notice before a class"
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                      {cur ? `FEE (${cur})` : 'FEE'}
+                    </Text>
+                    <TextInput
+                      value={cancelFeeField}
+                      onChangeText={(v) => { setCancelFeeDraft(v); if (policyMsg) setPolicyMsg(null); }}
+                      placeholder="—"
+                      placeholderTextColor={t.ink3}
+                      keyboardType="decimal-pad"
+                      accessibilityLabel={cur ? `Late cancellation fee in ${cur}` : 'Late cancellation fee'}
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}
+                    />
+                  </View>
+                </View>
+                {/* The unit is the gym's, and without one the amount cannot be
+                    shown to a member at all — said here rather than discovered
+                    later by an owner whose fee never appears. */}
+                {/* A Flag, not coloured text. check:contrast caught the first
+                    version of both of these: status colours are tuned to the
+                    3:1 a mark needs and not the 4.5:1 text needs, so the tone
+                    goes on the mark and the words stay in ink. */}
+                {!cur ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                    Your gym has no currency set, so a fee saved here cannot be shown to members as an amount;
+                    they are told you charge for it and to ask you what it is. Set a currency above and the
+                    figure appears.
+                  </Flag>
+                ) : null}
+                {policyMsg ? (
+                  policyMsg.bad
+                    ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{policyMsg.text}</Flag>
+                    : <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{policyMsg.text}</Text>
+                ) : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    Clear both and save to withdraw the policy. An empty notice is not a zero-hour window, and
+                    an empty fee is not a free cancellation. Both of those you can state by entering 0.
+                  </Text>
+                )}
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta wide label={policyBusy ? 'Saving…' : 'Save Cancellation Policy'} disabled={policyBusy}
+                    onPress={() => { void savePolicy(); }} />
+                </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            <View onLayout={(e) => { ys.current.cards = e.nativeEvent.layout.y; }}>
+              {/* ── the gym's own Stripe account ─────────────────────────────
+                  Until this exists, a member can read the price of the plan they
+                  are on and cannot buy it, renew it or move off it, and the gym's
+                  price book is a document rather than a shop. `gym_connect_
+                  accounts` (part 280) is one row per GYM and it is deliberately
+                  NOT the owner's own coach row in `connect_accounts`: a
+                  membership sold on a coach's account makes a different legal
+                  entity the merchant of record for it, and nothing in the app
+                  would look wrong about that until a chargeback arrived.
+
+                  Four states and three of them need different words. "Never
+                  started" is one tap from starting; "Stripe is still verifying"
+                  is waiting on nobody here; and an account of the wrong KIND can
+                  never take payments, because Stripe fixes an account's type at
+                  creation and will not change it. A read that FAILED is the
+                  fourth and says nothing about the gym at all. */}
+              <Section>
+                <SectionHead title="Card Payments"
+                  note={merchantStatus === 'ready' ? (merchant && merchantState(merchant).kind === 'live' ? 'On' : 'Off') : undefined} />
+                {merchantStatus === 'loading' ? (
+                  <Empty tone={t.ink3}>Reading your gym’s payment account…</Empty>
+                ) : merchantStatus === 'error' ? (
+                  <Empty tone={t.warn}>
+                    Your gym’s payment account could not be read, so whether it takes cards is not known. This is
+                    not a statement that it does not.
+                  </Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is nothing to set up.</Empty>
+                ) : (<>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{merchantState(merchant).note}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    The account is your gym’s own, in your gym’s name. Stripe holds your gym responsible for
+                    refunds and disputes on it, and the money never passes through a coach’s account.
+                  </Text>
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta wide label={merchantBusy ? 'Opening…' : merchantState(merchant).cta} disabled={merchantBusy}
+                      onPress={() => { void openStripeSetup(); }} />
+                  </View>
+                  {merchantMsg ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{merchantMsg}</Flag> : null}
+                </>)}
+              </Section>
+            </View>
+
+            {/* ── the gym's own clock ───────────────────────────────────────
+                Not money, and not day-to-day: the zone every date in the
+                console, the rota and the month close is drawn on. */}
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.xl, marginBottom: sp.xs }}>Gym Clock</Text>
+            <View onLayout={(e) => { ys.current.zone = e.nativeEvent.layout.y; }}>
+              {/* ── where this gym is ────────────────────────────────────────
+                  The setting every gym on the platform is missing, and the only
+                  one on this screen that is WRONG rather than empty while it is
+                  unset: with no zone, "today", the month close, the payroll month
+                  and footfall by hour are each cut on whichever machine the page
+                  is open on. Read at the front desk they are right by accident.
+
+                  No "use this phone's zone" button, and the phone's own zone is
+                  shown as a fact about the phone with nothing to press. Part 710
+                  makes the argument about a laptop and it holds harder here: an
+                  owner going through their books in an airport would set the gym
+                  to Europe/Amsterdam with one tap and never find out. */}
+              <Section>
+                <SectionHead title="Where This Gym Is"
+                  note={zoneRead && !zoneErr && zone ? (gymTimeLabel(tick, zone) ?? undefined) : undefined} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  Whose day this gym’s day is. The month close, the payroll month and every “today”
+                  in the owner console are cut on it.
+                </Text>
+                {tenantStatus === 'loading' || (tenant?.id && !zoneRead) ? (
+                  <Empty tone={t.ink3}>Reading your gym…</Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
+                ) : zoneErr ? (
+                  <Empty tone={t.warn}>
+                    This gym’s timezone could not be read, so whether one is set is not known. This is
+                    not a statement that none is. Nothing can be changed until it can be read.
+                  </Empty>
+                ) : (<>
+                  {zone ? (
+                    <View style={{ marginBottom: sp.md }}>
+                      <Text style={{ ...ty.body, color: t.ink }}>{zone}</Text>
+                      {/* The check anybody can actually perform. A null clock is a
+                          stored zone this runtime cannot resolve — said as that,
+                          rather than left blank. */}
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {gymTimeLabel(tick, zone) && gymDay(tick, zone)
+                          ? `It is ${gymTimeLabel(tick, zone)} on ${gymDay(tick, zone)} there. If that is not the time at the gym, this is the wrong zone.`
+                          : 'This phone cannot resolve that zone, so the clock cannot be shown against it. Search below to set one it knows.'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Not set. Until it is, every date in the owner console is drawn on whichever
+                      machine it is read from: right at the front desk by accident, and wrong for
+                      anyone reading from another country.
+                    </Flag>
+                  )}
+
+                  <TextInput value={zoneQuery} onChangeText={(v) => { setZoneQuery(v); if (zoneMsg) setZoneMsg(null); }}
+                    placeholder={zoneAll.length ? 'Search a city, e.g. London, Dubai' : 'Europe/London'}
+                    placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
+                    accessibilityLabel="Search for the city this gym is in"
+                    style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+
+                  {zoneAll.length === 0 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{NO_ZONE_LIST_NOTE}</Text>
+                  ) : null}
+
+                  {/* Typed a full zone name that this runtime knows, and it is not
+                      already in the list below. The only path on a runtime with no
+                      list, and a shortcut for anybody who knows the name. */}
+                  {typedZone.kind === 'zone' && !zoneHits.some((h) => h.zone === typedZone.zone) ? (
+                    <ZoneRow zone={typedZone.zone} where="typed" tick={tick} busy={zoneBusy}
+                      onPress={() => { askZone(typedZone.zone); }} />
+                  ) : null}
+
+                  {zoneHits.map((h) => (
+                    <ZoneRow key={h.zone} zone={h.zone} where={h.where} tick={tick} busy={zoneBusy}
+                      onPress={() => { askZone(h.zone); }} />
+                  ))}
+
+                  {zoneQuery.trim() && zoneHits.length === 0 && typedZone.kind !== 'zone' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {typedZone.kind === 'bad'
+                        ? typedZone.reason
+                        : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town. Zones are named after the city whose clock a place keeps.`}
+                    </Text>
+                  ) : null}
+
+                  {zoneMsg ? (
+                    zoneMsg.bad
+                      ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{zoneMsg.text}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{zoneMsg.text}</Text>
+                  ) : null}
+
+                  {/* A fact about this phone, labelled as one. Not a suggestion,
+                      and not something to press — see the note above the section. */}
+                  {readerZone() ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      This phone’s own clock is set to {readerZone()}. That is where the phone is, which
+                      is not necessarily where the gym is, so it is not filled in for you.
+                    </Text>
+                  ) : null}
+                </>)}
+              </Section>
+            </View>
           </View>
         ) : tab === 'support' ? (
           <View>
             <Section>
               {/* "All resolved" is a claim about every ticket there is, so it
                   needs the whole inbox behind it. */}
-              <SectionHead title="Support Inbox" note={inboxKnown && allTickets.length ? (openCount ? `${openCount} open` : 'All resolved') : undefined} />
+              <SectionHead title="Support Inbox" note={inboxKnown && allTickets.length ? (openCount ? `${openCount} Open` : 'All Resolved') : undefined} />
               {fbFailed ? (
                 // Tickets held on this device still show below — they are real —
                 // but they are not the inbox, and saying nothing here would let
                 // however many of them there are stand in for all of it.
                 <Empty tone={t.warn}>
-                  The support inbox could not be read. This is not "no tickets" — feedback sent from inside the app
+                  The support inbox could not be read. This is not "no tickets": feedback sent from inside the app
                   may be waiting, and nothing on this screen has ruled that out.
                 </Empty>
               ) : resolvedFailed ? (
@@ -652,6 +1589,16 @@ export default function OwnerOps() {
                 <Empty tone={t.warn}>
                   Which of these you have already dealt with could not be read, so they are all shown as open.
                   Some of them may not be.
+                </Empty>
+              ) : inboxShort ? (
+                // Read, and not all of it. Distinct from the two failures above
+                // and from the read still being in flight below — the tickets
+                // shown are real, there are more of them, and no count over
+                // them is offered.
+                <Empty tone={t.warn}>
+                  There is more feedback than fits in one read, so these are the most recent rather
+                  than all of them and there is no count above. Anything older than these has not
+                  been looked at by this screen.
                 </Empty>
               ) : !inboxKnown ? (
                 <Empty tone={t.ink3}>Reading the support inbox…</Empty>
@@ -665,7 +1612,7 @@ export default function OwnerOps() {
                     <Pressable onPress={() => setOpenT(open ? null : tk.id)} style={{ paddingVertical: sp.md }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                         {tk.resolved ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />}
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{tk.subject}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{tk.subject}</Text>
                         {tk.resolved ? <Text style={{ ...ty.micro, color: t.ink3 }}>Resolved</Text> : null}
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tk.from}</Text>
@@ -730,7 +1677,18 @@ export default function OwnerOps() {
               {evStatus === 'error' ? null : (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Written by the database as things happen, so nothing here was typed by anyone and nothing
-                  can be missed by a screen forgetting to record it.{events.length ? ' The most recent hundred.' : ''}
+                  can be missed by a screen forgetting to record it.
+                  {/* Conditioned on the STATUS and not on the row count.
+                      "The most recent hundred" was printed whenever any row
+                      arrived, so a complete forty-row feed was described as a
+                      truncated one — and a genuinely truncated feed was
+                      described in exactly the same words as a complete one, so
+                      the sentence told a reader nothing either way. `partial`
+                      is the only state in which a hundred rows means there are
+                      more, and it is the only state that now says so. */}
+                  {evStatus === 'partial'
+                    ? ' There is more activity than fits in one read, so these are the most recent hundred and there are older entries this screen has not seen. That is why there is no count above it.'
+                    : ''}
                 </Text>
               )}
             </Section>
@@ -752,20 +1710,31 @@ export default function OwnerOps() {
             in this file, which is all that check asks. A route named inside a
             branch that is false is reachable to a grep and unreachable to a
             person. */}
-        <Rule />
+        {/* ── 4 · people and floor ───────────────────────────────────────── */}
+        {/* "Everywhere Else" was one list of six unrelated destinations. Split
+            the way the review groups them: who is on the floor and what is on
+            it, then the account and its paperwork. */}
         <Section>
-          <SectionHead title="Everywhere Else" />
-          <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
+          <SectionHead title="People and Floor" />
+          <ListRow icon="calendar" tone="blue" title="Trainer Rota" note="Who is on the floor, against what is booked"
             onPress={() => router.push('/(owner)/rota')} />
-          <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
+          <ListRow icon="wrench" tone="amber" title="Equipment Register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
-          <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
+          <ListRow icon="dumbbell" tone="purple" title="Exercise Library" note="Every movement, and the kit each one needs"
             onPress={() => router.push('/(owner)/library')} />
-          <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
+        </Section>
+
+        {/* ── 5 · administration ─────────────────────────────────────────── */}
+        {/* Deletion Requests keeps its row here as well as its line in Needs
+            Action: that line only draws while somebody is waiting, and this
+            is the only standing route to the screen and its audit log. */}
+        <Section>
+          <SectionHead title="Administration" />
+          <ListRow icon="clock" tone="red" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
-          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+          <ListRow icon="settings" tone="neutral" title="Settings" note="Your sign-in, your data, and deleting your account"
             onPress={() => router.push('/(owner)/settings')} />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+          <ListRow icon="search" tone="teal" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>
       </ScrollView>

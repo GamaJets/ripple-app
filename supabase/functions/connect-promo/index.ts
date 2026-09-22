@@ -56,6 +56,13 @@
 // scoped by `trainer_id = uid` explicitly.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { modelForAccount } from '../../../src/lib/directCharges.ts';
 import { normaliseCode, promoBlocker, MAX_PERCENT_OFF, type PromoTarget } from '../../../src/lib/packagePromo.ts';
 
@@ -95,7 +102,22 @@ Deno.serve(async (req) => {
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
+      + 'No code has been created, changed or deleted. Try again in a moment.' }, 503);
+  }
   const uid = auth?.user?.id;
   if (!uid) return json({ error: 'no user' }, 401);
 
@@ -114,7 +136,7 @@ Deno.serve(async (req) => {
     // would do nothing — a coach printing it on a poster and clients typing it
     // into a page that shrugs.
     return json({
-      error: 'Discount codes are not available on your account yet. Your sales are taken with Repple as the merchant, and a code created on your own Stripe account would never be seen by the payment page — so it would look like it existed and would do nothing at all.',
+      error: 'Discount codes are not available on your account yet. Your sales are taken with Repple as the merchant, and a code created on your own Stripe account would never be seen by the payment page. So it would look like it existed and would do nothing at all.',
     }, 409);
   }
   const acctOpts = { stripeAccount: acct.stripe_account_id as string };
@@ -230,24 +252,54 @@ Deno.serve(async (req) => {
       metadata: { repple_package_id: packageId, repple_trainer_id: uid },
     }, acctOpts);
 
-    const promo = await stripe.promotionCodes.create({
-      coupon: coupon.id,
-      code,
-      ...(expiresAt ? { expires_at: expiresAt } : {}),
-      ...(maxRedemptions ? { max_redemptions: maxRedemptions } : {}),
-      // The package this is FOR, stamped where the list read can find it again.
-      // Stripe's own `applies_to.products` is about Products, and this app's
-      // packages are inline `price_data` with no stored Product to point at —
-      // so the restriction is recorded here and Stripe never acts on it.
-      // It used to be enforced by nothing at all beyond which package the coach
-      // handed the code out for, so a code made for one recurring package
-      // worked on every other one they sell. It is enforced now, at the point
-      // the client's code reaches connect-checkout, by `codeAppliesTo` in
-      // src/lib/packagePromo.ts — which only became possible once the code was
-      // typed in the app rather than on Stripe's own hosted page, where nothing
-      // in this repo could see it.
-      metadata: { repple_package_id: packageId, repple_trainer_id: uid },
-    }, acctOpts);
+    // ── the half-made offer ────────────────────────────────────────────────
+    //
+    // Two Stripe objects, created one after the other, and the second one is
+    // the one that fails: the commonest refusal this function meets is "code
+    // already in use on this account", and it can only be discovered HERE,
+    // after the coupon exists. Left alone, that coupon stays on the coach's
+    // account for ever — invisible in Repple, because `list` reads promotion
+    // codes and there is no code pointing at it, and visible in the coach's
+    // own Stripe dashboard as a discount they never made and cannot explain.
+    // A coach retrying with a different code accumulates one per attempt.
+    //
+    // So the second call is caught rather than allowed to escape into the outer
+    // handler, and the coupon it was going to belong to is deleted. Stripe
+    // permits deleting a coupon that has never been redeemed, which is exactly
+    // what one created a moment ago is. The delete is best-effort and its own
+    // failure is logged rather than reported: what the coach needs to read is
+    // WHY THE CODE WAS REFUSED, and replacing that with a message about
+    // tidying up would answer a question they did not ask.
+    let promo: Stripe.PromotionCode;
+    try {
+      promo = await stripe.promotionCodes.create({
+        coupon: coupon.id,
+        code,
+        ...(expiresAt ? { expires_at: expiresAt } : {}),
+        ...(maxRedemptions ? { max_redemptions: maxRedemptions } : {}),
+        // The package this is FOR, stamped where the list read can find it
+        // again. Stripe's own `applies_to.products` is about Products, and this
+        // app's packages are inline `price_data` with no stored Product to
+        // point at — so the restriction is recorded here and Stripe never acts
+        // on it. It used to be enforced by nothing at all beyond which package
+        // the coach handed the code out for, so a code made for one recurring
+        // package worked on every other one they sell. It is enforced now, at
+        // the point the client's code reaches connect-checkout, by
+        // `codeAppliesTo` in src/lib/packagePromo.ts — which only became
+        // possible once the code was typed in the app rather than on Stripe's
+        // own hosted page, where nothing in this repo could see it.
+        metadata: { repple_package_id: packageId, repple_trainer_id: uid },
+      }, acctOpts);
+    } catch (e) {
+      try {
+        await stripe.coupons.del(coupon.id, acctOpts);
+      } catch (delErr) {
+        console.error('connect-promo: code ' + code + ' was refused and its coupon ' + coupon.id
+          + ' could not be removed from ' + acct.stripe_account_id + ', so it is stranded on that account:',
+          (delErr as Error).message);
+      }
+      return stripeError('creating a code', e);
+    }
 
     return json({
       ok: true,

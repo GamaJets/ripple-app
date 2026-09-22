@@ -21,6 +21,10 @@
 // renders every switch as unread rather than as on. This file's only job in
 // that distinction is to never return 'ready' for a read that did not happen.
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. See
+// src/lib/authReadFate.ts: `getUser()` resolves on a dropped connection rather
+// than rejecting, so the error is the only thing that tells the two apart.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
@@ -37,9 +41,20 @@ export interface ChannelPrefsRead {
 export async function fetchChannelPrefs(): Promise<ChannelPrefsRead> {
   if (!USE_SUPABASE) return { muted: new Set(), status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { muted: new Set(), status: 'ready' };
+    // The error beside this call was discarded, so an unreachable auth server
+    // produced the same `undefined` uid a signed-out device does
+    // (src/lib/authReadFate.ts) — and took the 'ready' branch. Read the note on
+    // the database error eight lines below: 'error' exists here precisely
+    // because it "shows five unread switches rather than five switches in the
+    // on position". An empty muted set under 'ready' IS five switches in the on
+    // position, shown to a coach who muted chat, over a read that never
+    // happened. It is the same wrong screen the error branch already refuses,
+    // reached one call earlier — and it is the screen that leads a coach to
+    // conclude the switches do nothing and turn the master one off.
+    const who = await signedInUid('coachNotify.read');
+    if (who.fate === 'signed-out') return { muted: new Set(), status: 'ready' };
+    if (who.fate !== null) return { muted: new Set(), status: 'error' };
+    const uid = who.uid;
     const { data, error } = await supabase
       .from('notify_channel_prefs')
       .select('channel, enabled')
@@ -73,9 +88,16 @@ export async function fetchChannelPrefs(): Promise<ChannelPrefsRead> {
 export async function setChannel(channel: CoachChannel, enabled: boolean): Promise<boolean> {
   if (!USE_SUPABASE) return false;
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return false;
+    // A WRITE whose payload carries the uid — `user_id` is half the upsert's
+    // conflict target — so this is refused rather than attempted on either
+    // fate. `false` is already this function's "the server did not take it",
+    // and the whole reason this function returns a boolean at all is that a
+    // settings screen which cannot say "not saved" will say "saved". An outage
+    // now leaves a report under this key as well, instead of vanishing into an
+    // indistinguishable `false`.
+    const who = await signedInUid('coachNotify.write');
+    if (who.fate !== null) return false;
+    const uid = who.uid;
     const { data, error } = await supabase
       .from('notify_channel_prefs')
       .upsert({ user_id: uid, channel, enabled }, { onConflict: 'user_id,channel' })

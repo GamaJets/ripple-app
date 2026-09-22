@@ -32,12 +32,25 @@
 // The client app names its coach through `useThreadPeerName`
 // (src/lib/threadPeer.ts), which reads `clients.trainer_id` and then that id's
 // profile and no other. It is the right source there. This one never is.
-import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()`
+// resolves with a null user on a dropped connection rather than rejecting, so
+// the error is the only thing that separates an outage from a sign-out — see
+// src/lib/authReadFate.ts, and the SIGNED_OUT listener below, which documents
+// what a false sign-out costs on this particular screen.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
+// Whether the autosave actually landed. Until this module the write ended
+// `.then(() => {}, () => {})` and the screen could not tell a saved profile
+// from a refused one — see that file's header.
+import { IDLE_SAVE, markPending, afterWrite, profileWriteFailure, profileFingerprint, isProfileEdit, type SaveStatus } from '../lib/profileSave';
+// What may be stored in `profiles.avatar` at all. A device path is not a URL
+// anywhere but on the phone that chose it — see src/lib/avatarImage.ts.
+import { isDeviceAvatar } from '../lib/avatarImage';
 import {
   resolveTrainerAccess,
   mayReadTrainerProfile,
@@ -65,6 +78,8 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
   /** Null clears the rate. It is not the same as 0, which is a rate. */
   setSessionFee: (v: number | null) => void;
   setListed: (v: boolean) => void;
+  /** Whether the last autosave landed. See src/lib/profileSave.ts. */
+  save: SaveStatus;
   /**
    * Claim a public-page address and switch the page on or off, in one call.
    *
@@ -81,6 +96,10 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
    * grant (part 340 §4), so there is no other route to them from here.
    */
   publishPage: (handle: string, on: boolean) => Promise<PublishResult>;
+  /** Read `profiles` and `trainers` again. Flushes a pending edit first — see
+   *  the docstring on the implementation for why that ordering is not
+   *  optional. */
+  reload: () => Promise<void>;
 }
 
 const Ctx = createContext<MyTrainerProfileValue | null>(null);
@@ -138,19 +157,53 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // physical rather than advisory: the two rows this reads are the SIGNED-IN
   // user's, so on those apps there is no request whose result could be mistaken
   // for a coach's name or a coach's face, because no request is made.
+  // Bumped by `reload` below. In the dependency array of the read effect so a
+  // refresh goes back through the one read this provider has, rather than
+  // growing a second one that would have to repeat every assignment rule in it.
+  const [readNonce, setReadNonce] = useState(0);
+
   useEffect(() => {
     if (!hydrated || !USE_SUPABASE || VARIANT !== 'trainer') return;
     let cancelled = false;
     const fetchReal = async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const u = auth?.user;
+        const who = await signedInUid('coachProfile.read');
         if (cancelled) return;
-        setUid(u?.id ?? null);
+        setUid(who.uid);
         // Settle rather than return: a signed-out launch used to leave `synced`
         // false forever, which now reads as "still loading" and would hold a
         // screen on a spinner that nothing is ever going to resolve.
-        if (!u) { setTrainerRow('unknown'); setSynced(true); return; }
+        if (who.fate === 'signed-out') { setTrainerRow('unknown'); setSynced(true); return; }
+        if (who.fate !== null) {
+          // ── the door the listener below already guards, opened from here ──
+          //
+          // Read the long note on the SIGNED_OUT listener: `uid` null makes
+          // `resolveTrainerAccess` answer 'signed-out', "which blanks the
+          // profile AND turns every setter on this provider into a no-op, so
+          // their Name and Bio fields go quietly read-only". That note is about
+          // an INITIAL_SESSION delivered as null when `getSession()` errors —
+          // and this call had the identical hole, because the error beside
+          // `getUser()` was discarded and an unreachable auth server resolves
+          // with `user: null` (src/lib/authReadFate.ts). Settling here signed a
+          // working coach out of their own profile screen while they were
+          // looking at it.
+          //
+          // So `synced` stays FALSE, and that is the opposite of the line above
+          // rather than a contradiction of it. `settled` is `hydrated &&
+          // synced`, so access resolves to 'loading' — which is exactly true:
+          // nobody has established who this is yet. The spinner argument does
+          // not apply, because unlike a sign-out there IS something to wait
+          // for: this effect is keyed on `readNonce`, `reload()` bumps it, and
+          // pull-to-refresh is what the coach already has in their hand.
+          //
+          // 'unknown' on the trainer row is left as it is, for the reason that
+          // field is three-valued at all: "a read that failed says nothing at
+          // all, and treating it as absence would demote a real coach every
+          // time their connection dropped."
+          setTrainerRow('unknown');
+          return;
+        }
+        const u = { id: who.uid };
 
         const prof = await supabase.from('profiles').select('full_name, avatar').eq('id', u.id).single();
         if (cancelled) return;
@@ -201,13 +254,73 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       if (!cancelled) setSynced(true);
     };
     fetchReal();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (cancelled || !session) return;
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return;
+      if (!session) {
+        // A null session is not the same thing as a sign-out. SIGNED_OUT is the
+        // only event that means the session ended — auth-js raises it from
+        // `_removeSession()`, which every path that drops a session goes
+        // through — while INITIAL_SESSION is delivered with `null` whenever
+        // `getSession()` ERRORS, which it does when the access token has
+        // expired and the refresh could not be made. The refresh token is still
+        // on the handset and still good.
+        //
+        // This listener is re-registered on every `readNonce`, so `reload()`
+        // (pull-to-refresh) on a dead connection is enough to raise it. Clearing
+        // there signs a coach out of their own screen while they are looking at
+        // it: `uid` null makes `resolveTrainerAccess` answer 'signed-out',
+        // which blanks the profile AND turns every setter on this provider into
+        // a no-op, so their Name and Bio fields go quietly read-only. Anything
+        // typed since the last save is replaced by the server copy when the
+        // session comes back, with `save` left reading "Saving…" — the debounce
+        // is disarmed by the same `uid: null`, so it never resolves.
+        if (event !== 'SIGNED_OUT') return;
+        // ── the sign-out this listener did not have ────────────────────────
+        //
+        // It was `if (cancelled || !session) return;`, so a session ending was
+        // the one auth event this provider ignored, and every field below kept
+        // the departing coach's answers: their name, their face, their tagline,
+        // their bio, what they offer, their session rate, whether their public
+        // page is live and what its address is.
+        //
+        // This provider is mounted at the root and outlives the Sign Out
+        // button's `router.replace('/welcome')`, so the next coach to sign in
+        // on the same handset — a shared gym phone, a coach handing a device to
+        // a colleague — gets app/(trainer)/profile.tsx and the dashboard header
+        // drawn from it before their own read lands. And because the read only
+        // ASSIGNS a name it actually found (`if (real.trim()) setName(...)`), a
+        // profiles row with a blank full_name, or a read that failed, leaves the
+        // previous coach's name and photo in place for the whole session.
+        //
+        // Cleared to the values the `useState` calls above open with, so a
+        // sign-out returns this provider to the state a fresh launch has. The
+        // local blob needs nothing done to it: the hydrate effect above deletes
+        // `repple.coachProfile` outright whenever USE_SUPABASE is on, and the
+        // persist effect below is gated on `mine`, which this clear makes false.
+        //
+        // `uid` null is what disarms the debounced push effect and what makes
+        // `resolveTrainerAccess` answer 'signed-out', so a cleared bio can never
+        // be written up as though the coach had erased it themselves.
+        //
+        // `synced` goes TRUE, not false, for the reason fetchReal's own
+        // signed-out branch settles rather than returns: `settled` is
+        // `hydrated && synced`, and an unsettled read resolves to 'loading',
+        // which would hold a screen on a spinner nothing is ever going to
+        // resolve. There is nothing left to wait for here — the answer is that
+        // nobody is signed in.
+        setUid(null);
+        setTrainerRow('unknown');
+        setName(''); setPhoto(null); setTagline(''); setBio('');
+        setOffers([]); setSpecialties([]); setSessionFee(null); setListed(false);
+        setPublicHandle(null); setPublicPage(false);
+        setSynced(true);
+        return;
+      }
       setSynced(false);
       fetchReal();
     });
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
-  }, [hydrated]);
+  }, [hydrated, readNonce]);
 
   // Push edits back to the server. Debounced so typing in a text field doesn't fire
   // a write per keystroke. Update-only (never inserts): the trainer row is created
@@ -216,18 +329,169 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // Gated on `mine` as well as on `uid`, so a build that is not the coach app can
   // never write these columns for the signed-in user — the same reason it does
   // not read them.
+  const [save, setSave] = useState<SaveStatus>(IDLE_SAVE);
+  // The values the next write should carry, kept in a ref so the flush below
+  // can fire without being in anybody's dependency array.
+  const latest = useRef({ name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid });
+  latest.current = { name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid };
+  // Whether there is an edit that has not reached the server. Cleared only by a
+  // write that came back OK, so a failed one stays dirty and gets flushed again.
+  const dirty = useRef(false);
+  // The fingerprint of what the server last confirmed, or null when no baseline
+  // has been taken. Declared beside `dirty` because `flush` below writes to it.
+  // See the effect further down, and `profileFingerprint` in
+  // src/lib/profileSave.ts, for what it is guarding against.
+  const baseline = useRef<string | null>(null);
+
+  /**
+   * Write, and report what happened.
+   *
+   * Both statements are awaited together and BOTH must succeed. `profiles`
+   * holds the name and avatar and `trainers` holds everything else, so a screen
+   * that reported success on the first alone would tell a coach their bio was
+   * saved on the strength of their name having been.
+   */
+  const flush = useCallback(async (): Promise<void> => {
+    const v = latest.current;
+    if (!USE_SUPABASE || !v.uid || !mine) return;
+    try {
+      const [a, b] = await Promise.all([
+        // `count: 'exact'`, on both. Without it PostgREST answers an UPDATE that
+        // matched ZERO rows with 204 and `error: null` — indistinguishable here
+        // from one that changed something — and this screen printed "Saved."
+        // over it. The two coaches who get that are not edge cases: one with no
+        // `trainers` row yet, and one an RLS policy refuses. `session_fee` is in
+        // the second statement, and it is the figure Analytics and the Assistant
+        // price everything from.
+        //
+        // `avatar` is the second lock, the same one src/ui/clientData.tsx puts
+        // on the same column: a picker on a phone hands back a path INSIDE THIS
+        // HANDSET, and that path in a shared row is a blank circle for every
+        // client, every thread and the directory card meant to win the coach
+        // work. src/ui/avatarUpload.ts is where a photo becomes a URL; nothing
+        // else may reach this column.
+        supabase.from('profiles')
+          .update({
+          // Trimmed, and never stored blank: a coach who cleared this field was
+          // storing an empty string for real. Blank is not a name any screen can
+          // show, and action_account_deletion() freezes this column into
+          // deletion_log — where it can never be repaired, because the profile it
+          // came from is deleted on the next line. See supabase/parts/2370.
+          //
+          // NULL rather than the client app's answer, and the difference is
+          // deliberate. app/(client)/profile.tsx does `setName(nameVal.trim() ||
+          // cd.name)` — it keeps the OLD name, so clearing the box silently does
+          // nothing. That is fine there and wrong here: `full_name` is nullable,
+          // every reader of it already handles null (my_coach and
+          // my_coach_profile nullif this exact column), and a coach who clears
+          // their name has asked for something the schema can express. Reverting
+          // would tell them it saved when it had not.
+          full_name: v.name.trim() || null,
+          avatar: isDeviceAvatar(v.photo) ? null : v.photo,
+        }, { count: 'exact' })
+          .eq('id', v.uid),
+        supabase.from('trainers').update({
+          bio: v.bio, tagline: v.tagline, offers: v.offers,
+          specialties: v.specialties, session_fee: v.sessionFee, listed: v.listed,
+        }, { count: 'exact' }).eq('id', v.uid),
+      ]);
+      // Counted, never assumed. The sentence names which of the two halves did
+      // not land, because "your profile did not save" leaves a coach unable to
+      // tell whether it is their name or their rate that is still only here.
+      const why = profileWriteFailure(a, b);
+      if (why) {
+        if (a.error) reportError('coachProfile.persist.profiles', a.error);
+        if (b.error) reportError('coachProfile.persist.trainers', b.error);
+        // Left dirty on purpose: the values are still only on this handset, and
+        // the next edit or the unmount flush should try them again.
+        setSave((prev) => afterWrite(prev, false, Date.now(), why));
+        return;
+      }
+      dirty.current = false;
+      // What the server now holds. Taken from the values that were actually
+      // sent, not from the current render, so an edit made DURING the write is
+      // still seen as an edit afterwards.
+      baseline.current = profileFingerprint(v);
+      setSave((prev) => afterWrite(prev, true, Date.now()));
+    } catch (e) {
+      reportError('coachProfile.persist', e);
+      setSave((prev) => afterWrite(prev, false, Date.now(), null));
+    }
+  }, [mine]);
+
+  // A re-read, or a different person signing in, invalidates the baseline. It
+  // is retaken on the first settled render afterwards.
+  useEffect(() => { if (!synced) baseline.current = null; }, [synced]);
+
+  // ── the write that fired on every launch ──────────────────────────────────
+  //
+  // This effect used to set `dirty` and schedule a PATCH whenever ANY of its
+  // dependencies changed, and `synced` is one of them. So the instant the
+  // server read settled — carrying the values that had just come FROM the
+  // server — it wrote them straight back. Every launch, for every coach, over
+  // both tables, including `session_fee`, `listed` and `avatar`. Confirmed on
+  // an iPhone: relaunch the app, type nothing, and the badge already reads
+  // "Saved."; scroll, and it re-fires. The comment further down this screen
+  // saying "Nothing is drawn before the first edit" was describing a screen
+  // this one had stopped being.
+  //
+  // The cost is not the round trip. It is that a launch wrote HANDSET-held
+  // state over SERVER-held state, which is the direction that loses work: a
+  // coach who edits their rate on one device and then opens the app on another
+  // has the second device quietly put the old rate back.
+  //
+  // `baseline` is the fingerprint of what the server last confirmed. Until it
+  // is taken, nothing is written; while it matches, nothing is written; a
+  // re-read retakes it and a successful write replaces it. See
+  // `profileFingerprint` in src/lib/profileSave.ts for why it is a fingerprint
+  // and not a flag per setter.
   useEffect(() => {
     if (!USE_SUPABASE || !uid || !hydrated || !synced || !mine) return;
-    const timer = setTimeout(() => {
-      try {
-        supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', uid).then(() => {}, () => {});
-        supabase.from('trainers').update({
-          bio, tagline, offers, specialties, session_fee: sessionFee, listed,
-        }).eq('id', uid).then(() => {}, () => {});
-      } catch (e) { reportError('coachProfile.persist', e); }
-    }, 600);
+    const values = { name, photo, tagline, bio, offers, specialties, sessionFee, listed };
+    if (baseline.current === null) {
+      // The first settled render. This is what the server has; it is not an
+      // edit and there is nothing to save.
+      baseline.current = profileFingerprint(values);
+      return;
+    }
+    if (!isProfileEdit(baseline.current, values)) return;
+    dirty.current = true;
+    setSave(markPending);
+    const timer = setTimeout(() => { void flush(); }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid, hydrated, synced, mine]);
+  }, [name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid, hydrated, synced, mine, flush]);
+
+  // ── the write that used to be cancelled on the way out ────────────────────
+  //
+  // The debounce cleanup above is `clearTimeout`, and React runs it on unmount
+  // as well as on every dependency change. So a coach who changed a setting and
+  // left the screen inside 600ms had the write cancelled — never attempted, and
+  // nothing on screen had suggested anything was in flight.
+  //
+  // Mount-only, so its cleanup runs ONLY on unmount and cannot defeat the
+  // debounce. Fired without awaiting because a component coming apart cannot be
+  // held open; the request outlives it either way, and `dirty` means this is
+  // reached only when there is something that has genuinely not landed.
+  useEffect(() => () => { if (dirty.current) void flush(); }, [flush]);
+
+  /**
+   * Read the profile and the trainers row again.
+   *
+   * The pending edit is FLUSHED FIRST, and this is the whole subtlety. The read
+   * below assigns `bio`, `tagline`, `session_fee` and the rest in both
+   * directions — that is deliberate, and it is what lets a cleared rate stay
+   * cleared — so a re-read that landed on top of a debounced edit still sitting
+   * in `latest` would take the coach's typing back off the screen and out of
+   * the app. Writing it first means the values the server hands back are the
+   * coach's own. A failed flush leaves `dirty` set, so nothing is lost that was
+   * not already at risk, and the re-read is still worth doing: it is how a
+   * refused read gets a second chance.
+   */
+  const reload = useCallback(async (): Promise<void> => {
+    if (dirty.current) await flush();
+    setSynced(false);
+    setReadNonce((n) => n + 1);
+  }, [flush]);
 
   useEffect(() => { if (!hydrated || !mine) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee, listed })).catch(() => {}); }, [hydrated, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed]);
 
@@ -292,9 +556,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       setSpecialties: mine ? setSpecialties : off,
       setSessionFee: mine ? setSessionFee : off,
       setListed: mine ? setListed : off,
+      save,
       publishPage,
+      reload,
     };
-  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage, publishPage]);
+  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage, publishPage, save, reload]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -328,7 +594,7 @@ function warnOnceOffCoachApp(): void {
   warnedOffCoachApp = true;
   console.warn(
     `useMyTrainerProfile() was read on the ${VARIANT} app. It loads the SIGNED-IN user's own ` +
-    'profile and trainers row, so here it can only ever describe the reader — it is blanked ' +
+    'profile and trainers row, so here it can only ever describe the reader, so it is blanked ' +
     'rather than answered. To name a client\'s coach use useThreadPeerName (src/lib/threadPeer.ts).',
   );
 }

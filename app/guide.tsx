@@ -22,7 +22,8 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../src/ui/components';
-import { Rule, Section, SectionHead, Ghost } from '../src/ui/kit';
+import type { Theme } from '../src/theme/tokens';
+import { Section, Ghost, PageHead, HeroCard, Expandable, IconPlate, type Tone } from '../src/ui/kit';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL } from '../src/lib/variant';
 import { tabsFor, topicsFor, GUIDE_INTRO, type GuideSection } from '../src/lib/guideContent';
@@ -39,6 +40,43 @@ import { tabsFor, topicsFor, GUIDE_INTRO, type GuideSection } from '../src/lib/g
  */
 export const GUIDE_SEEN_KEY = 'repple.guide.seen';
 
+/**
+ * One section, whichever list it came from. The two are rendered identically on
+ * purpose — the difference between them is where they sit and what the kicker
+ * above them says, not how important they are.
+ *
+ * A module-scope PLAIN FUNCTION, called as `{block(s, t)}`, and not a component
+ * written as `<Block s={s} />`. Declared inside the screen body it was a new
+ * function object on every render, so React saw a different element TYPE each
+ * time and threw away every section of the guide rather than updating it. This
+ * screen is static reference text and re-renders rarely, so what that cost was
+ * work and a subtree that could hold no scroll or animation state — not a lost
+ * caret and not a wrong figure. The rule is the one stated at
+ * app/(client)/report.tsx:475 and enforced by scripts/check-remount.mjs.
+ *
+ * At module scope because it closes over nothing from the render body: the
+ * sections come in as an argument and the theme is passed.
+ *
+ * The `key` is on the View this RETURNS. It used to sit on `<Block key={s.title}
+ * …/>`; a plain call cannot carry one, and dropping it would cost React the
+ * identity of both lists — a quieter bug than the one being fixed here.
+ */
+// Folded now: the title and its one-line summary are the row, and the points
+// open under it on toned plates. Six tabs and every cross-app topic, all open,
+// was a wall a reader had to scroll to find one thing in; this is a list they
+// can scan. The kit's `Expandable` keeps its own open state, which is exactly
+// what the remount bug above would have thrown away on every render.
+const block = (s: GuideSection, t: Theme, tone: Tone) => (
+  <Expandable key={s.title} title={s.title} note={s.summary}>
+    {s.points.map((p, i) => (
+      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: i === s.points.length - 1 ? 0 : sp.md }}>
+        <IconPlate icon="check" tone={tone} size={32} />
+        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
+      </View>
+    ))}
+  </Expandable>
+);
+
 export default function Guide() {
   const t = useTheme();
   const router = useRouter();
@@ -50,41 +88,37 @@ export default function Guide() {
   // attention, which this app has no business doing and no way to do honestly.
   useEffect(() => { AsyncStorage.setItem(GUIDE_SEEN_KEY, '1').catch(() => {}); }, []);
 
-  // One section, whichever list it came from. The two are rendered identically
-  // on purpose — the difference between them is where they sit and what the
-  // kicker above them says, not how important they are.
-  const Block = ({ s }: { s: GuideSection }) => (
-    <View>
-      <Section>
-        <SectionHead title={s.title} />
-        <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{s.summary}</Text>
-        {s.points.map((p, i) => (
-          <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-            <Text style={{ ...ty.body, color: t.brand }}>•</Text>
-            <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
-          </View>
-        ))}
-      </Section>
-      <Rule />
-    </View>
-  );
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 48 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{GUIDE_INTRO[VARIANT]}</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 48 }}>
+        {/* ── the way out ──────────────────────────────────────────────────
+            Seen on an iPhone 17 Pro: this screen had no back control at all.
+            It is pushed from the Profile tab, it hides the tab bar, and the
+            only control that leaves it was the "Done" ghost at the foot of a
+            scroll that is six tab sections plus every cross-app topic long. A
+            reader who opened the guide to look one thing up had to scroll past
+            the whole of it to get out of it, or kill the app.
 
-        <Rule />
+            Leading edge with an a11yLabel, which is the house form — see
+            src/ui/FeedbackScreen.tsx for the argument. "Done" stays where it
+            is: somebody who read to the end should not have to scroll back. */}
+        {/* The kit's pushed-page head — the round back control on the
+            leading edge — and then the night hero that says whose guide this
+            is, with the app's own introduction as its one line. */}
+        <PageHead title="User Guide" />
+        <HeroCard eyebrow="USER GUIDE" title={VARIANT_LABEL[VARIANT]} meta={GUIDE_INTRO[VARIANT]} />
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>The tabs</Text>
-        {tabs.map((s) => <Block key={s.title} s={s} />)}
+
+        {/* marginTop to match "Across the app" below. Without it this kicker
+            sat hard against the rule above it and read as part of the header
+            paragraph rather than as the label on the list under it. */}
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The Tabs</Text>
+        {tabs.map((s) => block(s, t, 'brand'))}
 
         {topics.length ? (
           <>
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the app</Text>
-            {topics.map((s) => <Block key={s.title} s={s} />)}
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the App</Text>
+            {topics.map((s) => block(s, t, 'blue'))}
           </>
         ) : null}
 

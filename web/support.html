@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Support — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/support">
 <meta name="description" content="Help with Repple, Repple Coach and Repple Studio — signing in, confirmation emails, Apple Health, connected devices, notifications, and getting your data out or deleted.">
 <meta property="og:title" content="Support — Repple">
 <meta property="og:description" content="Real answers for the things that actually go wrong: confirmation emails, Apple Health permissions, connected devices, and getting your data out.">
 <meta property="og:url" content="https://www.repplefitness.com/support">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="auth-support.css?v=846c119af7">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,26 +77,37 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="flow-page support-page">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".38"/><circle cx="50" cy="50" r="21" opacity=".65"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support" aria-current="page">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -67,14 +118,14 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <!-- ── hero ───────────────────────────────────────────────────────────── -->
 <section class="hero">
   <div class="wrap">
     <div class="hero-grid">
       <div>
-        <div class="eyebrow">Support · updated 26 August 2026</div>
+        <div class="eyebrow">Support · updated 3 September 2026</div>
         <h1 class="display">Something not<br>working?</h1>
         <p class="lede" style="margin-top:24px">
           One address reaches a person: <strong>support@repplefitness.com</strong>. Below it are the
@@ -109,7 +160,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#apps">Which app</a></li>
       <li><a href="#signing-in">Signing in</a></li>
       <li><a href="#email">Emails that never arrive</a></li>
@@ -154,11 +205,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2 id="apps-qa">Common to all three</h2>
+      <h3 id="apps-qa">Common to all three</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>Do the three apps share one account?</h3>
+        <h4>Do the three apps share one account?</h4>
         <div>
           <p>Yes. One email and password, one database behind them. What differs is what you are
              shown, and that is decided by your <strong>role</strong>.</p>
@@ -166,7 +217,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>How is my role decided?</h3>
+        <h4>How is my role decided?</h4>
         <div>
           <p>By the app you created the account in. Sign up inside Repple and you are a member; sign
              up inside Repple Coach and you are a coach; sign up inside Repple Studio and you are a
@@ -179,7 +230,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Do I need more than one of them?</h3>
+        <h4>Do I need more than one of them?</h4>
         <div>
           <p>Only if you do more than one job. A member never needs Coach. A coach without a gym never
              needs Studio. <a href="/download">All three are here</a> if you do need another.</p>
@@ -187,7 +238,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Where is the in-app guide?</h3>
+        <h4>Where is the in-app guide?</h4>
         <div>
           <p>Every app has one, covering each of its five tabs and what you can do in them. It is the
              same text as the tour shown on first sign-in, so you can look something up again without
@@ -204,12 +255,15 @@ addEventListener('DOMContentLoaded', function () {
     <div class="lead-in wide">
       <h2 class="hd">Signing in and confirming your email</h2>
       <p class="lede">
-        Creating an account takes a name, an email and a password of at least six characters. Then
-        one step people do not expect: you have to confirm the address before you can sign in.
+        Creating an account takes a name, an email and a password of at least eight characters that
+        also has a lowercase letter, an uppercase letter, a number and a symbol in it. A password
+        that has appeared in a public data breach is refused as well, and that check can only run
+        when you save. Then one step people do not expect: you have to confirm the address before
+        you can sign in.
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">01</span>
         <div>
@@ -247,11 +301,11 @@ addEventListener('DOMContentLoaded', function () {
     </ol>
 
     <div class="qa-group">
-      <h2>When it will not let you in</h2>
+      <h3>When it will not let you in</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>I signed up twice with the same email. Which password works?</h3>
+        <h4>I signed up twice with the same email. Which password works?</h4>
         <div>
           <p><strong>The first one.</strong> This is worth reading carefully, because it has already
              locked someone out.</p>
@@ -265,7 +319,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>"Continue with Apple" and "Continue with Google" do nothing.</h3>
+        <h4>"Continue with Apple" and "Continue with Google" do nothing.</h4>
         <div>
           <p>They are not connected yet, and the app says so when you tap one. Use the email and
              password fields for now.</p>
@@ -273,7 +327,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I have forgotten my password.</h3>
+        <h4>I have forgotten my password.</h4>
         <div>
           <p>Ask for a reset link at <a href="/forgot-password">repplefitness.com/forgot-password</a>,
              or from the same option inside the app. The link opens a page where you set the new
@@ -284,7 +338,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I tried the demo and now my training has gone.</h3>
+        <h4>I tried the demo and now my training has gone.</h4>
         <div>
           <p>The demo on the welcome screen is a walkthrough, not an account. Nothing you do in it is
              saved anywhere, and nothing in it is yours — it exists so you can see the shape of the
@@ -294,7 +348,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>The app opens on a screen with nothing in it.</h3>
+        <h4>The app opens on a screen with nothing in it.</h4>
         <div>
           <p>That is a new account behaving correctly. Nothing is seeded with sample data, so records,
              charts and targets stay blank until there is something behind them. Where a figure is
@@ -319,7 +373,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Give it a few minutes.</strong> It is normally quick, but not always instant. Do not request three more in the meantime — each new link invalidates the one before it, and it is easy to end up clicking a dead one.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -365,11 +419,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Permissions</h2>
+      <h3>Permissions</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>Do I have to allow Apple Health?</h3>
+        <h4>Do I have to allow Apple Health?</h4>
         <div>
           <p>No. Repple works without it. If you do allow it, Repple asks to read five things and
              nothing else:</p>
@@ -386,7 +440,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>How do I change my mind?</h3>
+        <h4>How do I change my mind?</h4>
         <div>
           <p><span class="path">iOS Settings → Privacy &amp; Security → Health → Repple</span>. That
              screen is the only real switch. Turning a device off inside Repple clears Repple's own
@@ -396,7 +450,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Where does Repple say it uses my Health data?</h3>
+        <h4>Where does Repple say it uses my Health data?</h4>
         <div>
           <p>In <a href="/privacy">Privacy</a>, in full. The short version: it is read only after you
              grant permission, used only to show you your own training and recovery, never used for
@@ -407,11 +461,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Workouts and figures</h2>
+      <h3>Workouts and figures</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>My watch workouts are not showing up.</h3>
+        <h4>My watch workouts are not showing up.</h4>
         <div>
           <p>They are not pulled in automatically — you ask for them. Open
              <span class="path">Me → Watch &amp; Devices</span> and tap <strong>Find my workouts</strong>.
@@ -424,7 +478,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>My heart rate and calories are blank.</h3>
+        <h4>My heart rate and calories are blank.</h4>
         <div>
           <p>Heart rate and active energy come from the watch, so the watch has to be on your wrist
              and worn during the session. Steps come from the iPhone and will usually be there
@@ -433,7 +487,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Apple Health says it is unavailable.</h3>
+        <h4>Apple Health says it is unavailable.</h4>
         <div>
           <p>Two reasons, and the app names the one that applies. Apple Health is iPhone-only, so it
              will never connect on anything else. And it needs the real Repple build from the App
@@ -455,44 +509,45 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-services">
       <table class="data">
+        <caption class="vh" id="tbl-services">Connected services, what each brings in and how it connects</caption>
         <thead>
-          <tr><th>Service</th><th>What it brings in</th><th>How it connects</th></tr>
+          <tr><th scope="col">Service</th><th scope="col">What it brings in</th><th scope="col">How it connects</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Apple Watch</strong><br>via Apple Health</td>
+            <th scope="row"><strong>Apple Watch</strong><br>via Apple Health</th>
             <td>Heart rate, resting heart rate, active energy, steps and recorded workouts. The only source that can produce a per-session heart-rate zone breakdown.</td>
             <td>Tap Connect and grant the Health permission. iPhone only. Revoke in iOS Settings, not in Repple.</td>
           </tr>
           <tr>
-            <td><strong>WHOOP</strong></td>
+            <th scope="row"><strong>WHOOP</strong></th>
             <td>Strain, recovery, heart rate and calories, plus workouts you can import into your log.</td>
             <td>Tap Connect. WHOOP's own sign-in page opens in a browser sheet; approve it there and you are returned to the app.</td>
           </tr>
           <tr>
-            <td><strong>Oura Ring</strong></td>
+            <th scope="row"><strong>Oura Ring</strong></th>
             <td>Readiness, HRV, sleep and resting heart rate.</td>
             <td>Same — Oura's own sign-in page, then back to the app.</td>
           </tr>
           <tr>
-            <td><strong>Fitbit</strong></td>
-            <td>Steps, heart rate, sleep and calories.</td>
-            <td>Same — Fitbit's own sign-in page, then back to the app.</td>
+            <th scope="row"><strong>Fitbit</strong></th>
+            <td>Nothing yet.</td>
+            <td>The Repple side is written, but we have not finished registering the app with Fitbit, so there is nothing for you to sign in to and the row says so. Nothing is wrong with your Fitbit account. A Fitbit that already writes into Apple Health or Health Connect reaches Repple by that route in the meantime.</td>
           </tr>
           <tr>
-            <td><strong>Garmin</strong></td>
+            <th scope="row"><strong>Garmin</strong></th>
             <td>Nothing yet.</td>
             <td>Garmin's Health API is not self-serve — it needs an approved partnership, which is why the row stays unavailable and says so. A Garmin watch that already writes into Apple Health reaches Repple by that route in the meantime.</td>
           </tr>
           <tr>
-            <td><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></td>
-            <td>Nothing yet.</td>
-            <td>Android only, and not live in the current build. On anything other than Android the row tells you it is Android-only.</td>
+            <th scope="row"><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></th>
+            <td>Steps, heart rate, calories, workouts and sleep — Android's own health store, which is where a Garmin, a Fitbit, a Polar or a phone writes on that platform. Blood sugar is asked for separately, on the Blood Sugar screen.</td>
+            <td>Android only. Tap Connect and grant the Health Connect permission. It also needs an Android build that declares those permissions, which not every build does — where yours cannot ask, Connect fails with a sentence naming both reasons rather than a blank screen. On anything other than Android the row tells you it is Android-only.</td>
           </tr>
           <tr>
-            <td><strong>Spotify</strong></td>
+            <th scope="row"><strong>Spotify</strong></th>
             <td>Nothing about your training. It goes the other way: Repple builds a playlist to match the session.</td>
             <td><span class="path">Me → Music &amp; Playlists</span>. Connect Spotify and the playlist can be created in your own Spotify account.</td>
           </tr>
@@ -501,11 +556,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Connecting, disconnecting, and what we hold</h2>
+      <h3>Connecting, disconnecting, and what we hold</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>Does Repple see my WHOOP or Oura password?</h3>
+        <h4>Does Repple see my WHOOP or Oura password?</h4>
         <div>
           <p>No. Connecting opens that company's own sign-in page in a browser sheet. You sign in to
              them, they hand back an authorisation code, and the exchange for a token happens on our
@@ -515,7 +570,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>How do I disconnect one?</h3>
+        <h4>How do I disconnect one?</h4>
         <div>
           <p>Tap the row again on <span class="path">Me → Watch &amp; Devices</span> — the button reads
              <strong>Connected</strong> once it is. That deletes the stored token for that service.
@@ -525,7 +580,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>It says "not set up yet" when I tap Connect.</h3>
+        <h4>It says "not set up yet" when I tap Connect.</h4>
         <div>
           <p>That is the app missing its credentials for that vendor in the build you have, not
              anything wrong with your account or with the service. Tell us which one and on which app
@@ -534,7 +589,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Which of these can my coach see?</h3>
+        <h4>Which of these can my coach see?</h4>
         <div>
           <p>None of them directly. A coach you have linked to sees your training, and your nutrition
              and check-ins where you use those together — not your device connections and not your
@@ -583,11 +638,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>When they are not arriving</h2>
+      <h3>When they are not arriving</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>I am not getting anything at all.</h3>
+        <h4>I am not getting anything at all.</h4>
         <div>
           <p>Check the permission first, in your phone's own settings —
              <span class="path">iOS Settings → Notifications → Repple</span>, or the equivalent on
@@ -597,7 +652,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I set reminders and they stopped when I changed phone.</h3>
+        <h4>I set reminders and they stopped when I changed phone.</h4>
         <div>
           <p>Reminders are held on the device that scheduled them, not on your account. A new phone —
              or a reinstall — starts with none. Open <span class="path">Me → Reminders</span> and set
@@ -606,7 +661,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I want fewer of them.</h3>
+        <h4>I want fewer of them.</h4>
         <div>
           <p>Turn hydration and named reminders off in <span class="path">Me → Reminders</span>. For
              everything that comes from the server, the switch that always works is your phone's own
@@ -630,11 +685,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Your log</h2>
+      <h3>Your log</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>I logged a workout wrong. Can I fix it?</h3>
+        <h4>I logged a workout wrong. Can I fix it?</h4>
         <div>
           <p>Yes. In the <strong>Train</strong> tab, find the entry under the day it was logged and tap
              the pencil beside it. The edit sheet lets you change the exercise, the sets, the cardio
@@ -643,7 +698,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I logged the same workout twice.</h3>
+        <h4>I logged the same workout twice.</h4>
         <div>
           <p>Delete one of them from the same edit sheet. If it came in through
              <strong>Find my workouts</strong>, note that anything already in your log is marked as
@@ -653,7 +708,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>My calorie and macro targets are blank.</h3>
+        <h4>My calorie and macro targets are blank.</h4>
         <div>
           <p>They are scaled from your body, so they need something to scale from — a body-fat figure
              from a scan, or a weight from a check-in. Add either and the targets appear. Marking the
@@ -662,7 +717,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Readiness has nothing in it.</h3>
+        <h4>Readiness has nothing in it.</h4>
         <div>
           <p>Readiness needs a night of sleep logged before it can say anything, and it stays blank
              rather than guessing at one. Sleep comes from a connected device that reports it.</p>
@@ -671,11 +726,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Heart-rate zones</h2>
+      <h3>Heart-rate zones</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>Where is my heart-rate zone chart?</h3>
+        <h4>Where is my heart-rate zone chart?</h4>
         <div>
           <p>Zones need heart-rate samples taken <em>during</em> the session, which in practice means
              an Apple Watch worn while you train. A device that only reports a whole-day average —
@@ -688,7 +743,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I use WHOOP. Do I get zones?</h3>
+        <h4>I use WHOOP. Do I get zones?</h4>
         <div>
           <p>Partly. WHOOP reports how long a workout spent in each zone, but not the underlying
              samples — so you get the zone bars without the heart-rate line through them. That is the
@@ -697,7 +752,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>The bpm on my live session is not moving.</h3>
+        <h4>The bpm on my live session is not moving.</h4>
         <div>
           <p>If the figure came from a connected device rather than a watch on your wrist, it is
              today's average, and the session screen says so. It is shown because it is better than a
@@ -720,11 +775,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Linking to a coach</h2>
+      <h3>Linking to a coach</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>How does a coach get linked to me?</h3>
+        <h4>How does a coach get linked to me?</h4>
         <div>
           <p>Three ways, and they are not equivalent:</p>
           <ul>
@@ -736,7 +791,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>My coach cannot see my logs.</h3>
+        <h4>My coach cannot see my logs.</h4>
         <div>
           <p>Work through these in order:</p>
           <ul>
@@ -752,23 +807,25 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>What can a coach see once we are linked?</h3>
+        <h4>What can a coach see once we are linked?</h4>
         <div>
           <p>Your training, and your nutrition and check-ins where you use those features together.
-             Not your device connections, not your account settings, and not your progress photos &mdash;
-             a coach has no access to those at all. Their access is read-only and it ends when the link
-             does. The full account is in <a href="/privacy">Privacy</a>, and the row-by-row version is
-             in <a href="/security">Security &amp; data</a>.</p>
+             Not your device connections and not your account settings. Progress photos are the
+             exception that works the other way round: a coach has no access to them by default, and
+             sees one only where you have shared that specific photograph, which you can withdraw.
+             Their access is read-only and it ends when the link does &mdash; including every photo
+             you had shared. The full account is in <a href="/privacy">Privacy</a>, and the row-by-row
+             version is in <a href="/security">Security &amp; data</a>.</p>
         </div>
       </div>
     </div>
 
     <div class="qa-group">
-      <h2>Gyms and classes</h2>
+      <h3>Gyms and classes</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>My gym is not on Repple. Does the app still work?</h3>
+        <h4>My gym is not on Repple. Does the app still work?</h4>
         <div>
           <p>Yes — Train, Meals and Progress are yours, not your gym's, and they work regardless. What
              needs the gym to be running Repple Studio is the membership side: the entry barcode, the
@@ -777,7 +834,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>A class or session I booked has vanished.</h3>
+        <h4>A class or session I booked has vanished.</h4>
         <div>
           <p>Bookings can be cancelled from either side, and a cancellation sends a notification. If
              you did not get one, check the notification permission first. If the booking is gone and
@@ -786,7 +843,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>My gym membership or invoices are wrong.</h3>
+        <h4>My gym membership or invoices are wrong.</h4>
         <div>
           <p>Those records belong to the gym, who set and manage them. Ask them first. If something
              looks broken rather than merely wrong, we would like to know.</p>
@@ -808,11 +865,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Export</h2>
+      <h3>Export</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>How do I get a copy of everything?</h3>
+        <h4>How do I get a copy of everything?</h4>
         <div>
           <p><span class="path">Me → Settings → Your data → Export my data</span>. It gathers what is
              held against your account and hands you a JSON file through the normal share sheet, so you
@@ -822,19 +879,24 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>What is in the export?</h3>
+        <h4>What is in the export?</h4>
         <div>
           <p>Your profile, your client record, workouts, food logs, measurements, check-ins, habit
-             logs, scans, messages, coach nutrition plans, assigned programs, class bookings,
-             referrals and feedback.</p>
-          <p>What it does not include is anything the gym holds about you as a member — membership
-             records, invoices, payments, door-log visits. Those belong to the gym's own records. Ask
-             us and we will get them for you.</p>
+             logs, scans, progress photo records, messages, coach nutrition plans, assigned programs,
+             class bookings, referrals, feedback and your waivers and signed agreements. The gym-side
+             records are in it too — membership, invoices, payments, charges, passes and door-log
+             visits.</p>
+          <p>Two things it does not carry. Any note a coach wrote about you while you were a lead of
+             theirs, which is their working note rather than your record. And the files themselves:
+             the bundle lists every photograph, injury document, message attachment and avatar held
+             for you, and you save those one at a time from the same screen. Where a table could not
+             be read, the export says so in place of the rows rather than handing you an empty list
+             that reads like &ldquo;you had none&rdquo;.</p>
         </div>
       </div>
 
       <div class="qa">
-        <h3>Can I have it as a spreadsheet?</h3>
+        <h4>Can I have it as a spreadsheet?</h4>
         <div>
           <p>Not today — the export is JSON. If a CSV would be more use to you, say so; it is a
              reasonable request and worth knowing that people want it.</p>
@@ -843,11 +905,11 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="qa-group">
-      <h2>Deletion</h2>
+      <h3>Deletion</h3>
       <div class="bar"></div>
 
       <div class="qa">
-        <h3>How do I delete my account?</h3>
+        <h4>How do I delete my account?</h4>
         <div>
           <p><span class="path">Me → Settings → Your data → Delete my account</span>, then confirm.
              You are signed out straight away and the request is recorded against your account. Or
@@ -859,7 +921,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>I have changed my mind.</h3>
+        <h4>I have changed my mind.</h4>
         <div>
           <p>Sign back in and go to <span class="path">Me → Settings → Your data</span>. While a
              request is outstanding, that screen shows the date you asked and offers
@@ -868,7 +930,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Does asking twice make it happen sooner?</h3>
+        <h4>Does asking twice make it happen sooner?</h4>
         <div>
           <p>No, and it is written that way on purpose. A second request does not reset the clock,
              because that would quietly restart somebody's thirty days. Withdrawing and then asking
@@ -877,7 +939,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>Two things deletion does not do.</h3>
+        <h4>Two things deletion does not do.</h4>
         <div>
           <p>It does not cancel a subscription bought through the App Store or Google Play — cancel
              that in your Apple or Google account, or it keeps billing. And it does not remove records
@@ -886,7 +948,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
 
       <div class="qa">
-        <h3>How long does it take?</h3>
+        <h4>How long does it take?</h4>
         <div>
           <p>Within 30 days, as set out in <a href="/privacy">Privacy</a>. Nothing happens on a timer
              — a person carries it out — which is why we suggest emailing as well as tapping the
@@ -921,48 +983,61 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-            </svg>
-          </span>
-          Repple
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
         </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
-          The operating record for gyms, the coaches who work in them, and the people they train.
+          One connected fitness platform for members, coaches and gyms.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
-          <li><a href="/client">Repple</a></li>
-          <li><a href="/trainer">Repple Coach</a></li>
-          <li><a href="/studio">Repple Studio</a></li>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
-          <li><a href="/signup">Create account</a></li>
-          <li><a href="/forgot-password">Reset password</a></li>
-          <li><a href="/delete-account">Delete account</a></li>
+          <li><a href="/support">Support</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
-          <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

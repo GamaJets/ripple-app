@@ -285,7 +285,7 @@ export function refundBalanceNote(model: 'direct' | 'destination' | null): strin
  * and each one produces a different unhappy conversation with the same client.
  */
 export const REFUND_DOES_NOT =
-  'A refund gives money back and does nothing else. It does not cancel a subscription, it does not put a session credit back on a pack, and it does not tell your client anything — Stripe emails them a refund receipt and the rest is yours to say.';
+  'A refund gives money back and does nothing else. It does not cancel a subscription, it does not put a session credit back on a pack, and it does not tell your client anything. Stripe emails them a refund receipt and the rest is yours to say.';
 
 /**
  * That the platform fee comes back too, and that Stripe's own fee may not.
@@ -318,7 +318,7 @@ export const REFUND_IS_FINAL =
  * quietly taking weeks of coaching off somebody.
  */
 export const END_NOW_TAKES_THE_REST =
-  'Ending it now stops the coaching immediately and returns nothing. They have paid for the period they are in, and this takes the rest of it off them without giving the money back — refund it separately if that is what you mean.';
+  'Ending it now stops the coaching immediately and returns nothing. They have paid for the period they are in, and this takes the rest of it off them without giving the money back. Refund it separately if that is what you mean.';
 
 /** Why stopping at the end of the period is still the default. Shown beside the
  *  immediate option rather than instead of it, so the safer choice is the one a

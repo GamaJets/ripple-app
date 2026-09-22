@@ -37,6 +37,14 @@
 // import of ./supabase drags in AsyncStorage, which throws "window is not
 // defined" outside a React Native runtime.
 
+// The one thing this file imports at the top level. `num` is `toLocaleString`
+// at `appLocale()`, and it is safe HERE because nothing under supabase/functions
+// or studio-web can reach this module: an edge function has no reader whose
+// locale it could ask, and a latched locale under Next.js resolves on the
+// server during render and again in the browser. Both arguments are written out
+// in the header of scripts/check-numbers.mjs.
+import { num } from './format';
+
 /** What the server did. `ended: false` is a real answer, not a failure: the
  *  two were never linked, and nothing was written. */
 export type EndCoachingResult =
@@ -75,6 +83,36 @@ export function coachLabel(coachName: string | null | undefined): string {
 }
 
 /**
+ * What asking a SECOND coach does to the first, said before it is asked.
+ *
+ * `link_coaching` (supabase/parts/155) ends every other active relationship and
+ * rewrites `clients.trainer_id`: "one person has one coach in this product".
+ * So a member browsing the directory while already coached is one accept away
+ * from losing the coach they have — and the Find a Trainer screen offered three
+ * "Request coaching" buttons gated only on whether they had already asked THIS
+ * coach, with the name of their current one drawn at the top of the same
+ * screen and mentioned in none of it. The app is the only party that can see
+ * the conflict.
+ *
+ * What it must NOT say: that anything is cancelled or refunded. Nothing here
+ * touches a booked session or any money, and `leaveCoachPrompt` already words
+ * that fact — this repeats it rather than inventing a second version.
+ */
+export function replaceCoachNote(
+  currentName: string | null | undefined,
+  newName: string | null | undefined,
+): string {
+  const now = coachLabel(currentName);
+  const next = coachLabel(newName);
+  return (
+    `${now} coaches you now, and this app gives one person one coach. If ${next} accepts, `
+    + `${now} stops coaching you and stops seeing your training, and your thread with them closes.\n\n`
+    + `Sessions you have already booked with ${now} are not cancelled by this, and anything you have `
+    + `agreed to pay them is between you and them. Nothing changes until ${next} accepts.`
+  );
+}
+
+/**
  * The confirmation. Three paragraphs, in the order a person needs them:
  * what stops, what does not stop, and what it costs to change their mind.
  *
@@ -92,7 +130,7 @@ export function leaveCoachPrompt(coachName: string | null | undefined): LeavePro
     title: `Leave ${who}?`,
     body:
       `${who} stops being able to see your workouts, measurements, check-ins, habits, scans, food logs, goals and daily targets, and your message thread with them closes.\n\n` +
-      `Any progress photo you sent them is un-shared straight away, and that part cannot be undone — joining them again later does not hand the photos back. Nothing of yours is deleted: your own history stays exactly as it is, and so does their record of the sessions they delivered.\n\n` +
+      `Any progress photo you sent them is un-shared straight away, and that part cannot be undone. Joining them again later does not hand the photos back. Nothing of yours is deleted: your own history stays exactly as it is, and so does their record of the sessions they delivered.\n\n` +
       `Sessions you have already booked with them are not cancelled. Cancel those yourself if you no longer want them. You can join ${who} again any time with their coaching code.`,
     confirmLabel: `Leave ${who}`,
     cancelLabel: 'Stay',
@@ -343,7 +381,7 @@ export function clientEndConfirmBody(name: string | null | undefined): string {
   return `${who} stops being your coach. They can no longer see your training, your check-ins, your scans or anything you have disclosed, and their screens empty of you.
 
 `
-    + 'Nothing you have logged is deleted and nothing you have bought is refunded here — sessions you have already paid for and anything still on your account are settled with them directly. You can be coached by them again later if you both want that.';
+    + 'Nothing you have logged is deleted and nothing you have bought is refunded here. Sessions you have already paid for and anything still on your account are settled with them directly. You can be coached by them again later if you both want that.';
 }
 
 /** What actually happened, said without overclaiming. `reasonStored` false with
@@ -357,7 +395,7 @@ export function clientEndOutcomeLine(ended: boolean, reasonGiven: boolean, reaso
   if (!reasonGiven) return `${head} Nothing was recorded about why.`;
   return reasonStored
     ? `${head} Your reason has been passed on to them.`
-    : `${head} Your reason could not be recorded, so they have not been told why — the ending itself did happen.`;
+    : `${head} Your reason could not be recorded, so they have not been told why. The ending itself did happen.`;
 }
 
 /** Longest note the server stores against an ending. */
@@ -402,18 +440,70 @@ export function reasonAttribution(rec: EndRecord): string | null {
 }
 
 /**
+ * "We could not tell." The fourth answer, and the one that was missing.
+ *
+ * `fetchEndRecord` used to return `null` for two opposite events: the read was
+ * refused, and the read succeeded and there is no ended relationship between
+ * these two people. `endReasonPrompt` — the only thing that consumes that
+ * value — printed "How this ended could not be read" over both, so a clean
+ * answer about a coaching relationship that is still running was reported to
+ * the coach as a broken query.
+ *
+ * Kept apart for the reason `ME_UNREADABLE` is kept apart from a signed-out
+ * null in studio-web/lib/supabase.ts: one is a statement about the record, the
+ * other a statement about the connection, and they send a person to two
+ * different places.
+ */
+export const END_RECORD_UNREADABLE = 'unreadable' as const;
+
+/** What `fetchEndRecord` can answer: a record, no ended relationship, or "we
+ *  could not tell". */
+export type EndRecordRead = EndRecord | null | typeof END_RECORD_UNREADABLE;
+
+/**
+ * The words somebody actually wrote when they left, or the fact that there are
+ * none.
+ *
+ * `endReasonPrompt` above answers "was a reason recorded", and for a record
+ * that HAS one it returns `END_REASON_NOTE` — the general meaning of that
+ * category. This answers the different question, and it is the one the whole
+ * feature was collecting for: what did this person say. A category is a bucket
+ * chosen from nine; the note is a sentence in their own words, and a coach
+ * reading "Too expensive: 2" has been handed the bucket and not the sentence.
+ *
+ * Quoted, because it is somebody else's writing and must not read as this
+ * app's own summary of them. An empty note is its own answer and is said out
+ * loud: a reason chosen with nothing typed beside it is a person who declined
+ * to elaborate, which a coach can act on differently from a person who was
+ * never asked.
+ */
+export function endNoteLine(rec: EndRecord): string {
+  if (rec.note) return `\u201c${rec.note}\u201d`;
+  if (rec.reason === 'unsaid') {
+    return 'They were asked and chose not to say. Nothing further was written.';
+  }
+  return 'They picked a reason and wrote nothing beside it.';
+}
+
+/**
  * What to say where a reason could be recorded and is not.
  *
- * Three states and they are not interchangeable. The middle one is the point:
- * an ending nobody explained is an answer the coach can still go and get, and
+ * Four states and they are not interchangeable. The third one is the point: an
+ * ending nobody explained is an answer the coach can still go and get, and
  * telling them that is the whole value of the feature.
  */
-export function endReasonPrompt(rec: EndRecord | null): string {
-  if (rec == null) {
+export function endReasonPrompt(rec: EndRecordRead): string {
+  if (rec === END_RECORD_UNREADABLE) {
     return 'How this ended could not be read, so this is not "nothing was recorded".';
   }
+  if (rec == null) {
+    // Read, and there is no ended relationship on record between these two.
+    // Deliberately not the sentence above: that one sends a coach looking for a
+    // fault, and there is none — there is simply nothing that has ended.
+    return 'Nothing on record says this coaching relationship has ended.';
+  }
   if (rec.reason == null) {
-    return 'Nothing was recorded about why this ended. It is the cheapest thing you will ever learn about your own business, and this is the only moment it exists — write down what you know, even if all you know is that they did not say.';
+    return 'Nothing was recorded about why this ended. It is the cheapest thing you will ever learn about your own business, and this is the only moment it exists. Write down what you know, even if all you know is that they did not say.';
   }
   return END_REASON_NOTE[rec.reason];
 }
@@ -546,16 +636,29 @@ export async function recordEndReason(
 }
 
 /**
- * How one relationship ended, or null when it could not be read.
+ * How one relationship ended: the record, `null` when there is no ended
+ * relationship between these two, or `END_RECORD_UNREADABLE` when the question
+ * could not be answered.
  *
- * Null and not an empty record. `cr_self` admits both parties, so a refused
- * read here is a wire failure rather than a policy one — and an empty record
- * would render as "nothing was recorded about why they left", which is the one
- * sentence that would make a coach type over an answer the client gave.
+ * Not an empty record. `cr_self` admits both parties, so a refused read here is
+ * a wire failure rather than a policy one — and an empty record would render as
+ * "nothing was recorded about why they left", which is the one sentence that
+ * would make a coach type over an answer the client gave.
+ *
+ * Three answers rather than two, and the third is the fix. Every failure arm
+ * below used to return the same `null` that `maybeSingle()` returns for a
+ * relationship that has not ended, and the only consumer of that value —
+ * `endReasonPrompt` — read every one of them as "could not be read". That is
+ * harmless for exactly as long as this function has no caller, which is the
+ * state the note under `departureTally` records; it stops being harmless the
+ * first time a screen shows the sentence, and at that point the wrong one is
+ * shown to the coach whose client is still with them.
  */
-export async function fetchEndRecord(otherId: string, meId: string): Promise<EndRecord | null> {
+export async function fetchEndRecord(otherId: string, meId: string): Promise<EndRecordRead> {
   const id = (otherId || '').trim();
-  if (!id || !meId) return null;
+  // Nobody to ask about. Not "no ending on record" — no question was put, and
+  // saying otherwise is a claim about a relationship this call never named.
+  if (!id || !meId) return END_RECORD_UNREADABLE;
   try {
     const { data, error } = await db()
       .from('coaching_relationships')
@@ -568,12 +671,14 @@ export async function fetchEndRecord(otherId: string, meId: string): Promise<End
       // Reported and then treated as unreadable, which is the honest reading:
       // this app cannot say what was recorded.
       report('endCoaching.readReason', error, { otherId: id });
-      return null;
+      return END_RECORD_UNREADABLE;
     }
     const row = (data ?? null) as {
       ended_at?: unknown; ended_by?: unknown;
       end_reason?: unknown; end_note?: unknown; end_reason_by?: unknown;
     } | null;
+    // The only null that means what null says: the read worked and there is no
+    // ended relationship between these two.
     if (!row) return null;
     const by = typeof row.end_reason_by === 'string' ? row.end_reason_by : null;
     const endedBy = typeof row.ended_by === 'string' ? row.ended_by : null;
@@ -588,7 +693,7 @@ export async function fetchEndRecord(otherId: string, meId: string): Promise<End
     };
   } catch (e) {
     report('endCoaching.readReason', e, { otherId: id });
-    return null;
+    return END_RECORD_UNREADABLE;
   }
 }
 
@@ -662,12 +767,23 @@ export function departureTally(rows: readonly EndedRelationship[] | null): Depar
  */
 export function departureLine(tally: DepartureTally | null, windowDays: number): string | null {
   if (tally == null || tally.total === 0) return null;
-  const people = `${tally.total} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
+  // Every figure in this sentence goes through the same formatter, including
+  // the two that are bounded by the first. Grouping only the headline count is
+  // how the reported defect looked in the first place — "2,860 on the hero and
+  // 2860 four lines down", one paragraph, two spellings.
+  const people = `${num(tally.total)} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
+  // "in six months", not "in March". The deadline was written as a named month
+  // and the sentence is read all year: seen on an iPhone 17 Pro on 4 September,
+  // where a coach was told the answers "will not be in March" — a month six
+  // months behind them and six months ahead of them at once, and one no reader
+  // can place against today without doing the arithmetic the sentence was
+  // supposed to save them. A duration is the same claim and is true in every
+  // month it is read in.
   if (tally.counts.length === 0) {
-    return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in March.`;
+    return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in six months.`;
   }
   const top = tally.counts[0];
-  const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${top.n} of them.`;
+  const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${num(top.n)} of them.`;
   if (tally.unrecorded === 0) return lead;
-  return `${lead} ${tally.unrecorded} ${tally.unrecorded === 1 ? 'has' : 'have'} nothing recorded at all, which is not the same as ${END_REASON_LABEL.unsaid.toLowerCase()}.`;
+  return `${lead} ${num(tally.unrecorded)} ${tally.unrecorded === 1 ? 'has' : 'have'} nothing recorded at all, which is not the same as ${END_REASON_LABEL.unsaid.toLowerCase()}.`;
 }

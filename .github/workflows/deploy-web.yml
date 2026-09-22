@@ -62,9 +62,20 @@ jobs:
           test -s web/styles.css || { echo "missing: web/styles.css"; exit 1; }
           python3 - <<'PY'
           import re, glob, sys
+          # Comments are stripped BEFORE counting, because this gate counts
+          # strings and not elements. On 22 Sep 2026 it blocked a deploy over
+          # three files whose markup was perfectly balanced: coach.html and
+          # join.html each carry `<svg>` inside a JavaScript comment explaining
+          # that `hidden` does nothing on one, and download.html's header
+          # comment says a badge cluster needs a caveat "inside its own
+          # <section>". A gate that fails on prose about HTML teaches people to
+          # stop writing the prose.
+          def strip(s):
+              s = re.sub(r'<!--.*?-->', '', s, flags=re.S)
+              return re.sub(r'^[ \t]*//.*$', '', s, flags=re.M)
           bad = 0
           for f in sorted(glob.glob('web/*.html')):
-              s = open(f).read()
+              s = strip(open(f).read())
               for t in ('p','li','ul','div','section','tr','td','table','h1','h2','h3','svg','a','span'):
                   o = len(re.findall(r'<%s[\s>]' % t, s))
                   c = len(re.findall(r'</%s>' % t, s))

@@ -63,9 +63,27 @@
 // check at all.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
-const ROOTS = ['app', 'src/ui', 'src/lib'];
+// The console shows movements too — net members this month, revenue against the
+// same month last year, a weight change since a member's first scan — and a
+// sign in front of nothing is wrong in a browser for the same reason it is
+// wrong on a phone. Nothing in this rule is about React Native: it reads a
+// conditional on a comparison against zero whose arm is a sign character, which
+// is the same expression in either tree.
+//
+// One caveat that belongs with the widening, because it decides which helper a
+// console fix may reach for. `deltaSign`, `deltaArrow` and `deltaMoved` are
+// pure arithmetic — `deltaFigure` and a comparison — and the console may import
+// them. `deltaLabel` and `deltaMagnitude` may NOT: both go through `plain` in
+// src/lib/units.ts, which calls `appLocale()`, the module-level latch that
+// studio-web/lib/num.ts exists to avoid. In Next.js that resolves on the server
+// during render and again in the browser during hydration, on two machines with
+// two locales, and the mismatch is a silent hydration error. So a console site
+// takes the SIGN from the helper and spells the figure with the console's own
+// formatter.
+const ROOTS = ['app', 'src/ui', 'src/lib', 'studio-web/app', 'studio-web/components', 'studio-web/lib'];
 
 /**
  * A comparison against zero, and a sign character in one of the arms after it.
@@ -84,7 +102,7 @@ const HAND_ROLLED = /[<>]=?\s*0\b[^\n]{0,90}\?[^\n]{0,60}['"`][+−▲▼]/;
  * describing the tree — the same contract as KNOWN in check-currency.mjs.
  */
 const KNOWN = new Map([
-  ['app/(client)/scans.tsx', { count: 4, why:
+  ['app/(client)/scans.tsx', { count: 2, why:
     'The screen the defect was found on, and the one it was fixed on. Its four remaining sites ' +
     'are the reference wording for the rest of the app: the hero has an explicit `=== 0` arm ' +
     'reading "No change since <day>", the trend note and the movement chip each carry their own ' +
@@ -156,7 +174,17 @@ function walk(dir) {
     else if (/\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)) files.push(p);
   }
 }
-for (const r of ROOTS) { try { walk(join(ROOT, r)); } catch { /* a root not there yet */ } }
+// Counted per ROOT. `walk` swallows a missing directory — the `catch` right here
+// is what swallows it — so a renamed root contributed zero silently and only a
+// single total stood behind it. See scripts/gate-floor.mjs for why a total is
+// not a guard.
+const perRoot = new Map();
+for (const r of ROOTS) {
+  const before = files.length;
+  try { walk(join(ROOT, r)); } catch { /* a root that is not there yet */ }
+  perRoot.set(r, files.length - before);
+}
+assertRootFloors('check:deltas', perRoot);
 
 // A check that inspects no files passes every time. check-reads.mjs shipped
 // once having read nothing and reported success; the same guard, for the same

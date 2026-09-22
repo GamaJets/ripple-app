@@ -264,6 +264,69 @@ const sane = (v: { label: string; detail: string }, where: string) => {
   ok(!/reconnect/i.test(d4.detail + r4.detail), 'step 4: nothing may still be asking for a reconnect that just happened');
 }
 
+/* ── an account that is connected and has never sent anything ─────────────── */
+//
+// "Oura ring says that my ring is connected, I have created an account but I
+// have no ring associated with the Oura account that I have granted permissions
+// to." Every word of that is consistent: the OAuth worked, the token refreshes,
+// and there is no ring — so every read is empty for ever while the badge says
+// Repple is reading it.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, everProduced: false }));
+  ok(v.state === 'silent', 'connected with nothing ever received is its own state');
+  ok(v.connected === true, 'it IS connected — the account link is real');
+  ok(!/Repple is reading it/.test(v.detail), 'and it no longer claims Repple is reading it');
+  ok(/no device on the Oura account|has not synced/.test(v.detail), 'it names the two causes');
+  ok(v.action === null, 'and offers no reconnect, because signing in again changes nothing');
+  ok(v.tone !== 'warn', 'nothing is broken, so nothing is warned about');
+}
+
+// A device that HAS produced a figure is untouched.
+ok(describeLink(facts({ token: { kind: 'alive', at: NOW }, everProduced: true })).state === 'live',
+  'a device that has sent something is live');
+
+// And a caller that cannot say must not be reported as silence.
+ok(describeLink(facts({ token: { kind: 'alive', at: NOW } })).state === 'live',
+  'undefined is not false — a screen that has not looked claims no absence');
+
+// ── The vendor answering the question directly ─────────────────────────────
+//
+// `everProduced: false` can only offer two possibilities. When Oura has been
+// asked what is on the account and has said "nothing", the app must say that
+// instead of sending somebody to go and check whether a ring they do not own
+// has synced.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, hardware: 'absent' }));
+  ok(v.state === 'silent', 'no device on the account is silence, not a live read');
+  ok(v.connected, 'the ACCOUNT is connected, and saying otherwise is the bug in the other direction');
+  ok(/no device on it/.test(v.detail), 'and it states the fact rather than two possibilities');
+  ok(!/has not synced/.test(v.detail), 'so it does not also offer the guess it has replaced');
+  ok(!/Repple is reading it/.test(v.detail), 'and never claims a reading');
+  ok(v.action === null, 'a reconnect cannot conjure a ring');
+  ok(v.tone !== 'warn', 'nothing is broken');
+}
+
+// The definite answer outranks the inference, in the one direction that matters:
+// a ring that exists and has simply not synced yet must not be reported as no
+// ring at all.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, hardware: 'present', everProduced: false }));
+  ok(v.state === 'silent', 'a paired ring that has sent nothing is still silent');
+  ok(!/no device on it/.test(v.detail), 'but it is never told there is no device');
+}
+
+// An empty answer is not a reading. This is what the ledger records now for a
+// vendor that answered with no records, and 'empty' must not read as 'ok'.
+{
+  const v = describeLink(facts({
+    providerName: 'Oura', token: { kind: 'alive', at: NOW },
+    metric: { name: 'day', proof: { kind: 'empty', at: NOW } }, everProduced: false,
+  }));
+  ok(v.state === 'silent', 'a metric that came back empty leaves the device silent');
+  ok(v.connected, 'and the account stays connected — an empty answer is the endpoint working');
+  ok(v.action === null, 'with nothing to reconnect');
+}
+
 if (errors.length) {
   console.error(`wearableLink.test: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  · ' + e);

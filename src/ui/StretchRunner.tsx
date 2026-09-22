@@ -1,7 +1,7 @@
 // Following a stretch routine, one position at a time.
 //
 // The third runner in this app and deliberately the thinnest. `SessionRunner`
-// walks a lifting programme and `TimedSessionRunner` puts a clock on a cardio
+// walks a lifting program and `TimedSessionRunner` puts a clock on a cardio
 // or recovery session; this walks a fixed list of positions and counts each one
 // down. Everything it decides about WHAT to do — the order, the hold, which
 // stretches are done on both sides, how long the whole thing takes and what is
@@ -259,9 +259,9 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
 
   const discard = () => {
     Alert.alert(
-      'Leave this routine?',
+      'Leave This Routine?',
       `${restClock(elapsedSec)} so far. Nothing is written to your log.`,
-      [{ text: 'Keep stretching', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: onClose }],
+      [{ text: 'Keep Stretching', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: onClose }],
     );
   };
 
@@ -279,7 +279,7 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
 
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              This is saved as a mobility session called Stretching — the same entry Train&apos;s Mobility chip makes, so it
+              This is saved as a mobility session called Stretching, the same entry Train&apos;s Mobility chip makes, so it
               counts once and shows up on your calendar the way your other mobility sessions do.
             </Text>
           </Section>
@@ -293,7 +293,7 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
           ) : (
             <View>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.md }}>
-                Under a minute of stretching — too short to log, and rounding it up to one would be a figure you did not spend.
+                Under a minute of stretching is too short to log, and rounding it up to one would be a figure you did not spend.
               </Text>
               <Cta label="Close" wide onPress={onClose} />
             </View>
@@ -303,9 +303,9 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
                 is finished and NOT saved, so this is the one tap on the screen
                 that can lose it. */}
             {mins > 0 ? <Ghost label="Discard" onPress={() => Alert.alert(
-              'Discard this stretch session?',
+              'Discard This Stretch Session?',
               `${restClock(elapsedSec)} on the clock. Nothing is written to your log.`,
-              [{ text: 'Keep it', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
+              [{ text: 'Keep It', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
             )} /> : null}
           </View>
         </ScrollView>

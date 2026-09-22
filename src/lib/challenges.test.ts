@@ -16,7 +16,9 @@
 // number to a progress meter, and `Number(null)` is 0 — which on a leaderboard
 // is a real place, at the bottom.
 import {
-  BOARD_VISIBILITY_NOTE, SCORING_NOTE, canJoin, challengePhase, cohortLabel,
+  BOARD_CAP, BOARD_VISIBILITY_NOTE, SCORING_NOTE, boardTruncated,
+  canJoin, challengePhase, cohortLabel,
+  challengeActionsAllowed, staleChallengeNote,
   defaultUnit, figure, myBoardRow, rankLine, scoreText, shapeBoard,
   shapeChallenges, standingLine, windowLine,
   type BoardRow, type ChallengeRow, type RawBoardRow, type RawChallenge,
@@ -165,8 +167,49 @@ for (const s of ['error', 'partial', 'loading'] as LoadStatus[]) {
   ok(!/only|first one|nobody|alone/i.test(line), `${s} does not claim the board is empty — got ${JSON.stringify(line)}`);
   ok(!/\b0\b/.test(line), `${s} does not print a zero it did not read`);
 
+  // The DENOMINATOR is the figure over the set, and it is wrong under all
+  // three. "of 2" counts the page, and the page is not the board.
   const rl = rankLine(s, [boardRow({ isMe: true, place: 3 }), boardRow({ place: 1, name: 'Ben' })]);
-  ok(!/#3|\bof 2\b/.test(rl), `${s} states no rank — got ${JSON.stringify(rl)}`);
+  ok(!/\bof 2\b/.test(rl), `${s} states no head count — got ${JSON.stringify(rl)}`);
+}
+
+// 'partial' is not 'error', and the two halves of a rank line come apart on it.
+//
+// `challenge_board()` computes `place` with a window function over EVERY
+// participant and only then applies its own `limit 200`, so the place in a
+// truncated page is the true place and the denominator beside it is not. This
+// line used to refuse both, which left a member who had joined — and been
+// scored — with no answer on the one sheet that exists to give them one.
+{
+  const cut = [boardRow({ isMe: true, place: 147 }), boardRow({ place: 1, name: 'Ben' })];
+  const partial = rankLine('partial', cut);
+  ok(/#147/.test(partial), `a truncated board still states the server's own place — got ${JSON.stringify(partial)}`);
+  ok(!/\bof\b/.test(partial), `and never a denominator over it — got ${JSON.stringify(partial)}`);
+  ok(/longer/i.test(partial), 'and says the board goes on past what is shown');
+
+  // The member who is past the cut has no honest figure anywhere, so the line
+  // has to be words. What it must not do is go quiet and leave them reading an
+  // unfamiliar list for a name that was never going to be in it.
+  const offPage = rankLine('partial', [boardRow({ place: 1, name: 'Ben' })]);
+  ok(!/#/.test(offPage), 'a member off the page is given no invented place');
+  ok(/past|beyond|cannot|can.t|not.*see/i.test(offPage),
+    `and is told why they are not on it — got ${JSON.stringify(offPage)}`);
+  ok(!/\b1 on the board\b/.test(offPage), 'and never a head count of the page');
+}
+
+// The cap is the SERVER's, not PostgREST's, so nothing in rowCap.ts sees it.
+{
+  eq(BOARD_CAP, 200, 'the board cap matches `limit 200` in supabase/parts/128');
+  eq(boardTruncated(BOARD_CAP), true, 'a board that came back at the cap is a prefix');
+  eq(boardTruncated(BOARD_CAP - 1), false, 'one short of it is the whole board');
+  eq(boardTruncated(0), false, 'and an empty board is not a truncated one');
+  // Counted off the RAW rows: `shapeBoard` drops a row with no place, and a
+  // full page carrying one of those is still a full page.
+  const rawFull = Array.from({ length: BOARD_CAP }, (_, i) => (
+    { place: i === 0 ? null : i + 1, display_name: 'A', score: '1', is_me: false }
+  )) as RawBoardRow[];
+  eq(shapeBoard(rawFull).length, BOARD_CAP - 1, 'the unusable row is dropped from what is drawn');
+  eq(boardTruncated(rawFull.length), true, 'but the read is still reported as cut off');
 }
 
 // And under 'ready' the figures are stated, because they are real.
@@ -231,6 +274,33 @@ ok(/leave/i.test(BOARD_VISIBILITY_NOTE), 'and that leaving takes the client off 
 ok(/logged workouts/i.test(SCORING_NOTE), 'the scoring note says where a score comes from');
 ok(/time zone/i.test(SCORING_NOTE), 'and that everyone’s days are counted the same way');
 ok(/type a score/i.test(SCORING_NOTE), 'and that nobody can submit one');
+
+
+/* ── a control that changes what the screen says it cannot see ───────────── */
+
+// The banner said "We couldn’t check which challenges are running" and every
+// stale row underneath it kept a live Leave button. A member sees a challenge
+// they think they have finished, taps Leave, and comes off a board whose
+// current standing the app has just disclaimed.
+{
+  eq(challengeActionsAllowed('ready'), true, 'a read that landed may be acted on');
+  eq(challengeActionsAllowed('error'), false,
+    'JOINING AND LEAVING ARE OFF WHILE THE SCREEN CANNOT SEE THE BOARD');
+  eq(challengeActionsAllowed('partial'), false, 'and off over a list that came back short');
+  eq(challengeActionsAllowed('loading'), false, 'and off before it has come back at all');
+
+  eq(staleChallengeNote('ready'), null, 'nothing is said when the controls are there');
+  for (const s of ['loading', 'error', 'partial'] as LoadStatus[]) {
+    const note = staleChallengeNote(s);
+    ok(note != null && note.length > 0, `and something is said when they are not (${s})`);
+  }
+  ok(/off until this can be checked/.test(staleChallengeNote('error')!),
+    'the failed read says why the button is gone');
+  ok(!/empty|nothing is running/i.test(staleChallengeNote('error')!),
+    'and never suggests the gym is running nothing');
+  eq(new Set([staleChallengeNote('loading'), staleChallengeNote('error'), staleChallengeNote('partial')]).size, 3,
+    'loading, failed and truncated are three different sentences');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`challenges: ok (${shaped.length} rows shaped, ${board.length} board rows, ${sorted.length} sorted)`);

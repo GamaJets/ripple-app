@@ -12,14 +12,24 @@
 //
 // ── What this document CLAIMS ──────────────────────────────────────────────
 //
-// Exactly four things, and it is careful to claim no fifth:
+// Exactly five things, and it is careful to claim no sixth:
 //
 //   1. that a named coach issued it, on a stated date;
 //   2. that it is number N in THAT COACH's own sequence inside this app;
 //   3. that the charge was a stated amount, in a stated currency, for a stated
 //      thing, to a stated person;
 //   4. whether the coach says the money has been received or is being asked
-//      for — labelled, both times, as the coach's own word.
+//      for — labelled, both times, as the coach's own word;
+//   5. where the coach has since recorded one, that they say it was settled on
+//      a stated day — labelled, again, as their own word.
+//
+// The fifth is new (part 660) and it is an ADDITION rather than a change. It
+// does not touch the fourth: a document issued as a request still says it was a
+// request, because that is what it said, and `kind` is still on the immutable
+// list. Before it existed a coach whose client actually paid had two options,
+// and both were wrong — leave the invoice at "61+ days overdue" for ever, or
+// void it and stamp THIS INVOICE HAS BEEN VOIDED across a document that had
+// been paid in full.
 //
 // ── What it does NOT claim, and says so on its own face ────────────────────
 //
@@ -78,6 +88,12 @@ import { minorMoney, readMinorAmount, sumTaken, type Taken, type TakenRow, type 
 // cannot validate, which is what makes "no logo" and "an unreadable logo"
 // produce the same document rather than a broken image on somebody's invoice.
 import { LOGO_CSS, logoImgHtml } from './coachLogo';
+// The date formatter, for the same reason the money formatter above is
+// imported rather than rewritten: an invoice is the last place in this app that
+// may have a second opinion about how a date is written.
+import { fmtPointDay, numUpTo } from './format';
+import { localDate } from './localDate';
+import { isoDay } from './weekStart';
 
 /* ── what the caller hands over ───────────────────────────────────────────── */
 
@@ -98,6 +114,20 @@ import { LOGO_CSS, logoImgHtml } from './coachLogo';
  * pays on Wednesday, and nothing in this app is told when they pay. So the
  * union stays two words the coach chose, and `invoiceAge()` below computes the
  * rest from the due date every time it is asked.
+ *
+ * ── And a third value would not have fixed the invoice that got paid ──────
+ *
+ * There was no way to settle a 'requested' invoice, and the union is the reason
+ * it looked like there was nothing to be done: the only place a payment could
+ * be recorded appeared to be this field, and this field is on the document and
+ * cannot move. So an invoice a client actually paid sat at "61+ days overdue"
+ * for ever, was counted in the outstanding figure, and was named by part 613's
+ * nightly pass four times over two months — or the coach voided it, and stamped
+ * THIS INVOICE HAS BEEN VOIDED across a document that had been paid in full.
+ *
+ * The settlement is not in this union and never will be. It is `settledOn`
+ * below: a NEW FACT, recorded after issue, beside a `kind` that still says
+ * exactly what the issued document said. Part 660 has the argument in full.
  */
 export type InvoiceKind = 'received' | 'requested';
 
@@ -134,6 +164,49 @@ export interface CoachInvoice {
    * copy — keeps compiling and means exactly what it meant before.
    */
   dueOn?: string | null;
+  /**
+   * `YYYY-MM-DD` the coach says the money arrived, or null because it has not
+   * (part 660).
+   *
+   * The coach's own word, checked against nothing, in exactly the voice `kind`
+   * is — and, like `kind`, printed on the document labelled as their statement
+   * rather than as a fact this app is standing behind.
+   *
+   * WRITTEN ONCE. There is no un-settle, for the reason there is no un-void:
+   * money that came in and then went back out is a refund or a chargeback,
+   * which happened on its own day and belongs in its own record. A column that
+   * could flip back would lose that day.
+   *
+   * NULL IS NOT "UNPAID". Nothing tells this app when a client pays, which is
+   * what `AGEING_IS_YOUR_OWN_RECORD` says on the screen: null here means the
+   * coach has not written it down, and a coach paid in cash on Friday who did
+   * not is exactly the case that produces a wrong-looking chase list.
+   */
+  settledOn?: string | null;
+  /** When the coach recorded the settlement, ISO, as distinct from the day they
+   *  say the money arrived. Both matter: a quarter of payments written up in
+   *  one evening must not all be dated that evening. */
+  settledAt?: string | null;
+  /** How the coach says it arrived, in their own words, or null. Printed
+   *  verbatim on the reprinted document and parsed for nothing. */
+  settleNote?: string | null;
+  /**
+   * The day the COACH decided to start chasing this one, or null (part 660).
+   *
+   * NOT A DUE DATE, and the difference is the whole reason this column is
+   * allowed to exist beside an immutable `dueOn`. It is written after the fact,
+   * by the person doing the chasing, about their own working list. It is never
+   * printed on the document, was never shown to the client, and `invoiceAge()`
+   * words it differently every time it appears — "you set" rather than "you
+   * stated", because nobody agreed to it.
+   *
+   * It exists because every invoice issued before part 188 carries no due date
+   * and can never be given one, so it was in no outstanding figure and on no
+   * chase list, permanently. `dueOn` wins wherever both are present, and part
+   * 660 refuses to set this on an invoice that has one — an invoice with two
+   * answers to "when is this late" has none.
+   */
+  chaseFrom?: string | null;
   /** When the coach last chased it, ISO, or null because they never have.
    *  The coach's own record of an act they performed — this app does not send
    *  the chase anywhere the coach did not send the document. */
@@ -292,7 +365,7 @@ export function issuerCaveat(status: LoadStatus): string | null {
   if (status === 'partial') {
     return 'Issuer details: more was on record than could be read in one request. What is printed is real and it may not be all of it.';
   }
-  return 'Issuer details: the name of the person issuing this could not be read when the document was made. The From line is EMPTY BECAUSE OF A FAILED READ — do not treat the missing name as the name being absent from the record.';
+  return 'Issuer details: the name of the person issuing this could not be read when the document was made. The From line is EMPTY BECAUSE OF A FAILED READ. Do not treat the missing name as the name being absent from the record.';
 }
 
 /** Every caveat this document has to carry. Empty means everything read. */
@@ -368,16 +441,24 @@ export const kindLabel = (kind: InvoiceKind): string =>
  *
  * `new Date('2026-08-01')` is UTC midnight, which is 31 July for anybody west
  * of Greenwich — so a naive format dates an invoice the day before it was
- * issued for a third of the world. The parts are formatted from the string.
+ * issued for a third of the world. The parts are read off the string and handed
+ * to `fmtPointDay` as NUMBERS, which is the whole reason that helper takes
+ * numbers: nothing is parsed, so nothing can shift a day.
+ *
+ * In the reader's own language, not in English. This label is not an internal
+ * note — it is the issue date on the face of an invoice, and that document is
+ * rendered for the CLIENT as well as for the coach who wrote it. It used to
+ * assemble `${day} ${MONTHS[i]} ${year}` out of a hardcoded English array, so a
+ * client in Milan was sent a bill dated "1 Aug 2026" by a coach whose every
+ * other figure on the page was already in their own locale.
  */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export function invoiceDayLabel(iso: string | null | undefined): string {
   const s = String(iso ?? '').slice(0, 10);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return '—';
   const mi = Number(m[2]) - 1;
   if (mi < 0 || mi > 11) return '—';
-  return `${Number(m[3])} ${MONTHS[mi]} ${m[1]}`;
+  return fmtPointDay(Number(m[1]), mi, Number(m[3]));
 }
 
 /* ── how late it is, which is never a stored fact ─────────────────────────── */
@@ -404,17 +485,23 @@ export const INVOICE_DUE_NOT_A_TERM =
  * Friday marks it by issuing a 'received' invoice, not by this app noticing.
  */
 export const AGEING_IS_YOUR_OWN_RECORD =
-  'This list is built from the due dates you typed and this phone’s clock. Nothing here has been checked against a bank or a card processor, and nobody tells this app when a client pays you — an invoice stays on this list until you say otherwise.';
+  'This list is built from the due dates you typed and this phone’s clock. Nothing here has been checked against a bank or a card processor, and nobody tells this app when a client pays you. An invoice stays on this list until you say otherwise.';
 
 /**
  * Where one invoice stands against its own due date.
  *
  * Six states rather than a boolean, and the two that are not about lateness are
- * the reason. A settled invoice ('received' — the coach's own claim that the
- * money came in) and a voided one are not late and never will be; an invoice
- * with NO due date is neither late nor on time, and reporting it as "not due"
- * would put every invoice a coach issued before part 168 into the reassuring
- * bucket. That is the same class of mistake as an empty list under 'error'.
+ * the reason. A settled invoice and a voided one are not late and never will
+ * be; an invoice with NO date of any kind is neither late nor on time, and
+ * reporting it as "not due" would put every invoice a coach issued before part
+ * 188 into the reassuring bucket. That is the same class of mistake as an empty
+ * list under 'error'.
+ *
+ * 'settled' now has TWO doors into it and they say different things. One is
+ * `kind === 'received'`, the coach's claim at the moment of issue that the
+ * money had already come in. The other is `settledOn`, recorded afterwards on
+ * an invoice that was issued as a request and then paid — which had no door at
+ * all before part 660, and left a paid invoice permanently overdue.
  */
 export type InvoiceAgeState =
   | 'settled'
@@ -437,6 +524,17 @@ export interface InvoiceAge {
   /** The sentence for a list row. Sentence case: it is prose beside a number,
    *  not a label. */
   line: string;
+  /**
+   * True when the lateness above was measured against `chaseFrom` — the coach's
+   * own working note — rather than against a due date the client was shown.
+   *
+   * It is on the type rather than left to the wording because a screen may need
+   * to badge it, and because the two must never be summed into one "overdue"
+   * figure without the difference being sayable. A document with a due date on
+   * it is a term somebody was given; a chase date is a plan the coach made, and
+   * only one of those is something to put in a demand.
+   */
+  fromChaseDate: boolean;
 }
 
 /**
@@ -508,39 +606,100 @@ export const BUCKET_TITLE: Readonly<Record<AgeBucket, string>> = {
  */
 export function invoiceAge(inv: CoachInvoice, today: string): InvoiceAge {
   if (inv.voidedAt) {
-    return { state: 'voided', daysOverdue: null, bucket: null, line: 'Voided, so it is not owed and it is not late.' };
+    return { state: 'voided', daysOverdue: null, bucket: null, line: 'Voided, so it is not owed and it is not late.', fromChaseDate: false };
+  }
+  // A settlement the coach recorded, which is a fact about an event AFTER the
+  // document was issued and is the only door out of this list that does not
+  // stamp VOIDED across a paid invoice. It is asked BEFORE `kind`, so that an
+  // invoice which was requested and then paid reads as settled rather than as
+  // 61 days overdue — which is the entire point of part 660.
+  const settledOn = String(inv.settledOn ?? '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(settledOn)) {
+    return {
+      state: 'settled',
+      daysOverdue: null,
+      bucket: null,
+      // "You recorded", not "it was paid". Nothing checked it, exactly as
+      // nothing checks `kind`, and the sentence has to keep saying whose word
+      // it is on a list the coach makes chasing decisions from.
+      line: `You recorded this one as settled on ${invoiceDayLabel(settledOn)}, so it is not outstanding.`,
+      fromChaseDate: false,
+    };
   }
   if (inv.kind === 'received') {
-    return { state: 'settled', daysOverdue: null, bucket: null, line: 'You stated this one was received, so it is not outstanding.' };
+    return { state: 'settled', daysOverdue: null, bucket: null, line: 'You stated this one was received, so it is not outstanding.', fromChaseDate: false };
   }
+  const day = /^\d{4}-\d{2}-\d{2}$/;
   const due = String(inv.dueOn ?? '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+  const chase = String(inv.chaseFrom ?? '').slice(0, 10);
+  // The DOCUMENT's date wins wherever there is one. `chaseFrom` is a private
+  // note and a due date is a term the client was shown, so an invoice carrying
+  // both would have two answers to "when is this late" and only one of them is
+  // something to put in a demand. Part 660 refuses to write the second where
+  // the first exists; this is the same rule stated where it is read.
+  const against = day.test(due) ? due : day.test(chase) ? chase : '';
+  const fromChaseDate = !day.test(due) && day.test(chase);
+  if (!against) {
     return {
       state: 'undated',
       daysOverdue: null,
       bucket: null,
       // Never "not due". The absence of a date is the absence of a statement,
-      // and an invoice from before part 168 must not be reported as being
-      // comfortably within terms nobody ever wrote down.
-      line: 'No due date was stated on this one, so nothing here says whether it is late.',
+      // and an invoice from before part 188 must not be reported as being
+      // comfortably within terms nobody ever wrote down. It now names the way
+      // out, which it could not before: the coach can set a day to start
+      // chasing from, which is their own note and goes on no document.
+      line: 'No due date was stated on this one, so nothing here says whether it is late. Set a day to chase it from and it joins the lists below.',
+      fromChaseDate: false,
     };
   }
-  const days = daysBetween(due, today);
+  const days = daysBetween(against, today);
   if (days == null) {
-    return { state: 'undated', daysOverdue: null, bucket: null, line: 'The due date on this one could not be read, so nothing here says whether it is late.' };
+    return {
+      state: 'undated',
+      daysOverdue: null,
+      bucket: null,
+      line: fromChaseDate
+        ? 'The day you set to chase this one from could not be read, so nothing here says whether it is late.'
+        : 'The due date on this one could not be read, so nothing here says whether it is late.',
+      fromChaseDate: false,
+    };
   }
   if (days < 0) {
     const n = -days;
-    return { state: 'not-due', daysOverdue: null, bucket: null, line: `Due in ${n} ${n === 1 ? 'day' : 'days'}, on ${invoiceDayLabel(due)}.` };
+    return {
+      state: 'not-due',
+      daysOverdue: null,
+      bucket: null,
+      line: fromChaseDate
+        ? `You set ${invoiceDayLabel(against)} as the day to start chasing this one, in ${n} ${n === 1 ? 'day' : 'days'}. No due date is on the document.`
+        : `Due in ${n} ${n === 1 ? 'day' : 'days'}, on ${invoiceDayLabel(against)}.`,
+      fromChaseDate,
+    };
   }
   if (days === 0) {
-    return { state: 'due-today', daysOverdue: null, bucket: null, line: 'Due today.' };
+    return {
+      state: 'due-today',
+      daysOverdue: null,
+      bucket: null,
+      line: fromChaseDate
+        ? `Today is the day you set to start chasing this one. No due date is on the document.`
+        : 'Due today.',
+      fromChaseDate,
+    };
   }
   return {
     state: 'overdue',
     daysOverdue: days,
     bucket: ageBucket(days),
-    line: `${days} ${days === 1 ? 'day' : 'days'} past the ${invoiceDayLabel(due)} you stated.`,
+    // "you set" and not "you stated", every time this comes off `chaseFrom`.
+    // The client never agreed to it and in most cases has never been shown a
+    // date at all, so a coach reading this row has to be able to tell which of
+    // the two kinds of lateness they are looking at before they send anything.
+    line: fromChaseDate
+      ? `${days} ${days === 1 ? 'day' : 'days'} past the ${invoiceDayLabel(against)} you set to chase it from. No due date is on the document.`
+      : `${days} ${days === 1 ? 'day' : 'days'} past the ${invoiceDayLabel(against)} you stated.`,
+    fromChaseDate,
   };
 }
 
@@ -596,7 +755,14 @@ export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, to
   // Longest overdue first, then by number so the order cannot flap between two
   // invoices that are equally late.
   overdue.sort((a, b) => (b.age.daysOverdue ?? 0) - (a.age.daysOverdue ?? 0) || a.invoice.seq - b.invoice.seq);
-  upcoming.sort((a, b) => String(a.invoice.dueOn ?? '').localeCompare(String(b.invoice.dueOn ?? '')) || a.invoice.seq - b.invoice.seq);
+  // Sorted on the date `invoiceAge` actually judged against, which is `dueOn`
+  // when there is one and `chaseFrom` when there is not (see its own note). On
+  // `dueOn` alone a dueless invoice sorted as an empty string and went FIRST —
+  // so a list headed "soonest first" opened with one due at the end of October
+  // above one due in three days.
+  const judgedOn = (r: { invoice: { dueOn?: string | null; chaseFrom?: string | null } }) =>
+    String(r.invoice.dueOn ?? r.invoice.chaseFrom ?? '');
+  upcoming.sort((a, b) => judgedOn(a).localeCompare(judgedOn(b)) || a.invoice.seq - b.invoice.seq);
   undated.sort((a, b) => b.invoice.seq - a.invoice.seq);
 
   const withheld = status === 'ready'
@@ -615,8 +781,16 @@ export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, to
     })))
     : null;
 
+  // Names the way out, which it could not before part 660. The old sentence
+  // ended "A due date is stated when the invoice is issued and cannot be added
+  // afterwards" — which is still true, and which told a coach with a year of
+  // back catalogue that those invoices were outside every figure and every
+  // chase list permanently, with nothing to do about it. The due date still
+  // cannot move; what the coach can now set is their own note of when to start
+  // chasing, which goes on no document and is worded as theirs everywhere it
+  // appears. See `CHASE_FROM_IS_NOT_A_DUE_DATE`.
   const undatedNote = status === 'ready' && undated.length
-    ? `${undated.length} invoice${undated.length === 1 ? '' : 's'} you are still asking for ${undated.length === 1 ? 'has' : 'have'} no due date on ${undated.length === 1 ? 'it' : 'them'}, so ${undated.length === 1 ? 'it is' : 'they are'} in no figure above and on no list of what is late. A due date is stated when the invoice is issued and cannot be added afterwards.`
+    ? `${undated.length} invoice${undated.length === 1 ? '' : 's'} you are still asking for ${undated.length === 1 ? 'has' : 'have'} no due date on ${undated.length === 1 ? 'it' : 'them'}, so ${undated.length === 1 ? 'it is' : 'they are'} in no figure above and on no list of what is late. The due date on a document cannot be changed after it is issued, but you can set a day to start chasing each of these from, which is your own note and appears on nothing you send.`
     : null;
 
   return { overdue, upcoming, undated, outstanding, withheld, undatedNote };
@@ -639,8 +813,143 @@ export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, to
  */
 export function chaseBlocker(inv: CoachInvoice): string | null {
   if (inv.voidedAt) return 'This one is voided, so there is nothing to chase.';
+  if (inv.settledOn) return `You recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}, so there is nothing outstanding to chase.`;
   if (inv.kind === 'received') return 'You stated this one was received, so there is nothing outstanding to chase.';
   if (!inv.clientId) return 'This one is not tied to an account, so there is nobody here to notify. Send it to them the way you sent it the first time.';
+  return null;
+}
+
+/* ── recording that one was paid ──────────────────────────────────────────── */
+
+/**
+ * What a settlement claims, printed on the reprinted document.
+ *
+ * The same hedge `kindLine` puts on the original claim, and it belongs here
+ * more sharply: a client who has paid and is handed the document again is
+ * looking at a statement about their own payment, made by the person they paid,
+ * and neither this app nor anything else has checked it.
+ */
+export const INVOICE_SETTLEMENT_IS_YOUR_WORD =
+  'The settlement above is the issuer’s own statement that this was paid, recorded by them after this document was issued. It has not been checked against a bank or a card processor and it is not a payment receipt from one. What the document said when it was issued has not been changed.';
+
+/**
+ * Whether this invoice can be recorded as settled, and the reason when it
+ * cannot. Null means it can go.
+ *
+ * Every refusal here is one part 660's function raises too, in the same order,
+ * so the screen and the server cannot disagree about what is allowed — the
+ * screen's copy is a convenience so a coach is not sent to the server to be
+ * told no, and the server's copy is the rule.
+ */
+export function settleBlocker(inv: CoachInvoice): string | null {
+  if (inv.voidedAt) return 'This one is voided, so there is nothing to settle. A voided document is not a charge that stands.';
+  if (inv.settledOn) return `You already recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}. A settlement is written once. If the money went back out, that is a refund or a chargeback and it happened on its own day.`;
+  if (inv.kind === 'received') return 'This one already states the money was received, so there is nothing to record. Settling it as well would put the same payment on one document twice, on two dates.';
+  return null;
+}
+
+/**
+ * Whether this invoice can be voided, and the reason when it cannot. Null means
+ * it can go.
+ *
+ * ── The control that raised a database error at a customer ────────────────
+ *
+ * Part 138 gave `void_coach_invoice` one guard — an invoice already voided —
+ * because when it was written that was the only state it could be in. Part 660
+ * then added `settled_on` and, with it, the constraint
+ * `coach_invoices_not_both_chk`: a document may say it was cancelled or that it
+ * was paid, never both. It did not add the matching refusal to the function.
+ *
+ * So voiding a settled invoice reached the UPDATE, tripped the CHECK, and came
+ * back to the coach as an Alert headed "That invoice was not voided" carrying
+ * the raw Postgres sentence about a relation and a constraint name. A dead
+ * control and a developer's error message, both of which this codebase bans.
+ *
+ * The state it happens in is not exotic — it is the one a coach reaches by
+ * making a mistake. "They paid it" sits next to "Send" on every row of the
+ * whole-book list; a settlement is written once and there is no un-settle, so a
+ * coach who taps the wrong row looks for the other way out, and the immutable
+ * guard's own message tells them what it is: "void it and issue another".
+ *
+ * The refusal says what actually happened and what is left to do, because there
+ * IS something left to do — the number stands, and a correcting document is how
+ * a paper ledger has always handled this.
+ */
+export function voidBlocker(inv: CoachInvoice): string | null {
+  if (inv.voidedAt) return 'This one is already voided. A number is cancelled once and never uncancelled: somebody has been told it was.';
+  if (inv.settledOn) {
+    return `You recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}, and a document cannot say both that it was paid and that it was cancelled. `
+      + 'A settlement is written once, so if that was the wrong invoice the way to correct it is a new document for the difference, not a void on this one.';
+  }
+  return null;
+}
+
+/**
+ * Whether the day the coach typed can be recorded as the day it was settled.
+ *
+ * `today` is the DEVICE's own day, passed in for the reason every date function
+ * in this file takes it: `new Date()` here would be UTC-shaped and untestable,
+ * and the day that matters is the one the person holding the phone is on.
+ *
+ * Both ends are refused rather than corrected. A date before the invoice is a
+ * typo that would sort to the top of a ledger; a date after today is money
+ * recorded as having arrived on a day that has not happened.
+ */
+export function settleDayBlocker(inv: CoachInvoice, settledOn: string, today: string): string | null {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const on = String(settledOn ?? '').trim();
+  if (!day.test(on)) return 'Say which day the money arrived. Write it as a date.';
+  if (day.test(String(inv.issuedOn)) && on < String(inv.issuedOn)) {
+    return `Money cannot have arrived before the invoice was written. This one was issued on ${invoiceDayLabel(inv.issuedOn)}.`;
+  }
+  if (day.test(today) && on > today) {
+    return 'That day has not happened yet. Record it when the money is actually there.';
+  }
+  return null;
+}
+
+/* ── deciding when to chase one that carries no due date ──────────────────── */
+
+/**
+ * What a chase date is, said on the screen wherever one can be set.
+ *
+ * The single most important sentence about this feature, and the reason it is
+ * allowed to exist beside an immutable due date at all. A coach who believes
+ * this is "adding a due date" will chase against it as though the client agreed
+ * to it, and the client never saw it.
+ */
+export const CHASE_FROM_IS_NOT_A_DUE_DATE =
+  'A day you set to chase from is your own note about your own list. It is not printed on the invoice, it was never sent to anybody, and nothing about it is a term your client has agreed to. This app has not told them a date and cannot. It exists so an invoice with no due date on it can be on a list at all, instead of sitting outside every figure for ever.';
+
+/**
+ * Whether a chase date can be set on this invoice, and the reason when it
+ * cannot. Null means it can go.
+ *
+ * The refusal that matters is the last one. An invoice that already carries a
+ * due date is chased against the term the client was actually shown, and a
+ * second private date beside it would give one invoice two answers to "when is
+ * this late". Part 660's function raises on the same condition.
+ */
+export function chaseFromBlocker(inv: CoachInvoice): string | null {
+  if (inv.voidedAt) return 'This one is voided, so there is nothing to chase.';
+  if (inv.settledOn) return `You recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}, so there is nothing to chase.`;
+  if (inv.kind === 'received') return 'This one states the money was received, so there is nothing to chase.';
+  if (inv.dueOn) return `This one carries a due date of ${invoiceDayLabel(inv.dueOn)}, which is what it is already chased against. That date is on the document and cannot be moved.`;
+  return null;
+}
+
+/** Whether the day typed can be a chase date. Only one end is refused: a day
+ *  before the invoice existed is a typo that would sort to the top of the
+ *  ageing list as the most urgent thing the coach owns. There is deliberately
+ *  NO upper bound — a coach who has agreed to wait until March sets March, and
+ *  that is a plan about their own book. */
+export function chaseFromDayBlocker(inv: CoachInvoice, from: string): string | null {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const on = String(from ?? '').trim();
+  if (!day.test(on)) return 'Write the day to start chasing from as a date, or clear it and this one goes back on the undated list.';
+  if (day.test(String(inv.issuedOn)) && on < String(inv.issuedOn)) {
+    return `That is before the invoice was written, on ${invoiceDayLabel(inv.issuedOn)}.`;
+  }
   return null;
 }
 
@@ -649,8 +958,18 @@ export function chaseBlocker(inv: CoachInvoice): string | null {
 export function chaseHistoryLine(inv: CoachInvoice): string | null {
   const n = Number(inv.reminderCount ?? 0);
   if (!Number.isFinite(n) || n < 1) return null;
-  const when = String(inv.remindedAt ?? '').slice(0, 10);
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(when) ? invoiceDayLabel(when) : null;
+  // `coach_invoices.reminded_at` is a `timestamptz` — the instant the chase was
+  // sent — and PostgREST serialises it in UTC. Slicing the first ten characters
+  // off it printed GREENWICH's calendar day, so a coach who chased at 18:00 on
+  // 31 March in California was told "last on 1 Apr": a date in the future, on
+  // the one line that exists to tell them when they last chased. Every OTHER
+  // slice in this file is on a `date` column — `issued_on`, `due_on`,
+  // `chase_from`, `settled_on` — where it is a no-op and correct.
+  //
+  // `localDate()` keeps the instant, `isoDay()` reads its LOCAL parts, and
+  // `invoiceDayLabel` then formats the day in the reader's own language.
+  const remindedOn = localDate(inv.remindedAt);
+  const day = remindedOn ? invoiceDayLabel(isoDay(remindedOn)) : null;
   return `Chased ${n} ${n === 1 ? 'time' : 'times'}${day ? `, last on ${day}` : ''}.`;
 }
 
@@ -716,7 +1035,7 @@ export function readTaxRate(text: string | null | undefined): TypedRate {
   const raw = String(text ?? '').trim().replace(/\s/g, '').replace(/%$/, '');
   if (!raw) return { ok: true, pct: null };
   if (!/^\d{1,3}([.,]\d{1,3})?$/.test(raw)) {
-    return { ok: false, reason: 'A tax rate is a percentage — 20, or 12.5. Type the number on its own, with no per-cent sign and no currency.' };
+    return { ok: false, reason: 'A tax rate is a percentage: 20, or 12.5. Type the number on its own, with no per-cent sign and no currency.' };
   }
   const n = Number(raw.replace(',', '.'));
   if (!Number.isFinite(n)) {
@@ -733,7 +1052,7 @@ export function readTaxRate(text: string | null | undefined): TypedRate {
  *  which is a statement they did not make. */
 export function taxRateLabel(pct: number | null | undefined): string | null {
   if (pct == null || !Number.isFinite(pct)) return null;
-  return `${Number(pct.toFixed(3))}%`;
+  return `${numUpTo(pct, 3)}%`;
 }
 
 /** Whether this document carries anything the coach stated about tax, and so
@@ -763,8 +1082,10 @@ export function statesTax(i: CoachInvoice): boolean {
  * three families — no minor unit, hundredths, thousandths — and does the
  * conversion on the DIGITS rather than by multiplying a float, so nothing is
  * rounded into an amount nobody typed. It also carries Stripe's own rule that a
- * thousandth-unit amount must end in a nought. There is one place in this app
- * that decides how many decimal places a currency has, and this is not it.
+ * thousandth-unit amount must end in a nought — which is turned OFF here, see
+ * the call below: an invoice a coach writes and settles themselves is not a
+ * Stripe charge. There is one place in this app that decides how many decimal
+ * places a currency has, and this is not it.
  *
  * A comma decimal separator is still accepted: half the world types "45,50",
  * and `Number('45,50')` is NaN, which would refuse a perfectly ordinary amount
@@ -773,7 +1094,14 @@ export function statesTax(i: CoachInvoice): boolean {
  * and an invoice is not the place to pick one.
  */
 export function draftAmount(amountText: string, currency: string | null): TypedAmount {
-  const read = readMinorAmount(amountText, currency);
+  // NOT a charge, so Stripe's whole-ten rule for the thousandth-unit
+  // currencies does not apply to it. A coach invoice is a figure the coach
+  // states and settles against their own ledger — Stripe never sees it — and
+  // `readMinorAmount`'s default of `chargeable = true` was refusing an amount
+  // like KWD 12.345 with "the last place must be a nought" on a bill nobody
+  // was ever going to put through a card. coachMoney.ts's header lists this
+  // file as one of the three call sites it could not reach; this is that site.
+  const read = readMinorAmount(amountText, currency, false);
   if (!read.ok) return read;
   // Zero is a valid minor-unit figure and is not a valid invoice. An invoice
   // for nothing is not an invoice, and a receipt for nothing is not a payment —
@@ -808,7 +1136,7 @@ export function invoiceBlockers(d: InvoiceDraft): string[] {
   // currency" is a different problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to price this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to price this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so it cannot be printed on an invoice.');
   } else {
@@ -923,7 +1251,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   T.push('', 'FROM AND TO');
   if (!readIssuer) {
     H.push('<p class="none"><b>Not read.</b> The issuer’s name could not be read from the server when this document was made, so nothing is printed here. This is not a statement that the record has no name in it.</p>');
-    T.push('From: NOT READ — the issuer’s name could not be read. This is not a statement that the record has no name in it.');
+    T.push('From: NOT READ. The issuer’s name could not be read. This is not a statement that the record has no name in it.');
   } else if (!issuerName) {
     H.push('<p class="none">The issuer has not recorded a name on their account.</p>');
     T.push('From: the issuer has not recorded a name on their account.');
@@ -961,6 +1289,39 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
     if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
       H.push(`<p><b>Due:</b> ${escapeHtml(invoiceDayLabel(due))}</p>`);
       T.push(`Due: ${invoiceDayLabel(due)}`);
+    }
+  }
+  // The settlement, where the coach has recorded one (part 660).
+  //
+  // This is NOT an edit of what the document said. `kind` is untouched and the
+  // line above still reports it: the document said the money was being
+  // requested and it still says so, and it now also says the issuer states it
+  // arrived on a day. Both are true and both are the issuer's word.
+  //
+  // Printed because the alternative is worse in both directions. A client who
+  // has paid and asks for the document again would otherwise be handed one
+  // still demanding money, which reads as a second request; and a coach's own
+  // copy of a paid invoice would carry nothing to say it was paid.
+  //
+  // The DEVICE'S date is never used here. `settledOn` is a `date` column and is
+  // printed through `invoiceDayLabel`, which formats the parts of the string —
+  // `new Date('2026-08-01')` is UTC midnight, and would date a settlement the
+  // day before it happened for a third of the world.
+  //
+  // `chaseFrom` is deliberately NOT printed, on this document or any other. It
+  // is the coach's own working note about their own list, the client never
+  // agreed to it, and putting it on the page would turn it into the term
+  // `CHASE_FROM_IS_NOT_A_DUE_DATE` says it is not.
+  {
+    const settled = String(inv.settledOn ?? '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(settled)) {
+      H.push(`<p><b>Settled:</b> the issuer states this was paid on ${escapeHtml(invoiceDayLabel(settled))}.</p>`);
+      T.push(`Settled: the issuer states this was paid on ${invoiceDayLabel(settled)}.`);
+      const how = String(inv.settleNote ?? '').trim();
+      if (how) {
+        H.push(`<p class="lede">How the issuer says it arrived: ${escapeHtml(how)}</p>`);
+        T.push(`How the issuer says it arrived: ${how}`);
+      }
     }
   }
   // What the coach stated about tax, if anything, printed exactly as they typed
@@ -1005,6 +1366,13 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   }
   H.push(`<p class="lede">${escapeHtml(INVOICE_NOT_A_RECEIPT)}</p>`);
   T.push(INVOICE_NOT_A_RECEIPT);
+  // Only where a settlement is on the page. Said on every document would be a
+  // paragraph about a claim the document does not make, which is how the tax
+  // sentences got two versions rather than one hedged one.
+  if (inv.settledOn) {
+    H.push(`<p class="lede">${escapeHtml(INVOICE_SETTLEMENT_IS_YOUR_WORD)}</p>`);
+    T.push(INVOICE_SETTLEMENT_IS_YOUR_WORD);
+  }
   // Said on EVERY document, including the ones with no due date on them. A
   // reader who has one needs to know what it is and is not; a reader who has
   // none is entitled to know that this app never adds interest or a late fee to
@@ -1017,7 +1385,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
     ? `VOIDED. Invoice ${no}, issued ${invoiceDayLabel(inv.issuedOn)}${brand ? ' through ' + brand : ''}.`
     : complete
       ? `Invoice ${no}, issued ${invoiceDayLabel(inv.issuedOn)}${brand ? ' through ' + brand : ''}.`
-      : `Invoice ${no} — PARTS OF THIS DOCUMENT COULD NOT BE READ, see above${brand ? '. Issued through ' + brand : ''}.`;
+      : `Invoice ${no}. PARTS OF THIS DOCUMENT COULD NOT BE READ, see above${brand ? '. Issued through ' + brand : ''}.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 
@@ -1033,7 +1401,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
  * because it is already in somebody else's inbox.
  */
 export function invoiceShareBlurb(doc: CoachInvoiceDoc, inv: CoachInvoice): string {
-  const base = `Invoice ${invoiceNumber(inv.seq)} for ${inv.billTo}. It states no tax and it is not a payment receipt — both are said on the document itself.`;
+  const base = `Invoice ${invoiceNumber(inv.seq)} for ${inv.billTo}. It states no tax and it is not a payment receipt. Both are said on the document itself.`;
   const parts = [base];
   if (inv.voidedAt) {
     parts.push('THIS ONE IS VOIDED. The document says so across its top. Send it only if you mean to tell them it was cancelled.');

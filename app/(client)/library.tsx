@@ -28,7 +28,7 @@
 // A list of exercises, and the one thing you could not do to any of them was
 // log it. Tapping opened the clip and the footer sent you to Train, where you
 // then had to find the same movement again in a plan that may not contain it at
-// all — the library holds everything a coach has ever filmed, today's programme
+// all — the library holds everything a coach has ever filmed, today's program
 // holds six lifts. So somebody who did an extra set of face pulls after their
 // session had nowhere to put it from the screen they were already looking at.
 //
@@ -39,6 +39,7 @@
 // it does not, rather than closing on a set that exists on this phone alone.
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -46,14 +47,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useToast } from '../../src/ui/toast';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
+// Whose clip it is. The row, the caption and the player's precedence all ask
+// this one module rather than each re-deriving it from `trainerId`, which is
+// the expression that captioned a stranger's clip as the member's own coach's.
+import { clipOwner, type ClipOwner } from '../../src/lib/clipOwner';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useClientData } from '../../src/ui/clientData';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field, PageHead, IconPlate, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { ExerciseMuscles, groupTone } from '../../src/ui/ExerciseMuscles';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 // expo-image is required through src/ui/nativeModules.ts, never imported. Its
 // entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
@@ -62,13 +71,119 @@ import { catalogueValue as cap, num } from '../../src/lib/format';
 // takes today's bundle and has no ExpoImage in it. A bare import would take
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
-import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, grown, font, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift } from '../../src/lib/units';
 // The sentence a bodyweight set reads as, in the one place it is written.
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
+import { FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * `level` is a ladder, not a tally.
+ *
+ * Every other facet on this screen is ordered by how many movements carry it,
+ * which is the right order for a list of unrelated labels — the chip a member
+ * is most likely to want is first. Difficulty is not unrelated labels. Ordered
+ * by frequency it would read Intermediate, Beginner, Advanced (300 / 264 / 44
+ * on the live table), and a rung out of order in a three-rung ladder reads as
+ * a bug in the sorting rather than as a deliberate order. Anything the
+ * catalogue adds later that is not on this ladder sorts after it, alphabetically.
+ */
+const LEVEL_ORDER = ['beginner', 'intermediate', 'advanced'];
+
+/**
+ * The four tags a member must not be handed as a filter.
+ *
+ * `knee_safe`, `shoulder_safe`, `lower_back_safe` and `no_axial_load` are on
+ * roughly 270-300 rows each, and they are the vendor catalogue's own labels
+ * meaning, at most, "this movement does not load that joint". A member reads
+ * "Knee Safe" as "safe for my knee", which is a clinical claim about THEIR
+ * knee that nobody in this system has made. The catalogue tags Behind the Neck
+ * Press `knee_safe`, which is true and useless, and it is not a sentence this
+ * app should put in front of somebody choosing what to train on.
+ *
+ * It also routes around the one process built for this. An injury is disclosed
+ * to the coach, and src/lib/injuryGate.ts holds a program closed until the
+ * coach has acknowledged it — "building a program around an injury nobody
+ * has read is the thing this check exists to stop". A chip that filters six
+ * hundred movements down to "the safe ones" is a member building that
+ * program alone, off a third party's label, with no coach in the loop.
+ *
+ * They stay in `CatalogueRow.tags` — the column is read, the data is intact,
+ * and a screen with a clinician or a coach in front of it may yet have a use
+ * for it. What they do not get is a chip on the member's library.
+ */
+const HIDDEN_TAGS = new Set(['knee_safe', 'shoulder_safe', 'lower_back_safe', 'no_axial_load']);
+
+/**
+ * One row of filter chips over one catalogue column.
+ *
+ * A component rather than five copies of the same JSX, because five copies is
+ * how the muscle-group row and a facet row come to disagree about what a
+ * selected chip looks like — and a chip whose selected state is not obvious is
+ * a filter a member cannot tell is on.
+ *
+ * There is no 'All' chip. The lit chip is the filter, and tapping it again
+ * turns it off — so the row has one control per value and no thirty-first
+ * control meaning "none of the above". `accessibilityState.selected` is what
+ * says which, and the spoken label says what the tap will DO, because "Beginner,
+ * selected" does not tell a screen-reader user that the next double-tap clears it.
+ */
+/**
+ * A filter chip: a TonedChip's plate that can be pressed.
+ *
+ * Off, it is the tone's pale plate under the tone's INK — the muscle-group row
+ * hands each group the tone src/ui/ExerciseMuscles.tsx gives it, so Chest is
+ * the same blue here, on the row it filters to and on the exercise's own page;
+ * a facet value has no hue of its own and is neutral. ON, it is ink on the
+ * ground colour, which is how the kit's Segmented says "selected": a lit chip
+ * that kept its hue would be one pastel among twelve, and a filter a member
+ * cannot see is on is the failure FacetRow's header describes. The kit's
+ * TonedChip is not pressable and its `toneOf` is not exported, so the two
+ * colours are read off the theme here by the same rule.
+ */
+function FilterChip({ label, tone, on, onPress, a11yLabel, t }: {
+  label: string; tone: Tone; on: boolean; onPress: () => void; a11yLabel: string; t: Theme;
+}) {
+  const c = tone === 'brand' ? { soft: t.brandSoft, ink: t.brandText }
+    : tone === 'neutral' ? { soft: t.surface3, ink: t.ink2 }
+    : { soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11yLabel} accessibilityState={{ selected: on }}
+      // 36pt tall; the slop makes it 44 without moving the rows round it.
+      hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+      style={{ minHeight: grown(36), paddingHorizontal: sp.lg, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : c.soft }}>
+      <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: on ? t.surface : c.ink }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function FacetRow({ label, options, value, onPick, t }: {
+  label: string;
+  options: string[];
+  value: string | null;
+  onPick: (v: string | null) => void;
+  t: Theme;
+}) {
+  if (!options.length) return null;
+  return (
+    <View style={{ marginTop: sp.md }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.xs }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
+        {options.map((o) => {
+          const on = value === o;
+          const shown = cap(o);
+          return (
+            <FilterChip key={o} t={t} label={shown} tone="neutral" on={on} onPress={() => onPick(on ? null : o)}
+              a11yLabel={on ? `${shown}. Tap to stop filtering by ${label.toLowerCase()}` : `Show ${shown} movements only`} />
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
 
 export default function Library() {
  const toast = useToast();
@@ -81,17 +196,55 @@ export default function Library() {
  const goBack = useBackFromHub('(client)');
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
+ // ── the catalogue's own columns, offered as filters ──────────────────────
+ //
+ // Null is "not filtering on this", and it is null rather than '' or 'All' on
+ // purpose: '' is a value that compares equal to a missing one, and 'All' is a
+ // magic string that has to be excluded from every comparison by hand — the
+ // muscle-group chips above carry exactly that cost and are only left alone
+ // because they are already shipped and drive two lists.
+ //
+ // These five drive the CATALOGUE list only. A clip a coach filmed has a name,
+ // a group and a file, and nothing else; filtering the clips by a column their
+ // rows do not have would hide a coach's own demonstration behind a label
+ // nobody applied to it. So the panel lives inside All Exercises, under the
+ // heading of the list it governs, rather than beside the group chips at the
+ // top, which do drive both.
+ const [level, setLevel] = useState<string | null>(null);
+ const [mechanic, setMechanic] = useState<string | null>(null);
+ const [force, setForce] = useState<string | null>(null);
+ const [goal, setGoal] = useState<string | null>(null);
+ const [tag, setTag] = useState<string | null>(null);
+ // Folded away by default. Five more chip rows permanently open would push the
+ // list itself off the first screenful of a phone, and the list is the screen.
+ const [facetsOpen, setFacetsOpen] = useState(false);
  const { videos, status, reload } = useExerciseVideos();
+ // Who coaches this member. The library read is filtered by POLICY and not by
+ // trainer — `exvid_read` knows about grants and gym-wide sharing that a
+ // client-side filter would get wrong — so this list holds the platform's
+ // clips, this member's coach's, and every other coach's marked 'public'. The
+ // id is the only thing that tells the second from the third, and without it
+ // every one of them reads as "Recorded by your coach".
+ //
+ // `useClientData` exposes it now (src/ui/clientData.tsx). Until tonight it did
+ // not, and app/(client)/exercise.tsx asked for it anyway through a cast that
+ // produced `undefined` on every render. null here is no tie-break, which is
+ // also what a member with no coach has, and it is never captioned as anything
+ // — `clipOwner` resolves it to 'other', not to 'mine'.
+ const coachId = useClientData().trainerId;
  // A failed read used to strand this screen for the whole session: the only
  // way to ask again was the Try Again button inside the failure notice, and
  // there is no such button on a screen that merely went stale. Pull to refresh
  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
- const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
  // The catalogue, which is a different thing from the clips and was never on
  // this screen. 917 movements exist; nought clips do. A screen called Exercise
  // Library that could only ever show the second was empty for every client on
  // the platform, and said "No clips yet" as though that were the whole story.
  const cat = useExerciseCatalogue();
+ // Both halves. The gesture asked for the CLIPS alone, so a member whose
+ // catalogue read had failed — which is most of this screen's rows — pulled it
+ // down and got the same empty list back with the same sentence under it.
+ const pull = usePullToRefresh(useCallback(() => { reload(); void cat.reload(); }, [reload, cat.reload]));
  // Rendered in pages. 917 <ListRow>s mounted at once is a visibly janky scroll
  // on an older phone, and nobody reads past the first screenful anyway.
  const [catShown, setCatShown] = useState(50);
@@ -131,6 +284,63 @@ export default function Library() {
   if (group !== 'All' && !groups.some((g) => g.toLowerCase() === group.toLowerCase())) setGroup('All');
  }, [groups, group]);
 
+ // ── the facet chips are whatever the catalogue actually holds ────────────
+ //
+ // Derived, never hardcoded, for the reason the group chips are: a hardcoded
+ // list is a second copy of the vocabulary, and the day the catalogue gains a
+ // value the chip for it does not exist and the rows carrying it become
+ // unreachable through the one control on the screen whose job is finding
+ // them. Today that vocabulary is three levels, two mechanics, four forces,
+ // seven goals and thirty-odd tags; none of those numbers are written down
+ // anywhere in this file.
+ //
+ // Ordered by how many movements carry each value, so the chip worth tapping
+ // is the one nearest the member's thumb, with ties broken alphabetically so
+ // the row does not reshuffle between two equal counts. `level` is the
+ // exception — see LEVEL_ORDER.
+ const facets = useMemo(() => {
+  const tally = (values: (string | null)[][]) => {
+   const n = new Map<string, number>();
+   for (const vs of values) for (const v of vs) { const s = (v || '').trim(); if (s) n.set(s, (n.get(s) ?? 0) + 1); }
+   return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
+  };
+  const levels = tally(cat.rows.map((e) => [e.level])).sort((a, b) => {
+   const ia = LEVEL_ORDER.indexOf(a), ib = LEVEL_ORDER.indexOf(b);
+   // A value the ladder does not name sorts after every value it does, rather
+   // than at -1, which would put it first.
+   if (ia < 0 && ib < 0) return a.localeCompare(b);
+   if (ia < 0) return 1;
+   if (ib < 0) return -1;
+   return ia - ib;
+  });
+  return {
+   levels,
+   mechanics: tally(cat.rows.map((e) => [e.mechanic])),
+   forces: tally(cat.rows.map((e) => [e.force])),
+   goals: tally(cat.rows.map((e) => e.goals)),
+   // See HIDDEN_TAGS. Filtered here rather than at the read, so the column is
+   // still whole for anything else that comes to want it.
+   tags: tally(cat.rows.map((e) => e.tags.filter((v) => !HIDDEN_TAGS.has(v)))),
+  };
+ }, [cat.rows]);
+
+ // A chip can vanish underneath the selection, exactly as a group chip can —
+ // the catalogue read lands, or is re-read after a sign-in, and the value the
+ // member was standing on is no longer in it. Left alone the list would be
+ // empty under a filter that is no longer drawn anywhere on the screen.
+ useEffect(() => {
+  // Only once a read has actually landed. While `cat.rows` is empty because
+  // the read is still in flight — or failed — every facet is "missing", and
+  // clearing on that would wipe the member's filters every time they pulled
+  // to refresh.
+  if (!cat.rows.length) return;
+  if (level != null && !facets.levels.includes(level)) setLevel(null);
+  if (mechanic != null && !facets.mechanics.includes(mechanic)) setMechanic(null);
+  if (force != null && !facets.forces.includes(force)) setForce(null);
+  if (goal != null && !facets.goals.includes(goal)) setGoal(null);
+  if (tag != null && !facets.tags.includes(tag)) setTag(null);
+ }, [facets, cat.rows.length, level, mechanic, force, goal, tag]);
+
  const term = q.trim().toLowerCase();
  const list = videos.filter((v) =>
   (group === 'All' || (v.group || '').trim().toLowerCase() === group.toLowerCase()) &&
@@ -140,11 +350,57 @@ export default function Library() {
  // The same search box and the same chips drive both lists, so a client typing
  // 'squat' filters what we can show them AND what they can read about, rather
  // than filtering one and leaving the other showing everything.
- const catList = cat.rows.filter((e) =>
+ // The group and the search alone. Kept apart from the facet filters below so
+ // the "we cannot judge these rows" sentence is counted over the same set the
+ // facets are applied to, rather than over the whole catalogue.
+ const catScoped = cat.rows.filter((e) =>
   (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
-  (term === '' || e.name.toLowerCase().includes(term))
+  // Both names, and the catalogue's synonyms. A member whose phone is in German
+  // sees "Kniebeuge" and must be able to type it; the same member reading a
+  // program their coach wrote in English must be able to type "Back Squat"
+  // and land on the same row. And a member who has only ever heard the movement
+  // called "butt kicks" must find Heel Flicks, which is what `synonyms` is for
+  // — before this, that search returned nothing and the screen said so, about a
+  // movement we have.
+  matchesSearch(term, e.name, e.display, e.synonyms)
  );
- useEffect(() => { setCatShown(50); }, [term, group]);
+ // A null column never matches a chip. That is the whole rule and it is worth
+ // saying out loud: a movement the catalogue has not rated is NOT a beginner
+ // movement by default, and it is not an advanced one either — it is a row we
+ // cannot judge, and it drops out of every level filter rather than being
+ // guessed into one. The count of those rows is printed under the panel.
+ const catList = catScoped.filter((e) =>
+  (level == null || e.level === level) &&
+  (mechanic == null || e.mechanic === mechanic) &&
+  (force == null || e.force === force) &&
+  (goal == null || e.goals.includes(goal)) &&
+  (tag == null || e.tags.includes(tag))
+ );
+ const facetsOn = [level, mechanic, force, goal, tag].filter((v) => v != null).length;
+ const clearFacets = () => { setLevel(null); setMechanic(null); setForce(null); setGoal(null); setTag(null); };
+ // Everything currently narrowing the catalogue list, named. Empty string when
+ // nothing is — which is the only condition under which "the catalogue is
+ // empty" is a true sentence.
+ const narrowedBy = [
+  term ? `“${q.trim()}”` : null,
+  group !== 'All' ? group : null,
+  facetsOn > 0 ? `${facetsOn} filter${facetsOn === 1 ? '' : 's'}` : null,
+ ].filter(Boolean).join(' and ');
+ // Rows the group and the search DID select, which carry nothing in a column
+ // being filtered on. They are absent from the list below, and the reason is
+ // not that they failed the test — nobody applied the test to them. Saying so
+ // is the same duty `unmatchedNote` discharges on the muscle board and
+ // `unpricedSets` discharges under a tonnage: a filtered count that quietly
+ // omits the rows it could not classify is a smaller number presented as a
+ // complete one.
+ const unjudged = facetsOn === 0 ? 0 : catScoped.filter((e) =>
+  (level != null && !e.level) ||
+  (mechanic != null && !e.mechanic) ||
+  (force != null && !e.force) ||
+  (goal != null && e.goals.length === 0) ||
+  (tag != null && e.tags.length === 0)
+ ).length;
+ useEffect(() => { setCatShown(50); }, [term, group, level, mechanic, force, goal, tag]);
 
  // Thumbnails for the page on screen, signed in ONE request.
  //
@@ -166,11 +422,52 @@ export default function Library() {
   return () => { cancelled = true; };
  }, [visibleKey]);
 
- // Whose clip it is, in the same words <ExerciseVideoBlock> uses on the workout
- // screen: one clip described two ways on two screens reads as two facts. A null
- // trainerId is a platform clip belonging to no gym; anything else is here
- // because a coach chose to share it with this client.
- const source = (v: VideoItem) => (v.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`);
+ // Whose clip it is, in the same words the workout screen uses: one clip
+ // described two ways on two screens reads as two facts.
+ //
+ // The comment above this line used to say "a null trainerId is a platform clip
+ // belonging to no gym; anything else is here because a coach chose to share it
+ // with this client", and BOTH halves were false — the same two false statements
+ // `SessionDemo` in app/(client)/workouts.tsx made out of the identical
+ // expression, and they are recorded there at length:
+ //
+ //   · null is ALSO the shape of a clip stranded in this handset's storage
+ //     after its insert was refused. No row, nobody else can see it, and it was
+ //     captioned as the platform's — a clip no client can reach, presented as
+ //     something Repple published.
+ //   · non-null is ALSO another coach's PUBLISHED clip. `exvid_read` decides
+ //     what a member may see and it does not narrow to their own coach, so
+ //     those rows are real and reachable here — and every one of them was
+ //     captioned "Recorded by your coach", about somebody the member has never
+ //     met.
+ //
+ // Asked through `clipOwner` (src/lib/clipOwner.ts), which is the one place this
+ // app answers the question, so the row, the player's precedence and the
+ // coverage report cannot drift apart. `preferTrainerId` is the member's own
+ // coach — `coachId`, read at the top of this component — and it is what
+ // separates 'mine' from 'other';
+ // null there means no tie-break, which resolves to 'other' rather than
+ // guessing the flattering answer.
+ //
+ // The four sentences are character-for-character the ones `clipCaption` in
+ // app/(client)/workouts.tsx writes. They are restated rather than imported
+ // because that function lives inside an expo-router route file and the module
+ // that owns the question, src/lib/clipOwner.ts, belongs to another lane
+ // tonight; lifting them into it is the follow-up, and until then any change to
+ // one of these lines has to be made to both.
+ const clipCaption = (owner: ClipOwner): string => {
+  switch (owner) {
+   case 'mine': return 'Recorded by your coach';
+   // Real, published, and not theirs. Named as a coach's rather than as the
+   // library's, because the library's means nobody's.
+   case 'other': return `Recorded by a coach on ${BRAND.label}`;
+   case 'platform': return `From the ${BRAND.label} library`;
+   // Never the library's. There is no row behind this clip, nobody but this
+   // device can see it, and no coach put it here for this member.
+   case 'local': return 'Saved on this device only, not from the library, and not your coach’s';
+  }
+ };
+ const source = (v: VideoItem) => clipCaption(clipOwner({ id: v.id, trainerId: v.trainerId ?? null }, coachId));
  // `dur` is not a duration and never was — it holds the literal word "clip" or
  // "link", which is how the client came to be reading "Legs · clip". What they
  // can use is whose demonstration it is and whether there is one to play at all.
@@ -198,7 +495,7 @@ export default function Library() {
  const [saving, setSaving] = useState(false);
  const addSet = () => {
   const r = parseInt(reps, 10) || 0;
-  if (r <= 0) { Alert.alert('How many reps?', 'A set needs a rep count. The weight can be left blank for a bodyweight movement.'); return; }
+  if (r <= 0) { Alert.alert('How Many Reps?', 'A set needs a rep count. The weight can be left blank for a bodyweight movement.'); return; }
   // Blank weight is 0 and stays 0 — that is a bodyweight set, which is a real
   // set, and the log already renders a 0 kg set as bodyweight rather than as a
   // missing figure.
@@ -215,7 +512,7 @@ export default function Library() {
   // It also refuses text that is not a number instead of silently making it a
   // bodyweight set, and states its bound in the unit on screen.
   const load = readLift(kg, wu);
-  if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
+  if (!load.ok) { Alert.alert('Check That Load', load.reason); return; }
   // A blank box is testimony, not a zero: `readLift` returns a null load for it
   // and that null is what says "my own bodyweight". A typed load on top of it
   // is what was ADDED — the belt — exactly as `setLoadKg` reads it.
@@ -231,9 +528,9 @@ export default function Library() {
   // the log by this path would otherwise have been the one set in the session
   // stored in the wrong unit — the hardest kind of wrong figure to ever notice.
   const trailing = readLift(kg, wu);
-  if (!trailing.ok) { Alert.alert('Check that load', trailing.reason); return; }
+  if (!trailing.ok) { Alert.alert('Check That Load', trailing.reason); return; }
   const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0, trailing.kg == null] as [number, number, boolean]] : banked;
-  if (!pending.length) { Alert.alert('Nothing to log', 'Add a set first — reps, and the weight if there was one.'); return; }
+  if (!pending.length) { Alert.alert('Nothing to Log', 'Add a set first: reps, and the weight if there was one.'); return; }
   setSaving(true);
   // No `kcal`. Train derives an energy estimate across a whole session's work;
   // one set logged on its own has no session around it to derive from, and the
@@ -252,13 +549,13 @@ export default function Library() {
    // Kept rather than lost, so the sheet closes and the banked sets are
    // cleared exactly as they are on a real save — leaving them in the form as
    // well is how one set becomes two.
-   Alert.alert('Saved on this phone', `${open.name} has not reached your training log yet — there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
+   Alert.alert('Saved on This Phone', `${open.name} has not reached your training log yet because there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
    setBanked([]); setReps(''); setKg('');
    close();
    return;
   }
   if (out === 'refused') {
-   Alert.alert('Not logged', `${open.name} was rejected by your training log, so it has not been recorded and it is not waiting to send. Logging it again as it is will be rejected again.`);
+   Alert.alert('Not Logged', `${open.name} was rejected by your training log, so it has not been recorded and it is not waiting to send. Logging it again as it is will be rejected again.`);
    return;
   }
   notifySuccess();
@@ -280,32 +577,27 @@ export default function Library() {
   <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
    <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-     <Ghost icon="back" onPress={goBack} />
-     <View style={{ flex: 1 }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>How-to clips from your coach</Text>
-      <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
-     </View>
-    </View>
+    <PageHead title="Exercise Library" onBack={goBack} />
 
-    {/* ── the field is the screen ────────────────────────────────────── */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>
-     <Icon name="search" size={16} color={t.ink3} />
+    {/* ── the field is the screen ──────────────────────────────────────
+        A pill on the grey ground, so it is a white one under the card shadow:
+        surface2 is two points of grey from the ground and the one control the
+        page is built round was the faintest thing on it. */}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(50), backgroundColor: t.surface, borderRadius: radius.pill, paddingHorizontal: sp.lg, marginTop: sp.lg, ...elevation.card }}>
+     <Icon name="search" size={18} color={t.ink3} />
      <TextInput value={q} onChangeText={setQ} placeholder="Search exercises…" placeholderTextColor={t.ink3}
+      accessibilityLabel="Search exercises" returnKeyType="search"
       style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
      {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
     </View>
 
+    {/* One tone per muscle group, the same one the rows below wear. */}
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
-     {groups.map((g) => {
-      const on = group.toLowerCase() === g.toLowerCase();
-      return (
-       <Pressable key={g} onPress={() => setGroup(g)} accessibilityRole="button" accessibilityLabel={g === 'All' ? 'Show every muscle group' : `Show ${g} only`} accessibilityState={{ selected: on }}
-        style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-        <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g}</Text>
-       </Pressable>
-      );
-     })}
+     {groups.map((g) => (
+      <FilterChip key={g} t={t} label={g} tone={g === 'All' ? 'neutral' : groupTone(g)}
+       on={group.toLowerCase() === g.toLowerCase()} onPress={() => setGroup(g)}
+       a11yLabel={g === 'All' ? 'Show every muscle group' : `Show ${g} only`} />
+     ))}
     </ScrollView>
 
     <Section>
@@ -317,10 +609,7 @@ export default function Library() {
          reader resolves that by believing the list, and concludes the sentence
          is broken rather than that it is about something else. */}
      <SectionHead title={group === 'All' ? 'Clips from Your Coach' : `${group} Clips`}
-      note={status === 'ready' && list.length ? `${list.length} clip${list.length === 1 ? '' : 's'}` : undefined} />
-     {status === 'ready' && list.length ? (
-      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap one to watch it — and to log the sets you just did.</Text>
-     ) : null}
+      note={status === 'ready' && list.length ? `${list.length} Clip${list.length === 1 ? '' : 's'}` : undefined} />
 
      {/* The read failed, so nothing below this line is a statement about what
          the coach has uploaded. Anything the phone already had is still shown
@@ -335,23 +624,29 @@ export default function Library() {
      ) : null}
 
      {status === 'loading' && videos.length === 0 ? (
-      <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
-       <Icon name="video" size={26} color={t.ink3} />
-       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>Loading your coach's clips…</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+       <IconPlate icon="video" tone="neutral" />
+       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Loading your coach's clips…</Text>
       </View>
      ) : list.length === 0 ? (
       // On 'error' the notice above has already said why the list is empty;
       // repeating it here as "no clips yet" would be the old lie again.
       status === 'error' ? null : (
-       <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
-        <Icon name="video" size={26} color={t.ink3} />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
+       // A plate and one line, not a tall centred block: with no clips filmed
+       // anywhere yet this is what most members see, and it was holding the
+       // catalogue — the part of the page that has something in it — below
+       // the first screenful.
+       <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        <IconPlate icon="video" tone="neutral" />
+        <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>
          {videos.length === 0
-          ? 'No clips yet — they appear here as your coach uploads them.'
+          ? 'No clips yet. They appear here as your coach uploads them.'
           : term && group !== 'All' ? `No clip in ${group} matches “${q.trim()}”.`
           : term ? `No clip matches “${q.trim()}”.`
           : `No clips filed under ${group}. Every ${group} movement we know is listed further down.`}
         </Text>
+        </View>
         {videos.length > 0 && filtering ? (
          <View style={{ marginTop: sp.md }}>
           <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup('All'); }} />
@@ -362,13 +657,12 @@ export default function Library() {
      ) : list.map((v, i) => (
       <View key={v.id}>
        {i > 0 ? <Rule /> : null}
-       <ListRow icon="video" title={v.name} note={rowNote(v)} onPress={() => show(v)} />
+       <ListRow icon="video" tone="blue" title={v.name} note={rowNote(v)} onPress={() => show(v)} />
       </View>
      ))}
     </Section>
 
     {/* ── every movement we know, clip or no clip ────────────────────────── */}
-    <Rule />
     <Section>
      <SectionHead
       title="All Exercises"
@@ -381,12 +675,75 @@ export default function Library() {
               // have been printed as a measurement of the catalogue.
               note={cat.status === 'ready' && !cat.signedOut ? `${catList.length} of ${cat.rows.length}` : undefined}
      />
+
+     {/* ── filtering by the columns the catalogue already has ───────────── */}
+     {/* Drawn whenever there are rows at all, and NOT only when the filtered
+         list has some. A panel that disappears the moment its filters empty
+         the list strands the member on a blank screen with the control that
+         emptied it no longer on it — which is the one moment they need it. */}
+     {cat.rows.length > 0 ? (<>
+      <Pressable onPress={() => setFacetsOpen((v) => !v)}
+       accessibilityRole="button"
+       accessibilityState={{ expanded: facetsOpen }}
+       accessibilityLabel={facetsOpen
+        ? 'Hide the filters'
+        : facetsOn > 0
+        ? `Show the filters. ${facetsOn} ${facetsOn === 1 ? 'is' : 'are'} on`
+        : 'Show filters for difficulty, movement, direction, goal and label'}
+       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
+       <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
+        {/* The count is in the closed label as well as the open panel. A
+            filter a member forgot they set is indistinguishable, from a
+            folded panel, from a catalogue that is missing movements. */}
+        Filters{facetsOn > 0 ? ` · ${facetsOn} on` : ''}
+       </Text>
+       <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{facetsOpen ? 'Hide' : 'Show'}</Text>
+      </Pressable>
+      {facetsOpen ? (<>
+       <FacetRow label="Difficulty" options={facets.levels} value={level} onPick={setLevel} t={t} />
+       {/* 'Movement' and 'Direction' rather than the catalogue's own
+           'mechanic' and 'force'. Those are the column names and they are the
+           vocabulary of whoever compiled the dataset, not of somebody looking
+           for a chest exercise — 'force: static' is not a phrase a member has
+           ever used. The VALUES stay exactly as the catalogue writes them,
+           because those are words people do use, and rewording them here
+           would be a second vocabulary for the same data. */}
+       <FacetRow label="Movement" options={facets.mechanics} value={mechanic} onPick={setMechanic} t={t} />
+       <FacetRow label="Direction" options={facets.forces} value={force} onPick={setForce} t={t} />
+       <FacetRow label="Goal" options={facets.goals} value={goal} onPick={setGoal} t={t} />
+       <FacetRow label="Label" options={facets.tags} value={tag} onPick={setTag} t={t} />
+       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+        These are the exercise catalogue's own labels for a movement, not advice about your
+        training. What to do about an injury, or which of these to work towards, is a
+        conversation with your coach.
+       </Text>
+       {facetsOn > 0 ? (
+        <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+         <Ghost label="Clear Filters" onPress={clearFacets} />
+        </View>
+       ) : null}
+      </>) : null}
+      {/* Said whether the panel is open or shut, because it explains rows that
+          are missing from the list either way. Under a truncated read it is a
+          FLOOR: `catScoped` is drawn from the thousand rows that came back, so
+          the number of unrated movements in the whole catalogue is at least
+          this and may be more. See src/ui/loadStatus.ts on why 'partial' is
+          not 'ready'. */}
+      {unjudged > 0 ? (
+       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+        {isWhole(cat.status)
+         ? `${num(unjudged)} movement${unjudged === 1 ? '' : 's'} here carr${unjudged === 1 ? 'ies' : 'y'} no label of that kind in the catalogue, so ${unjudged === 1 ? 'it is' : 'they are'} not in the list below. That is a gap in what we know about ${unjudged === 1 ? 'it' : 'them'}, not a judgement about ${unjudged === 1 ? 'it' : 'them'}.`
+         : `At least ${num(unjudged)} of the movements read carry no label of that kind in the catalogue, so they are not in the list below. That is a gap in what we know about them, not a judgement about them.`}
+       </Text>
+      ) : null}
+     </>) : null}
+
      {cat.status === 'loading' ? (
       <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>
      ) : cat.status === 'error' ? (
       // Not "no exercises". We have 917 of them; we could not read them.
       <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
-       note="This is our end, not yours — the movements are still there. Try again once you have signal." />
+       note="This is our end, not yours. The movements are still there. Try again once you have signal." />
      ) : cat.signedOut ? (
       // The read POLICY is `to authenticated`, so a session that has not been
       // restored yet is handed zero rows with no error at all and the hook
@@ -396,11 +753,24 @@ export default function Library() {
       // movements. app/(client)/exercise.tsx has said this correctly for as
       // long as the flag has existed; this is the same sentence.
       <Notice tone={t.warn} kicker="Catalogue" title="Sign in to see the exercise list"
-       note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed — all 900-odd movements are still there." />
+       note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed; all 900-odd movements are still there." />
      ) : catList.length === 0 ? (
-      <Text style={{ ...ty.label, color: t.ink3 }}>
-       {filtering ? `No movement matches ${term ? `“${q.trim()}”` : `${group}`}.` : 'The catalogue is empty.'}
-      </Text>
+      <View>
+       <Text style={{ ...ty.label, color: t.ink3 }}>
+        {/* `filtering` was the test here, and `filtering` is the CLIPS' notion
+            of it — search plus muscle group. With a facet chip lit and neither
+            of those set it is false, so a filter that had narrowed 615
+            movements down to none would have printed "The catalogue is empty."
+            over a catalogue that is nothing of the sort. It now names every
+            control that is currently narrowing the list. */}
+        {narrowedBy ? `No movement matches ${narrowedBy}.` : 'The catalogue is empty.'}
+       </Text>
+       {narrowedBy ? (
+        <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+         <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup('All'); clearFacets(); }} />
+        </View>
+       ) : null}
+      </View>
      ) : (
       <>
        {cat.status === 'partial' ? <PartialRead what="exercises" shown={cat.rows.length} /> : null}
@@ -415,16 +785,27 @@ export default function Library() {
         const thumb = e.thumbPath && needsSigning(e.thumbPath)
           ? (thumbs.get(e.thumbPath) ?? null)
           : (frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null);
+        // Why this row is in the results, when the answer is not visible in its
+        // title. Null on almost every row, including every row in an unfiltered
+        // list — see matchedSynonym() in src/lib/catalogueLocale.ts.
+        const via = matchedSynonym(term, e.name, e.display, e.synonyms);
         return (
         <View key={e.id}>
          {i > 0 ? <Rule /> : null}
          <Pressable
           onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name, from: 'clientLibrary' } })}
           accessibilityRole="button"
-          accessibilityLabel={e.name}
+          // The row's second line as well as its first. In a list of six
+          // hundred movements the muscle group and the equipment are how one
+          // is told from another, and the label was replacing both.
+          // The matched synonym is in the SPOKEN label too. A screen reader
+          // announces the title, and a member who searched "butt kicks" and
+          // hears "Heel Flicks" has exactly the problem the printed line
+          // below exists to solve, with no way to see the answer.
+          accessibilityLabel={[e.display.text, via ? `matched ${via}` : null, [e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' \u00b7 ')].filter(Boolean).join('. ')}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
          >
-          <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 60, height: 60, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
            {thumb ? (
             <GuardedImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
              style={{ width: '100%', height: '100%' }} />
@@ -435,12 +816,45 @@ export default function Library() {
            )}
           </View>
           <View style={{ flex: 1 }}>
-           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.name}</Text>
-           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
-            {[e.group, e.equipment ? cap(e.equipment) : null].filter(Boolean).join(' · ')}
-           </Text>
+           {/* The reader's language where we have it. `e.name` is untouched
+               and is still what the row navigates by — the exercise screen
+               resolves a movement by the slug of its ENGLISH name. */}
+           <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>{e.display.text}</Text>
+           {/* The group as a chip in its own tone — the filter row's tone —
+               and the rest of the line beside it. The chip never shrinks; the
+               caption does, because the group is what the row is scanned by. */}
+           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+            {e.group ? <TonedChip label={e.group} tone={groupTone(e.group)} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1, minWidth: 0 }} numberOfLines={1}>
+             {/* The marker is on the row and not only on the detail screen,
+                 because in a list of six hundred an unmarked English name among
+                 German ones simply reads as the German name. Null, and so
+                 absent, for a reader whose language the catalogue is in. */}
+             {[e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
+            </Text>
+           </View>
+           {/* Its OWN line, not another item on the one above. This is the
+               sentence that stops a result reading as a bug — a member types
+               "butt kicks", gets back a row titled Heel Flicks, and without
+               this has been shown a movement whose name contains nothing they
+               typed. Joined into the caption it would be the first thing
+               `numberOfLines={1}` dropped on a narrow phone, which is the one
+               place it is most needed. Absent entirely when a name matched. */}
+           {via ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>Matched “{via}”</Text>
+           ) : null}
           </View>
-          <Icon name="chevron" size={15} color={t.ink3} />
+          {/* Where the movement lands on the body, at the trailing edge. A
+              sliver of lit figure says hips-or-back-or-arms at a glance, which
+              is the one thing the group word does not: "Legs" is a squat and a
+              calf raise. Decorative — the spoken label above names the group.
+              'ready' and not `cat.status`: a truncated LIST is still made of
+              whole ROWS, and this row's two muscle columns are its own. Drawn
+              ungraded it would show primary and secondary in one colour,
+              misreading the row to say something about the list. Nothing at
+              all when the row names no muscle the artwork can draw. */}
+          <ExerciseMuscles compact primary={e.primaryMuscles} secondary={e.secondaryMuscles} status="ready" />
+          <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
          </Pressable>
         </View>
         );
@@ -465,11 +879,11 @@ export default function Library() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close}
      accessibilityRole="button" accessibilityLabel="Close the clip" />
-    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%', ...elevation.e2 }}>
+    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: 20, paddingBottom: 30, maxHeight: '90%', ...elevation.e2 }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
       <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={1}>{open?.name}</Text>
       <Pressable onPress={close} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
-       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Close</Text>
+       <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>Close</Text>
       </Pressable>
      </View>
 
@@ -501,7 +915,7 @@ export default function Library() {
      {/* ── log it, from here ────────────────────────────────────────────── */}
      <Rule />
      <View>
-      <SectionHead title="Log This Exercise" note={banked.length ? `${banked.length} set${banked.length === 1 ? '' : 's'} ready` : undefined} />
+      <SectionHead title="Log This Exercise" note={banked.length ? `${banked.length} Set${banked.length === 1 ? '' : 's'} Ready` : undefined} />
       {banked.length ? (
        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
         {banked.map((s, i) => (
@@ -546,14 +960,18 @@ export default function Library() {
       <View style={{ marginTop: sp.md }}>
        <Cta label={saving ? 'Logging…' : 'Log to Today'} wide disabled={saving} onPress={logIt} />
       </View>
-      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-       Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
-      </Text>
      </View>
 
-     <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
-      The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
-     </Text>
+     {/* The two explanations, folded: the form above them says what it does,
+         and on a small phone they were what pushed Log to Today off the sheet. */}
+     <Expandable title="How This Works">
+      <Text style={{ ...ty.caption, color: t.ink3 }}>
+       Goes into today's log alongside your program, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+       The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
+      </Text>
+     </Expandable>
      </ScrollView>
     </View>
     </KeyboardAvoidingView>

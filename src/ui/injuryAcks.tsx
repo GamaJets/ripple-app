@@ -6,10 +6,16 @@
 //
 // The status is exposed for the same reason every other provider here exposes
 // one: an empty acknowledgement list means "not acknowledged" and "could not
-// read" equally, and the guard has to refuse both rather than let a programme
+// read" equally, and the guard has to refuse both rather than let a program
 // be built on the difference.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. An auth error is
+// not a sign-out — see src/lib/authReadFate.ts — and on this provider the
+// difference is whether a client is told their coach has not read their
+// injuries or that we could not check.
+import { signedInUid } from '../lib/signedInUid';
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 import { worstStatus, type LoadStatus } from './loadStatus';
@@ -32,7 +38,12 @@ interface Value {
    *  screen to escape. */
   refresh: () => Promise<void>;
   /** The keys acknowledged for a client, or null if this coach has never
-   *  acknowledged anything for them. Null and [] are different answers. */
+   *  acknowledged anything for them. Null and [] are different answers.
+   *
+   *  Read this ONLY under `status === 'ready'`. Under 'partial' the map is a
+   *  page of the coach's acknowledgements and a null is "not in the page we
+   *  got", not "never acknowledged"; under 'error' it is nothing at all.
+   *  `guardInjuries` checks the status before it looks. */
   acknowledged: (clientId: string) => string[] | null;
   /** Record that the coach has read exactly these disclosures. Returns false
    *  if the write did not land, so a caller never reports a confirmation the
@@ -52,22 +63,73 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     setStatus('loading');
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { if (alive()) { setRows({}); setStatus('ready'); } return; }
+      // ── an outage is not "this coach has read nothing" ───────────────────
+      //
+      // The error beside this call was discarded, so `uid` was `undefined` for
+      // an unreachable auth server exactly as it is for nobody being signed in
+      // (src/lib/authReadFate.ts has the library reading). Both landed on
+      // `setRows({}); setStatus('ready')`.
+      //
+      // An empty map under 'ready' is not nothing: `acknowledged()` reads a
+      // missing client out of it as `[]`-meaning-none, which this file's own
+      // interface documents as "this coach has never acknowledged anything for
+      // them", and src/lib/injuryGate.ts then refuses Assign with the sentence
+      // that says GO AND READ THE DISCLOSURES. Under 'error' that same gate
+      // refuses with the sentence that says the acknowledgements could not be
+      // read — which is the true one, and the one that does not send a coach
+      // to re-read work they have already done. Same refusal, honest reason.
+      const who = await signedInUid('injuryAcks.read');
+      if (who.fate !== null) {
+        if (alive()) {
+          setRows({});
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        }
+        return;
+      }
+      const uid = who.uid;
+      // ── The probe row, and the order that makes it mean anything ─────────
+      //
+      // `.limit(capLimit())` asks for one row past the cap so that a full page
+      // and a truncated one stop looking identical (src/lib/rowCap.ts). That
+      // was already here; what was not is anybody looking at the answer. The
+      // probe row was merged into the map like data — which src/lib/rowCap.ts
+      // says in as many words it is not — and 'ready' was set whatever came
+      // back, so 'partial' was unreachable.
+      //
+      // What that costs is specific. Past the cap, a client whose row fell off
+      // the end reads back as `null` from `acknowledged()`, documented above as
+      // "this coach has never acknowledged anything for them" — so
+      // `guardInjuries` refuses Assign with the wrong sentence, telling a coach
+      // to go and read disclosures they have already confirmed instead of that
+      // the list could not be read whole. It fails safe, and it needs one
+      // trainer with more than a thousand acknowledged clients, but it is
+      // wrong in a way nobody on the screen can tell.
+      //
+      // The `.order()` is what makes it deterministic. Without one Postgres
+      // promises nothing about which thousand of the rows come back, so WHICH
+      // clients read as unacknowledged changed between launches. `client_id` is
+      // unique within a trainer's rows (the table's conflict target is
+      // trainer_id,client_id), so ordering on it alone is a total order.
       const { data, error } = await supabase
         .from('injury_acknowledgements')
         .select('client_id, acknowledged_injuries')
         .eq('trainer_id', uid)
+        .order('client_id')
         .limit(capLimit());
       if (!alive()) return;
       if (error) { reportError('injuryAcks.read', error); setRows({}); setStatus('error'); return; }
+      const page = capped(data ?? []);
       const next: Record<string, string[]> = {};
-      for (const r of data ?? []) {
+      for (const r of page.rows) {
         next[(r as any).client_id] = Array.isArray((r as any).acknowledged_injuries) ? (r as any).acknowledged_injuries : [];
       }
       setRows(next);
-      setStatus('ready');
+      // The rows are real and the map may be held; what may NOT happen is a
+      // guard reading a missing client out of it as an unacknowledged one.
+      // src/lib/injuryGate.ts treats 'partial' as 'error' and refuses Assign
+      // with the sentence that says the injuries could not be read, which is
+      // the true statement about a coach with more clients than came back.
+      setStatus(page.truncated ? 'partial' : 'ready');
     } catch (e) { if (alive()) { reportError('injuryAcks.read', e); setStatus('error'); } }
   }, []);
 
@@ -83,9 +145,20 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
     const keys = [...new Set(injuries.map(injuryKey))].sort();
     if (!USE_SUPABASE) { setRows((r) => ({ ...r, [clientId]: keys })); return true; }
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return false;
+      // Refused on both fates, and the write below is never reached — which
+      // matters more here than the read above it. `trainer_id` is the upsert's
+      // conflict target; a null uid would not have produced an anonymous row,
+      // it would have been refused by the column, but only AFTER the request
+      // went. Answering here instead keeps the acknowledgement attributable by
+      // construction and reports the outage under this key rather than losing
+      // it inside a database error about a not-null constraint.
+      //
+      // `false` is already this function's "the write did not land" and every
+      // caller renders it as that, so an outage costs the coach a retry rather
+      // than a confirmation the server does not hold.
+      const who = await signedInUid('injuryAcks.write');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // Counted, not merely un-errored. A row the policy filtered out is not an
       // error in PostgREST, and this is the write a coach is told opened the
       // gate — reporting a confirmation the server does not hold is the one
@@ -113,7 +186,7 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
       // or not this push is delivered; this is the nudge, not the record.
       // no-error-ok: the acknowledgement is written and readable by them either way; a lost push costs a notification, not the fact
       void sendPush([clientId], 'Your coach has read your injuries',
-        'They have seen what you disclosed, and cannot assign you a programme until they have.',
+        'They have seen what you disclosed, and cannot assign you a program until they have.',
         { route: '/(client)/injuries' });
       return true;
     } catch (e) { reportError('injuryAcks.write', e); return false; }
@@ -153,38 +226,77 @@ export interface CoachRead {
   keys: string[];
 }
 
-/** One programme the coach assigned that loaded something disclosed. */
-export interface ProgrammeChoice {
+/** One program the coach assigned that loaded something disclosed. */
+export interface ProgramChoice {
   at: string;
   movements: { exercise: string; area: string; severity: string }[];
 }
 
 export interface MyInjuryAcks {
-  /** The worse of the two reads. Under anything but 'ready' the client is told
-   *  nothing about their coach either way — see ackState. */
+  /** The worse of the two reads, for a caller that wants one figure — a
+   *  pull-to-refresh spinner, say. NOT for the sentences: the two reads fail
+   *  independently and folding them made a screen disclaim the one that
+   *  worked. Gate each sentence on the status of the read behind it. */
   status: LoadStatus;
+  /** How the read of `read` went, on its own. */
+  readStatus: LoadStatus;
+  /** How the read of `choices` went, on its own. */
+  choicesStatus: LoadStatus;
   read: CoachRead | null;
-  choices: ProgrammeChoice[];
+  choices: ProgramChoice[];
+  /**
+   * Ask both reads again.
+   *
+   * A real re-read of `injury_acknowledgements` and
+   * `program_injury_acknowledgements`, not a state reset: the status goes back
+   * through whatever the server says this time. Whether a coach has read a
+   * disclosure is the sort of fact a client refreshes a screen to find out, and
+   * until this there was no way to ask twice.
+   */
+  reload: () => void;
 }
 
 export function useMyInjuryAcks(): MyInjuryAcks {
-  const [state, setState] = useState<MyInjuryAcks>({
-    status: USE_SUPABASE ? 'loading' : 'ready', read: null, choices: [],
+  const [state, setState] = useState<Omit<MyInjuryAcks, 'reload'>>({
+    status: USE_SUPABASE ? 'loading' : 'ready',
+    readStatus: USE_SUPABASE ? 'loading' : 'ready',
+    choicesStatus: USE_SUPABASE ? 'loading' : 'ready',
+    read: null, choices: [],
   });
   const authRev = useAuthRevision();
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
-        // getSession, not getUser: getUser REJECTS with nobody signed in, and
-        // treating that as a failure would latch this into 'error' before
-        // anybody had logged in. No session is a true answer.
-        const { data: sess } = await supabase.auth.getSession();
+        // getSession, not getUser: this answers from device storage and works
+        // offline, and treating "nobody is signed in" as a failure would latch
+        // this into 'error' before anybody had logged in. No session is a true
+        // answer.
+        //
+        // What was NOT a true answer was a session that could not be read.
+        // `read: null` under 'ready' is this screen telling a client, as a
+        // fact about their own care, that their coach has not confirmed
+        // reading the injuries they disclosed — and `choices: []` that nothing
+        // has been assigned over them. Those are the two sentences this
+        // provider's `readStatus`/`choicesStatus` split exists to keep
+        // truthful; an unclassified auth error walked straight past both.
+        const who = await sessionUid('injuryAcks.mine');
         if (cancelled) return;
-        const uid = sess?.session?.user?.id;
-        if (!uid) { setState({ status: 'ready', read: null, choices: [] }); return; }
+        if (who.fate !== null) {
+          if (who.fate === 'signed-out') {
+            setState({ status: 'ready', readStatus: 'ready', choicesStatus: 'ready', read: null, choices: [] });
+            return;
+          }
+          // Both facts are unknown, and each carries how its own read went —
+          // so both say 'error' rather than one standing in for the pair.
+          setState({ status: 'error', readStatus: 'error', choicesStatus: 'error', read: null, choices: [] });
+          return;
+        }
+        const uid = who.uid;
 
         const [ackRes, progRes] = await Promise.all([
           supabase.from('injury_acknowledgements')
@@ -200,18 +312,24 @@ export function useMyInjuryAcks(): MyInjuryAcks {
         ]);
         if (cancelled) return;
 
-        // Reported separately and folded into one status, because a client
-        // shown "your coach has read these" off a half-failed pair would be
-        // being told something on the strength of a read that did not happen.
+        // Reported separately AND kept separate. These are two tables, two
+        // policies and two failures: whether a coach has confirmed reading a
+        // disclosure, and what they then assigned over it. Folded into one
+        // status they became one sentence, and a client whose acknowledgement
+        // read came back perfectly was told "we couldn't check whether your
+        // coach has read these" because the OTHER read had failed — while the
+        // block that had actually failed drew as an empty result and said
+        // nothing. Each fact now carries how its own read went.
         if (ackRes.error) reportError('injuryAcks.mine.read', ackRes.error);
         if (progRes.error) reportError('injuryAcks.mine.choices', progRes.error);
 
         const ackRows = capped(ackRes.data ?? []);
         const progRows = capped(progRes.data ?? []);
-        const status = worstStatus(
-          ackRes.error ? 'error' : ackRows.truncated ? 'partial' : 'ready',
-          progRes.error ? 'error' : progRows.truncated ? 'partial' : 'ready',
-        );
+        const readStatus: LoadStatus =
+          ackRes.error ? 'error' : ackRows.truncated ? 'partial' : 'ready';
+        const choicesStatus: LoadStatus =
+          progRes.error ? 'error' : progRows.truncated ? 'partial' : 'ready';
+        const status = worstStatus(readStatus, choicesStatus);
 
         // The most recent coach's, not a merge of every coach who ever had
         // them. Merging would let a previous coach's confirmation cover a
@@ -224,22 +342,27 @@ export function useMyInjuryAcks(): MyInjuryAcks {
             }
           : null;
 
-        const choices: ProgrammeChoice[] = progRows.rows
+        const choices: ProgramChoice[] = progRows.rows
           .map((r: any) => ({
             at: typeof r.acknowledged_at === 'string' ? r.acknowledged_at : '',
             movements: Array.isArray(r.movements) ? r.movements : [],
           }))
           .filter((c) => c.at && c.movements.length);
 
-        setState({ status, read: ackRes.error ? null : read, choices: progRes.error ? [] : choices });
+        setState({
+          status, readStatus, choicesStatus,
+          read: ackRes.error ? null : read,
+          choices: progRes.error ? [] : choices,
+        });
       } catch (e) {
         if (cancelled) return;
         reportError('injuryAcks.mine', e);
-        setState({ status: 'error', read: null, choices: [] });
+        // The throw is around both awaits, so neither fact is known here.
+        setState({ status: 'error', readStatus: 'error', choicesStatus: 'error', read: null, choices: [] });
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
-  return state;
+  return { ...state, reload };
 }

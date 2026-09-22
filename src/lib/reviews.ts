@@ -34,6 +34,7 @@
 // screen and forgotten.
 
 import type { LoadStatus } from '../ui/loadStatus';
+import { num1 } from './format';
 
 export const MIN_RATING = 1;
 export const MAX_RATING = 5;
@@ -42,16 +43,62 @@ export const MIN_FOR_AVERAGE = 3;
 export const MAX_BODY = 1500;
 export const MAX_REPLY = 1500;
 
+/**
+ * One person's rating, or null when the answer did not contain one.
+ *
+ * `Number(r.rating) || 0` was the wrong form here, and it was the sharpest
+ * instance of it in the tree: `Number(null)` is 0, `Number('')` is 0 and
+ * `Number(undefined) || 0` is 0, so an absent key, a null column and a word all
+ * arrive as ZERO STARS AGAINST A NAMED COACH — a rating below the lowest one a
+ * client is allowed to give, printed in a sentence about their livelihood.
+ *
+ * The rules are `queueLength`'s in src/lib/reschedule.ts with a range on top: a
+ * number is read only when it is finite and whole, a string only when it is a
+ * string of digits, and the result only when it lands inside MIN_RATING..
+ * MAX_RATING — the range the schema constrains and the only range the stars,
+ * the average and every sentence here can honestly render. Anything else is
+ * null and travels as null.
+ */
+export function ratingOf(v: unknown): number | null {
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v.trim())
+    : null;
+  if (n === null || !Number.isInteger(n)) return null;
+  return n >= MIN_RATING && n <= MAX_RATING ? n : null;
+}
+
+/**
+ * A tally off a summary row — a count of reviews, or the sum of their ratings —
+ * or null when that figure did not come back.
+ *
+ * Separate from `ratingOf` because neither of these is a rating: a sum of forty
+ * reviews is 160 and no range applies. `queueLength`'s reading otherwise, and
+ * for the same reason — a count nobody took is not a count of none.
+ */
+export function ratingTally(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? v : null;
+  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return null;
+}
+
 export interface RatingSummary {
-  /** Live, non-withdrawn reviews. */
-  count: number;
-  /** Sum of their ratings — the average is derived here, never in a screen. */
-  sum: number;
+  /** Live, non-withdrawn reviews, or null where the summary row carried no
+   *  readable count. Null and not 0: a row that answered without a count did
+   *  not count nobody, and "No reviews yet" is a sentence about a coach's
+   *  reputation. */
+  count: number | null;
+  /** Sum of their ratings — the average is derived here, never in a screen —
+   *  or null where that figure did not come back. An unread sum over an unread
+   *  count is a rating invented twice, so `ratingDisplay` computes an average
+   *  only when it holds both. */
+  sum: number | null;
 }
 
 export interface Review {
   id: string;
-  rating: number;
+  /** Out of MAX_RATING, or null where the row carried no readable rating.
+   *  Never 0 — a rating is 1–5, so a zero could only be a figure nobody sent. */
+  rating: number | null;
   body: string | null;
   createdAt: string;
   edited: boolean;
@@ -65,7 +112,10 @@ export interface Review {
 
 export interface MyReview {
   id: string;
-  rating: number;
+  /** As above: the caller's own rating, or null where it could not be read.
+   *  The editor seeds its star picker from this, and a null seeds nothing
+   *  rather than seeding a zero the picker cannot even display. */
+  rating: number | null;
   body: string | null;
   createdAt: string;
   edited: boolean;
@@ -81,6 +131,9 @@ export type RatingDisplay =
   | { kind: 'none' }
   /** One or two reviews: a count is honest, an average is not. */
   | { kind: 'few'; count: number }
+  /** Enough reviews to average, and no readable sum to average. The count is
+   *  a real reading and is shown; nothing is claimed about the score. */
+  | { kind: 'count-only'; count: number }
   | { kind: 'average'; average: number; count: number };
 
 /**
@@ -91,19 +144,31 @@ export type RatingDisplay =
  * 'partial' is treated as 'error' here on purpose: the load-status vocabulary
  * says a count or an average over a truncated set may not be shown, and both of
  * those are the only things this function produces.
+ *
+ * ── the null tests come FIRST, and that is load-bearing ───────────────────
+ *
+ * `count` and `sum` are `number | null` because the summary row can answer
+ * without either figure on it. `null <= 0` is FALSE and `null < MIN_FOR_AVERAGE`
+ * is TRUE, so an unread count tested after the comparisons would fall silently
+ * into `{ kind: 'few', count: null }` and a screen would print "null reviews" —
+ * and an unread sum divided by a real count is `0 / n`, which renders as a
+ * one-star coach. Both are tested before anything compares them.
  */
 export function ratingDisplay(summary: RatingSummary | null, status: LoadStatus): RatingDisplay {
   if (status === 'loading') return { kind: 'loading' };
   if (status !== 'ready') return { kind: 'unknown' };
-  if (!summary || summary.count <= 0) return { kind: 'none' };
+  if (!summary) return { kind: 'none' };
+  if (summary.count == null) return { kind: 'unknown' };
+  if (summary.count <= 0) return { kind: 'none' };
   if (summary.count < MIN_FOR_AVERAGE) return { kind: 'few', count: summary.count };
+  if (summary.sum == null) return { kind: 'count-only', count: summary.count };
   return { kind: 'average', average: summary.sum / summary.count, count: summary.count };
 }
 
 /** One decimal, and never rounded up to a number the ratings cannot reach. */
 export function formatAverage(avg: number): string {
   const clamped = Math.min(MAX_RATING, Math.max(MIN_RATING, avg));
-  return (Math.round(clamped * 10) / 10).toFixed(1);
+  return num1(Math.round(clamped * 10) / 10);
 }
 
 /** The short text on a directory row. Null when nothing may honestly be said. */
@@ -115,10 +180,47 @@ export function ratingLine(d: RatingDisplay): string | null {
     case 'none':
       return 'No reviews yet';
     case 'few':
+    case 'count-only':
       return `${d.count} review${d.count === 1 ? '' : 's'}`;
     case 'average':
       return `${formatAverage(d.average)} from ${d.count} reviews`;
   }
+}
+
+/**
+ * The score on one review row, as a screen prints it beside the reviewer.
+ *
+ * Here rather than in three screens because the third state is the whole point
+ * of it: `{r.rating} / {MAX_RATING}` with a null rating renders as " / 5", a
+ * hole of exactly the kind scripts/check-prose.mjs exists for, and the form it
+ * replaced rendered "0 / 5" — a score no client can give, against a coach, out
+ * of a column that never arrived.
+ */
+export function reviewScoreLabel(r: Pick<Review, 'rating'>): string {
+  return r.rating == null ? `Rating unreadable of ${MAX_RATING}` : `${r.rating} / ${MAX_RATING}`;
+}
+
+/** The same score inside a sentence — "their 4 of 5 review", or just "their
+ *  review" where the number did not come back. The noun survives; only the
+ *  figure is dropped, because the review itself is not in doubt. */
+export function reviewScorePhrase(r: Pick<Review, 'rating'>): string {
+  return r.rating == null ? 'review' : `${r.rating} of ${MAX_RATING} review`;
+}
+
+/**
+ * What the caller gave their own coach, above the editor.
+ *
+ * `coachName` is null on a profile with no name, and the sentence does without
+ * one rather than print a dash. A null RATING gets its own sentence instead of
+ * a number: the review is still theirs and still on screen, and the editor
+ * below opens with nothing selected rather than with a fabricated score
+ * sitting in the picker ready to be saved back over the real one.
+ */
+export function ownRatingLine(rating: number | null, coachName: string | null): string {
+  const who = coachName ?? 'them';
+  return rating == null
+    ? `We couldn’t read the rating you gave ${who}, so we are not showing one. Your review is below, and picking a rating again would replace what is on record.`
+    : `You rated ${who} ${rating} out of ${MAX_RATING}.`;
 }
 
 export type ReviewGate =
@@ -155,7 +257,7 @@ export function reviewGateNote(g: ReviewGate): string | null {
     case 'allowed':      return null;
     case 'self':         return 'This is your own profile.';
     case 'not-a-client': return 'Reviews come from people this coach has actually trained, so only their current and former clients can leave one.';
-    case 'unknown':      return 'We couldn’t check whether you’ve trained with this coach, so we can’t open the review form. This is our end — try again in a moment.';
+    case 'unknown':      return 'We couldn’t check whether you’ve trained with this coach, so we can’t open the review form. This is our end. Try again in a moment.';
   }
 }
 
@@ -195,7 +297,7 @@ export const IDENTITY_NOTE =
 
 /** Rewriting clears the coach's answer. Said before saving, not after. */
 export const EDIT_NOTE =
-  'If you change a review your coach has already replied to, their reply is removed — it answered what you wrote before.';
+  'If you change a review your coach has already replied to, their reply is removed, since it answered what you wrote before.';
 
 /** What withdrawing does and does not do. */
 export const WITHDRAW_NOTE =
@@ -203,7 +305,7 @@ export const WITHDRAW_NOTE =
 
 /** The coach's side, on the screen where they answer. */
 export const REPLY_NOTE =
-  'Your reply is public, under the review, with your name on it. It is the only thing you can do about a review you disagree with — there is no way to take one down from inside the app.';
+  'Your reply is public, under the review, with your name on it. It is the only thing you can do about a review you disagree with. There is no way to take one down from inside the app.';
 
 export type WriteResult =
   | 'written' | 'not_a_client' | 'invalid_rating' | 'self' | 'signed_out'
@@ -230,7 +332,7 @@ export function writeOutcome(r: WriteResult, coachName: string | null): { title:
     case 'signed_out':
       return { title: 'Not saved', body: 'Sign in to Repple and try again.', saved: false };
     case 'failed':
-      return { title: 'Could not save', body: 'We could not reach the server, so nothing was written. Your review is still here — try again in a moment.', saved: false };
+      return { title: 'Could not save', body: 'We could not reach the server, so nothing was written. Your review is still here. Try again in a moment.', saved: false };
   }
 }
 
@@ -382,7 +484,7 @@ export interface AskCandidate {
  * "fix" somebody would otherwise reach for.
  */
 export const WHO_REVIEWED_IS_HIDDEN =
-  'Repple cannot tell you who has already written one. Reviews carry a name only where the reviewer put one, and which client wrote which is not something this app will hand a coach — so somebody who has already reviewed you may still appear here. They will say so.';
+  'Repple cannot tell you who has already written one. Reviews carry a name only where the reviewer put one, and which client wrote which is not something this app will hand a coach, so somebody who has already reviewed you may still appear here. They will say so.';
 
 /**
  * Whether now is a moment, and which.
@@ -447,14 +549,14 @@ export function reviewAskDraft(
 ): string {
   const who = firstWord(clientName);
   const me = firstWord(coachName);
-  const hi = who ? `Hi ${who} — ` : '';
+  const hi = who ? `Hi ${who},\n\n` : '';
   const sign = me ? `\n\n${me}` : '';
   const opener = m === 'goal-reached'
-    ? 'congratulations again on hitting that. '
+    ? 'Congratulations again on hitting that. '
     : '';
   return `${hi}${opener}If you have a couple of minutes, would you write a short review of the coaching in the app? `
     + `It is the main way people decide whether to work with me, and it helps far more than you would think. `
-    + `Say whatever you actually think — it goes up as written.${sign}`;
+    + `Say whatever you actually think. It goes up as written.${sign}`;
 }
 
 /** First word only, and never a fragment of an email address or a bare uuid: a
@@ -481,7 +583,7 @@ export function askListNote(rows: readonly { moment: AskMoment }[] | null): stri
   if (rows == null) return 'Working out who is worth asking…';
   const n = rows.filter((r) => r.moment !== 'none').length;
   if (n === 0) {
-    return 'Nobody on the part of your book that was read is at a moment worth asking at. That is a real answer — this list is not a monthly sweep, and asking everybody every month is how a good business collects bad reviews.';
+    return 'Nobody on the part of your book that was read is at a moment worth asking at. That is a real answer. This list is not a monthly sweep, and asking everybody every month is how a good business collects bad reviews.';
   }
   return `${n} ${n === 1 ? 'client is' : 'clients are'} at a moment worth asking at. Nothing is sent from here: you get a draft, you edit it, you send it yourself.`;
 }
@@ -494,4 +596,4 @@ export function askListNote(rows: readonly { moment: AskMoment }[] | null): stri
  * "only ask the happy ones" filter.
  */
 export const ASK_IS_UNFILTERED =
-  'Repple does not choose who to ask by how they are likely to rate you, and it never will — asking only the people who look happy is a lie told to everybody who reads the average afterwards. What decides this list is whether there is anything to review yet.';
+  'Repple does not choose who to ask by how they are likely to rate you, and it never will. Asking only the people who look happy is a lie told to everybody who reads the average afterwards. What decides this list is whether there is anything to review yet.';

@@ -13,6 +13,7 @@
 // it would do before it does anything.
 
 import { parseSheet, mapColumns, type Sheet } from './csv';
+import { currencyDecimals } from './coachMoney';
 import type { CoachedMode } from './types';
 
 /* ── values ────────────────────────────────────────────────────────────────── */
@@ -24,26 +25,125 @@ export type Parsed<T> =
   | { ok: true; value: T }
   | { ok: false; reason: string };
 
-const MONEY_STRIP = /[^\d.,\-()]/g;
+/** A minus sign as a keyboard writes it and as a spreadsheet writes it. Excel
+ *  and most European ledgers emit U+2212 for a negative figure. */
+const MINUS = /[-−]/;
 
 /**
- * Parse a money column into integer minor units.
+ * The sentence a row gets when nobody has said which money the file is in.
  *
- * Handles both conventions — "1,234.56" and "1.234,56" — by taking whichever
- * separator appears last as the decimal point. A lone separator followed by
- * exactly three digits is read as a thousands separator, because "1,234" in a
- * price column is a thousand-something, not one-point-two-three-four.
- *
- * Anything with more than two decimal places is refused rather than rounded:
- * a column of four-decimal figures is a unit price or an exchange rate, and
- * rounding it silently turns a data-shape problem into a money problem.
+ * Written once because it is the answer to three different questions — a
+ * payment amount, a plan price, and `parseMoneyCents` called on its own — and
+ * all three have the same fix, which is at the import screen and not in the
+ * spreadsheet.
  */
-export function parseMoneyCents(raw: string): Parsed<number> {
+const NO_CURRENCY =
+  'the currency is not known, so this figure cannot be read into minor units; '
+  + 'set the gym’s currency, or give the file a currency column';
+
+/**
+ * The sentence a row gets when the currency IS stated and is not a currency.
+ *
+ * A separate sentence, not a second wording of `NO_CURRENCY`, because this is
+ * the one place in the money family that is reading SOMEBODY ELSE'S FILE. The
+ * other six consumers of `currencyDecimals` scale figures this product wrote,
+ * where a non-code means a row of ours is corrupt; here it means a column of
+ * theirs says "Pounds" or "£" or "GBP " with a stray character in it, which is
+ * an ordinary thing for an export from another gym system to do and is fixable
+ * in thirty seconds BY THE PERSON LOOKING AT THE SCREEN — but only if the
+ * message names the value it could not read instead of telling them no currency
+ * is set. `NO_CURRENCY` sends them to the gym's settings, which is the wrong
+ * place and, for a file carrying its own currency column, would not help.
+ *
+ * Refusing rather than guessing is the same answer as everywhere else, and it
+ * has to be: this is the import a gym runs once at setup, and the figure goes
+ * into `gym_payments.amount_cents` as the permanent record of what a member
+ * paid. Reading "12.340" from a file labelled 'pounds' as 1234 is not a
+ * rendering fault the next release corrects.
+ */
+const NOT_A_CURRENCY = (stated: string): string =>
+  `“${stated.length > 24 ? stated.slice(0, 24) + '…' : stated}” is not a currency code, so this figure `
+  + 'cannot be read into minor units: a three-letter code (GBP, JPY, KWD) says '
+  + 'how many decimal places the money has, and nothing else does';
+
+/**
+ * Parse a money column into integer minor units, in the currency it is in.
+ *
+ * ── Why the currency is an argument and not an assumption ─────────────────
+ *
+ * This function used to be two decimal places, flat, both ways. It refused a
+ * perfectly ordinary Kuwaiti figure — "12.340" came back as "has 3 decimal
+ * places; money takes at most 2" — and it read a Japanese "50000" as FIVE
+ * MILLION YEN, because it multiplied by a hundred whatever the money was. That
+ * value went into `gym_payments.amount_cents` and into
+ * `membership_plans.price_cents`: the one import a gym does once, at setup,
+ * from a spreadsheet nobody opens again. A hundredfold error there is not a
+ * rendering fault that the next release corrects — it is the permanent record
+ * of what members paid, and the sheet it disagrees with is in somebody's
+ * Downloads folder.
+ *
+ * Repple is white-labelled. There is no default currency anywhere in it and
+ * there is therefore no default number of decimal places either, so with no
+ * currency this REFUSES rather than assuming two. `currencyDecimals` in
+ * src/lib/coachMoney.ts is the one place that answers the question, and it
+ * answers null — not 2 — when nobody has said which money it is, or when what
+ * was said is not a currency code. The second half matters more here than
+ * anywhere else in the money family: the currency column in an incoming file
+ * was typed by another system, and "Pounds", "£" and "GBP " were all read as
+ * two-place money and scaled accordingly.
+ *
+ * The caller always has it: studio-web/app/import/page.tsx reads
+ * `tenants.currency` and already refuses the whole import for a gym that has
+ * not set one, and a plans sheet may carry its own currency column, which
+ * outranks the gym's.
+ *
+ * ── The conversion is done on the digits ──────────────────────────────────
+ *
+ * "12.50" in a two-place currency becomes the integer 1250 by padding the
+ * fraction, never by `12.5 * 100`, which is a floating-point multiplication
+ * whose result has to be rounded back. Same arithmetic as `minorFromDecimal`
+ * and `readMinorAmount` next door, and for the same reason: this is a ledger.
+ *
+ * ── What it refuses, and what it now accepts ──────────────────────────────
+ *
+ * Both separator conventions still work — "1,234.56" and "1.234,56" — by
+ * taking whichever separator appears last as the decimal point.
+ *
+ * More decimal places than the money has is refused rather than rounded, with
+ * one exception that loses nothing: trailing NOUGHTS. A system that writes
+ * every figure to two places emits "1234.00" for a yen amount, and reading
+ * that as 1234 yen is exact. "1.2345" in sterling is refused as it always was,
+ * and so is "500.50" in yen — a currency with no minor unit has nothing after
+ * the point, and a file that has something there is very likely not in the
+ * currency the gym thinks it is.
+ *
+ * A TRAILING minus is now read as a minus. SAP, DATEV and most German exports
+ * write a credit as "50.00-", and reading that as +50.00 turns a refund into
+ * income on the way in — which `previewPayments` exists to refuse. A minus
+ * anywhere else in the figure is refused outright rather than stripped.
+ */
+export function parseMoneyCents(raw: string, currency?: string | null): Parsed<number> {
+  const dp = currencyDecimals(currency);
+  const cur = String(currency ?? '').trim().toUpperCase();
+  // Two refusals, because they have two different fixes. See NOT_A_CURRENCY.
+  if (dp == null) return { ok: false, reason: cur ? NOT_A_CURRENCY(cur) : NO_CURRENCY };
+
   const t = raw.trim();
   if (t === '') return { ok: false, reason: 'empty' };
 
-  const negative = /^\(.*\)$/.test(t) || t.trimStart().startsWith('-');
-  let s = t.replace(MONEY_STRIP, '').replace(/[()]/g, '').replace(/-/g, '');
+  // Accounting parentheses, a leading minus and a trailing minus all mean the
+  // same thing, and are all read before anything is stripped — see the header
+  // on the trailing one.
+  const parens = /^\(.*\)$/.test(t);
+  let body = (parens ? t.slice(1, -1) : t).trim();
+  const negative = parens || MINUS.test(body[0] ?? '') || MINUS.test(body[body.length - 1] ?? '');
+  body = body.replace(/^[-−]\s*/, '').replace(/\s*[-−]$/, '');
+  if (MINUS.test(body)) {
+    return { ok: false, reason: `"${raw}" has a minus sign inside the figure` };
+  }
+
+  // Whatever is left may be a currency symbol, a currency code or spacing.
+  const s = body.replace(/[^\d.,]/g, '');
   if (s === '') return { ok: false, reason: `"${raw}" has no digits` };
 
   const lastDot = s.lastIndexOf('.');
@@ -55,8 +155,41 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   } else if (lastDot >= 0 || lastComma >= 0) {
     const at = Math.max(lastDot, lastComma);
     const after = s.length - at - 1;
-    // Three digits after a single separator: thousands, not decimals.
-    decimalAt = after === 3 ? -1 : at;
+    // A separator that appears more than once is a grouping character and
+    // nothing else: "1,234,567" cannot be a decimal point twice.
+    const lone = s.indexOf(s[at]) === at;
+    if (after !== 3 || !lone) {
+      decimalAt = at;
+    } else if (dp !== 3) {
+      // Three digits after a single separator: thousands, not decimals. "1,234"
+      // in a two-place price column is a thousand-something, and a yen has no
+      // decimal point available to it at all.
+      decimalAt = -1;
+    } else if (s[at] === '.') {
+      // A THREE-place currency, where three digits after a point is the exact
+      // shape of a correctly written amount and the exact shape `minorToDecimal`
+      // in src/lib/gymExport.ts writes, so a file exported from Repple
+      // re-imports. A grouped thousand in such a file is written either with
+      // its decimal part too — "1,250.000", which took the branch above — or
+      // with more than one group, which the `lone` test caught.
+      decimalAt = at;
+    } else {
+      // A lone COMMA before three digits in a three-place currency is the one
+      // genuinely 50/50 case left: "1,250" is a thousand two hundred and fifty
+      // dinars to an English writer and one and a quarter to a German one, and
+      // the two readings are a thousand apart. This module's governing rule is
+      // that an ambiguous value is refused with a reason rather than guessed —
+      // the same rule `parseDate` applies to 03/04/2026.
+      return {
+        ok: false,
+        // Both readings derived from what was TYPED. It used to quote a fixed
+        // "1,250 or 1.250" regardless, so an owner staring at 9,999 in their
+        // own spreadsheet was shown a refusal about a number that is not in
+        // their file — which reads as a bug in the importer rather than as a
+        // question about their cell.
+        reason: `"${raw}" could be ${cur} ${raw.replace(/[.,]/g, '')} or ${cur} ${raw.replace(/[.,]/g, (m, i) => (i === raw.lastIndexOf(m) ? '.' : ''))}; write the amount with all ${dp} decimal places`,
+      };
+    }
   }
 
   let whole: string;
@@ -64,8 +197,20 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   if (decimalAt >= 0) {
     whole = s.slice(0, decimalAt);
     frac = s.slice(decimalAt + 1);
-    if (frac.length > 2) {
-      return { ok: false, reason: `"${raw}" has ${frac.length} decimal places; money takes at most 2` };
+    if (frac.length > dp) {
+      const extra = frac.slice(dp);
+      if (/[^0]/.test(extra)) {
+        return {
+          ok: false,
+          reason: dp === 0
+            ? `"${raw}" has ${frac.length} decimal place${frac.length === 1 ? '' : 's'}; ${cur} has no smaller unit`
+            : `"${raw}" has ${frac.length} decimal places; ${cur} has ${dp}`,
+        };
+      }
+      // Trailing noughts beyond the places this money has lose nothing:
+      // "1234.00" is 1234 yen exactly, and a system that writes every figure to
+      // two places is not stating a fraction a yen does not have.
+      frac = frac.slice(0, dp);
     }
   } else {
     whole = s;
@@ -77,9 +222,14 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   }
   if (whole === '' && frac === '') return { ok: false, reason: `"${raw}" is not a number` };
 
-  const cents = Number(whole || '0') * 100 + Number((frac + '00').slice(0, 2));
-  if (!Number.isFinite(cents)) return { ok: false, reason: `"${raw}" is not a number` };
-  return { ok: true, value: negative ? -cents : cents };
+  // The digits, with the fraction padded out to the places the money has. No
+  // float is multiplied at any point.
+  const digits = (whole || '0') + frac.padEnd(dp, '0');
+  const minorUnits = Number(digits);
+  if (digits.length > 15 || !Number.isSafeInteger(minorUnits)) {
+    return { ok: false, reason: `"${raw}" is larger than any amount this can work with` };
+  }
+  return { ok: true, value: negative ? -minorUnits : minorUnits };
 }
 
 const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
@@ -93,7 +243,19 @@ function ymdToIso(y: number, m: number, d: number): Parsed<string> {
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
     return { ok: false, reason: `${y}-${m}-${d} is not a real date` };
   }
-  return { ok: true, value: dt.toISOString().slice(0, 10) };
+  // Built from the parts that were parsed, not read back out of the Date.
+  //
+  // The Date exists to REJECT 31 February and nothing else; the day itself is
+  // the one the importer typed into a spreadsheet and it must come back out
+  // unchanged. `dt.toISOString().slice(0, 10)` happened to agree here because
+  // the Date was made with `Date.UTC` — but it agreed by accident, and the next
+  // person to change this to `new Date(y, m - 1, d)`, which is the more natural
+  // spelling, would silently move every imported date by one for half the
+  // world. These are membership start dates and payment dates on a file an
+  // owner is migrating from another system; a day out is a day of membership
+  // somebody paid for.
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { ok: true, value: `${String(y).padStart(4, '0')}-${pad(m)}-${pad(d)}` };
 }
 
 /**
@@ -133,7 +295,27 @@ export function parseDate(raw: string, order?: DateOrder): Parsed<string> {
   if (!order) {
     return {
       ok: false,
-      reason: `"${raw}" could be day-first or month-first — say which the file uses`,
+      reason: `"${raw}" could be day-first or month-first; say which the file uses`,
+    };
+  }
+  // `'ymd'` is not an answer to this question, and it used to fall into the
+  // day-first arm and guess.
+  //
+  // The order is inferred from the file: one unambiguous row settles it. A file
+  // whose only datable rows are ISO — `2026-01-15` — is reported as `'ymd'`,
+  // which says the file writes ISO. It says NOTHING about how that file spells
+  // a slashed date, and a US export mixing ISO rows with `MM/DD` rows is
+  // ordinary. `03/04/2026` in such a file was silently filed as 3 April instead
+  // of 4 March: a payment a month out, with no date error raised, in an import
+  // that is otherwise about money.
+  //
+  // So 'ymd' is treated as "the file has not said", which is the same refusal
+  // the no-order branch above already gives. The owner is asked; nothing is
+  // guessed.
+  if (order !== 'dmy' && order !== 'mdy') {
+    return {
+      ok: false,
+      reason: `"${raw}" could be day-first or month-first; say which the file uses`,
     };
   }
   return order === 'mdy' ? ymdToIso(c, a, b) : ymdToIso(c, b, a);
@@ -220,6 +402,17 @@ export interface ImportPreview<T> {
   /** Header columns that matched nothing — reported, never silently dropped. */
   unmatchedColumns: string[];
   dateOrder: DateOrder | 'ambiguous' | 'unknown';
+  /**
+   * The currency the money columns in this file were read in, or null.
+   *
+   * Stated rather than left to the caller's memory, because the figure and its
+   * unit have to travel together: `amountCents` read as GBP and written as AED
+   * is the currency bug this product has already had twice, and a preview that
+   * could not say which money it had just parsed would be the third. Null on a
+   * preview with no money in it at all, and on one that was given no currency —
+   * where every money row is refused rather than assumed into two places.
+   */
+  currency: string | null;
   rows: RowResult<T>[];
   ready: T[];
   rejected: RowResult<T>[];
@@ -321,6 +514,8 @@ export function previewMembers(text: string, order?: DateOrder): ImportPreview<M
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: order ?? detected,
+    // A member sheet carries no money column, so there is no currency to state.
+    currency: null,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -463,6 +658,8 @@ export function previewCoachRoster(text: string): ImportPreview<CoachClientRow> 
     // No dates are read, so there is no convention to settle and nothing to
     // ask the coach about. Stated rather than left as a stale 'ambiguous'.
     dateOrder: 'unknown',
+    // And no money either — a coach's roster is a name, a goal and a mode.
+    currency: null,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -472,12 +669,20 @@ export function previewCoachRoster(text: string): ImportPreview<CoachClientRow> 
 /* ── payment import ────────────────────────────────────────────────────────── */
 
 export const PAYMENT_ALIASES: Record<string, string[]> = {
-  member: ['member', 'name', 'customer', 'paid by', 'client'],
-  email:  ['email', 'e-mail', 'email address'],
-  amount: ['amount', 'total', 'paid', 'value', 'gross', 'sum'],
-  date:   ['date', 'paid on', 'payment date', 'taken', 'received'],
-  method: ['method', 'type', 'payment method', 'via'],
-  note:   ['note', 'notes', 'reference', 'description', 'memo'],
+  member:   ['member', 'name', 'customer', 'paid by', 'client'],
+  email:    ['email', 'e-mail', 'email address'],
+  amount:   ['amount', 'total', 'paid', 'value', 'gross', 'sum'],
+  date:     ['date', 'paid on', 'payment date', 'taken', 'received'],
+  method:   ['method', 'type', 'payment method', 'via'],
+  note:     ['note', 'notes', 'reference', 'description', 'memo'],
+  // Read, and read only to CONTRADICT. A payments sheet does not set the
+  // currency — every imported row is written in the gym's, because
+  // `gym_payments.currency` is one column and `importPayments` fills it from
+  // one value — but a sheet that names a different one is a sheet from
+  // somewhere else, and importing it silently restates a GBP ledger as
+  // dirhams at par. Repple's own payments.csv carries this column, so the
+  // check costs nothing on the file it matters most for.
+  currency: ['currency', 'ccy', 'cur'],
 };
 
 export interface PaymentRow {
@@ -489,14 +694,38 @@ export interface PaymentRow {
   note: string | null;
 }
 
+/**
+ * The words this recognises, and nothing else — see the refusal at the row.
+ *
+ * `other` is in here as a spelling in its own right because it is a STORED
+ * value: `gym_payments.method` is `check (method in ('card', 'cash',
+ * 'transfer', 'direct_debit', 'other'))` (part 29), `gymExport.ts` writes that
+ * column straight into payments.csv, and a file this product exported must
+ * re-import. Without it, refusing the unknown would refuse our own export.
+ */
 const METHODS: Record<string, PaymentRow['method']> = {
   card: 'card', creditcard: 'card', debitcard: 'card', visa: 'card', mastercard: 'card', stripe: 'card',
   cash: 'cash',
   transfer: 'transfer', banktransfer: 'transfer', bacs: 'transfer', wire: 'transfer',
   directdebit: 'direct_debit', dd: 'direct_debit', gocardless: 'direct_debit', standingorder: 'direct_debit',
+  other: 'other',
 };
 
-export function previewPayments(text: string, order?: DateOrder): ImportPreview<PaymentRow> {
+/**
+ * Read a payment spreadsheet without writing anything.
+ *
+ * `currency` is the gym's, from `tenants.currency`, and it is what the amount
+ * column is denominated in — a payments sheet has no currency column, so every
+ * row inherits it. It is not optional in spirit: with none, every amount is
+ * refused with a reason rather than read at two decimal places, because two is
+ * wrong for twenty-one currencies and silently so. The screen that calls this
+ * already refuses the import outright for a gym with no currency set, so the
+ * refusals are a belt beside that brace rather than the only thing standing
+ * between a yen sheet and a hundredfold error in `gym_payments.amount_cents`.
+ */
+export function previewPayments(
+  text: string, order?: DateOrder, currency?: string | null,
+): ImportPreview<PaymentRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PAYMENT_ALIASES);
 
@@ -506,6 +735,9 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
 
   const at = (r: string[], f: string): string =>
     index[f] === undefined ? '' : (r[index[f]] ?? '');
+
+  // What every row of this file is being written in.
+  const importIn = (currency ?? '').trim().toUpperCase() || null;
 
   const detected = detectDateOrder(
     index.date !== undefined ? sheet.rows.map((r) => at(r, 'date')) : [],
@@ -517,11 +749,11 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     const line = i + 2;
     const errors: string[] = [];
 
-    const amt = parseMoneyCents(at(r, 'amount'));
+    const amt = parseMoneyCents(at(r, 'amount'), currency);
     if (!amt.ok) errors.push(`amount: ${amt.reason}`);
     // A zero payment is a real thing (a comped month, a correction). A negative
     // one is a refund, which is not what this importer is for.
-    else if (amt.value < 0) errors.push('amount is negative — refunds are not imported here');
+    else if (amt.value < 0) errors.push('amount is negative; refunds are not imported here');
 
     const d = parseDate(at(r, 'date'), effective);
     if (!d.ok) errors.push(`date: ${d.reason}`);
@@ -535,11 +767,48 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
 
     const memberName = at(r, 'member').trim() || null;
     if (!memberName && !email) {
-      errors.push('no member name or email — this payment cannot be attributed');
+      errors.push('no member name or email, so this payment cannot be attributed');
     }
 
-    const rawMethod = at(r, 'method').trim().toLowerCase().replace(/[^a-z]/g, '');
-    const method: PaymentRow['method'] = rawMethod ? (METHODS[rawMethod] ?? 'other') : 'other';
+    // A stated currency that is not the one this import writes. Refused per row
+    // rather than for the file, because a mixed sheet is a real thing and the
+    // rows in the gym's own currency are still importable.
+    const stated = at(r, 'currency').trim().toUpperCase();
+    if (stated && importIn && stated !== importIn) {
+      errors.push(
+        `this row is in ${stated} and the import is writing ${importIn}; `
+        + 'the figures are not the same money and are not converted here',
+      );
+    }
+
+    // An unreadable method is REFUSED and named, like every other word column
+    // in this file. This line used to read `METHODS[rawMethod] ?? 'other'`, so
+    // "cheque", "paypal", "efectivo" and the typo "cardd" all became `other` —
+    // indistinguishable from a cell that said nothing, on an import screen that
+    // never displays the parsed method, in a row that becomes the gym's
+    // permanent record of how somebody paid. Same reasoning and same wording as
+    // status, delivery mode, billing period and active.
+    //
+    // A BLANK STILL MEANS `other`, and it is a different case rather than the
+    // same one handled leniently. `method` is not a required column: a sheet
+    // that omits it reads as '' on every row, so refusing a blank would reject
+    // a whole ledger for lacking a column this importer never asked for. And
+    // the stored column is `not null`, so there is no unknown to write — `other`
+    // is the only truthful home for "the file did not say". A blank is the file
+    // saying nothing; an unreadable word is the file saying something this
+    // cannot read, and only the second would have this import inventing a fact.
+    //
+    // The CELL decides whether the file said anything, not the stripped key:
+    // the strip is what lets "Direct Debit" and `direct_debit` both match, and
+    // it also turns "1" or "-" into an empty string, which would otherwise read
+    // as a blank and be filed as `other` in silence.
+    const methodCell = at(r, 'method').trim();
+    let method: PaymentRow['method'] = 'other';
+    if (methodCell) {
+      const hit = METHODS[methodCell.toLowerCase().replace(/[^a-z]/g, '')];
+      if (!hit) errors.push(`payment method "${methodCell}" is not one this recognises`);
+      else method = hit;
+    }
 
     const value: PaymentRow = {
       memberName,
@@ -558,6 +827,7 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: order ?? detected,
+    currency: importIn,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -634,7 +904,7 @@ const ACTIVE_WORDS = new Set([
  * thing a gym sells at nothing on purpose. The distinction is between an
  * absent cell and a deliberate 0.
  */
-export function previewPlans(text: string): ImportPreview<PlanRow> {
+export function previewPlans(text: string, currency?: string | null): ImportPreview<PlanRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PLAN_ALIASES);
 
@@ -649,6 +919,9 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
   // 'unknown' rather than omitted, because ImportPreview is shared and a
   // missing field would read as a bug in the caller.
   const seen = new Map<string, number>();
+
+  // The gym's own currency, used for any row whose sheet does not state one.
+  const fallback = (currency ?? '').trim().toUpperCase() || null;
 
   const rows: RowResult<PlanRow>[] = sheet.rows.map((r, i) => {
     const line = i + 2; // +1 for zero-index, +1 for the header
@@ -667,12 +940,29 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else seen.set(key, line);
     }
 
+    // The currency is read BEFORE the price, because it decides how the price
+    // is read. An absent currency column is not an error — most sheets do not
+    // have one — but it is not 'AED' either. Null means "the sheet does not
+    // say", and the gym's own currency is what the row is then priced in. A
+    // present column that is not a 3-letter code IS an error.
+    let stated: string | null = null;
+    const rawCurrency = at(r, 'currency').trim().toUpperCase();
+    if (rawCurrency) {
+      if (/^[A-Z]{3}$/.test(rawCurrency)) stated = rawCurrency;
+      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
+    }
+    // What this row's price is denominated in: the sheet's own code where it
+    // has one, and the gym's otherwise. A price book exported from a British
+    // gym's old system with a GBP column belongs in GBP whatever the gym in
+    // front of it trades in, which is why the sheet outranks the fallback.
+    const priceIn = stated ?? fallback;
+
     let priceCents = 0;
     const rawPrice = at(r, 'price').trim();
     if (!rawPrice) {
-      errors.push('no price — a blank price is an unfinished row, not a free plan');
+      errors.push('no price; a blank price is an unfinished row, not a free plan');
     } else {
-      const m = parseMoneyCents(rawPrice);
+      const m = parseMoneyCents(rawPrice, priceIn);
       if (m.ok) {
         if (m.value < 0) errors.push('price is negative');
         else priceCents = m.value;
@@ -687,16 +977,12 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else errors.push(`billing period "${at(r, 'interval').trim()}" is not month, year or one-off`);
     }
 
-    // An absent currency column is not an error — most sheets do not have one
-    // — but it is not 'AED' either. Null means "the sheet does not say", and
-    // the import screen fills it from the gym before anything is written. A
-    // present column that is not a 3-letter code IS an error.
-    let currency: string | null = null;
-    const rawCurrency = at(r, 'currency').trim().toUpperCase();
-    if (rawCurrency) {
-      if (/^[A-Z]{3}$/.test(rawCurrency)) currency = rawCurrency;
-      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
-    }
+    // `PlanRow.currency` stays what the SHEET said and not what the row was
+    // priced in. The import screen writes `plan.currency ?? gymCurrency`, so
+    // filling this from the fallback here would say the file stated a currency
+    // it never mentioned — and the whole point of the null is that it is
+    // honest about what the file contains.
+    const currency = stated;
 
     let active = true;
     const rawActive = at(r, 'active').trim().toLowerCase();
@@ -720,6 +1006,9 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: 'unknown',
+    // The fallback, not a row's own code: a price book may name three
+    // currencies down its own column and no single one describes the file.
+    currency: fallback,
     rows,
     ready,
     rejected,
@@ -734,7 +1023,7 @@ export function describePreview<T>(p: ImportPreview<T>): string {
   if (p.rows.length === 0) return 'That file has a header but no rows.';
   const parts = [`${p.ready.length} of ${p.rows.length} rows ready`];
   if (p.rejected.length) parts.push(`${p.rejected.length} need attention`);
-  if (p.dateOrder === 'ambiguous') parts.push('date order unclear — say which the file uses');
+  if (p.dateOrder === 'ambiguous') parts.push('date order unclear; say which the file uses');
   if (p.unmatchedColumns.length) parts.push(`ignoring ${p.unmatchedColumns.length} unrecognised column(s)`);
   return parts.join(' · ');
 }

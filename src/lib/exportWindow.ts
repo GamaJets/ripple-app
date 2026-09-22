@@ -104,7 +104,25 @@ export function instantOf(v: string | null | undefined): number | null {
     // is UTC and `new Date('2026/03/31')` is local, and only one of those two
     // spellings is ever more than a typo away.
     const ms = Date.UTC(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
-    return Number.isFinite(ms) ? ms : null;
+    if (!Number.isFinite(ms)) return null;
+    // `Date.UTC` never returns NaN for numeric arguments — it ROLLS FORWARD, so
+    // 2026-02-30 becomes 2 March and 2026-13-01 becomes January of 2027. That
+    // made `windowBlocker`'s own "One of those days does not exist." branch
+    // unreachable, and a window asked for from 30 February came back silently
+    // starting two days later than requested with the export labelled by the
+    // date nobody could have meant.
+    //
+    // Round-tripping is the only test that catches it: a day that does not
+    // exist does not survive being written back out.
+    //
+    // utc-day-ok: this is not a claim about anybody's day — it is a validity
+    // check on the STRING, and it compares within the one calendar the value
+    // was just built in. `ms` came from `Date.UTC` on this string's own parts
+    // three lines up, so reading it back with `toISOString` asks exactly one
+    // question: did those parts survive? A reader's zone or a gym's would break
+    // the comparison by shifting one side of it, and would answer a question
+    // nobody asked here.
+    return new Date(ms).toISOString().slice(0, 10) === s ? ms : null;
   }
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) return null;
   if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) return null;
@@ -257,20 +275,29 @@ export function presetDays(id: PresetId, today: string): { from: string; to: str
   const d = new Date(t);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth();
-  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-  const todayDay = iso(t);
+  // `utcIso` rather than `iso`, because every one of its arguments below is a
+  // `Date.UTC(...)` and `instantOf` builds `t` the same way — UTC goes in and
+  // the same UTC day comes back out, which is what makes this pure and what the
+  // note above is describing when it says the suite gets one answer under six
+  // timezones. Reading these back with the LOCAL getters, which is the usual
+  // repair for `toISOString().slice(0, 10)`, would be the actual bug here: the
+  // first of the month built at UTC midnight reads back as the last day of the
+  // month before for every laptop west of Greenwich, and an accountant would
+  // get a file labelled September holding a payment from August.
+  const utcIso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const todayDay = utcIso(t);
   switch (id) {
     case 'thisMonth':
-      return { from: iso(Date.UTC(y, m, 1)), to: todayDay };
+      return { from: utcIso(Date.UTC(y, m, 1)), to: todayDay };
     case 'lastMonth':
       // Day 0 of a month is the last day of the one before it, which is the
       // only spelling of "the end of last month" that is right in February.
-      return { from: iso(Date.UTC(y, m - 1, 1)), to: iso(Date.UTC(y, m, 0)) };
+      return { from: utcIso(Date.UTC(y, m - 1, 1)), to: utcIso(Date.UTC(y, m, 0)) };
     case 'last90':
-      return { from: iso(t - 89 * 86_400_000), to: todayDay };
+      return { from: utcIso(t - 89 * 86_400_000), to: todayDay };
     case 'thisYear':
-      return { from: iso(Date.UTC(y, 0, 1)), to: todayDay };
+      return { from: utcIso(Date.UTC(y, 0, 1)), to: todayDay };
     case 'lastYear':
-      return { from: iso(Date.UTC(y - 1, 0, 1)), to: iso(Date.UTC(y - 1, 11, 31)) };
+      return { from: utcIso(Date.UTC(y - 1, 0, 1)), to: utcIso(Date.UTC(y - 1, 11, 31)) };
   }
 }

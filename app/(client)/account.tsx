@@ -11,6 +11,15 @@
 // lost the account, because the reset email is the only way back in and it
 // goes to the address they no longer have.
 //
+// ── And the one a password change does NOT do ──────────────────────────────
+//
+// It does not sign anybody else out. That is Supabase's behaviour, not a
+// choice: a refresh token per session, untouched by `updateUser({ password })`.
+// This screen used to state it and leave it there — on the screen Explore
+// routes the keyword "hacked" to, where the person reading has exactly one
+// question. The alert now offers `endOtherSessions`, which keeps this phone's
+// session and ends every other one, and reports honestly when it could not.
+//
 // ── Two screens' worth of care, for two different reasons ──────────────────
 //
 // The PASSWORD form asks for the current password even though Supabase does
@@ -31,19 +40,21 @@
 // into, and every field is cleared on success. No password reaches
 // reportError, AsyncStorage, or a log line.
 import { useCallback, useEffect, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Flag, fig, PageHead, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import {
-  MIN_PASSWORD, changeEmail, changePassword, emailProblem, passwordProblem, pendingEmail,
+  MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
  *  kept apart from `null` for the reason settings.tsx keeps them apart: a read
@@ -74,6 +85,7 @@ function signInAddress(email: string): string {
 
 export default function Account() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const auth = useAuth();
   const email = auth.user?.email || '';
@@ -95,6 +107,11 @@ export default function Account() {
     } catch (e) { reportError('account.pendingEmail', e); setPending('failed'); }
   }, []);
   useEffect(() => { void loadPending(); }, [loadPending]);
+
+  // Whether an email change is still waiting to be confirmed is the one server
+  // read on this screen, and it is the one a member comes back to check after
+  // opening the link in their inbox.
+  const pull = usePullToRefresh(loadPending);
 
   /* ── the password form ──────────────────────────────────────────────────── */
 
@@ -128,8 +145,40 @@ export default function Account() {
       }
       wipePassword();
       setPwNote(null);
-      Alert.alert('Password changed',
-        'Your new password is in place. You are still signed in on this phone; anywhere else you are signed in stays signed in until that session expires.');
+      // ── The offer this screen owed and did not make ────────────────────
+      //
+      // A password change evicts nobody. Supabase issues a refresh token per
+      // session and leaves the others alone, so a handset somebody else is
+      // holding stays signed in to this account — with the member's messages,
+      // injuries and scans in it — until that session's own token expires. The
+      // alert said exactly that and then stopped, on the screen Explore routes
+      // the keyword "hacked" to. Somebody who arrives here has one question,
+      // and the app knew the answer.
+      //
+      // Offered rather than done. Most password changes are housekeeping, and
+      // signing a member out of their own tablet uninvited is its own small
+      // harm. `endOtherSessions` keeps THIS session — see the note on it.
+      Alert.alert('Password Changed',
+        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires, including any phone or tablet you no longer have.',
+        [
+          { text: 'Leave Them', style: 'cancel' },
+          {
+            text: 'Sign Out Everywhere Else',
+            onPress: async () => {
+              const out = await endOtherSessions(supabase.auth);
+              // Both outcomes are said. "We could not do it" is the one that
+              // matters here: a member who believes they have evicted somebody
+              // and has not is worse off than one who knows they must ring
+              // support.
+              Alert.alert(
+                out.ok ? 'Signed Out Everywhere Else' : 'Still Signed In Elsewhere',
+                out.ok
+                  ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
+                  : `${out.note} Your password HAS been changed, so nothing new can sign in, but a device already signed in may still be. Try again in a moment.`,
+              );
+            },
+          },
+        ]);
     } finally { setPwBusy(false); }
   };
 
@@ -154,12 +203,12 @@ export default function Account() {
       // account, not from the fact that a call returned.
       await loadPending();
       if (res.outcome === 'changed') {
-        Alert.alert('Email changed',
+        Alert.alert('Email Changed',
           `Your account now uses ${res.requested}. That is the address to sign in with from now on, and the one a password reset will go to.`);
         return;
       }
       if (res.outcome === 'pending') {
-        Alert.alert('Check your inbox — nothing has changed yet',
+        Alert.alert('Check your inbox. Nothing has changed yet',
           `We have sent a confirmation to ${res.requested}. Your account still uses ${signInAddress(email)} and will keep using it until you open that link.\n\n`
           + 'If the link is never opened, nothing happens and your old address goes on working.');
         return;
@@ -175,34 +224,37 @@ export default function Account() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the password fields are the LAST thing on this screen and
+          the button under them has to come up with them. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Settings</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Account & Sign-in</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          The password you sign in with, and the address a reset would go to
-        </Text>
+        <PageHead title="Account & Sign-in" subtitle="Your password, and where a reset would go" />
 
-        <Rule />
 
         {/* ── email ──────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Email Address" />
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>On your account</Text>
-            <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>
+          {/* The address as the card's figure: a plate, the label over it, the
+              address in ink. It was a grey label and a right-aligned value cut
+              to one line — on the screen whose whole subject is this address. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+            <IconPlate icon="message" tone="blue" />
+            <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>On Your Account</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
               {/* `|| null` and not the empty string `email` already is: `fig('')` is the
                   empty string, so an unread address left this slot blank under its
                   label — indistinguishable from an account with no email at all.
                   The dash is how the rest of the app says "not read". */}
               {auth.loading ? 'Checking…' : fig(email || null)}
             </Text>
+            </View>
           </View>
 
           {/* The four states of "is there a change outstanding", kept apart.
@@ -219,7 +271,7 @@ export default function Account() {
               <Pressable onPress={() => { void loadPending(); }} hitSlop={8} accessibilityRole="button"
                 accessibilityLabel="Check again for an outstanding email change"
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : pending.email ? (
@@ -228,37 +280,40 @@ export default function Account() {
             </Flag>
           ) : null}
 
-          {label('New email address')}
+          {label('New Email Address')}
           <TextInput value={newEmail} onChangeText={(v) => { setNewEmail(v); setEmNote(null); }}
             placeholder="you@example.com" placeholderTextColor={t.ink3}
             autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress"
-            accessibilityLabel="New email address" style={inp} />
+            accessibilityLabel="New Email Address" style={inp} />
           {emNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{emNote}</Flag> : null}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent — so keep it one you can open.
-          </Text>
+          <View style={{ marginTop: sp.md }}>
+            <Expandable title="Who Sees This Address">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent, so keep it one you can open.
+              </Text>
+            </Expandable>
+          </View>
           <View style={{ height: sp.md }} />
           <Cta label={emBusy ? 'Sending…' : 'Change Email Address'} wide disabled={emBusy} onPress={() => { void submitEmail(); }} />
         </Section>
 
-        <Rule />
 
         {/* ── password ───────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Password" />
-          {label('Current password')}
+          {label('Current Password')}
           <TextInput value={current} onChangeText={(v) => { setCurrent(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="password"
             placeholder="The one you use now" placeholderTextColor={t.ink3}
-            accessibilityLabel="Current password" style={inp} />
+            accessibilityLabel="Current Password" style={inp} />
 
-          {label('New password')}
+          {label('New Password')}
           <TextInput value={next} onChangeText={(v) => { setNext(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder={`At least ${MIN_PASSWORD} characters`} placeholderTextColor={t.ink3}
-            accessibilityLabel="New password" style={inp} />
+            accessibilityLabel="New Password" style={inp} />
 
-          {label('New password again')}
+          {label('New Password Again')}
           <TextInput value={confirm} onChangeText={(v) => { setConfirm(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder="Type it a second time" placeholderTextColor={t.ink3}
@@ -266,18 +321,21 @@ export default function Account() {
 
           {pwNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{pwNote}</Flag> : null}
 
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            We ask for your current password so that a phone left unlocked on a bench can’t be used to lock you out of your own account.
-          </Text>
+          <View style={{ marginTop: sp.md }}>
+            <Expandable title="Why We Ask for Your Current Password">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                So that a phone left unlocked on a bench can’t be used to lock you out of your own account.
+              </Text>
+            </Expandable>
+          </View>
           <View style={{ height: sp.md }} />
           <Cta label={pwBusy ? 'Changing…' : 'Change Password'} wide disabled={pwBusy} onPress={() => { void submitPassword(); }} />
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen — that sends a link to {signInAddress(email)}.
+            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen. That sends a link to {signInAddress(email)}.
           </Text>
         </Section>
       </ScrollView>

@@ -40,25 +40,74 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, PageHead, ActionBlock } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
-import { checklist, checklistDone, checklistLeft, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
+import { checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
 import { ONBOARD_KEY } from './onboarding';
 import { GUIDE_SEEN_KEY } from '../guide';
+import { FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * The mark against one checklist row — a filled tick, a hairline ring, or a
+ * dash for a state nothing could read.
+ *
+ * A module-scope PLAIN FUNCTION, called as `tick(r.state, t)`, and not a
+ * component written as `<Tick state={…} />`. Declared inside the screen body it
+ * was a new function object on every render, so React saw a different element
+ * TYPE each time and unmounted and remounted all six marks rather than updating
+ * them — on every focus re-read, every pull-to-refresh, every provider landing.
+ * Nothing here holds a TextInput or an accessibility label, so what that cost
+ * was work, not a member's caret; the rule is the same either way and is stated
+ * at app/(client)/report.tsx:475 and enforced by scripts/check-remount.mjs.
+ *
+ * At module scope rather than a local call because it closes over nothing from
+ * the render body: the sizes and the hairline are module imports and the theme
+ * is the one thing it needs, so the theme is passed.
+ *
+ * The coach's copy is app/(trainer)/getting-started.tsx. The two are NOT shared
+ * from here: these are route modules under two different route groups and
+ * importing one into the other would make a screen file an exported library.
+ * If they are ever to be one, the one belongs in src/ui/.
+ */
+const tick = (state: ChecklistRow['state'], t: Theme) => (
+  <View style={{
+    width: 24, height: 24, borderRadius: radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: state === 'done' ? t.brand : 'transparent',
+    borderWidth: state === 'done' ? 0 : hairline,
+    borderColor: t.ring,
+  }}>
+    {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+    {/* A dash, not an empty circle. An empty circle is a claim that this has
+        not been done, and under a failed read that is a claim we have not
+        earned. */}
+    {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
+  </View>
+);
 
 export default function GettingStarted() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const food = useFoodLog();
-  const { states } = useWearables();
+  const wearables = useWearables();
+  const { states } = wearables;
+  // Every tick on this checklist is a claim about a server read — profile,
+  // training log, food log, connected watch — and a read that failed leaves the
+  // step showing as not done. Telling a member they have not started when they
+  // have is the one thing this screen must not do twice.
+  const pull = usePullToRefresh(useCallback(() => {
+    c.reload(); reloadLog(); food.reload(); void wearables.syncAll();
+  }, [c.reload, reloadLog, food.reload, wearables]));
 
   // Two device-local marks, read on every focus so a tick appears the moment
   // somebody comes back from the screen that earned it. null while the read is
@@ -90,11 +139,16 @@ export default function GettingStarted() {
     // could not be read, which is not the same as not being linked.
     coach: c.coachLinked,
     workout: isWhole(logStatus) ? log.length > 0 : (log.length > 0 ? true : null),
-    // Only today's log is loaded, so a `true` is trustworthy and a `false` is
-    // only "not today". Both are read the same way: something logged is proof,
-    // nothing logged on a settled read is a genuine no, and an unsettled one is
-    // unknown.
-    meal: isWhole(food.status) ? food.entries.length > 0 : (food.entries.length > 0 ? true : null),
+    // "Have you EVER logged a meal", which is a fact about this member's
+    // history and not about today. It used to be read off `food.entries`,
+    // which src/ui/foodLog.tsx loads for today only — so the row un-ticked
+    // itself every midnight, the list could never reach zero, and the home
+    // screen kept the onboarding row for a member who had logged every meal
+    // for six months. `everLogged` is the read with no date floor on it, and
+    // it is null until it lands: see everLoggedMeal, which is where the rule
+    // that a null stays a dash lives. `food.status` is not consulted at all
+    // now — a settled empty TODAY says nothing about ever.
+    meal: everLoggedMeal({ loggedToday: food.entries.length, unsentEarlier: food.owed.length, everLogged: food.everLogged }),
     device: deviceKnown ? Object.values(states).some((s) => s === 'connected') : null,
     solo,
   });
@@ -105,38 +159,16 @@ export default function GettingStarted() {
   const unknown = rows.length - done - left;
   const G = layout.gutter;
 
-  const Tick = ({ state }: { state: ChecklistRow['state'] }) => (
-    <View style={{
-      width: 24, height: 24, borderRadius: radius.pill,
-      alignItems: 'center', justifyContent: 'center',
-      backgroundColor: state === 'done' ? t.brand : 'transparent',
-      borderWidth: state === 'done' ? 0 : hairline,
-      borderColor: t.ring,
-    }}>
-      {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-      {/* A dash, not an empty circle. An empty circle is a claim that this has
-          not been done, and under a failed read that is a claim we have not
-          earned. */}
-      {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
-    </View>
-  );
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>
-              {/* Counted, not fractioned, when part of the list is unreadable.
-                  "4 of 6" over two failed reads states a denominator we cannot
-                  stand behind. */}
-              {unknown > 0 ? `${done} done` : `${done} of ${rows.length} done`}
-            </Text>
-          </View>
-        </View>
+        {/* Counted, not fractioned, when part of the list is unreadable.
+            "4 of 6" over two failed reads states a denominator we cannot
+            stand behind. The count is the subtitle now, under the page's
+            name, where the board puts the one quiet line a pushed page has. */}
+        <PageHead title="Getting Started" subtitle={unknown > 0 ? `${done} done` : `${done} of ${rows.length} done`} />
+        <View style={{ height: sp.lg }} />
 
         {next ? (
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -152,6 +184,20 @@ export default function GettingStarted() {
           </Text>
         )}
 
+        {/* ── the next one, as the one button ─────────────────────────────
+            The data-layout review's stack is state, then the next action, then
+            the evidence — and this screen went from "3 of 6 done" straight to
+            six equal rows, leaving the member to work out which was theirs.
+            `nextTodo` already picks it (the first row that is KNOWN to be
+            undone — never an unread one, which may well be done); this is that
+            row's own title and note over the one full-width primary the board
+            gives every screen — the kit's `ActionBlock`, which is that shape. It
+            opens the same route the row does. */}
+        {next ? (
+          <ActionBlock title={next.title} reason={next.note} meta="Next Up"
+            cta={{ label: 'Open', a11yLabel: `Open ${next.title}`, onPress: () => router.push(next.route as any) }} />
+        ) : null}
+
         <Section>
           {rows.map((r) => (
             <Pressable
@@ -161,23 +207,73 @@ export default function GettingStarted() {
               accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : 'Still to do'}. ${r.item.note}`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
             >
-              <Tick state={r.state} />
+              {tick(r.state, t)}
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
               </View>
-              <Icon name="chevron" size={15} color={t.ink3} />
+              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
             </Pressable>
           ))}
         </Section>
 
-        <Rule />
+
+        {/* ── the three the DESK cares about ──────────────────────────────
+         *
+         * The checklist above is about learning the app. This is about being
+         * let in, and none of it was anywhere on a new member's path.
+         *
+         * `src/lib/features.ts` and the Me hub are the only routes to all three
+         * — Explore, and a list eleven rows down under Me — so a member who has
+         * just joined is never once shown the gym's waiver, the intake their
+         * coach needs before a first session, or the entry barcode. The first
+         * two are what a desk turns somebody away for; the third has to be
+         * handed to reception BEFORE it opens anything, which makes it a day
+         * one task and not a later one. Mindbody, PureGym and Planet Fitness
+         * all put exactly these in front of a joining member; this app had them
+         * and hid them.
+         *
+         * Deliberately without ticks. The rows above earn theirs from reads
+         * this screen already has; these three would each need a read of their
+         * own, and a tick drawn off a read that has not happened is the one
+         * thing the whole top of this file is about. They say what they are and
+         * where they stand is on the other side of the tap.
+         */}
+        <Section>
+          <SectionHead title="Before Your First Visit" />
+          <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.sm }}>
+            These are the ones the front desk cares about. Open each one to see where you stand.
+          </Text>
+          {[
+            { icon: 'check' as const, title: "Your Gym's Paperwork", note: 'waivers and consents your gym asks you to sign; some gyms cannot train you until they have them', route: '/(client)/agreements' },
+            { icon: 'pencil' as const, title: 'Your Intake', note: 'what your coach needs before your first session. You can save it half-finished', route: '/(client)/intake' },
+            { icon: 'lock' as const, title: 'Your Entry Barcode', note: 'give it to reception once and the entrance scanner will read it after that', route: '/(client)/access' },
+          ].map((r) => (
+            <Pressable
+              key={r.route}
+              onPress={() => router.push(r.route as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`${r.title}. ${r.note}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
+            >
+              <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={r.icon} size={15} color={t.ink3} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{r.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.note}</Text>
+              </View>
+              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+            </Pressable>
+          ))}
+        </Section>
+
 
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />
           <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-            Every tab has a row at the top saying what it is showing you. Open it, read it, and close it —
-            it will not come back.
+            Every tab has a row at the top saying what it is showing you. Open it, read it, and close it.
+            It will not come back.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.md }}>
             <Ghost label="User Guide" onPress={() => router.push('/guide')} />

@@ -1,0 +1,94 @@
+/* Audience and story pages (/client, /trainer, /studio, /pricing,
+   /how-it-works): the shared presentation layer. Copy, forms, product
+   examples and scripts stay in the pages and styles.css.
+
+   The masthead, hero and closing call are Night sections in BOTH colour
+   schemes, the way the apps draw their hero surfaces. They were painted dark
+   with hard-coded colours while their text still followed the reader's scheme,
+   so in a light scheme the headline was dark ink on a dark ground. The dark
+   tokens are restated on those sections instead, so everything inside them —
+   text, panels, buttons — resolves against the ground it actually sits on.
+   --accent is restated too: it is resolved once at <body>, against whichever
+   scheme is active, and would otherwise arrive as the light-ground green. */
+.audience-page header.site,
+.audience-page .hero,
+.audience-page .close-cta {
+  --bg: #06130f;
+  --panel: #0b1d19;
+  --panel2: #10261f;
+  --sunk: #040e0b;
+  --line: rgba(244, 246, 245, .10);
+  --hair: rgba(244, 246, 245, .06);
+  --ink: #f4f6f5;
+  --ink2: #a8b6b1;
+  --ink3: #7c8c86;
+  --brand: #22c55e;
+  --brand-fill: #22c55e;
+  --brand-fill-ink: #052e16;
+  --accent: #22c55e;
+  --accent-soft: rgba(34, 197, 94, .12);
+  --head-bg: #06130f;
+  color: var(--ink);
+}
+
+.audience-page header.site .wrap { min-height: 74px; height: auto; }
+.audience-page nav.site a { font-size: 15px; }
+
+.audience-page .hero {
+  display: grid;
+  align-items: center;
+  padding-block: clamp(72px, 9vw, 128px);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.audience-page .hero-grid {
+  grid-template-columns: minmax(0, .92fr) minmax(380px, 1.08fr);
+  gap: clamp(44px, 7vw, 104px);
+  align-items: center;
+}
+.audience-page .hero .eyebrow { color: var(--ink2); }
+.audience-page .hero .display {
+  max-width: 11ch;
+  margin-top: 18px;
+  font-size: clamp(44px, 5.4vw, 74px);
+  line-height: 1.03;
+}
+.audience-page .hero .lede {
+  max-width: 58ch;
+  font-size: clamp(17px, 1.4vw, 19px);
+  line-height: 1.7;
+}
+.audience-page .hero .getbar {
+  margin-top: 32px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.audience-page .hero .surface {
+  border-radius: 12px;
+  box-shadow: 0 30px 60px -36px rgba(0, 0, 0, .7);
+}
+.audience-page .hero .surface-bar { min-height: 42px; background: var(--panel2); }
+.audience-page .hero .jump { padding-top: 22px; border-top: 1px solid var(--line); }
+
+.audience-page .close-cta { background: var(--bg); }
+
+/* Editorial story pages: same masthead and section rhythm, no product mock. */
+.story-page .hero { min-height: auto; padding-block: clamp(82px, 11vw, 144px); }
+.story-page .hero .lead-in.wide { max-width: 920px; }
+.story-page .hero .lead-in.wide .display { max-width: 14ch; }
+
+@media (max-width: 940px) {
+  .audience-page .hero-grid { grid-template-columns: 1fr; }
+  .audience-page .hero .display { max-width: 13ch; }
+}
+
+@media (max-width: 760px) {
+  .audience-page header.site .wrap { min-height: 68px; }
+  .audience-page .hero { padding-block: 60px 72px; }
+  .audience-page .hero-grid { gap: 38px; }
+  .audience-page .hero .display { font-size: clamp(38px, 11vw, 54px); }
+  .audience-page .hero .getbar { padding: 14px; }
+  .story-page .hero { padding-block: 64px 80px; }
+}

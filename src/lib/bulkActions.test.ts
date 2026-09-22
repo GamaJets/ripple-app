@@ -5,7 +5,7 @@
 // acts on thirty rows and reports on none of them.
 //
 //   · "Assign to 12" is a number, and the tap behind it replaces nine
-//     programmes a human wrote. The confirmation has to say HOW MANY are on
+//     programs a human wrote. The confirmation has to say HOW MANY are on
 //     something and WHO — a count alone leaves the coach to work out whether
 //     Tuesday's client is in the set, which is exactly the work they opened a
 //     bulk control to avoid.
@@ -32,8 +32,8 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
-const target = (name: string, onProgramme: boolean): AssignTarget =>
-  ({ clientId: name.toLowerCase(), name, onProgramme });
+const target = (name: string, onProgram: boolean): AssignTarget =>
+  ({ clientId: name.toLowerCase(), name, onProgram });
 
 /* ── namesWithRest: a truncated list of names is a false sentence ─────────── */
 
@@ -66,7 +66,7 @@ eq(namesWithRest(['Ana', 'Ben', 'Cara']), 'Ana, Ben and Cara', 'three read as a 
   ok(b.body.includes('Ana') && b.body.includes('Ben'),
     'AND THEY ARE NAMED — a coach recognises the person they spent an hour programming on Tuesday; they do not recognise a nine');
   ok(b.body.includes('Push · Pull · Legs'),
-    'the programme going out is quoted back, so the dialog is about a specific thing rather than about the button that opened it');
+    'the program going out is quoted back, so the dialog is about a specific thing rather than about the button that opened it');
   ok(/no undo/i.test(b.body),
     'and the cost is stated: there is no undo, which is the whole reason this dialog exists');
   ok(/nothing tells them|nothing.*changed/i.test(b.body),
@@ -126,8 +126,8 @@ const outcome = (name: string, isOk: boolean, why: string | null = null): WriteO
 {
   const r = bulkReport('assign', [
     outcome('Ana', true), outcome('Ben', true), outcome('Cara', true),
-    outcome('Dev', false, 'That programme was not changed — the server matched no rows.'),
-    outcome('Eve', false, 'That programme could not be saved.'),
+    outcome('Dev', false, 'That program was not changed — the server matched no rows.'),
+    outcome('Eve', false, 'That program could not be saved.'),
   ]);
   eq(r.retry.join(','), 'dev,eve',
     'THE FAILURES COME BACK AS IDS — the caller leaves exactly them selected, so trying again is the same gesture over the set that still needs it');
@@ -145,8 +145,8 @@ const outcome = (name: string, isOk: boolean, why: string | null = null): WriteO
 // thinks a failed bulk assign half-landed has to check twelve people by hand.
 {
   const r = bulkReport('assign', [
-    outcome('Ana', false, 'That programme could not be saved.'),
-    outcome('Ben', false, 'That programme could not be saved.'),
+    outcome('Ana', false, 'That program could not be saved.'),
+    outcome('Ben', false, 'That program could not be saved.'),
   ]);
   eq(r.retry.length, 2, 'every one of them is offered for retry');
   ok(/nothing has changed|nothing.*changed/i.test(r.body),
@@ -157,7 +157,7 @@ const outcome = (name: string, isOk: boolean, why: string | null = null): WriteO
 // A long tail of identical failures collapses its REASONS and keeps its NAMES.
 {
   const many: WriteOutcome[] = [];
-  for (let i = 1; i <= 12; i++) many.push(outcome('C' + i, false, 'That programme could not be saved.'));
+  for (let i = 1; i <= 12; i++) many.push(outcome('C' + i, false, 'That program could not be saved.'));
   const r = bulkReport('assign', many);
   eq(r.retry.length, 12, 'all twelve come back for retry however the sentence is written');
   ok(r.body.includes('C1') && r.body.includes('C12'),
@@ -263,7 +263,7 @@ eq(bulkThreadNote(1), null,
     'AND IT TELLS THE COACH WHAT THE CLIENT WILL SEE — nothing is appended to the body under the coach’s name, so the decision to say "this went to everyone" is theirs to type');
 }
 
-/* ── taking clients OFF a programme ───────────────────────────────────────── */
+/* ── taking clients OFF a program ───────────────────────────────────────── */
 //
 // The user's request carried the fear inside it: "un-assign templates meanwhile
 // keeping the data for the history of the workouts done in those templates so
@@ -281,14 +281,14 @@ eq(bulkThreadNote(1), null,
     'the clients actually coming off are NAMED — a coach recognises the person, not the count');
   ok(!b.body.includes('Cara'),
     'and somebody already on their auto plan is not counted as being taken off anything');
-  eq(b.replacing.length, 2, 'only the ones on a programme are acted on');
+  eq(b.replacing.length, 2, 'only the ones on a program are acted on');
   ok(/already logged/i.test(b.body) && /still/i.test(b.body),
-    'THE HISTORY IS PROMISED IN WORDS — that what is already logged stays, and is STILL there if the programme goes back on. This is the whole reason the dialog exists: a coach who is unsure will never press the button');
+    'THE HISTORY IS PROMISED IN WORDS — that what is already logged stays, and is STILL there if the program goes back on. This is the whole reason the dialog exists: a coach who is unsure will never press the button');
   ok(/2/.test(b.confirmLabel), 'and the button carries the number, like every other destructive one here');
 }
 {
   const b = unassignBrief([target('Ana', false)]);
-  eq(b.replacing.length, 0, 'nobody on a programme is nobody to take off');
+  eq(b.replacing.length, 0, 'nobody on a program is nobody to take off');
   ok(/nothing to remove|already/i.test(b.body),
     'and that is said plainly rather than raising an alarm about a write that would do nothing');
 }

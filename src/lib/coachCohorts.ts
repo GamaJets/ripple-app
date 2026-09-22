@@ -128,7 +128,7 @@ export function monthsUntilYearOnYear(snapshots: Snapshots, now: Date): number {
 export function yearOnYearLine(snapshots: Snapshots, now: Date, status: LoadStatus): string {
   if (status === 'loading') return 'Reading the months you have recorded…';
   if (status === 'error') {
-    return 'Your recorded months could not be read, so this is not "no history" — there may be a year of them on your account this phone has not got. Nothing has been lost.';
+    return 'Your recorded months could not be read, so this is not "no history". There may be a year of them on your account this phone has not got. Nothing has been lost.';
   }
   const wait = monthsUntilYearOnYear(snapshots, now);
   if (wait > 0) {
@@ -290,4 +290,4 @@ export const COHORT_CAVEAT =
 /** The floor, restated for the screen so the number and the sentence cannot
  *  drift apart. */
 export const COHORT_FLOOR_NOTE =
-  `Every row is a count. A percentage is added only where the cohort reached ${num(MIN_COHORT_FOR_RATE)} people — three of five leaving is not the same fact as 40% of two hundred, and one figure cannot say both. The same floor governs the gym console, so the two screens cannot disagree about what is too small to state.`;
+  `Every row is a count. A percentage is added only where the cohort reached ${num(MIN_COHORT_FOR_RATE)} people: three of five leaving is not the same fact as 40% of two hundred, and one figure cannot say both. The same floor governs the gym console, so the two screens cannot disagree about what is too small to state.`;

@@ -9,6 +9,10 @@
     <priority>0.5</priority>
   </url>
   <url>
+    <loc>https://www.repplefitness.com/coach-setup</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
     <loc>https://www.repplefitness.com/how-it-works</loc>
     <priority>0.5</priority>
   </url>
@@ -47,5 +51,13 @@
   <url>
     <loc>https://www.repplefitness.com/trainer</loc>
     <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.repplefitness.com/about</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.repplefitness.com/contact</loc>
+    <priority>0.5</priority>
   </url>
 </urlset>

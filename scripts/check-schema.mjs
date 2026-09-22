@@ -53,6 +53,119 @@
 // summary says how many tables were only spot-checked, rather than claiming a
 // coverage it does not have.
 //
+// ── And the FUNCTIONS, since 13 Sep 2026 ──────────────────────────────────
+//
+// This file compared tables and columns and nothing else, and that left a hole
+// the exact size of a part that adds no column.
+// `supabase/parts/2790-a-review-you-wrote-and-could-never-look-at-again.sql`
+// creates one function — `my_coach_reviews()` — and touches no table. It had
+// never been run. Nothing here noticed, because nothing here looked: the part
+// declares no column, so the column comparison had nothing to compare, and the
+// gate printed "schema ok" over a database missing the only thing that part
+// exists to add. It was found by querying the live database by hand.
+//
+// That is the same failure as `workouts.session_mins` on 27 Aug — written,
+// committed, bundled, never run — with the one difference that the column
+// version of it was catchable here and this version was not.
+//
+// So the live half now also asks which functions `public` holds, and compares
+// that against the functions supabase/setup.sql declares, in both directions
+// and in the same words the column comparison uses.
+//
+// ── NAMES, not bodies ─────────────────────────────────────────────────────
+//
+// "Declared in the repo" means the NAME. Many parts use `create or replace
+// function`, deliberately — the convention in supabase/parts is that an early
+// part keeps describing the schema it created and a later one supersedes it —
+// so a function's text in this repo is the last of several definitions and the
+// text in the database is whichever of them was last applied. This check does
+// not diff bodies and does not claim to: a function whose body in production is
+// two revisions behind the repo passes here, silently, and there is nothing in
+// what PostgREST exposes that would let it be otherwise. What it catches is the
+// cliff-edge case — the function that is in the repo and is NOT THERE — which is
+// the one that takes a screen down.
+//
+// ── how the live list is got, and why only with a secret key ──────────────
+//
+// From the same OpenAPI description `listLive` already reads: PostgREST
+// publishes one `/rpc/<name>` path per callable function, so the paths ARE the
+// list. That document is refused to a publishable key, so without
+// SUPABASE_SECRET_KEY the function halves of both directions are not run and
+// the summary says so rather than implying a coverage it does not have.
+//
+// There is no publishable-key fallback here, and that is a decision rather than
+// an omission. The column check can confirm-or-deny any name it is given
+// because asking for a column is a SELECT that RLS refuses after planning.
+// Asking whether a function exists means calling it: a POST to
+// `/rest/v1/rpc/<name>` EXECUTES it, and a schema check that fires
+// `run_invoice_ageing_notices()` to find out whether it is there is a schema
+// check that mails a gym's members. A GET is refused for anything VOLATILE, and
+// for the rest PostgREST answers 404/PGRST202 both when the function is absent
+// and when the argument NAMES do not match an overload — so the one probe that
+// is safe cannot tell "missing" from "called wrongly". Either answer would be a
+// guess, and the file's rule is that it does not guess.
+//
+// ── what the function comparison therefore cannot see ─────────────────────
+//
+//   · A TRIGGER FUNCTION. PostgREST cannot call one, so it appears in no path
+//     and a listing that omitted it would read as 127 missing functions. Every
+//     `returns trigger` declaration is excluded here and counted in the
+//     summary. They are not unchecked entirely — scripts/check-grants.mjs and
+//     scripts/check-definer.mjs both read them out of the parts — but whether
+//     one was APPLIED is not visible from outside the database.
+//
+//   · A FUNCTION THE SECRET KEY MAY NOT EXECUTE. The listing is generated per
+//     role. Supabase's ALTER DEFAULT PRIVILEGES grant EXECUTE on each new
+//     function to anon, authenticated and service_role separately, and the
+//     house `revoke … from public, anon` does not touch service_role's own
+//     grant, so in this project a function that exists should be listed. If a
+//     part ever revokes from service_role, this gate will call that function
+//     missing and be wrong — check the grants before believing it, exactly as
+//     the note on a table absent from the listing already says.
+//
+//   · WHICH OVERLOAD. `class_roster(uuid)` and `class_roster(uuid, date)` are
+//     one path and one name. A signature change that drops the old form is
+//     invisible here.
+//
+//   · A FUNCTION IN ANOTHER SCHEMA. Only `public` is exposed and only `public`
+//     is compared.
+//
+// ── What a row is allowed to look like ────────────────────────────────────
+//
+// Almost nothing writes an object literal straight into .insert(). Thirty
+// writes — thirty tables' worth of column names, four of them on the money
+// path — were being reported as unreadable, which is honest and is not
+// checking. Each of these is now followed to the literal underneath, and every
+// one of them can only be followed with certainty:
+//
+//   const row = { … }              the declaration the CALL sees, resolved by
+//                                  scope, innermost block outward
+//   crashRow(c, uid)               a named builder, through its `return`, past
+//                                  an object return TYPE that is not the body
+//   const rows = []; rows.push(…)  the pushes are the rows, unless something
+//                                  else fills the array too
+//   xs.map(asRow)                  a handler named rather than written out
+//   a ? { … } : { … }              both arms, because both are written
+//   built.row                      the row a builder hands back beside its
+//                                  refusal
+//   .from(TABLE_CONST)             a table named by a string constant declared
+//                                  once in the same file
+//   return null                    a builder refusing to build: no columns and
+//                                  no gap either, because nothing is written
+//
+// What is NOT followed is anything whose value only exists at runtime: a table
+// that is a parameter (src/lib/gymPay.ts, owner-metrics, connect-refund), one
+// chosen by a ternary over two tables, a property read off an event or a
+// queued payload (`sale.table`, `unitHome.current`, the outbox in
+// src/ui/measurements.tsx). Those are still listed, every run. A check that
+// pretends to know which table a write went to is worse than one that says it
+// cannot tell.
+//
+// The safety net under all of it is in scanFile: a write that comes back
+// having named NO column and admitted NO gap is reported anyway. Every shape
+// above says so when it gives up; that invariant is what catches the next
+// shape somebody adds and forgets to.
+//
 //     node scripts/check-schema.mjs             the whole check
 //     node scripts/check-schema.mjs --offline   app vs repo only, no credentials
 //     node scripts/check-schema.mjs --list      what it covers, table by table
@@ -234,17 +347,56 @@ function sourceOf(file) {
   return sources.get(file);
 }
 
-/** A select list written as `'a, b, ' + 'c'`, or as a named constant. */
-function stringExpr(text, consts) {
+/**
+ * A select list written as `'a, b, ' + 'c'`, or as a named constant — declared
+ * here, or imported from one hop away.
+ *
+ * The import hop is not a nicety. This function used to look in the using
+ * file's own constants and nowhere else, and four coach screens read
+ * `workouts` through the same column list: `src/lib/workoutRow.ts` declared it
+ * beside `rowToEntry`, `app/(trainer)/log-session.tsx` imported it, and
+ * client-week, client-report and client-training each hand-copied the literal
+ * with a comment saying they had to, because a shared constant was a select
+ * list THIS CHECK COULD NOT SEE. The comment was accurate. The result was four
+ * copies of one list with one source of truth among them, and three of them
+ * silently short of `bw`, `timed` and `tempos` — so a coach's screens totalled
+ * a client's training against columns the read never asked for.
+ *
+ * Making the gate follow the import is what let those three copies be deleted
+ * without trading drift for a blind spot. Still ONE hop and still a plain
+ * string literal: a constant assembled at runtime, or re-exported through a
+ * barrel, resolves to nothing here and is reported as unreadable rather than
+ * guessed at.
+ */
+function stringExpr(text, consts, file) {
   let out = '';
   for (const piece of splitTopLevel(text, '+')) {
     const lit = stringLiteral(piece);
     if (lit != null) { out += lit; continue; }
-    const named = consts.get(piece.trim());
+    const name = piece.trim();
+    const named = consts.get(name) ?? (file ? importedConst(name, file) : undefined);
     if (named != null) { out += named; continue; }
     return null;
   }
   return out;
+}
+
+/**
+ * The string a name imported into `file` stands for, when the module it comes
+ * from declares it as a plain string literal. Null for everything else —
+ * including a name imported from a module this cannot locate, which is the
+ * ordinary case for a package rather than a relative path.
+ */
+function importedConst(name, file) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return undefined;
+  const { code } = sourceOf(file);
+  for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)) {
+    const names = m[1].split(',').map((s) => s.trim().split(/\s+as\s+/).pop().trim());
+    if (!names.includes(name)) continue;
+    const target = moduleFile(m[2], file);
+    if (target) return sourceOf(target).consts.get(name);
+  }
+  return undefined;
 }
 
 function moduleFile(spec, from) {
@@ -252,32 +404,186 @@ function moduleFile(spec, from) {
   if (spec.startsWith('.')) base = join(dirname(from), spec);
   else if (spec.startsWith('@lib/')) base = join('src/lib', spec.slice(5));
   else return null;
+  // An edge function imports the shared library the way Deno requires, with the
+  // extension written out: `from '../../../src/lib/disputes.ts'`. Appending
+  // another one finds nothing, which is how `disputeRow` and
+  // `gymOrderPaymentRow` — three writes to client_disputes and one to
+  // gym_payments — were unreadable while being perfectly ordinary row builders.
+  try { if (statSync(base).isFile()) return base; } catch { /* not a file itself */ }
   for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx']) {
     try { if (statSync(base + ext).isFile()) return base + ext; } catch { /* try the next */ }
   }
   return null;
 }
 
+// ── Which `row` is THE row ─────────────────────────────────────────────────
+//
+// The first version of this looked up a name with one regex over the whole
+// file and took the first hit. `src/lib/coachPrefsStore.ts` declares `const
+// row` three times in three functions, and the upsert at line 150 was being
+// read against the one at line 90 — a `data` cast, not a row at all. Five
+// writes were being judged against the wrong declaration, and one of them,
+// stripe-webhook's `client_subscriptions` upsert, is on the path every
+// subscription in the product takes.
+//
+// So a name is resolved the way the language resolves it: innermost enclosing
+// block first, then outward. Two declarations of one name in one block cannot
+// happen in code that compiles, so at each level there is either exactly one
+// answer or none — and anything else, a parameter included, is refused rather
+// than guessed at.
+
+/** Every `{ … }` in the file, as [start, end) pairs. */
+function blocksOf(file) {
+  const s = sourceOf(file);
+  if (!s.blocks) {
+    const { code } = s;
+    const blocks = [], stack = [];
+    let i = 0;
+    while (i < code.length) {
+      const c = code[i];
+      if (c === '"' || c === "'" || c === '`') { i = skipString(code, i); continue; }
+      if (c === '{') { stack.push(i); i++; continue; }
+      if (c === '}') { const open = stack.pop(); if (open != null) blocks.push([open, i + 1]); i++; continue; }
+      i++;
+    }
+    s.blocks = blocks;
+  }
+  return s.blocks;
+}
+
+/** The blocks enclosing `at`, innermost first, and then the file itself. */
+function scopeChain(file, at) {
+  const chain = blocksOf(file)
+    .filter(([a, b]) => a < at && at < b)
+    .sort((x, y) => (x[1] - x[0]) - (y[1] - y[0]));
+  chain.push(null);                                    // module level
+  return chain;
+}
+
+/** The innermost block containing `index`, or null for module level. */
+function ownBlock(file, index) {
+  return scopeChain(file, index)[0] ?? null;
+}
+
+const sameBlock = (a, b) => (a === null && b === null) || (!!a && !!b && a[0] === b[0]);
+
 /**
- * Where `name` is defined: the text just after its `=`, or the body of its
- * `function`. Looks in the file that uses it and then along a relative import,
- * and no further — one hop is what the row builders in this codebase need.
+ * The parameter list of the function whose body starts at `blockStart`, or
+ * null when that block is not a function body. Read backwards from the brace
+ * over a return type annotation and a `=>`.
  */
-function definitionOf(name, file) {
+function paramsOf(file, blockStart) {
   const { code } = sourceOf(file);
-  const decl = new RegExp(`(?:^|[^\\w$.])(?:const|let|var)\\s+${name}\\s*(?::[^=\\n]+)?=\\s*`, 'm').exec(code);
-  if (decl) return { text: code.slice(decl.index + decl[0].length), file };
-  const fn = new RegExp(`(?:^|[^\\w$.])(?:async\\s+)?function\\s+${name}\\s*(?:<[^>]*>)?\\s*\\(`, 'm').exec(code);
-  if (fn) {
-    const params = readBalanced(code, fn.index + fn[0].length - 1);
-    const brace = code.indexOf('{', params);
-    if (brace !== -1) return { body: code.slice(brace, readBalanced(code, brace)), file };
+  let j = blockStart - 1;
+  while (j >= 0 && /\s/.test(code[j])) j--;
+  if (code[j] === '>' && code[j - 1] === '=') { j -= 2; while (j >= 0 && /\s/.test(code[j])) j--; }
+  // `): Row | null {` — walk back over the annotation to the `)` that closes
+  // the parameters, refusing to cross anything that ends a statement.
+  while (j >= 0 && code[j] !== ')') {
+    if (code[j] === ';' || code[j] === '{' || code[j] === '}') return null;
+    j--;
+  }
+  if (j < 0) return null;
+  let depth = 0;
+  for (let k = j; k >= 0; k--) {
+    if (code[k] === ')') depth++;
+    else if (code[k] === '(') { depth--; if (!depth) return code.slice(k + 1, j); }
+  }
+  return null;
+}
+
+/** Every place `name` is declared in this file, with where its value starts. */
+function declarationsOf(name, code) {
+  const out = [];
+  for (const m of code.matchAll(new RegExp(`(?:^|[^\\w$.])(?:const|let|var)\\s+${name}\\s*(?::[^=\\n]+)?=\\s*`, 'g'))) {
+    out.push({ kind: 'value', index: m.index + m[0].length });
+  }
+  for (const m of code.matchAll(new RegExp(`(?:^|[^\\w$.])(?:async\\s+)?function\\s+${name}\\s*(?:<[^>]*>)?\\s*\\(`, 'g'))) {
+    out.push({ kind: 'function', index: m.index + m[0].length - 1 });
+  }
+  return out;
+}
+
+/**
+ * The declaration of `name` that the use at `at` actually sees, or null when
+ * this cannot say which — including when the name is a parameter, which is a
+ * value that only exists at runtime and must never be read as a constant.
+ */
+function declarationFor(name, file, at) {
+  const { code } = sourceOf(file);
+  const all = declarationsOf(name, code);
+  if (!all.length) return null;
+  if (at == null) return all.length === 1 ? all[0] : null;
+  for (const scope of scopeChain(file, at)) {
+    if (scope) {
+      const params = paramsOf(file, scope[0]);
+      // A parameter shadows everything outside, and nothing here can read one.
+      if (params != null && new RegExp(`(?:^|[^\\w$.])${name}\\s*(?::|,|=|\\)|$)`).test(params)) return null;
+    }
+    const here = all.filter((d) => sameBlock(ownBlock(file, d.index), scope));
+    if (here.length === 1) return here[0];
+    if (here.length > 1) return null;                  // cannot happen; not guessed at either
+  }
+  return null;
+}
+
+/** The body of the function declared at `decl`, past any return type. */
+function functionBody(code, decl) {
+  const params = readBalanced(code, decl.index);
+  let j = params;
+  for (let tries = 0; tries < 4; tries++) {
+    const brace = code.indexOf('{', j);
+    if (brace === -1) return null;
+    const end = readBalanced(code, brace);
+    // `): { user_id: string | null; … } {` — an object return TYPE, with the
+    // real body after it. crashRow and draftToRow are both written this way,
+    // and reading the annotation as the body found no `return` in either.
+    if (/^\s*[{|&[>,]/.test(code.slice(end, end + 8))) { j = end; continue; }
+    return { body: code.slice(brace, end), at: end - 1 };
+  }
+  return null;
+}
+
+/**
+ * The string a bare identifier stands for, when it is declared once, in this
+ * file, as a plain string literal and nothing else — `export const
+ * INJURY_DOC_CONSENT_TABLE = 'injury_doc_ocr_consents'`. A parameter named
+ * `table`, a ternary over two table names, a property read off something at
+ * runtime: all null, all still reported. A checker that pretends to know which
+ * table a write went to is worse than one that says it does not.
+ */
+function constantString(text, file, at) {
+  const name = /^\s*([A-Za-z_$][\w$]*)\s*$/.exec(text)?.[1];
+  if (!name) return null;
+  const decl = declarationFor(name, file, at);
+  if (!decl || decl.kind !== 'value') return null;
+  const { code } = sourceOf(file);
+  const lit = /^('[^'\n]*'|"[^"\n]*"|`[^`\n$\\]*`)\s*;/.exec(code.slice(decl.index, decl.index + 400));
+  return lit ? lit[1].slice(1, -1) : null;
+}
+
+/**
+ * Where `name` is defined, as the use at `at` sees it: the text just after its
+ * `=`, or the body of its `function`. Looks in the file that uses it and then
+ * along a relative import, and no further — one hop is what the row builders
+ * in this codebase need. `at` travels with the answer, because the names
+ * inside a definition resolve where THAT definition is, not where it is used.
+ */
+function definitionOf(name, file, at) {
+  const { code } = sourceOf(file);
+  const decl = declarationFor(name, file, at);
+  if (decl && decl.kind === 'value') return { text: code.slice(decl.index), at: decl.index, file };
+  if (decl && decl.kind === 'function') {
+    const body = functionBody(code, decl);
+    if (body) return { body: body.body, at: body.at, file };
   }
   for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)) {
     const names = m[1].split(',').map((s) => s.trim().split(/\s+as\s+/).pop().trim());
     if (!names.includes(name)) continue;
     const target = moduleFile(m[2], file);
-    if (target) return definitionOf(name, target);
+    // Nothing is known about where in the target file the name sits, so the
+    // lookup there is unambiguous or it is nothing.
+    if (target) return definitionOf(name, target, null);
   }
   return null;
 }
@@ -354,7 +660,12 @@ function scanFile(file) {
 
     const open = m.index + m[0].length - 1;
     const end = readBalanced(code, open);
-    const table = stringLiteral(code.slice(open + 1, end - 1));
+    const named = code.slice(open + 1, end - 1);
+    // `.from(INJURY_DOC_CONSENT_TABLE)`. A table named by a constant is not a
+    // dynamic table: the constant is declared once, in this file, as a string
+    // and nothing else. Anything else — a parameter, a ternary, a property of
+    // something read at runtime — resolves to nothing here and is reported.
+    const table = stringLiteral(named) ?? constantString(named, file, m.index);
     const where = `${file}:${lineOf(code, m.index)}`;
 
     // Walk the rest of the chain: .select(…).eq(…).order(…) and so on.
@@ -373,12 +684,20 @@ function scanFile(file) {
 
       if (name === 'select') {
         if (!args.length) continue;                        // .select() is *
-        const list = stringExpr(args[0], consts);
+        const list = stringExpr(args[0], consts, file);
         if (list == null) { add(null, null, `.select(${args[0].slice(0, 30)})`); continue; }
         selectColumns(list, table, add);
       } else if (WRITES.has(name)) {
         if (!args.length) { add(null, null, `.${name}() with no row`); continue; }
-        readRow(args[0], table, name, add, file, 0, null);
+        const before = claims.length;
+        readRow(args[0], table, name, add, file, 0, null, argOpen);
+        // The one invariant everything above is allowed to rely on: a write
+        // that came back having named NO column and admitted NO gap has not
+        // been read, whatever route through this file it took. Every shape
+        // that gives up says so; this is what catches a shape that forgets to.
+        if (claims.length === before) {
+          add(null, null, `.${name}(${args[0].slice(0, 40).replace(/\s+/g, ' ')}) — nothing in it names a column`);
+        }
         // `.upsert(row, { onConflict: 'coach_id,name' })` names columns too, and
         // a wrong one there fails the write exactly as a wrong one in the row.
         const conflict = args[1] && /onConflict\s*:\s*'([^']*)'/.exec(args[1]);
@@ -404,6 +723,79 @@ function scanFile(file) {
 }
 
 /**
+ * The last `.name(…)` in an expression, when the expression ENDS there.
+ * `entries.map(f)` is the rows; `entries.map(f).join(',')` is a string, and
+ * reading the handler of that one would report columns for something that is
+ * not a row at all.
+ */
+function trailingCall(text, method) {
+  const body = text.trim();
+  let i = 0, found = null;
+  while (i < body.length) {
+    const c = body[i];
+    if (c === '"' || c === "'" || c === '`') { i = skipString(body, i); continue; }
+    if (c === '(' || c === '{' || c === '[') { i = readBalanced(body, i); continue; }
+    if (c === '.' || (c === '?' && body[i + 1] === '.')) {
+      const m = /^\??\.\s*([A-Za-z_$][\w$]*)\s*\(/.exec(body.slice(i));
+      if (m) {
+        const open = i + m[0].length - 1;
+        const end = readBalanced(body, open);
+        if (m[1] === method && end === body.length) found = body.slice(open + 1, end - 1);
+        i = end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return found;
+}
+
+/**
+ * The two arms of a top-level conditional, or null. `?.` and `??` are not
+ * conditionals and a `:` inside a nested one belongs to that one.
+ */
+function ternaryArms(text) {
+  let depth = 0, q = -1, i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === '`') { i = skipString(text, i); continue; }
+    if (c === '(' || c === '{' || c === '[') { i = readBalanced(text, i); continue; }
+    if (c === '?') {
+      if (text[i + 1] === '.' || text[i + 1] === '?') { i += 2; continue; }
+      if (!depth) q = i;
+      depth++; i++; continue;
+    }
+    if (c === ':' && depth) { depth--; if (!depth) return [text.slice(q + 1, i), text.slice(i + 1)]; }
+    i++;
+  }
+  return null;
+}
+
+/**
+ * How long the `(params) =>` at the front of `text` is, or 0 when what starts
+ * there is not an arrow function. The parameters are read as a balanced group
+ * rather than matched with a lazy `\(.*?\)`, which found the `=>` inside
+ * `(a.entries as WorkoutEntry[]).map((e) => …)` and called the whole rows
+ * expression a function.
+ */
+function arrowHead(text) {
+  let i = /^async\s/.test(text) ? 5 : 0;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  let after;
+  if (text[i] === '(') after = readBalanced(text, i);
+  else {
+    const m = /^[A-Za-z_$][\w$]*/.exec(text.slice(i));
+    if (!m) return 0;
+    after = i + m[0].length;
+  }
+  const tail = /^\s*(?::[^=\n]*)?=>\s*/.exec(text.slice(after));
+  return tail ? after + tail[0].length : 0;
+}
+
+/** Nothing was written. Not a row, and not a gap in this check either. */
+const NO_ROW = (t) => t === 'null' || t === 'undefined' || t === 'void 0';
+
+/**
  * The columns a written row carries, or an admission that they cannot be had.
  *
  * Half the writes in this codebase hand .insert() something assembled
@@ -414,23 +806,49 @@ function scanFile(file) {
  * file, or one imported over a relative path, is followed and read the same
  * way — and where the trail runs out, it says so instead of returning half a
  * row as if it were the whole one.
+ *
+ * `at` is where in `file` the expression sits, which is what says WHICH `row`
+ * a `row` is. `pick` is a property being taken off whatever is resolved, for
+ * `built.row` — a builder that hands back the row beside its refusal.
+ *
+ * Reading nothing is never a pass: the caller counts what this adds, and a
+ * write that names no column at all is reported like any other blind spot.
  */
-function readRow(arg, table, method, add, file, depth, origin) {
+function readRow(arg, table, method, add, file, depth, origin, at, pick) {
   // A definition is followed by handing back everything after its `=` or its
   // `return`, so the expression has to be cut out of what comes next.
   const text = splitTopLevel(arg.trim(), ';')[0].trim().replace(/\s+as\s+[\w<>[\]{}|,.\s]+$/, '');
   // Whatever the trail ends on, the complaint names the call that was written,
   // because that is the line somebody has to go and look at.
   const shown = origin ?? text;
-  const again = (t, f = file) => readRow(t, table, method, add, f, depth + 1, shown);
+  const again = (t, f = file, a = at, p = pick) => readRow(t, table, method, add, f, depth + 1, shown, a, p);
   const giveUp = (why) => add(null, null, `.${method}(${shown.slice(0, 40).replace(/\s+/g, ' ')}) — ${why}`);
-  if (depth > 6) return giveUp('followed as far as this goes');
+  if (depth > 8) return giveUp('followed as far as this goes');
   if (!text) return giveUp('the row is an expression this cannot read');
+  // `packageUpdateRow` returns a row or null, and the caller checks. The null
+  // arm writes nothing, so it names no column — and it is not a gap either.
+  if (NO_ROW(text)) return;
 
   if (text.startsWith('{')) {
-    const { keys, spreads, gaps } = objectKeys(text.slice(0, readBalanced(text, 0)));
+    const literal = text.slice(0, readBalanced(text, 0));
+    if (pick) {
+      // The value of one named property of this literal, and nothing else.
+      // What is written here wins over anything spread in, exactly as it does
+      // at runtime, and a property arriving from two spreads is not read at
+      // all rather than read from whichever came first.
+      const items = splitTopLevel(literal.slice(1, -1));
+      for (const item of items) {
+        const m = new RegExp(`^(?:'${pick}'|"${pick}"|${pick})\\s*:`).exec(item);
+        if (m) return again(item.slice(m[0].length), file, at, null);
+        if (item.trim() === pick) return again(pick, file, at, null);
+      }
+      const spreads = items.filter((i) => i.startsWith('...'));
+      if (spreads.length === 1) return again(spreads[0].slice(3), file, at, pick);
+      return giveUp(`nothing here is the ${pick} it is asked for`);
+    }
+    const { keys, spreads, gaps } = objectKeys(literal);
     for (const k of keys) add(table, k);
-    for (const s of spreads) again(s);
+    for (const s of spreads) again(s, file, at, null);
     for (const g of gaps) add(null, null, `.${method}({…}) carries ${g}`);
     return;
   }
@@ -439,6 +857,8 @@ function readRow(arg, table, method, add, file, depth, origin) {
     const rows = splitTopLevel(text.slice(1, readBalanced(text, 0) - 1));
     // `const rows: any[] = []` filled by rows.push(…) later. Nothing is read
     // from an empty array, and reading nothing must never look like reading it.
+    // Where the name is known the pushes ARE the rows, and that is handled at
+    // the declaration below; arriving here means there is no name to follow.
     if (!rows.length) return giveUp('the rows are pushed into an empty array');
     for (const row of rows) again(row);
     return;
@@ -447,45 +867,64 @@ function readRow(arg, table, method, add, file, depth, origin) {
   // which is how a row leaves a column out rather than nulling it.
   if (text.startsWith('(')) {
     const inner = text.slice(1, readBalanced(text, 0) - 1);
-    const objects = objectLiterals(inner);
-    if (objects.length) { for (const o of objects) again(o); return; }
-    return again(inner);
+    if (readBalanced(text, 0) === text.length) {
+      const objects = objectLiterals(inner);
+      if (objects.length) { for (const o of objects) again(o); return; }
+      return again(inner);
+    }
   }
-  // `rows.map((e) => entryToRow(uid, e))` — the handler returns the row.
-  const mapped = /^[\w$.[\]]*\.\s*map\s*\(/.exec(text);
-  if (mapped) {
-    const open = mapped.index + mapped[0].length - 1;
-    const handler = text.slice(open + 1, readBalanced(text, open) - 1);
+  // `a.kind === 'coach' ? {…} : {…}` — a row that is one shape or the other.
+  // Both arms are written to the same table, so both are read.
+  const arms = ternaryArms(text);
+  if (arms) { for (const arm of arms) again(arm); return; }
+
+  // `rows.map((e) => entryToRow(uid, e))` — the handler returns the row, and
+  // the chain in front of it may be as long and as wrapped as it likes.
+  const handler = trailingCall(text, 'map');
+  if (handler != null) {
     const arrow = /=>/.exec(handler);
     if (arrow) return again(handler.slice(arrow.index + 2));
+    // `slice.map(asRow)` — the handler by name. Read as the call it is.
+    if (/^[A-Za-z_$][\w$]*$/.test(handler.trim())) return again(`${handler.trim()}()`);
     return giveUp('the rows come from a handler this cannot read');
   }
+
+  // `built.row` — the row beside the refusal that explains its absence.
+  const member = /^([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)$/.exec(text);
+  if (member && !pick) return again(member[1], file, at, member[2]);
 
   const call = /^([A-Za-z_$][\w$]*)\s*\(/.exec(text);
   const name = call?.[1] ?? /^([A-Za-z_$][\w$]*)$/.exec(text)?.[1];
   if (!name) return giveUp('the row is an expression this cannot read');
 
-  const def = definitionOf(name, file);
+  const def = definitionOf(name, file, at);
   if (!def) return giveUp(`${name} is defined somewhere this cannot follow`);
-  const readReturns = (block) => {
+  const readReturns = (block, blockAt) => {
     const returns = topLevelReturns(block);
     if (!returns.length) return giveUp(`${name} returns something this cannot read`);
-    for (const r of returns) again(r, def.file);
+    for (const r of returns) again(r, def.file, blockAt);
   };
-  if (def.body) return readReturns(def.body);       // function name(…) { … }
+  if (def.body) return readReturns(def.body, def.at);       // function name(…) { … }
 
-  const value = def.text.trimStart();
+  // What a definition hands back runs to the end of the file, so the statement
+  // has to be cut out of it before anything reads its shape. Left whole, the
+  // arrow-function test below matched a `=>` four functions further down and
+  // reported `const rows = xs.map(…)` as a function rather than a row.
+  const whole = def.text.trimStart();
+  const valueAt = def.at + (def.text.length - whole.length);
+  const value = splitTopLevel(whole, ';')[0] ?? '';
   // `const entryToRow = (uid, e): WorkoutRow => ({ … })`
-  const fat = /^(?:async\s*)?(?:\([\s\S]*?\)|[A-Za-z_$][\w$]*)\s*(?::[^=\n]*)?=>\s*/.exec(value);
+  const fat = arrowHead(value);
   if (fat && call) {
-    const after = value.slice(fat[0].length);
-    if (after.startsWith('{')) return readReturns(after.slice(0, readBalanced(after, 0)));
-    return again(after, def.file);
+    const after = value.slice(fat);
+    if (after.startsWith('{')) return readReturns(after.slice(0, readBalanced(after, 0)), valueAt + fat);
+    return again(after, def.file, valueAt + fat);
   }
   if (fat) return giveUp(`${name} is a function, not a row`);
 
   if (value.startsWith('{')) {
-    again(value.slice(0, readBalanced(value, 0)), def.file);
+    again(value.slice(0, readBalanced(value, 0)), def.file, valueAt);
+    if (pick) return;
     // `const row: Record<string, unknown> = {}` filled in afterwards by
     // `row.starts_at = …`. The assignments are the row.
     const { code } = sourceOf(def.file);
@@ -493,8 +932,32 @@ function readRow(arg, table, method, add, file, depth, origin) {
     if (new RegExp(`\\b${name}\\s*\\[`).test(code)) add(null, null, `${name} is also given a computed key`);
     return;
   }
+
+  // `const rows: any[] = []` and then `rows.push({ … })`. The pushes are the
+  // rows: src/ui/measurements.tsx builds every measurement it writes this way,
+  // one per metric the member filled in.
+  if (value.startsWith('[')) {
+    const array = value.slice(0, readBalanced(value, 0));
+    const items = splitTopLevel(array.slice(1, -1));
+    if (items.length) { for (const it of items) again(it, def.file, valueAt); return; }
+    const { code } = sourceOf(def.file);
+    // Anything else that puts rows in is a way of putting rows in this cannot
+    // read, and an unread row is a column nothing checks.
+    if (new RegExp(`\\b${name}\\s*\\.\\s*(?:unshift|splice|fill|copyWithin)\\s*\\(`).test(code)
+      || new RegExp(`\\b${name}\\s*\\[[^\\]]*\\]\\s*=(?!=)`).test(code)) {
+      return giveUp(`${name} is filled in a way this cannot read`);
+    }
+    let pushed = 0;
+    for (const m of code.matchAll(new RegExp(`\\b${name}\\s*\\.\\s*push\\s*\\(`, 'g'))) {
+      const open = m.index + m[0].length - 1;
+      const inner = code.slice(open + 1, readBalanced(code, open) - 1);
+      for (const one of splitTopLevel(inner)) { again(one, def.file, open); pushed++; }
+    }
+    if (!pushed) return giveUp('the rows are pushed into an empty array');
+    return;
+  }
   // `const rows = entries.map(…)` — the initialiser is the row, one step on.
-  again(value, def.file);
+  again(value, def.file, valueAt);
 }
 
 const files = [];
@@ -569,6 +1032,8 @@ function blankSql(src) {
 }
 
 const declared = new Map();     // table -> Map(column -> part file)
+const declaredFns = new Map();  // function name -> { part, trigger }
+const droppedFns = new Map();   // function name -> the part that dropped it and did not put it back
 const dropped = new Map();      // table -> the part that dropped it
 const opaque = new Map();       // table -> why its columns cannot be listed
 const unparsed = [];            // SQL this file admits it does not understand
@@ -647,7 +1112,13 @@ function parseSetup(raw) {
   // so the whole statement is taken and every clause in it read. A regex that
   // stopped at the first clause reported `via_code` as undeclared when part 56
   // declares it three lines further down.
-  for (const m of code.matchAll(/\balter\s+table\s+(?:only\s+)?([\w".]+)\b/gi)) {
+  // `if exists` is allowed between `table` and the name, and was not: the regex
+  // read the word "if" as the table, so every column added by an
+  // `alter table if exists <t> add column ...` was invisible here and the app
+  // naming it was reported as naming a column declared nowhere. Caught by
+  // supabase/parts/2615 writing it that way; the part now matches the house
+  // style AND this reads both, because the next one will not think to.
+  for (const m of code.matchAll(/\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w".]+)\b/gi)) {
     const table = publicName(m[1]);
     if (!table) continue;
     const semi = code.indexOf(';', m.index);
@@ -682,6 +1153,48 @@ function parseSetup(raw) {
     if (m.index > (createdAt.get(table) ?? -1)) {
       declared.delete(table);
       dropped.set(table, partAt(m.index));
+    }
+  }
+
+  // ── The FUNCTIONS the bundle declares ───────────────────────────────────
+  //
+  // The name only, for the reason the header gives: `create or replace` is the
+  // house convention and a function's body here is the last of several.
+  //
+  // `returns trigger` is recorded because PostgREST cannot call a trigger
+  // function and so never lists one — comparing those against the live listing
+  // would report every one of the 127 in this bundle as missing.
+  //
+  // The head is read from the signature to the `as $tag$` that opens the body,
+  // which is the only place the return type can be, and it is read out of
+  // `code` so that a commented-out example is not a declaration. The same
+  // technique, for the same reason, as scripts/check-grants.mjs.
+  const fnName = (n) => {
+    const b = bare(n).toLowerCase();
+    if (!b.includes('.')) return b;
+    const [schema, rest] = b.split('.');
+    return schema === 'public' ? rest : null;
+  };
+  const fnCreatedAt = new Map();
+  for (const m of code.matchAll(/\bcreate\s+(?:or\s+replace\s+)?function\s+([\w".]+)\s*\(/gi)) {
+    const name = fnName(m[1]);
+    if (!name) continue;
+    const after = raw.slice(m.index);
+    const body = /\bas\s+\$[A-Za-z_]*\$/i.exec(after);
+    const head = code.slice(m.index, m.index + (body ? body.index : 2000));
+    fnCreatedAt.set(name, m.index);
+    declaredFns.set(name, { part: partAt(m.index), trigger: /\breturns\s+trigger\b/i.test(head) });
+  }
+  // A part may retire a function outright, and several parts drop one only to
+  // create it again a line later — the house way of changing a signature, since
+  // `create or replace` cannot. The last DDL wins, exactly as it does for a
+  // table above.
+  for (const m of code.matchAll(/\bdrop\s+function\s+(?:if\s+exists\s+)?([\w".]+)/gi)) {
+    const name = fnName(m[1]);
+    if (!name) continue;
+    if (m.index > (fnCreatedAt.get(name) ?? -1)) {
+      declaredFns.delete(name);
+      droppedFns.set(name, partAt(m.index));
     }
   }
 
@@ -724,6 +1237,10 @@ if (LIST) {
   }
   console.log(`\n${[...used.values()].reduce((n, m) => n + m.size, 0)} columns named by ${files.length} source files across ${used.size} tables;`);
   console.log(`${[...declared.values()].reduce((n, m) => n + m.size, 0)} columns declared by ${SETUP_SQL} across ${declared.size} tables.`);
+  const callable = [...declaredFns].filter(([, f]) => !f.trigger);
+  console.log(`${declaredFns.size} functions declared, ${callable.length} of them callable through PostgREST and compared against the live listing:`);
+  for (const [name] of callable.sort((a, b) => a[0].localeCompare(b[0]))) console.log(`  ${name}()`);
+  console.log(`  (${declaredFns.size - callable.length} trigger functions are declared and are NOT compared — PostgREST cannot call one, so none appears in the listing.)`);
   for (const u of [...new Set(unreadable)].sort()) console.log(`  could not read: ${u}`);
   for (const u of [...new Set(unparsed)].sort()) console.log(`  did not understand: ${u}`);
   process.exit(0);
@@ -779,6 +1296,7 @@ const secret = env('SUPABASE_SECRET_KEY') || env('SUPABASE_SERVICE_ROLE_KEY');
 const notes = [];
 let liveChecked = 0;
 let liveListed = null;          // table -> Set(column), only with a secret key
+let liveFns = null;             // Set(function name), only with a secret key
 
 async function ask(path, apiKey) {
   const res = await fetch(`${url}${path}`, {
@@ -834,7 +1352,20 @@ async function listLive() {
     if (!props || typeof props !== 'object') return { failed: `the listing gave no columns for ${table}` };
     map.set(table, new Set(Object.keys(props)));
   }
-  return { map };
+  // The same document carries one path per callable function. `paths` holds the
+  // tables too (`/gym_invoices` and so on), so the `/rpc/` prefix is what picks
+  // the functions out — and a document with no `/rpc/` path at all in a project
+  // that declares three hundred of them is a listing that did not work, not a
+  // database with no functions, so it is reported as unanswered rather than as
+  // three hundred missing ones.
+  const paths = doc && doc.paths;
+  let fns = null;
+  if (paths && typeof paths === 'object') {
+    const found = new Set();
+    for (const p of Object.keys(paths)) if (p.startsWith('/rpc/')) found.add(p.slice(5).toLowerCase());
+    if (found.size) fns = found;
+  }
+  return { map, fns };
 }
 
 if (!OFFLINE) {
@@ -844,7 +1375,11 @@ if (!OFFLINE) {
     if (secret) {
       const listed = await listLive().catch((e) => ({ failed: e.message }));
       if (listed.failed) notes.push(`SUPABASE_SECRET_KEY is set but ${listed.failed} — the live schema was not listed.`);
-      else liveListed = listed.map;
+      else {
+        liveListed = listed.map;
+        liveFns = listed.fns;
+        if (!liveFns) notes.push('the live schema listing carried no /rpc/ paths, so the FUNCTIONS were not compared — that is a listing that did not answer, not a database with no functions.');
+      }
     }
 
     const tables = [...new Set([...declared.keys(), ...used.keys()])].sort();
@@ -925,6 +1460,27 @@ if (!OFFLINE) {
         }
       }
     }
+
+    // ── The functions, both directions ─────────────────────────────────────
+    //
+    // Part 2790 creates a function and nothing else, and was never run. The
+    // column comparison above had nothing to compare and said "ok".
+    if (liveFns) {
+      for (const [name, f] of declaredFns) {
+        if (f.trigger) continue;              // PostgREST never lists one; see the header
+        if (!liveFns.has(name)) {
+          report(`${name}()`, 'declared in the repo, missing from the live database — a migration has not been run', f.part);
+        }
+      }
+      for (const name of liveFns) {
+        if (declaredFns.has(name)) continue;
+        const wasDropped = droppedFns.get(name);
+        report(`${name}()`, wasDropped
+          ? `dropped by ${wasDropped} and still live — that part has not been run`
+          : `live, declared nowhere in ${SETUP_SQL} — a hand change nobody wrote down`,
+        wasDropped ?? 'the live schema listing');
+      }
+    }
   }
 }
 
@@ -942,6 +1498,22 @@ for (const [what, , , where] of undeclared.values()) {
 
 const tableCount = new Set([...declared.keys(), ...used.keys()]).size;
 const columnCount = [...used.values()].reduce((n, m) => n + m.size, 0);
+const callableFns = [...declaredFns.values()].filter((f) => !f.trigger).length;
+const triggerFns = declaredFns.size - callableFns;
+
+// What the function half did not get to do, said out loud. A part that adds
+// only a function is invisible to every other comparison in this file, so
+// "these were not compared" is a sentence somebody has to be able to read.
+if (!declaredFns.size) {
+  console.error(`read ${SETUP_SQL} and found no function declared, which cannot be right — the bundle creates hundreds.`);
+  process.exit(1);
+}
+if (!OFFLINE && url && key && !secret) {
+  notes.push(`the ${callableFns} callable functions declared in ${SETUP_SQL} were NOT compared against the live database: that needs SUPABASE_SECRET_KEY. A publishable key is refused the schema document, and the only way to ask it about a function by name is to CALL the function.`);
+}
+if (triggerFns) {
+  notes.push(`${triggerFns} trigger functions are declared and are not compared either way — PostgREST cannot call one, so none appears in the live listing. Whether they were APPLIED is not visible from outside the database.`);
+}
 
 if (unreadable.length) {
   console.error(`${unreadable.length} place${unreadable.length === 1 ? '' : 's'} name${unreadable.length === 1 ? 's' : ''} columns this check cannot read from the source:\n`);
@@ -988,7 +1560,7 @@ const caveat = unreadable.length
   : '';
 
 if (OFFLINE) {
-  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}${caveat}. The live database was not asked.`);
+  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}${caveat}. ${SETUP_SQL} also declares ${declaredFns.size} functions, ${callableFns} of them callable. The live database was not asked, so neither the columns nor the functions were compared against it.`);
   process.exit(0);
 }
 if (!url || !key) {
@@ -1001,4 +1573,7 @@ if (!url || !key) {
 const coverage = liveListed
   ? 'the whole live schema was listed and compared'
   : `${tableCount} tables were asked about by name — a live column that neither the repo nor the app mentions is invisible without SUPABASE_SECRET_KEY`;
-console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}${caveat}.`);
+const fnCoverage = liveFns
+  ? `, and ${callableFns} callable functions were compared against ${liveFns.size} the database exposes`
+  : ', and the functions were not compared';
+console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}${fnCoverage}${caveat}.`);

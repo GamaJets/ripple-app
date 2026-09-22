@@ -44,6 +44,25 @@
 // goal does not decide it, the answer is `undefined` and the screen shows a
 // neutral mark: silence is honest, and congratulating somebody for moving away
 // from their own goal is not.
+// ── And the sixth thing, which is not this module's own ────────────────────
+//
+// The magnitude was `String(Math.abs(f))`, which writes a full stop in every
+// locale there has ever been. That is the same defect `num2` in
+// src/lib/format.ts was written against — "0.25 kg/wk" beside "1.204,5 kg" on a
+// German handset, two decimal separators in one paragraph, and in German the
+// first of those is not a quarter of a kilogram.
+//
+// It is fixed here by printing through `plain` from ./units rather than by
+// reaching for `numUpTo`, and the choice is deliberate. A delta is rendered on
+// the same ROW as the figure it moved — the hero and the movement under it, the
+// KPI and its delta, "Weight 82,4 kg (−1,2 kg overall)" — and that figure is
+// printed by `plain`, which cannot group or localise its digits because the
+// boxes those same numbers are typed into are read back by `readNumber`. Two
+// formatters on one row is how a row comes to print two conventions, so this
+// takes the one the row already has. No site in this tree passes a delta that
+// reaches four digits: the largest are a weight, a tape measurement, a
+// percentage and a monthly count.
+import { plain } from './units';
 import type { Goal } from './types';
 
 /** U+2212 MINUS. The app prints this, not a hyphen — a hyphen at figure size
@@ -119,10 +138,13 @@ export function deltaArrow(value: number | null | undefined, decimals = DEFAULT_
   return s === '' ? '' : s === '+' ? '▲' : '▼';
 }
 
-/** The figure without its sign, printed the way a person writes it: 2, not 2.0. */
+/** The figure without its sign, printed the way a person writes it: 2, not 2.0;
+ *  2,5 rather than 2.5 where that is the reader's own separator. `decimals` is
+ *  passed on so the spelling cannot print a place the rounding above did not
+ *  judge — see `plain`. */
 export function deltaMagnitude(value: number | null | undefined, decimals = DEFAULT_DECIMALS): string | null {
   const f = deltaFigure(value, decimals);
-  return f == null ? null : String(Math.abs(f));
+  return f == null ? null : plain(Math.abs(f), decimals);
 }
 
 /**
@@ -143,7 +165,7 @@ export function deltaLabel(value: number | null | undefined, opts: DeltaOpts): s
   if (f == null) return opts.noBaseline ?? 'No earlier reading';
   if (f === 0) return `${opts.noChange ?? 'No change'}${since}`;
   const u = opts.unit ? (JOINED.test(opts.unit) ? opts.unit : ` ${opts.unit}`) : '';
-  return `${f < 0 ? MINUS : '+'}${Math.abs(f)}${u}${since}`;
+  return `${f < 0 ? MINUS : '+'}${plain(Math.abs(f), dp)}${u}${since}`;
 }
 
 // ── Which way is good, and for whom ────────────────────────────────────────

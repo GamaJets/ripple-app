@@ -3,7 +3,7 @@
 // Three things are defended here, and the first two are the ones that would
 // ship quietly wrong.
 //
-// 1. No arrangement of marks, dates and programmes makes this module say a plan
+// 1. No arrangement of marks, dates and programs makes this module say a plan
 //    was kept. The screen it feeds reads no training log — see the header of
 //    coachWeek.ts — so every passed day must come back 'log-unknown', and none
 //    of the sentences may claim otherwise.
@@ -15,13 +15,13 @@
 //    cross both hemispheres' clock changes, where a day is 23 or 25 hours long
 //    and naive millisecond arithmetic loses or gains a day.
 //
-// 3. A conflict is claimed only when the programme is actually known. A coach
+// 3. A conflict is claimed only when the program is actually known. A coach
 //    reads `assigned_programs` only for rows they assigned to a client still
-//    theirs, so "no programme came back" is not "their programme is empty".
+//    theirs, so "no program came back" is not "their program is empty".
 import {
   DAYS_AHEAD, DAYS_BEHIND, daysBetweenIso, shiftIso, planWindow, sideOf,
   coachWeek, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
-  programmeCaveat, planNote, type ScheduledFocus,
+  programCaveat, planNote, type ScheduledFocus,
 } from './coachWeek';
 import { PLANNED_DAY_TYPES, type PlannedDay, type PlanOutcome } from './dayPlan';
 import { scheduledFocus } from './checklist';
@@ -74,12 +74,12 @@ ok(sideOf('2026-08-31', TODAY) === 'gone' && sideOf(TODAY, TODAY) === 'today'
   && sideOf('2026-09-02', TODAY) === 'ahead', 'today is its own side, neither past nor forecast');
 
 // ── the three states are three states ──
-const noProgramme: ScheduledFocus = () => undefined;
-ok(coachWeek(null, TODAY, noProgramme).state === 'unreadable',
+const noProgram: ScheduledFocus = () => undefined;
+ok(coachWeek(null, TODAY, noProgram).state === 'unreadable',
   'a failed read is unreadable — the one thing that must never look like an empty week');
-ok(coachWeek([], TODAY, noProgramme).state === 'none',
+ok(coachWeek([], TODAY, noProgram).state === 'none',
   'a read that came back empty is a real answer about this client');
-ok(coachWeek([], TODAY, noProgramme).ahead.length === 0, 'and it holds nothing');
+ok(coachWeek([], TODAY, noProgram).ahead.length === 0, 'and it holds nothing');
 
 // ── arrangement ──
 const PLANS: PlannedDay[] = [
@@ -91,7 +91,7 @@ const PLANS: PlannedDay[] = [
   { dateISO: '2026-09-20', type: 'rest', note: 'after the window' },
   { dateISO: 'nonsense', type: 'off', note: null },
 ];
-const plain = coachWeek(PLANS, TODAY, noProgramme);
+const plain = coachWeek(PLANS, TODAY, noProgram);
 ok(plain.state === 'planned', 'marked days show as marked');
 ok(plain.ahead.map((d) => d.plan.dateISO).join(',') === '2026-09-01,2026-09-07,2026-09-08',
   `today and forward, soonest first, got ${plain.ahead.map((d) => d.plan.dateISO).join(',')}`);
@@ -130,14 +130,14 @@ ok(coachPlanLine('rest', 'log-unknown', 'Sam').includes('doesn’t read their tr
   'and a passed day says why this screen cannot tell them');
 
 // ── the conflict, which is the point of the screen ──
-const programme = buildProgram('muscle', 25); // Mon Push · Wed Pull · Fri Legs
-const known: ScheduledFocus = (weekday) => scheduledFocus(programme.days, weekday);
+const program = buildProgram('muscle', 25); // Mon Push · Wed Pull · Fri Legs
+const known: ScheduledFocus = (weekday) => scheduledFocus(program.days, weekday);
 const withProg = coachWeek(PLANS, TODAY, known);
 const byDate = new Map(withProg.ahead.concat(withProg.gone).map((d) => [d.plan.dateISO, d]));
 
 const monday = byDate.get('2026-09-07');
 ok(monday?.conflict?.kind === 'plan-schedules-a-session',
-  'a rest day on a Monday the programme puts Push on is a conflict');
+  'a rest day on a Monday the program puts Push on is a conflict');
 ok(monday?.conflict?.focus === 'Push', `and it names the session, got ${monday?.conflict?.focus}`);
 ok(coachConflictLine(monday!.conflict!, 'rest', 'Sam').includes('Push'),
   'the coach is told which session it is');
@@ -146,13 +146,13 @@ ok(coachConflictLine(monday!.conflict!, 'rest', 'Sam').includes('Sam'),
 
 const tuesday = byDate.get('2026-09-08');
 ok(tuesday?.conflict?.kind === 'plan-schedules-nothing',
-  'a training day on a Tuesday the programme leaves empty is the other conflict');
+  'a training day on a Tuesday the program leaves empty is the other conflict');
 ok(byDate.get(TODAY)?.conflict === null,
-  'a deload on a day the programme schedules nothing is not a conflict — it is how a deload works');
+  'a deload on a day the program schedules nothing is not a conflict — it is how a deload works');
 
 ok(withProg.conflicts.map((d) => d.plan.dateISO).join(',') === '2026-09-07,2026-09-08',
   `conflicts are the ones still ahead, in date order, got ${withProg.conflicts.map((d) => d.plan.dateISO).join(',')}`);
-// The past Thursday is a training day, and the programme schedules nothing on a
+// The past Thursday is a training day, and the program schedules nothing on a
 // Thursday — so it IS a conflict, and it is still kept out of the list a coach
 // is asked to act on.
 ok(byDate.get('2026-08-27')?.conflict?.kind === 'plan-schedules-nothing',
@@ -160,21 +160,36 @@ ok(byDate.get('2026-08-27')?.conflict?.kind === 'plan-schedules-nothing',
 ok(!withProg.conflicts.some((d) => d.side === 'gone'),
   'but nothing already gone is put in front of a coach as something to settle');
 
-// ── nothing is claimed against a programme nobody read ──
+// ── nothing is claimed against a program nobody read ──
 ok(plain.conflicts.length === 0,
-  'with no readable programme, no conflict is claimed in either direction');
+  'with no readable program, no conflict is claimed in either direction');
 for (const d of [...plain.ahead, ...plain.gone]) {
-  ok(d.conflict === null, `${d.plan.dateISO} claims nothing while the programme is unknown`);
+  ok(d.conflict === null, `${d.plan.dateISO} claims nothing while the program is unknown`);
 }
-ok(programmeCaveat(true, 'Sam') === null, 'a known programme needs no caveat');
-ok((programmeCaveat(false, 'Sam') ?? '').includes('Sam'),
+ok(programCaveat(true, 'Sam') === null, 'a known program needs no caveat');
+ok((programCaveat(false, 'Sam') ?? '').includes('Sam'),
   'and an unknown one is said out loud, because no conflicts looks the same as never having checked');
 
-// ── labels, built rather than formatted ──
-ok(dayHeading('2026-09-01') === 'Tue 1 Sep',
-  `the heading is the client's own calendar day in every zone, got ${dayHeading('2026-09-01')}`);
-ok(dayHeading('2026-09-07') === 'Mon 7 Sep', 'and does not drift a day west of Greenwich');
-ok(dayHeading('2026-01-31') === 'Sat 31 Jan', 'month names are one-based off the index');
+// ── labels: the right DAY, written the reader's way ──
+//
+// 'Tue 1 Sep' was the old expectation, and it was an assertion about a pair of
+// English arrays inside dayHeading rather than about the heading's contract.
+// The contract is: the weekday and the date of the day that was asked for, in
+// the reader's own language, and never the day before. So the expectation is
+// derived here from a LOCALLY built date through the same three fields — which
+// pins the day itself in all six zones test:zones runs, and leaves the words to
+// whatever locale the runner is in.
+{
+  const heading = (y: number, m: number, d: number) =>
+    new Date(y, m, d).toLocaleDateString(undefined, { weekday: 'short' })
+      + ' ' + new Date(y, m, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  ok(dayHeading('2026-09-01') === heading(2026, 8, 1),
+    `the heading is the client's own calendar day in every zone, got ${dayHeading('2026-09-01')}`);
+  ok(dayHeading('2026-09-07') === heading(2026, 8, 7), 'and does not drift a day west of Greenwich');
+  ok(dayHeading('2026-09-01') !== heading(2026, 7, 31),
+    'the 1st is never the 31st of the month before, which is what UTC midnight would make it');
+  ok(dayHeading('2026-01-31') === heading(2026, 0, 31), 'month names are one-based off the index');
+}
 ok(dayHeading('nonsense') === '—', 'an unreadable date renders as a dash, not as today');
 ok(whenLabel(TODAY, TODAY) === 'Today', 'today says so');
 ok(whenLabel('2026-09-02', TODAY) === 'Tomorrow' && whenLabel('2026-08-31', TODAY) === 'Yesterday',

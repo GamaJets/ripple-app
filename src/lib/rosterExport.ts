@@ -151,7 +151,7 @@ function rosterCells(r: RosterExportRow, unit: WeightUnit): Cell[] {
  */
 export function rosterExportBlocker(status: LoadStatus, rows: number): string | null {
   if (status === 'error') {
-    return 'Your roster could not be read, so there is nothing to export. An empty list here means the read failed rather than that you have no clients — try again once you have signal.';
+    return 'Your roster could not be read, so there is nothing to export. An empty list here means the read failed rather than that you have no clients. Try again once you have signal.';
   }
   if (status === 'loading') {
     return 'Still reading your roster. Exporting now would write out whoever has loaded so far and call it your book.';
@@ -223,11 +223,11 @@ export function buildRosterExport(
       r.adherence == null ? 'no check-ins' : `${r.adherence}% adherence`,
       r.lastActive === UNKNOWN || r.lastActive === '' ? 'last seen not recorded' : r.lastActive,
     ];
-    return `• ${r.name} — ${parts.join(' · ')}`;
+    return `• ${r.name}: ${parts.join(' · ')}`;
   });
   const text = [
     warning,
-    `Your clients (${num(rows.length)}) — exported ${on}`,
+    `Your clients (${num(rows.length)}), exported ${on}`,
     ...lines,
   ].filter((x): x is string => !!x).join('\n');
 

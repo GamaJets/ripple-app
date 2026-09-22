@@ -144,8 +144,8 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
     gymName: 'Iron House', tenantId: 'T1', generatedAt: '2026-08-26T08:00:00.000Z',
     plans: sliceReady([{ id: 'pl1', name: 'Monthly', priceCents: 6000, currency: 'GBP', interval: 'month', active: true }]),
     memberships: sliceReady([
-      { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2025-01-01', endsOn: null, status: 'active' },
-      { id: 'ms2', memberId: 'm2', memberName: 'Bo', planId: null, planName: null, startedOn: '2025-06-01', endsOn: null, status: 'active' },
+      { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2025-01-01', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
+      { id: 'ms2', memberId: 'm2', memberName: 'Bo', planId: null, planName: null, startedOn: '2025-06-01', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
     ]),
     payments: sliceReady([
       { id: 'p1', memberId: 'm1', memberName: 'Sara', amountCents: 6000, currency: 'GBP', method: 'card', takenAt: '2026-08-01T00:00:00Z', note: null, kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: 'ms1' },
@@ -159,8 +159,8 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
     // member every session the gym ran; filtering on a member field that does
     // not exist would hand them none.
     sessions: sliceReady([
-      { id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'm1', clientName: 'Sara', startsAt: '2026-08-03T09:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
-      { id: 's2', trainerId: 't1', trainerName: 'Ana', clientId: 'm2', clientName: 'Bo', startsAt: '2026-08-03T10:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+      { id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'm1', clientName: 'Sara', startsAt: '2026-08-03T09:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+      { id: 's2', trainerId: 't1', trainerName: 'Ana', clientId: 'm2', clientName: 'Bo', startsAt: '2026-08-03T10:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
     ]),
     passTypes: sliceReady([]),
     passes: sliceReady([
@@ -221,6 +221,35 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
       { id: 'd2', memberId: 'm2', memberAttached: true, equipmentId: null, kind: 'contract', title: 'Signed membership agreement', storagePath: 'T1/2025-06-02-def-bo.pdf', mime: 'application/pdf', sizeBytes: 88112, expiresOn: null, note: null, uploadedById: 'o1', uploadedByName: 'Ana', uploadedAt: '2025-06-02T00:00:00Z' },
       { id: 'd3', memberId: null, memberAttached: false, equipmentId: 'e1', kind: 'insurance', title: 'Public liability schedule', storagePath: 'T1/2026-01-01-ghi-insurance.pdf', mime: 'application/pdf', sizeBytes: 4001, expiresOn: '2027-01-01', note: null, uploadedById: 'o1', uploadedByName: 'Ana', uploadedAt: '2026-01-01T00:00:00Z' },
     ]),
+    // Sara bought online and Bo did too, so 'their orders and not everybody's'
+    // is an assertion rather than a fixture that would pass with the filter
+    // removed.
+    orders: sliceReady([
+      { id: 'o1o', memberId: 'm1', memberName: 'Sara', kind: 'membership', intent: 'renew', status: 'paid', amountCents: 6000, currency: 'GBP', planId: 'pl1', passTypeId: null, termStartsOn: '2026-08-01', termEndsOn: '2026-09-01', usesTotal: null, expiresOn: null, membershipId: 'ms1', passId: null, stripeAccountId: 'acct_1', stripeSessionId: 'cs_a', stripePaymentIntent: 'pi_a', failureNote: null, createdAt: '2026-08-01T00:00:00Z', paidAt: '2026-08-01T00:00:09Z' },
+      { id: 'o2o', memberId: 'm2', memberName: 'Bo', kind: 'pass', intent: 'new', status: 'failed', amountCents: 2000, currency: 'GBP', planId: null, passTypeId: 'pt1', termStartsOn: null, termEndsOn: null, usesTotal: 1, expiresOn: null, membershipId: null, passId: null, stripeAccountId: 'acct_1', stripeSessionId: 'cs_b', stripePaymentIntent: 'pi_b', failureNote: 'pass insert refused', createdAt: '2026-08-02T00:00:00Z', paidAt: '2026-08-02T00:00:09Z' },
+    ]),
+    // The gym's own books and its own building. None of the three is anybody's
+    // personal record and all three must come out EMPTY in a member bundle.
+    closes: sliceReady([
+      { id: 'cl1', monthKey: '2026-07', closedAt: '2026-08-03T00:00:00Z', closedById: 'o1', closedByName: 'Owner', takenCents: 100000, invoicedCents: 100000, outstandingCents: 0, payrollCents: 30000, currency: 'GBP', unmarkedSessions: 0, blockersAtClose: null, note: null, reopenedAt: null, reopenedById: null, reopenedByName: null, reopenReason: null },
+    ]),
+    adjustments: sliceReady([
+      { id: 'ad1', trainerId: 't1', trainerName: 'Ana', kind: 'bonus', amountCents: 5000, currency: 'GBP', note: 'covered a class', appliesOn: '2026-08-31', settlementId: 'st1', createdAt: '2026-09-01T00:00:00Z', createdById: 'o1', createdByName: 'Owner' },
+    ]),
+    equipmentLog: sliceReady([
+      { id: 'el1', equipmentId: 'e1', equipmentLabel: 'Rower', kind: 'service', happenedOn: '2026-06-01', performedBy: 'Precor UK', findings: 'belt tensioned', costCents: 12000, currency: 'GBP', documentId: null, reportedTo: null, recordedById: 'o1', recordedByName: 'Ana', createdAt: '2026-06-01T00:00:00Z' },
+    ]),
+    // One mark against Sara's payment, one against Bo's invoice. Neither names
+    // a member, so both are placed only through the register they point at.
+    reconciles: sliceReady([
+      { id: 'rm1', subjectKind: 'payment', subjectId: 'p1', state: 'accepted', note: 'matches the bank line', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-08-05T00:00:00Z' },
+      { id: 'rm2', subjectKind: 'invoice', subjectId: 'i2', state: 'flagged', note: 'Bo disputes it', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-08-06T00:00:00Z' },
+    ]),
+    // The gym's own outgoings. About nobody in particular, which is the point:
+    // a member's bundle must come back EMPTY here, not carry the gym's rent.
+    costs: sliceReady([
+      { id: 'c1', description: 'Rent, August', supplier: 'Landlord Ltd', category: 'rent', amountCents: 420000, currency: 'GBP', paidOn: '2026-08-01', note: null, recordedById: 'o1', recordedByName: 'Owner', createdAt: '2026-08-01T00:00:00Z' },
+    ]),
   };
 
   const mine = memberSlices(base, 'm1');
@@ -248,6 +277,7 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
   eq(rows('shifts'), 0, 'and the rota');
   eq(rows('promos'), 0, 'and the promo codes');
   eq(rows('settlements'), 0, 'and what the gym paid its staff');
+  eq(rows('costs'), 0, 'and what the gym paid its landlord — the purchase ledger is the gym’s commercial position and is about no member');
 
   // The three F3 was about. A subject-access bundle that omitted the member's
   // own file — contact, next of kin, medical note, desk note — and every waiver
@@ -262,10 +292,50 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
   ok(!(mine.documents as any).rows.some((d: any) => d.id === 'd3'),
     'the gym’s insurance schedule is the building’s paperwork, not this member’s');
 
+  eq(rows('orders'), 1, 'the orders they placed online, and not the other member’s');
+  // Placed through the register the mark points at, because the mark itself
+  // names an invoice or a payment and never a person. Sara's payment p1 carries
+  // one; Bo's disputed invoice i2 carries the other, and it must not be here.
+  eq(rows('reconciles'), 1, 'the reconciliation mark against their own payment');
+  ok((mine.reconciles as any).rows[0].id === 'rm1',
+    'and not the one against the other member’s invoice');
+  // The gym's own books and its own building, which belong to nobody.
+  eq(rows('closes'), 0, 'a month close is the whole gym’s four totals and is not anybody’s record');
+  eq(rows('adjustments'), 0, 'and a coach’s pay is not a member’s record either');
+  eq(rows('equipmentLog'), 0, 'nor the maintenance and accident book, which carries no member at all');
+
   // 1 own file + 1 membership + 1 payment + 1 invoice + 1 booking + 1 session
   // + 2 passes + 1 visit + 1 invite + 1 contact + 1 pack + 1 event
-  // + 1 agreement + 1 signature + 1 document.
-  eq(memberRowCount(base, 'm1'), 16, 'sixteen rows across the record');
+  // + 1 agreement + 1 signature + 1 document + 1 order + 1 mark.
+  eq(memberRowCount(base, 'm1'), 18, 'eighteen rows across the record');
+
+  /* ── the part whose SCOPE depends on two other reads ───────────────────── */
+
+  // The sharpest rule in this file. A reconciliation mark names an invoice id
+  // or a payment id, so with the invoice register refused there is no way to
+  // know which marks are this member's — and filtering on the ids that DID load
+  // would produce a shorter list with nothing anywhere saying it was short.
+  // That is the exact failure a subject-access response cannot make, so an
+  // unnarrowable part is UNREADABLE rather than empty.
+  {
+    const noInvoices = memberSlices({ ...base, invoices: sliceFailed('permission denied') }, 'm1');
+    eq((noInvoices.reconciles as any).state, 'failed',
+      'with the invoice register refused, the marks cannot be narrowed and are refused rather than shortened');
+    ok(/invoice register/.test((noInvoices.reconciles as any).reason),
+      'and the reason names the read that did not answer');
+    ok(/could not be matched/.test((noInvoices.reconciles as any).reason),
+      'and says they were not matched — not that there were none');
+    eq(memberRowCount({ ...base, invoices: sliceFailed('permission denied') }, 'm1'), null,
+      'so the count offered before the download is unknown rather than smaller');
+
+    const noPayments = memberSlices({ ...base, payments: sliceFailed('timeout') }, 'm1');
+    ok(/the payments/.test((noPayments.reconciles as any).reason),
+      'the payments failing alone names the payments');
+    const neither = memberSlices(
+      { ...base, payments: sliceFailed('timeout'), invoices: sliceFailed('timeout') }, 'm1');
+    ok(/the invoice register and the payments/.test((neither.reconciles as any).reason),
+      'and both failing names both');
+  }
   eq(memberRowCount(base, 'm9'), 0, 'a person this gym holds nothing about is a real zero, and the screen says so');
 
   // One unreadable part makes the COUNT unknown rather than smaller. A smaller

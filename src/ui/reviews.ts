@@ -33,12 +33,14 @@
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { readByIds } from '../lib/idLookup';
 import type { LoadStatus } from './loadStatus';
 import {
   type Credential, type CredentialDraft, draftToRow,
 } from '../lib/coachCredentials';
 import {
   type Review, type MyReview, type RatingSummary, type WriteResult, asWriteResult,
+  ratingOf, ratingTally,
 } from '../lib/reviews';
 
 /** A read that says which of the two empties it is. */
@@ -64,27 +66,64 @@ function toCredential(r: any): Credential {
 }
 
 /**
- * Credentials for one or more coaches, in one query.
+ * Credentials for one or more coaches.
  *
  * `null` rows under 'error' rather than `[]`, so a caller cannot accidentally
  * treat a refusal as "this coach has declared nothing" — `insuranceClaim(null)`
  * is 'unknown' and `credentialCounts(null)` is null for exactly that reason.
+ *
+ * ── Why this is no longer "in one query" ──────────────────────────────────
+ *
+ * It was a single `.in('coach_id', ids)`, and the caller that matters hands it
+ * a whole page of the trainer directory: app/(client)/trainers.tsx reads
+ * listed coaches with `.limit(capLimit())` and then asks this about every one
+ * of them. That is up to a thousand ids, and a bare `.in()` over a thousand
+ * ids fails in both of the ways src/lib/idLookup.ts was written for:
+ *
+ *   · it 414s. A uuid costs about 39 bytes inside a PostgREST `in.(…)` list,
+ *     so a thousand of them is a ~39KB query STRING — five times the 8KB
+ *     request-line limit nginx and most CDNs enforce by default. The failure
+ *     is an opaque HTTP error, and what it costs on screen is the credential
+ *     and insurance line under every coach in the directory at once.
+ *   · it truncates. A thousand coaches carry well over a thousand credential
+ *     rows between them, PostgREST answers with the first thousand and says
+ *     nothing, and the coaches past the cut arrive here with an empty array —
+ *     which this function cannot tell from a coach who has declared nothing.
+ *     `credentialCounts([])` is a confident zero and `insuranceClaim([])` is
+ *     'none', so our truncated read renders as somebody else's professional
+ *     standing: no certifications listed, no public liability stated.
+ *
+ * `readByIds` chunks the list at 150 ids and finishes each chunk with `readAll`,
+ * so neither can happen. It throws rather than returning a prefix, and a throw
+ * here lands on the same 'error' path a refusal does — which is the honest
+ * answer, and the one every caller already renders.
  */
 export async function fetchCredentials(coachIds: string[]): Promise<Read<Record<string, Credential[]> | null>> {
   if (!USE_SUPABASE) return { rows: {}, status: 'ready' };
   const ids = coachIds.filter(Boolean);
   if (ids.length === 0) return { rows: {}, status: 'ready' };
-  const { data, error } = await supabase
-    .from('coach_credentials')
-    .select(CREDENTIAL_COLUMNS)
-    .in('coach_id', ids);
-  if (error) {
-    reportError('credentials.fetch', error);
+  let rows: any[];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      // `.order('id')` is what makes the paging total. Ordering on `coach_id`
+      // alone would not: one coach holds several credentials, and two tied rows
+      // are two rows Postgres may hand back in either order on either page.
+      (chunk, from, to) => supabase
+        .from('coach_credentials')
+        .select(CREDENTIAL_COLUMNS)
+        .in('coach_id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to),
+      'these coaches’ credentials',
+    );
+  } catch (e) {
+    reportError('credentials.fetch', e);
     return { rows: null, status: 'error' };
   }
   const by: Record<string, Credential[]> = {};
   for (const id of ids) by[id] = [];
-  for (const r of (data ?? []) as any[]) {
+  for (const r of rows) {
     const key = String(r.coach_id);
     (by[key] ??= []).push(toCredential(r));
   }
@@ -155,7 +194,10 @@ export async function deleteCredential(id: string): Promise<{ ok: boolean; reaso
 function toReview(r: any): Review {
   return {
     id: String(r.review_id),
-    rating: Number(r.rating) || 0,
+    // `Number(r.rating) || 0` put ZERO STARS against a named coach on their own
+    // profile whenever the column did not come back — a score below the lowest
+    // any client is allowed to give. `ratingOf` carries the unknown.
+    rating: ratingOf(r.rating),
     body: typeof r.body === 'string' ? r.body : null,
     createdAt: typeof r.created_at === 'string' ? r.created_at : '',
     edited: r.edited === true,
@@ -193,7 +235,11 @@ export async function fetchRatingSummaries(coachIds: string[]): Promise<Read<Rec
   }
   const out: Record<string, RatingSummary> = {};
   for (const r of (Array.isArray(data) ? data : []) as any[]) {
-    out[String(r.coach_id)] = { count: Number(r.rating_count) || 0, sum: Number(r.rating_sum) || 0 };
+    // Both `|| 0` before this, which is the invention twice over: an unread
+    // count made a listed coach "No reviews yet", and an unread sum over a real
+    // count averaged to 0.0 stars. `ratingTally` carries each null separately,
+    // and `ratingDisplay` tests them before it compares or divides them.
+    out[String(r.coach_id)] = { count: ratingTally(r.rating_count), sum: ratingTally(r.rating_sum) };
   }
   // A coach with no reviews has no row, which is a real "none" under 'ready'.
   return { rows: out, status: 'ready' };
@@ -225,7 +271,10 @@ export async function fetchMyReview(coachId: string): Promise<Read<MyReview | nu
   return {
     rows: {
       id: String(r.review_id),
-      rating: Number(r.rating) || 0,
+      // The caller's own rating, read the same way. A zero here would seed the
+      // star picker in app/(client)/my-coach.tsx with a rating that does not
+      // exist and then offer to save it back over the real one.
+      rating: ratingOf(r.rating),
       body: typeof r.body === 'string' ? r.body : null,
       createdAt: typeof r.created_at === 'string' ? r.created_at : '',
       edited: r.edited === true,

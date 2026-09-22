@@ -327,13 +327,31 @@ export function oneOffDiscount(
       // A fractional percentage is a real Stripe shape (`percent_off` is a
       // decimal) and it is refused rather than handled, because 12.5% of an odd
       // price is exactly the rounding this whole design exists to avoid.
+      // Bare, and deliberately. This branch is reached BECAUSE `pct` is not a
+      // whole number, so the sentence does carry a decimal separator every time
+      // it is printed — but this module is reached from
+      // supabase/functions/connect-checkout and connect-promo, and a server has
+      // no reader whose locale it could ask. `appLocale()` on Deno would resolve
+      // to the container's, which is nobody's. Importing src/lib/units here also
+      // pulls src/lib/locale into the Deno module graph, which
+      // scripts/check-functions.mjs refuses on its own terms.
+      //
+      // The screen that shows this to a coach is where a separator belongs, and
+      // it is the one place that knows whose separator it is.
       return { ok: false, why: `the coupon takes ${pct}% off, which is not a whole percentage between 1 and 100` };
     }
     const discountCents = exactPercentOff(priceCents, pct);
     if (discountCents == null) {
       return {
         ok: false,
-        why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them — and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
+        // The product is fractional — that is the whole subject of the
+        // sentence — and it is left bare for the reason given in the branch
+        // above: this runs on the server as well as the phone. It is also a
+        // COUNT OF MINOR UNITS rather than an amount, carrying no currency, so
+        // `money` is not the answer either: there is nothing here to take
+        // decimal places from, and inventing some would be the defect this file
+        // is written against.
+        why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them, and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
       };
     }
     return { ok: true, discountCents, totalCents: priceCents - discountCents };
@@ -354,7 +372,7 @@ export function oneOffDiscount(
  * question can be answered from it.
  */
 export const CODE_CANNOT_COME_OFF_THIS_ONE =
-  'That code does not come off this one. Nothing has been charged — buy it at the price shown, or check with your coach which of the things they sell it is for.';
+  'That code does not come off this one. Nothing has been charged. Buy it at the price shown, or check with your coach which of the things they sell it is for.';
 
 /* ── the code itself ──────────────────────────────────────────────────────── */
 
@@ -381,7 +399,7 @@ export function promoBlocker(code: string, percentOff: number, target: PromoTarg
   const out: string[] = [];
   const c = normaliseCode(code);
   if (!c) {
-    out.push('Type a code. It is what your client types at checkout, so letters and numbers only — anything else is dropped.');
+    out.push('Type a code. It is what your client types at checkout, so letters and numbers only. Anything else is dropped.');
   } else if (c.length < 3) {
     out.push('That code is too short to be worth typing. Three characters is the shortest Stripe will take.');
   }
@@ -619,7 +637,7 @@ export function promoUseLine(p: PromoCode): string {
  * precisely the reason written above.
  */
 export const PROMO_IS_A_PERCENTAGE =
-  'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one — a percentage is the same offer whatever you charge in.';
+  'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one. A percentage is the same offer whatever you charge in.';
 
 /**
  * Where the client types it, so the coach knows what to tell them.
@@ -633,7 +651,7 @@ export const PROMO_IS_A_PERCENTAGE =
  * "does not work".
  */
 export const PROMO_IS_TYPED_AT_CHECKOUT =
-  'Your client types the code in the app, on the package itself, before the payment page opens. Give them the code and tell them to tap Have A Code when they subscribe.';
+  'Your client types the code in the app, on the package itself, before the payment page opens. Give them the code and tell them to tap Have a Code when they subscribe.';
 
 /**
  * That Stripe holds these and this app does not.
@@ -643,7 +661,7 @@ export const PROMO_IS_TYPED_AT_CHECKOUT =
  * is Stripe, and there is only one copy.
  */
 export const PROMO_LIVES_AT_STRIPE =
-  'These live in your own Stripe account rather than in Repple, which is why the number of times each has been used is exact — there is one copy of it and Stripe keeps it. Withdrawing one here archives it at Stripe.';
+  'These live in your own Stripe account rather than in Repple, which is why the number of times each has been used is exact: there is one copy of it and Stripe keeps it. Withdrawing one here archives it at Stripe.';
 
 /**
  * That withdrawing does not un-discount anybody.
@@ -654,4 +672,4 @@ export const PROMO_LIVES_AT_STRIPE =
  * the discount for existing subscribers has a surprise coming a year later.
  */
 export const PROMO_WITHDRAW_IS_FORWARD_ONLY =
-  'Withdrawing a code stops anybody new using it. It does not change what somebody already subscribed on it pays — they keep the price they signed up at until their subscription ends, which is what they agreed to.';
+  'Withdrawing a code stops anybody new using it. It does not change what somebody already subscribed on it pays. They keep the price they signed up at until their subscription ends, which is what they agreed to.';

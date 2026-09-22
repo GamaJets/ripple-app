@@ -8,7 +8,7 @@
 // window, or a movement whose name was spelled differently.
 import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
-  loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
+  loadCheck, loadTally, loadLine, LOAD_TOLERANCE, prescribedTempo,
 } from './planVsActual';
 import type { ProgramDay } from './programs';
 import type { WorkoutEntry } from './mockData';
@@ -73,6 +73,53 @@ const ramp = planVsActual({
 });
 eq(ramp.movements[0].plannedTopKg, 140,
   'a ramp is prescribed at its top set, and the warm-up row is not what the coach asked for');
+
+/* ── one movement, two days, two prescriptions ──────────────────────────── */
+//
+// A squat on Monday at 100 and on Friday at 140 is ONE movement the client
+// either does or does not do — which is why the week-level list is
+// de-duplicated by slug — but it is NOT one prescription. First-one-wins kept
+// Monday's 100 and dropped Friday's 140, so `loadCheck` measured the client's
+// week against a load their coach had already superseded and called them 40 kg
+// over a target that was not theirs.
+const twoDays = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 100)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+  ],
+  programStatus: 'ready',
+  log: [{ t: at('2026-08-29'), exercise: 'Back Squat', sets: [[5, 135]] }],
+  logStatus: 'ready',
+  todayISO: TODAY,
+});
+eq(twoDays.movements.length, 1, 'the same movement on two days is one row at week level');
+eq(twoDays.movements[0].plannedTopKg, 140,
+  'and the week prescribes the HEAVIEST of the two, not whichever day came first');
+eq(loadCheck(twoDays.movements[0]).verdict, 'under',
+  'so 135 against a week that asks for 140 is under it, where Monday alone would have called it over');
+// Each day still carries its own figure, because the load belongs to the day
+// the coach wrote it on.
+eq(JSON.stringify(twoDays.days.map((d) => d.movements[0].plannedTopKg)), JSON.stringify([100, 140]),
+  'the per-day rows are untouched — merging happens only in the week-level list');
+// The order the days are written in must not decide the answer.
+const reversed = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat', 100)] },
+  ],
+  programStatus: 'ready', log: [], logStatus: 'ready', todayISO: TODAY,
+});
+eq(reversed.movements[0].plannedTopKg, 140, 'heaviest wins whichever day it is written on');
+// A day with no load on it cannot erase a day that has one.
+const oneLoaded = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat')] },
+  ],
+  programStatus: 'ready', log: [], logStatus: 'ready', todayISO: TODAY,
+});
+eq(oneLoaded.movements[0].plannedTopKg, 140,
+  'a bodyweight day beside a loaded one does not turn the week into a prescription of nothing');
 
 /* ── off-plan work, which nothing in this app could see before ──────────── */
 
@@ -148,12 +195,24 @@ const twice = planVsActual({
 });
 eq(twice.movements.length, 1, 'a movement prescribed twice in a week is one movement');
 
-/* ── no programme, and no read of one, are different answers ────────────── */
+/* ── no program, and no read of one, are different answers ────────────── */
 
 eq(planVsActual({ days: null, programStatus: 'ready', log, logStatus: 'ready', todayISO: TODAY }).state,
-  'no-programme', 'a client on nothing is a real state');
+  'no-program', 'a client on nothing is a real state');
 eq(planVsActual({ days: null, programStatus: 'error', log, logStatus: 'ready', todayISO: TODAY }).state,
-  'unreadable', 'and a programme that could not be read is a different one');
+  'unreadable', 'and a program that could not be read is a different one');
+// The third, which used to answer as the first. `useAssignedPrograms` reads
+// every client's assignment in one page ordered by `client_id`, so under a
+// truncated read the clients sorting last have no row and `getProgram` hands
+// back the same null it hands back for a client on nothing. This said "on no
+// coach-assigned program" to their coach and "No coach has written you a
+// program yet" to them.
+eq(planVsActual({ days: null, programStatus: 'partial', log, logStatus: 'ready', todayISO: TODAY }).state,
+  'unreadable', 'a client missing from a TRUNCATED assignment read is unknown, never "on nothing"');
+// And the direction that must not have been broken to fix it: a client whose
+// row WAS inside the page has a whole program and gets a whole comparison.
+eq(run({ programStatus: 'partial' }).state,
+  'ready', 'and a client whose row was inside the page is still compared normally');
 
 /* ── refusal 3: counts of MOVEMENTS, never a percentage ─────────────────── */
 
@@ -161,7 +220,7 @@ const line = coverageLine(base, WINDOW_DAYS, 'Priya');
 ok(/2 of 3 prescribed movements? logged/.test(line), 'the line counts movements');
 ok(!/%/.test(line), 'and there is no percentage anywhere in it — one number would hide every caveat above');
 ok(!/session/i.test(line), 'nor a session count, which a logged set carries no reference to a plan row to support');
-ok(/1 movement logged that this programme does not name/.test(line), 'off-plan work is named in the same breath');
+ok(/1 movement logged that this program does not name/.test(line), 'off-plan work is named in the same breath');
 
 const unreadLine = coverageLine(unread, WINDOW_DAYS, 'Priya');
 ok(/not a statement about Priya/i.test(unreadLine),
@@ -171,7 +230,7 @@ ok(coverageLine(cappedShort, WINDOW_DAYS, 'Priya').includes('cannot be answered 
 
 /* ── the load, not just the presence ─────────────────────────────────────
  *
- * P5. The sentence that changes next week's programme is not "they did four of
+ * P5. The sentence that changes next week's program is not "they did four of
  * six sessions", it is "they hit every prescribed load on upper and missed
  * every one on legs". Every assertion here is aimed at the same bug the rest of
  * this file is: a coach reads a verdict and acts on it, so a verdict must never
@@ -219,6 +278,52 @@ eq(loadLine(loadTally([mv(null, 50), mv(null, null)]), 'Priya'), null,
   'a block that names no loads anywhere gets no line at all rather than one apologising for itself');
 ok(/nothing to compare Priya against/.test(loadLine(loadTally([mv(100, null)]), 'Priya')!),
   'and a prescription nothing was logged against says so about the record, not about the person');
+
+/* ── the tempo the coach asked for ──────────────────────────────────────
+   The comparison itself is performedTempo.ts's and is asserted there. What is
+   pinned here is the RESOLUTION: which tempo a given set of a given movement
+   was asked for, and the cases where the honest answer is that nothing can
+   say. */
+
+const withTempo = (name: string, tempo: string | null, rows?: (string | null)[]) => ({
+  ...ex(name),
+  tempo,
+  ...(rows ? { setRows: rows.map((r) => ({ tempo: r })) } : {}),
+});
+
+const t1 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '311')] },
+]);
+eq(t1('Bench Press', 0), '3-1-1-0', 'a tempo written as 311 resolves to the one canonical form both apps compare in');
+eq(t1('bench press', 2), '3-1-1-0', 'and it is found by slug, so the spelling in the log does not matter');
+eq(t1('Back Squat', 0), null, 'a movement the program does not name asks for nothing');
+eq(t1('Bench Press', 7), '3-1-1-0', "past the end of the written sets the movement's own tempo still stands");
+eq(prescribedTempo(null)('Bench Press', 0), null, 'no program asks for nothing, and never throws');
+
+// Per set, because set 1 can be a warm-up inside an exercise whose top set is a
+// four-second eccentric.
+const t2 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110', [null, '4010', '4010'])] },
+]);
+eq(t2('Bench Press', 0), null, 'a warm-up row that names no tempo asks for none, and does not inherit a mark it was not given');
+eq(t2('Bench Press', 1), '4-0-1-0', 'the row that names one is what set 2 is judged against');
+eq(t2('Bench Press', 4), '3-1-1-0', "and past the last row, the movement's own");
+
+// Two days, two prescriptions, and nothing on a logged set saying which day it
+// belongs to. Refusal 1 at the top of the module, applied to tempo.
+const t3 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110')] },
+  { day: 'Fri', focus: 'Upper', exercises: [withTempo('Bench Press', '20X0')] },
+]);
+eq(t3('Bench Press', 0), null,
+  'a movement prescribed two different tempos in one week answers null rather than picking one and reporting a miss nobody earned');
+
+const t4 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110')] },
+  { day: 'Fri', focus: 'Upper', exercises: [withTempo('Bench Press', '3-1-1-0')] },
+]);
+eq(t4('Bench Press', 0), '3-1-1-0',
+  'but two days that ask for the same thing in two notations are one prescription, because readTempo is what decides that');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('planVsActual: ok — matched by slug over a window, never a weekday, never a percentage, and never "not logged" over an unread log');

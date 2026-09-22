@@ -6,9 +6,54 @@
 // and unit-testable. Cardio and bodyweight-only entries are skipped.
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
+// A 45-second plank is `[45, 10]` with `timed[0]` true — seconds in the reps
+// slot. Every rule below reads `sets[i][0]` as repetitions, so a timed set has
+// to be dropped before any of them sees it. src/lib/streaks.ts does exactly
+// this (`if (isTimedSet(e, i)) continue;`) and this module was the sibling that
+// never imported it.
+import { isTimedSet } from './timedSets';
 import { liftLabel, liftDeltaIn, plain, type WeightUnit } from './units';
 
 export type ProgressAction = 'increase' | 'reps' | 'hold' | 'deload';
+
+/**
+ * The four verdicts as a member reads them.
+ *
+ * The same four words app/(client)/progression.tsx has always shown beside its
+ * icons, lifted out so a second screen cannot invent a fifth vocabulary for the
+ * same four states. That screen keeps its own map because it pairs each with an
+ * icon and a theme colour, which are UI and have no business in a pure module.
+ */
+export const ACTION_LABEL: Record<ProgressAction, string> = {
+  increase: 'Add Load',
+  reps: 'Chase Reps',
+  hold: 'Hold',
+  deload: 'Ease Back',
+};
+
+/**
+ * What the rule ACTUALLY observed, with the prescription taken off.
+ *
+ * `rationale` is a sentence about the next session — "add 5.5 lb and reset to
+ * 8" — and belongs on the screen that tells somebody what to load. These are
+ * the same four readings without the instruction, for a screen whose question
+ * is "which lift is where" rather than "what do I put on the bar".
+ *
+ * Every one of them is deliberately about ONE SESSION, in those words, because
+ * that is all `suggestProgression` looks at: `latestByExercise` keeps the most
+ * recent entry per movement and nothing before it. None of these is a
+ * trajectory and none of them may be worded as one — "stalled", "plateaued" and
+ * "regressing" are all claims about a run of sessions that this rule has never
+ * seen. A member whose last set felt heavy is not a member who has stopped
+ * progressing, and the difference matters most to the people most likely to
+ * believe it.
+ */
+export const ACTION_READING: Record<ProgressAction, string> = {
+  increase: 'cleared the top of the rep range on every top set',
+  reps: 'landed inside the rep range',
+  hold: 'came in just under the rep range',
+  deload: 'reps fell away from the range',
+};
 
 export interface ProgressionTip {
   exercise: string;
@@ -27,13 +72,34 @@ const SMALL = /curl|raise|fly|pushdown|extension|face pull|calf|crunch|plank/i;
 
 const step = (name: string): number => (SMALL.test(name) && !BIG.test(name) ? 2.5 : BIG.test(name) ? 5 : 2.5);
 
+/**
+ * The repeated, loaded sets of one entry — the only ones a rep-range rule may
+ * read.
+ *
+ * A weighted hold passes every other test in this file: a 45-second plank under
+ * a 10 kg plate is `[45, 10]`, both numbers positive, and 45 is "reps" as far
+ * as arithmetic is concerned. It then cleared twelve reps on every top set, so
+ * the member was told to add 2.5 kg to their plank and reset to eight — every
+ * session, for ever.
+ */
+function liftedSets(e: WorkoutEntry): [number, number][] {
+  const out: [number, number][] = [];
+  const sets = e.sets || [];
+  for (let i = 0; i < sets.length; i++) {
+    if (isTimedSet(e, i)) continue;
+    const [r, w] = sets[i];
+    if ((w ?? 0) > 0 && (r ?? 0) > 0) out.push([r, w] as [number, number]);
+  }
+  return out;
+}
+
 // Group the log by exercise, newest session first, keeping only weighted sets.
 function latestByExercise(log: WorkoutEntry[]): Map<string, WorkoutEntry> {
   const seen = new Map<string, WorkoutEntry>();
   const sorted = [...log].sort((a, b) => Date.parse(b.t) - Date.parse(a.t));
   for (const e of sorted) {
     if (!e.sets || !e.sets.length) continue;
-    if (!e.sets.some(([r, w]) => (w ?? 0) > 0 && (r ?? 0) > 0)) continue;
+    if (!liftedSets(e).length) continue;
     if (!seen.has(e.exercise)) seen.set(e.exercise, e);
   }
   return seen;
@@ -83,7 +149,7 @@ export function suggestProgression(
   const latest = latestByExercise(log);
   const tips: ProgressionTip[] = [];
   for (const [exercise, e] of latest) {
-    const working = (e.sets || []).filter(([r, w]) => (w ?? 0) > 0 && (r ?? 0) > 0) as [number, number][];
+    const working = liftedSets(e);
     if (!working.length) continue;
     // Heaviest weight used, and the best reps achieved at that weight.
     const lastWeight = Math.max(...working.map(([, w]) => w));
@@ -99,17 +165,17 @@ export function suggestProgression(
       nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2;
       nextReps = `${bottomRange}-${topRange}`;
       const add = bump(step(exercise));
-      rationale = `Cleared ${topRange}+ reps on every top set — add ${add ?? 'a step'} and reset to ${bottomRange}.`;
+      rationale = `Cleared ${topRange}+ reps on every top set. Add ${add ?? 'a step'} and reset to ${bottomRange}.`;
     } else if (lastReps >= bottomRange) {
       action = 'reps';
       nextWeight = lastWeight;
       nextReps = `${Math.min(topRange, lastReps + 1)}+`;
-      rationale = `In range${at ? ` at ${at}` : ''} — hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
+      rationale = `In range${at ? ` at ${at}` : ''}. Hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
     } else if (lastReps >= Math.max(3, bottomRange - 3)) {
       action = 'hold';
       nextWeight = lastWeight;
       nextReps = `${bottomRange}-${topRange}`;
-      rationale = `Just under range — repeat ${at ?? 'the same weight'} and build reps before adding load.`;
+      rationale = `Just under range. Repeat ${at ?? 'the same weight'} and build reps before adding load.`;
     } else {
       action = 'deload';
       nextWeight = Math.round((lastWeight * 0.9) * 2) / 2;
@@ -119,8 +185,8 @@ export function suggestProgression(
       // member decides the suggestion is guesswork.
       const easeTo = load(nextWeight);
       rationale = easeTo
-        ? `Reps fell off — ease to ~${easeTo} and rebuild.`
-        : 'Reps fell off — ease off about 10% and rebuild.';
+        ? `Reps fell off. Ease to ~${easeTo} and rebuild.`
+        : 'Reps fell off. Ease off about 10% and rebuild.';
     }
     // RPE / "felt" signal: the hardest feel logged on the top-weight sets (captured
     // per set in session mode) governs how aggressively to progress.
@@ -133,15 +199,15 @@ export function suggestProgression(
     const feltEasy = topFeels.length > 0 && topFeels.every((f) => f === 'easy');
     if (feltHard && action === 'increase') {
       action = 'reps'; nextWeight = lastWeight; nextReps = `${Math.min(topRange, lastReps)}+`;
-      rationale = `Cleared the range but the top sets felt hard — hold ${at ?? 'the same weight'} and bank the reps before adding load.`;
+      rationale = `Cleared the range but the top sets felt hard. Hold ${at ?? 'the same weight'} and bank the reps before adding load.`;
     } else if (feltHard && action === 'reps') {
       action = 'hold'; nextWeight = lastWeight; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range but it felt hard — repeat ${at ?? 'the same weight'} to consolidate before progressing.`;
+      rationale = `In range but it felt hard. Repeat ${at ?? 'the same weight'} to consolidate before progressing.`;
     } else if (feltEasy && action === 'reps') {
       action = 'increase'; nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range and every top set felt easy — add ${bump(step(exercise)) ?? 'a step'} now.`;
+      rationale = `In range and every top set felt easy. Add ${bump(step(exercise)) ?? 'a step'} now.`;
     } else if (feltEasy && action === 'increase') {
-      rationale = rationale + ' Top sets felt easy — add with confidence.';
+      rationale = rationale + ' Top sets felt easy. Add with confidence.';
     }
     tips.push({ exercise, lastWeight, lastReps, nextWeight, nextReps, action, rationale, at: e.t });
   }
@@ -166,7 +232,14 @@ export function parseRepRange(reps: string): RepRange | null {
 /** Most-recent logged sets for a given exercise name (newest entry wins). */
 export function lastSetsFor(log: WorkoutEntry[], exerciseName: string): [number, number][] | undefined {
   const entries = log.filter((e) => e.exercise === exerciseName && e.sets && e.sets.length).sort((a, b) => b.t.localeCompare(a.t));
-  return entries[0]?.sets;
+  const e = entries[0];
+  if (!e) return undefined;
+  // The holds come out here too: `suggestNextWeight` reads the pair as reps and
+  // load, so a session of planks would otherwise recommend a heavier plank.
+  // An entry that was ALL holds returns undefined — no suggestion at all — which
+  // is the right answer for a movement this rule has nothing to say about.
+  const lifted = liftedSets(e);
+  return lifted.length ? lifted : undefined;
 }
 
 export interface Suggestion { weight: number; up: boolean; reason: string }
@@ -201,7 +274,7 @@ export function suggestNextWeight(
     return {
       weight: round(topW + increment),
       up: true,
-      reason: `You hit ${repsAtTop} reps at ${top ?? 'your top weight'} — add ${add}`,
+      reason: `You hit ${repsAtTop} reps at ${top ?? 'your top weight'}. Add ${add}`,
     };
   }
   return {
@@ -235,12 +308,25 @@ export function suggestForExercise(log: WorkoutEntry[], exerciseName: string, re
   return suggestNextWeight(lastSetsFor(log, exerciseName), parseRepRange(reps), increment, unit);
 }
 
-/** Best estimated-1RM ever recorded for an exercise (for live PR detection). */
+/**
+ * Best estimated-1RM ever recorded for an exercise (for live PR detection).
+ *
+ * Timed sets are skipped, and this is the half of the plank defect that did not
+ * heal on its own: Epley over seconds is arithmetic on a stopwatch, and one
+ * logged 45-second hold under a plate raised that movement's "best" to a
+ * fictional 1RM no real set could beat — so real records on it stopped firing,
+ * permanently and silently. src/lib/timedSets.ts states the rule this now
+ * keeps: a timed set produces no estimated 1RM.
+ */
 export function priorBest1RM(log: WorkoutEntry[], exerciseName: string): number {
   let best = 0;
   for (const e of log) {
     if (e.exercise !== exerciseName || !e.sets) continue;
-    for (const [r, w] of e.sets) if (w && r) best = Math.max(best, est1RM(w, r));
+    for (let i = 0; i < e.sets.length; i++) {
+      if (isTimedSet(e, i)) continue;
+      const [r, w] = e.sets[i];
+      if (w && r) best = Math.max(best, est1RM(w, r));
+    }
   }
   return best;
 }

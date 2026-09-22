@@ -23,7 +23,7 @@
 //   4. A PROBE THAT NEVER SLOWS DOWN, OR NEVER SPEEDS BACK UP. The delay has to
 //      grow while it keeps missing and collapse the moment one lands.
 import {
-  canAssertEmpty, currentReach, initialReach, isTransportFailure, noteReached, noteThrown,
+  currentReach, initialReach, isTransportFailure, noteReached, noteThrown,
   noteUnreachable, offlineBanner, onReconnect, probeDelayMs, reachAfter, reachState,
   resetReach, retryLine, subscribeReach, observedFetch,
 } from './reachability';
@@ -63,9 +63,11 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   eq(offlineBanner('unknown'), null, 'and none before we know anything — a cold launch must not accuse the network');
   ok((offlineBanner('offline') ?? '').length > 0, 'offline says so once');
 
-  ok(canAssertEmpty('online'), 'a screen that reached the server may state an empty list');
-  ok(canAssertEmpty('unknown'), 'and so may one that has not tried yet: the read itself says which');
-  ok(!canAssertEmpty('offline'), 'offline may not: what is on screen is from some earlier moment');
+  // `canAssertEmpty` was tested here, and those three assertions were the only
+  // thing in the repository that called it. A test is not a caller: it proved
+  // the function returned what it said it returned, while four comments in
+  // three other files described a protection no screen had ever asked for. See
+  // the note where it used to live in ./reachability.ts.
 }
 
 /* ── 3 · folding verdicts, and the reconnect edge ──────────────────────── */

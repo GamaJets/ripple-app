@@ -36,33 +36,56 @@
 // (`src/theme/scale`): eleven bordered boxes became hairline-separated sections,
 // payroll became the screen's one hero figure, and the Georgia serif header and
 // the 12.5/11.5px font sizes are gone.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, KpiRow, Ghost, Flag, fig, PageHead, Ring, Meter, Expandable, HERO_FIT } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
-import { money } from '../../src/lib/gymRecord';
+// `normaliseCurrency` alongside `money` because this screen has to COUNT the
+// currencies its payroll total is made of, not just format one: ' gbp ' and
+// 'GBP' are one currency and a count that says two withholds a total the gym is
+// entitled to. It is the same normaliser `payCurrency` and `sharedCurrency` use.
+import { money, normaliseCurrency } from '../../src/lib/gymRecord';
+// The inverse of the `readMinorAmount` that `parseRate` reads this screen's
+// rate field back with: minor units → the major-unit string a person types,
+// with the number of places taken from the currency rather than assumed to be
+// two. A yen has none and a Kuwaiti dinar has three.
+import { majorFromMinor } from '../../src/lib/coachMoney';
 import {
-  fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay,
+  fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay, payLinesTotal,
   classPayAmount, classPayBlocker, parseRate, payRateBlocker,
-  CLASS_PAY_LABEL,
-  type PayIndex, type ClassPayLine, type ClassPayKind,
+  payCurrency, CLASS_PAY_LABEL,
+  type PayIndex, type TrainerPay, type ClassPayLine, type ClassPayKind,
 } from '../../src/lib/gymPay';
+// `tenants.timezone`, parsed, with a failed read kept apart from a gym that
+// has not set one. The tenant context does not carry the zone, and this screen
+// needs nothing else off the gym row.
+import { fetchGymZone } from '../../src/lib/gymZone';
+// Which recurring slots on the timetable are full and which are running empty —
+// bucketed on the GYM's clock, with anything that could not be placed on it
+// counted and named rather than dropped. src/lib/classSlots.ts.
+import { classSlots, unplacedNote } from '../../src/lib/classSlots';
 // The console's own month boundary, so "This month" on the phone and the
 // August run on the laptop are the same period rather than two numbers under
 // one label. Local midnight, not UTC's — see the header of monthEnd.ts.
 import { monthWindow, monthKeyOf } from '../../src/lib/monthEnd';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, hasRows, staleNote } from '../../src/lib/staleRead';
 
 type Range = 'week' | 'month' | 'season';
-const RANGES: [Range, string][] = [['week', 'This week'], ['month', 'This month'], ['season', 'Season']];
+const RANGES: [Range, string][] = [['week', 'This Week'], ['month', 'This Month'], ['season', 'Season']];
 
 /**
  * ── "This month" is the CALENDAR month, and it did not used to be ─────────
@@ -109,23 +132,9 @@ function rollingFrom(now: Date, days: number): string {
   return from.toISOString();
 }
 
-/**
- * One bar of a ranked list. 3px on a dim track, same mark as <Meter/> — `dim`
- * separates the two ranked lists without reaching for a status colour.
- */
-function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: string; pct: number; dim?: boolean }) {
-  return (
-    <View style={{ marginTop: sp.md }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md }}>
-        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{label}</Text>
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{note}</Text>
-      </View>
-      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-        <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand, opacity: dim ? 0.45 : 1 }} />
-      </View>
-    </View>
-  );
-}
+/* The local 3pt `Bar` that lived here is the kit's <Meter> now: the same label,
+ * note and proportion, on the 8pt bar the rest of the app draws, in a named
+ * tone, and spoken as one fact instead of two loose Texts. */
 
 /**
  * The inline rate editor for one coach.
@@ -143,18 +152,46 @@ function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: stri
  */
 function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
   t: Theme;
-  existing: { classRateCents: number | null; classPayKind: ClassPayKind | null } | null;
+  existing: { classRateCents: number | null; classPayKind: ClassPayKind | null; currency: string | null } | null;
   busy: boolean; cur: string;
   onSave: (amount: string, kind: ClassPayKind | '') => void;
   onCancel: () => void;
 }) {
+  /**
+   * The stored rate is in a DIFFERENT money from the one this box is in.
+   *
+   * `TrainerPay.currency` is never inherited from `tenants.currency` at read
+   * time — src/lib/gymPay.ts says why in writing: a gym that changes its
+   * currency must not retroactively re-denominate what it agreed to pay
+   * somebody. So a gym that switched from AED to GBP still holds a coach's rate
+   * in AED, and this box, which is labelled `cur` and whose contents `saveRate`
+   * parses and stores as `cur`, has no honest number to start from. It starts
+   * empty and says so, rather than showing 600 under a "GBP" label because the
+   * digits happen to be the same.
+   */
+  const otherMoney = !!existing?.currency && existing.currency !== cur && existing.classRateCents != null;
   const [amount, setAmount] = useState(
-    existing?.classRateCents == null ? '' : (existing.classRateCents / 100).toFixed(2),
+    // NOT `cents / 100`. The factor is a property of the currency: a yen has no
+    // minor unit, so a ¥5,000 class rate is stored as 5000 and was pre-filled
+    // here as "50.00" — the coach's rate rewritten to a hundredth of itself the
+    // moment the owner opened the editor and pressed Save. A Kuwaiti dinar has
+    // 1000 fils, so KWD 12.340 was shown as "123.40" and saved back as ten
+    // times the agreed rate. `majorFromMinor` takes the places from the
+    // currency and is the exact inverse of the `readMinorAmount` inside
+    // `parseRate` that reads this field back. src/lib/coachMoney.ts.
+    otherMoney ? '' : majorFromMinor(existing?.classRateCents, cur),
   );
-  const [kind, setKind] = useState<ClassPayKind | ''>(existing?.classPayKind ?? '');
+  const [kind, setKind] = useState<ClassPayKind | ''>(otherMoney ? '' : (existing?.classPayKind ?? ''));
 
   return (
     <View style={{ marginTop: sp.md }}>
+      {otherMoney ? (
+        <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+          {`This coach's rate is recorded in ${existing!.currency}, and this gym now works in ${cur}. `
+           + `The old amount is not shown here because it is not an amount of ${cur}. Typing a new one `
+           + `replaces the ${existing!.currency} rate with a ${cur} one, and leaving this alone changes nothing.`}
+        </Flag>
+      ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, alignSelf: 'flex-start' }}>
         <Text style={{ ...ty.label, color: t.ink3 }}>{cur}</Text>
         <TextInput
@@ -180,19 +217,26 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
             }}
           >
             <Text style={{ ...ty.label, color: kind === k ? t.brandInk : t.ink3 }}>
-              {k === 'per_class' ? 'Per class' : 'Per person'}
+              {k === 'per_class' ? 'Per Class' : 'Per Person'}
             </Text>
           </Pressable>
         ))}
       </View>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, maxWidth: 380 }}>
         {CLASS_PAY_LABEL[kind || 'per_class']}. Clearing the rate means this gym does not pay this
-        coach for teaching &mdash; which is a different thing from paying them nothing, and is why
+        coach for teaching. That is a different thing from paying them nothing, and it is why
         an empty field clears rather than storing a zero.
       </Text>
       <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-        <Ghost label={busy ? 'Saving…' : 'Save Rate'} onPress={() => onSave(amount, kind)} />
-        <Ghost label="Cancel" onPress={onCancel} />
+        {/* Both off while the rate is saving. Save said 'Saving…' and stayed
+            pressable, so two taps were two writes of the same rate to the same
+            row — harmless in what it stores and not harmless in what it does
+            next, because each one calls `reload()` and the second lands on a
+            screen the first has already rebuilt. Cancel goes off with it: it
+            clears `editing`, which unmounts this row mid-write and leaves the
+            owner with no sight of whether the rate they typed was kept. */}
+        <Ghost label={busy ? 'Saving…' : 'Save Rate'} disabled={busy} onPress={() => onSave(amount, kind)} />
+        <Ghost label="Cancel" disabled={busy} onPress={onCancel} />
       </View>
     </View>
   );
@@ -210,7 +254,8 @@ export default function OwnerClassAnalytics() {
   const cur = tenant?.currency ?? null;
   const t = useTheme();
   const router = useRouter();
-  const [range, setRange] = useState<Range>('week');
+  // Remembered between visits (review rule 8).
+  const [range, setRange] = useStickyChoice<Range>('studio.classes.range', RANGES.map(([k]) => k), 'week');
   // Null until the read returns, never []. An empty array here is a claim —
   // "no classes ran in this range" — and this screen made it on first paint and
   // again on every range change, before the query it depends on had answered.
@@ -219,6 +264,25 @@ export default function OwnerClassAnalytics() {
   // in. Null says "not known yet"; [] stays reserved for a range that really
   // held nothing.
   const [rows, setRows] = useState<ClassSummaryRow[] | null>(null);
+  /**
+   * The period label for the rows IN HAND — set beside them, from the same
+   * `rangeBounds` call that produced the bounds they were read with.
+   *
+   * Null until a read has landed, because until then there is nothing being
+   * labelled. See `periodLabel` below for what this replaced.
+   */
+  const [rowsLabel, setRowsLabel] = useState<string | null>(null);
+  /** Which range the rows in hand are FOR. Without it the effect below cannot
+   *  tell a refresh of the range on screen from a switch to a different one,
+   *  and it has to clear for the second.
+   *
+   *  A ref rather than state deliberately: in the dependency array it would
+   *  re-enter the effect after every successful read and fire a second query
+   *  for the same range, and nothing on screen is derived from it. */
+  const rowsRange = useRef<Range | null>(null);
+  /** Whether the most recent attempt failed. Paired with `rows`, this is the
+   *  four-state read in src/lib/staleRead.ts. */
+  const [readFailed, setReadFailed] = useState(false);
   /** What the gym pays each coach to teach, from `gym_trainer_pay`. Null is a
    *  read that failed or has not returned — NOT a gym that pays nobody, which
    *  is why every figure below it goes to a dash rather than to zero. */
@@ -234,24 +298,85 @@ export default function OwnerClassAnalytics() {
   /** Bumped by the Refresh control. A counter, so two taps are two reads. */
   const [tick, setTick] = useState(0);
   /** When the attendance read landed, and whether one is in flight. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [attendanceAt, setAttendanceAt] = useState<number | null>(null);
   const [reading, setReading] = useState(false);
+  /** And when the pay rates did. The payroll column on this screen is those two
+   *  reads multiplied together, so one stamp over it has to be the older. */
+  const [payAt, setPayAt] = useState<number | null>(null);
+  /* ── the gym's clock, KEPT ───────────────────────────────────────────────
+   *
+   * `fetchGymZone` was already called on this screen, for `fetchClassPay`, and
+   * its answer was consumed inline and thrown away. The timetable section below
+   * needs it — a class start is an instant, and which 06:00 slot it belongs to
+   * is a question about the gym's wall clock, not the reader's.
+   *
+   * Three states and not two, for the reason `fetchGymZone` returns three:
+   * `{ zone: 'Asia/Dubai' }` is a gym that has said, `{ zone: null, error: null }`
+   * is a gym that has not, and `{ error }` is a read that failed. The third must
+   * never be shown as the second — "this gym has not set a timezone" is an
+   * instruction to change a setting that may already be right. `zoneRead` is
+   * what keeps "not asked yet" out of both.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+  const [zoneRead, setZoneRead] = useState(false);
 
   useEffect(() => {
     let on = true;
-    const { from, to } = rangeBounds(range);
-    // Cleared first: without this the previous range's rows stayed on screen
-    // while the new range loaded, so a payroll total for the season sat under
-    // the heading "This week" — a number an owner might pay against.
-    setRows(null);
+    const { from, to, label } = rangeBounds(range);
+    // Cleared ONLY when the range changed. Without any clearing, the previous
+    // range's rows stayed on screen while the new range loaded, so a payroll
+    // total for the season sat under the heading "This week" — a number an
+    // owner might pay against.
+    //
+    // Clearing unconditionally was the other half of that mistake and arrived
+    // with pull-to-refresh: the gesture re-runs this effect on the SAME range,
+    // so pulling down emptied a correct payroll table, and a pull that failed
+    // left it empty. `rowsRange` is what separates the two.
+    // `rowsLabel` goes with `rows`, and for the same reason: it is the label OF
+    // those rows, so a range change that clears one and leaves the other would
+    // head an empty table with the departing range's period.
+    if (rowsRange.current !== range) { setRows(null); setRowsLabel(null); rowsRange.current = null; setReadFailed(false); }
     setReading(true);
     classSummary(from, to)
       // The stamp moves on a read that LANDED. A refused one leaves it where it
       // was, because what is on screen is still the earlier read's.
-      .then((r) => { if (on) { setRows(r); setFetchedAt(Date.now()); } })
+      //
+      // ── null is a FAILED read, and it used to be filed as a blank screen ──
+      //
+      // `classSummary` never rejects. Read its body: the whole Supabase branch
+      // sits inside a `try { … } catch { return null }`, and it returns null
+      // for a PostgREST error, for a read that came back at the row cap, and
+      // for a shape it did not expect. So `.catch` below was unreachable,
+      // `readFailed` was never true, and every one of those three arrived here
+      // as `setRows(null)` with the failure flag CLEARED — which
+      // `readState(null, false)` calls 'loading'.
+      //
+      // The effect was that an owner whose payroll read was refused by RLS, or
+      // whose gym crossed a thousand classes in the Season range, sat looking
+      // at "Reading the register…" with no spinner and no further read coming.
+      // The two branches this file wrote to explain both cases — "This range
+      // could not be read" and `staleNote('register')` — could not be reached
+      // from any state the screen could get into.
+      //
+      // A null therefore raises `readFailed` and does NOT touch `rows`: on a
+      // first read that leaves 'failed' (nothing has ever landed, and the
+      // sentence says it is not an empty range), and on a refresh over rows
+      // already held it leaves 'stale' (the payroll table stays, labelled).
+      // That is exactly what src/lib/staleRead.ts is for, and this screen has
+      // been importing it without ever entering two of its four states.
+      .then((r) => {
+        if (!on) return;
+        if (r == null) { setReadFailed(true); return; }
+        // The label is stamped with the rows, from the SAME `rangeBounds` call
+        // that produced the bounds they were read with. See `periodLabel`.
+        setRows(r); setRowsLabel(label); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now());
+      })
       // A bare .then left a rejection unhandled and the screen showing whatever
-      // it had. There is nothing to show after a failed read, so say so.
-      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); })
+      // it had, silently. The rows are now kept and LABELLED instead: a refresh
+      // fails for reasons that say nothing about the register, and a coach's
+      // payroll table should not vanish because the phone went into a lift.
+      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setReadFailed(true); })
       .finally(() => { if (on) setReading(false); });
     return () => { on = false; };
   }, [range, tick]);
@@ -265,17 +390,58 @@ export default function OwnerClassAnalytics() {
   useEffect(() => {
     let on = true;
     if (!tenantId) { setPay(null); setPaid(null); return; }
-    fetchTrainerPay(supabase, tenantId)
-      .then((p) => { if (on) setPay(p); })
-      .catch((e) => { reportError('classAnalytics.trainerPay', e); if (on) setPay(null); });
-    fetchClassPay(supabase, tenantId)
-      .then((p) => { if (on) setPaid(p); })
-      .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); });
+    // Both halves have to land for the stamp to move: the payroll column needs
+    // the rates AND the lines already raised, and a stamp set by whichever
+    // resolved first would claim an age for the other one. Each keeps its own
+    // failure — a null `pay` is what the flag below reads as "the rates could
+    // not be read", and rates are the one thing on this screen that must not
+    // survive a refusal, because somebody pays against them.
+    Promise.all([
+      fetchTrainerPay(supabase, tenantId)
+        .then((p) => { if (on) setPay(p); })
+        .catch((e) => { reportError('classAnalytics.trainerPay', e); if (on) setPay(null); throw e; }),
+      // The gym's own clock, read first, because `fetchClassPay` DATES every
+      // line it returns and cannot re-date them afterwards. Nothing on this
+      // screen renders `taughtOn` — `already` dedupes by class id and `queued`
+      // counts and sums — so passing the zone changes no pixel here today.
+      // It is passed anyway, and the parameter is required rather than
+      // optional, because the alternative is what /payroll did for as long as
+      // it was optional: take the reader's clock by saying nothing, and put a
+      // coach on the wrong month's run. A screen that starts printing these
+      // dates should not have to discover the fallback the way that one did.
+      //
+      // `fetchGymZone` reports a refused read as no zone rather than throwing,
+      // which is right here: a gym whose timezone could not be read still has
+      // classes to queue, and the lines fall back to the reader's day exactly
+      // as a gym that has set none does.
+      fetchGymZone(supabase, tenantId)
+        .then((z) => {
+          // Kept as well as passed on. `fetchGymZone` reports a refused read as
+          // `{ zone: null, error }` rather than throwing, so all three answers
+          // arrive here and all three are recorded.
+          if (on) { setZone(z.zone); setZoneUnread(!!z.error); setZoneRead(true); }
+          return fetchClassPay(supabase, tenantId, z.zone);
+        })
+        .then((p) => { if (on) setPaid(p); })
+        .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); throw e; }),
+    ])
+      .then(() => { if (on) setPayAt(Date.now()); })
+      .catch(() => { /* both halves have already reported and cleared themselves */ });
     return () => { on = false; };
   }, [tenantId, payTick]);
   const reload = () => setPayTick((n) => n + 1);
+  /** One line over the two reads, and it is the age of the older. */
+  const fetchedAt = oldestFetch(attendanceAt, payAt);
+  /** Attendance and pay, both. The Refresh button beside the stamp and the pull
+   *  gesture run the same pair — a screen half-refreshed under one stamp is the
+   *  thing the stamp exists to prevent. */
+  const refreshAll = useCallback(() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }, []);
+  const pull = usePullToRefresh(refreshAll);
 
-  const loaded = rows !== null;
+  // Two facts — what is held, and whether the last attempt landed — and the
+  // four states they make. src/lib/staleRead.ts.
+  const readSt = readState(rows, readFailed);
+  const loaded = hasRows(readSt);
   const list = rows ?? [];
   /**
    * What one class is worth to the coach who taught it, in minor units, or null
@@ -293,6 +459,27 @@ export default function OwnerClassAnalytics() {
     return classPayAmount(own.classPayKind, own.classRateCents, r.attended);
   };
 
+  /**
+   * What ONE coach's class money is in — their own stated rate currency, and
+   * the gym's only where they have stated none.
+   *
+   * `gym_trainer_pay.currency` is nullable PER COACH and is never inherited
+   * from `tenants.currency` at read time; src/lib/gymPay.ts states the contract
+   * in writing — a gym that changes its currency must not retroactively
+   * re-denominate what it agreed to pay somebody. So a coach still on an AED
+   * rate at a gym that now works in GBP is owed dirhams, and `worth()` returns
+   * minor units of THAT coach's money, not the gym's.
+   *
+   * One expression, read by the figure beside "Add To Payroll" AND by the write
+   * that files the line. It was two: the label said `cur` while the insert said
+   * `own.currency ?? cur`, so at exactly that gym the owner read one currency
+   * and the line was filed in another — which is character for character the
+   * defect scripts/check-currency.mjs opens with, the Members payment form whose
+   * label was corrected and whose write was left alone. Two copies of a currency
+   * rule is that bug waiting for its second outing, so there is one copy.
+   */
+  const coachCurrency = (own: TrainerPay | null | undefined): string | null => own?.currency ?? cur;
+
   const totals = useMemo(() => {
     // Both rates come from one helper, so this screen and the timetable can no
     // longer disagree about what "fill" means. Each stays null when its
@@ -301,11 +488,33 @@ export default function OwnerClassAnalytics() {
     let cents = 0;
     let priced = 0;
     let unpriced = 0;
+    /**
+     * The rates that actually CONTRIBUTED to `cents`, one entry per coach.
+     *
+     * Kept because the sum above is only a sum of money if they agree on which
+     * money it is. `worth()` returns minor units in each coach's own currency
+     * and this loop adds them together, so the set of currencies behind the
+     * total is the only thing that can honestly label it. Coaches with no rate
+     * contributed nothing and are not asked.
+     */
+    const contributors: TrainerPay[] = [];
+    const seen = new Set<string>();
     for (const row of list) {
       const c = worth(row);
       if (c == null) { unpriced += 1; continue; }
       cents += c; priced += 1;
+      const own = pay?.get(row.trainerId);
+      if (own && !seen.has(own.trainerId)) { seen.add(own.trainerId); contributors.push(own); }
     }
+    // Which currencies were actually STATED by those rates. `payCurrency` below
+    // is the rule and returns one code or null; this is the same question asked
+    // a second time only to say WHICH silence a null is, the way
+    // app/(owner)/financials.tsx keeps its four apart. A rate that states
+    // nothing does not disagree with anything — it is filed in the gym's own
+    // currency by the write, which is why it is filtered out here too.
+    const stated = [...new Set(
+      contributors.map((p) => normaliseCurrency(p.currency)).filter((c): c is string => !!c),
+    )];
     return {
       ...r,
       showPct: r.show == null ? null : Math.round(r.show * 100),
@@ -314,11 +523,50 @@ export default function OwnerClassAnalytics() {
       // and its note says why — rather than a confident zero over a range full
       // of classes somebody taught.
       payrollCents: priced ? cents : null,
+      /**
+       * What that sum may be LABELLED, and null where nothing may.
+       *
+       * It was `cur` — `tenants.currency` — at four sites, over a figure built
+       * from per-coach rates that are deliberately not denominated in it. A gym
+       * that switched from AED to GBP and left one coach on the old rate had
+       * its dirhams added to its pounds and the result headed GBP.
+       *
+       * `payCurrency` is the rule, it already existed, and this screen was the
+       * half of the product that never got it: null for a mixed set, and null
+       * for a single currency that is not the gym's, because that is two
+       * answers and neither is the total's.
+       */
+      payrollCurrency: payCurrency(contributors, cur),
+      /** More than one money in the sum. */
+      mixedPayCurrencies: stated.length > 1,
+      /** One money in the sum, and it is not the one this gym works in. */
+      otherPayCurrency: stated.length === 1 && !!cur && stated[0] !== cur ? stated[0] : null,
       priced,
       unpriced,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `worth` closes over `pay`, which is the dependency that matters
-  }, [list, pay]);
+  }, [list, pay, cur]);
+
+  /**
+   * Why the payroll total is not stated, when it is not — and which of the two
+   * reasons it is.
+   *
+   * The pattern is `queued` below, in this same file: two currencies never sum,
+   * the COUNT of classes is still true, so the sentence keeps what is true and
+   * drops the amount. The two silences are kept apart for the reason
+   * app/(owner)/financials.tsx keeps its four apart: a range whose coaches are
+   * paid in two moneys and a range whose one money is not the gym's are
+   * different facts, and folding either into "your gym has not set a currency"
+   * sends an owner to Ops to set a field that is already set.
+   *
+   * Null when there is nothing to withhold — including at a gym with no
+   * currency at all, where `noCurrency` is already the whole answer.
+   */
+  const payGap: string | null = totals.mixedPayCurrencies
+    ? 'these coaches are paid in more than one currency, so there is no one total to state'
+    : totals.otherPayCurrency
+    ? `these class rates are recorded in ${totals.otherPayCurrency} and this gym works in ${cur}, so there is no one total to state`
+    : null;
 
   const byGroup = (key: (r: ClassSummaryRow) => string) => {
     const m: Record<string, { attended: number; booked: number; classes: number }> = {};
@@ -346,19 +594,41 @@ export default function OwnerClassAnalytics() {
   const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [list]);
   const maxBranch = Math.max(1, ...byBranch.map(([, v]) => v.attended));
   const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
+  /**
+   * Which recurring slots on the timetable are working.
+   *
+   * The one question this screen held all the data for and never asked. It
+   * already groups by branch and by kind; `startsAt` was on every row and
+   * nothing grouped by WHEN, which is the first thing an owner wants from a
+   * class report — what to cut, and what to run a second time.
+   *
+   * No new read. `list` is the rows already in hand and `zone` is the gym read
+   * this screen was already making for `fetchClassPay`.
+   */
+  const slots = useMemo(() => classSlots(list, zone), [list, zone]);
+  const slotGap = unplacedNote(slots, zone, zoneUnread);
+  /** The busiest slot, as the bar scale. `Math.max(1, …)` so an all-empty
+   *  timetable divides by one rather than by nought. */
+  const maxSlotBooked = Math.max(1, ...slots.slots.map((s) => s.booked));
   /** Class ids already on a payroll line, so nothing is offered twice. */
   const already = useMemo(() => new Set((paid ?? []).map((p) => p.classId)), [paid]);
   const G = layout.gutter;
 
   // ── pricing a class, and why the typed rate is gone ──────────────────────
   //
-  // Every output of this section goes through `money(..., cur)`, which returns
-  // null when the gym has not set `tenants.currency` — so at such a gym the
-  // hero, the section note and every per-trainer figure render a dash no matter
-  // what is stored. A control whose every result is withheld is a control that
-  // does nothing, so where there is no currency it is replaced by the reason and
-  // the way to fix it. The check-in and class counts are unaffected: they are
-  // not money and they still stand.
+  // Every output of this section goes through `money()`, which returns null
+  // when it is handed no currency — so at a gym that has not set
+  // `tenants.currency` the hero, the section note and every per-trainer figure
+  // render a dash no matter what is stored. A control whose every result is
+  // withheld is a control that does nothing, so where there is no currency it is
+  // replaced by the reason and the way to fix it. The check-in and class counts
+  // are unaffected: they are not money and they still stand.
+  //
+  // WHICH currency each of those figures is handed is not one answer and used to
+  // be: `cur` — the gym's — labelled all four, over amounts `worth()` returns in
+  // each COACH's own money. A per-coach figure now takes `coachCurrency`, and
+  // the two totals take `payCurrency`, which withholds rather than choose
+  // between two moneys. See both.
   //
   // What is offered instead of the old single typed rate is a rate PER COACH,
   // saved to `gym_trainer_pay`, with the thing a single number could not say —
@@ -372,7 +642,7 @@ export default function OwnerClassAnalytics() {
         Check-ins and fill rates below are unaffected.
       </Text>
       <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-        <Ghost label="Set It In Operations" onPress={() => router.push('/(owner)/ops')} />
+        <Ghost label="Set It in Operations" onPress={() => router.push('/(owner)/ops')} />
       </View>
     </View>
   );
@@ -381,7 +651,8 @@ export default function OwnerClassAnalytics() {
     if (!tenantId || !cur) return;
     const blocker = payRateBlocker('', amount, kind, cur);
     if (blocker) { setWriteErr(blocker); return; }
-    const parsed = parseRate(amount);
+    // The gym's own currency, and the guard above already refused a null one.
+    const parsed = parseRate(amount, cur);
     setBusy(trainerId);
     try {
       const own = pay?.get(trainerId) ?? null;
@@ -409,12 +680,37 @@ export default function OwnerClassAnalytics() {
   /**
    * The period this screen is reporting, in words.
    *
-   * Recomputed on render rather than stored, so the label cannot drift from the
-   * bounds the read used. "September 2026 so far" is a different claim from
-   * "the last 30 days" and the owner is about to reconcile it against a payroll
-   * run named after a month.
+   * ── it was a SECOND clock read, and it drifted from the first ────────────
+   *
+   * This was `rangeBounds(range).label` — a bare call, in the render body, with
+   * `now` defaulting to `new Date()`. The comment on it said the label
+   * "cannot drift from the bounds the read used", and the opposite was true:
+   * the bounds come from `rangeBounds(range)` inside the effect, at the moment
+   * the query is issued, and this was a different call to the same function at
+   * a different moment. Two clock reads, one label over the other's rows.
+   *
+   * scripts/check-frozen-day.mjs does not see this shape — it catches a clock
+   * frozen into a `useState` or `useMemo` initialiser, and this was neither. It
+   * is the other half of the same problem, and on this screen it is the worse
+   * half, because of how long the screen lives: `class-analytics` is registered
+   * `href: null` in app/(owner)/_layout.tsx, and expo-router mounts such a
+   * screen once and NEVER tears it down — not on a sign-out, not on
+   * backgrounding the app.
+   *
+   * So: an owner opens Classes & Payroll at 23:50 on 31 August with the range
+   * on "This month". The effect reads August. At 00:01 the pay read lands, or
+   * they open a rate editor, or they pull to refresh and the read fails — any
+   * re-render at all — and this line is evaluated again against the new day.
+   * `monthKeyOf(now)` is now September, so the heading over Classes, Check-ins,
+   * Avg Fill and Avg Show reads "September 2026 so far" while every figure
+   * under it is August's. The screen's own header explains at length why the
+   * month was made to match the console's payroll run; this quietly renamed it.
+   *
+   * The label is now stamped WITH the rows, from the same call, and falls back
+   * to the live one only while nothing has landed — where there is nothing yet
+   * being labelled and the label describes the read in flight.
    */
-  const periodLabel = rangeBounds(range).label;
+  const periodLabel = rowsLabel ?? rangeBounds(range).label;
 
   /**
    * Lines queued and NOT settled.
@@ -433,9 +729,13 @@ export default function OwnerClassAnalytics() {
     // pay lines, and adding them is not a total — the count is still true, so
     // the sentence keeps the count and drops the amount.
     const cs = new Set(open.map((l) => l.currency));
+    // `payLinesTotal`, not a reduce. A line whose amount did not come back
+    // makes the sum null for the same reason two currencies do: the count is
+    // still true and the amount is not, so the sentence keeps the count and
+    // drops the figure rather than printing a queue that is smaller than it is.
     return {
       count: open.length,
-      cents: cs.size === 1 ? open.reduce((a, l) => a + l.amountCents, 0) : null,
+      cents: cs.size === 1 ? payLinesTotal(open) : null,
       currency: cs.size === 1 ? [...cs][0] : null,
     };
   }, [paid]);
@@ -447,6 +747,14 @@ export default function OwnerClassAnalytics() {
     if (blocker) { setWriteErr(blocker); return; }
     const cents = worth(r);
     if (cents == null || !own || own.classRateCents == null || own.classPayKind == null) return;
+    // The one expression, read here and by the figure printed beside the button
+    // that calls this. `classPayBlocker` above already refuses a coach whose
+    // rate states no currency, and `cur` is non-null by the guard at the top, so
+    // this cannot be null — the check is written out anyway because a currency
+    // must never be inferred at a write, least of all from a guard three
+    // branches away.
+    const lineCur = coachCurrency(own);
+    if (!lineCur) return;
     setBusy(r.classId);
     try {
       await addClassPay(supabase, tenantId, {
@@ -459,7 +767,7 @@ export default function OwnerClassAnalytics() {
         rateCents: own.classRateCents,
         attendees: own.classPayKind === 'per_attendee' ? r.attended : null,
         amountCents: cents,
-        currency: own.currency ?? cur,
+        currency: lineCur,
         createdBy: null,
       });
       setWriteErr(null);
@@ -472,36 +780,55 @@ export default function OwnerClassAnalytics() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Attendance drives pay</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & Payroll</Text>
-            {/* Attendance and payroll both. The pay reload rides along, because
-                an owner pressing one control expects the whole screen to be
-                current afterwards, not half of it. */}
-            <Fetched at={fetchedAt} busy={reading}
-              onRefresh={() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }} />
-          </View>
-        </View>
+        <PageHead title="Classes & Payroll" />
 
         {/* ── range ──────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
-          {RANGES.map(([k, label]) => (
-            <Pressable key={k} onPress={() => setRange(k)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: radius.sm, backgroundColor: range === k ? t.brand : 'transparent' }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: range === k ? t.brandInk : t.ink3 }}>{label}</Text>
-            </Pressable>
-          ))}
+        {/* The board's segmented bar: a pill of `surface2`, equal segments,
+            the chosen one filled in ink. A tab per range, said as one. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+          {RANGES.map(([k, label]) => {
+            const on = range === k;
+            return (
+              <Pressable key={k} onPress={() => setRange(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : 'transparent' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        {!loaded ? (
+        {/* Attendance and payroll both. The pay reload rides along, because
+            an owner pressing one control expects the whole screen to be
+            current afterwards, not half of it. */}
+        <Fetched at={fetchedAt} busy={reading} onRefresh={refreshAll} />
+
+        {/* A failed refresh over rows that DID land no longer reaches this
+            branch — those rows are kept and flagged below. What is left here is
+            a range nothing has ever been read for, and the two reasons for that
+            are now separate sentences rather than one that covers both. */}
+        {/* One caveat for the whole screen: the hero, the fill rates and the
+            payroll column are all derived from this one read. `warn`, not
+            `crit` — the rows are real and complete, and only the attempt to
+            confirm them failed. */}
+        {readSt === 'stale' ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{staleNote('register')}</Flag>
+        ) : null}
+
+        {readSt === 'failed' ? (
+          <Section>
+            <Text style={{ ...ty.head, color: t.ink }}>This range could not be read.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              That is a read that did not come back, not a range with no classes. Nobody&rsquo;s
+              attendance has been lost and no payroll line has changed. Pull down to try again.
+            </Text>
+          </Section>
+        ) : !loaded ? (
           <Section>
             <Text style={{ ...ty.head, color: t.ink }}>Reading the register…</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Attendance and payroll stay blank until this range has actually been read. If it
-              stays blank, that is a read that did not come back — not a range with no classes.
+              Attendance and payroll stay blank until this range has actually been read.
             </Text>
           </Section>
         ) : list.length === 0 ? (
@@ -509,7 +836,7 @@ export default function OwnerClassAnalytics() {
             <Text style={{ ...ty.head, color: t.ink }}>No classes in this range.</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
               Attendance, fill rates and trainer payroll appear here once classes run and trainers check members in.
-              Nothing is estimated — payroll is check-ins × your per-attendee rate.
+              Nothing is estimated: payroll is check-ins × your per-attendee rate.
             </Text>
           </Section>
         ) : (<>
@@ -524,22 +851,39 @@ export default function OwnerClassAnalytics() {
               and React renders null as nothing, which is how a sentence loses
               its middle and reads as a broken screen rather than as a missing
               setting. */}
-          <Hero
-            label="Trainer Payroll"
-            figure={fig(money(totals.payrollCents, cur))}
-            note={[
-              `${totals.attended} check-ins`,
-              `${totals.classes} classes`,
-              `${totals.showPct ?? '—'}% turned up`,
+          {/* A card rather than the kit's bare `Hero`: the one block on this
+              screen the board does not draw. */}
+          {(() => {
+            const figure = fig(money(totals.payrollCents, totals.payrollCurrency));
+            // The counts that used to open this note are the tiles under the
+            // card now. What stays beside the figure is what qualifies it: how
+            // much of the range is priced, or why none of it is.
+            const note = [
+              `${num(totals.priced)} of ${num(totals.classes)} class${totals.classes === 1 ? '' : 'es'} priced`,
               !cur
                 ? "set your gym's currency to value them"
                 : pay === null
                 ? 'the pay rates could not be read, so nothing here is priced'
+                // Said before the unpriced count, because this one explains the
+                // DASH where the figure is. An unpriced class makes the total
+                // smaller than the range; a mixed set means there is no total.
+                : payGap
+                ? payGap
                 : totals.unpriced > 0
                 ? `${totals.unpriced} class${totals.unpriced === 1 ? '' : 'es'} priced at nothing because the coach has no class rate`
                 : null,
-            ].filter(Boolean).join(' · ')}
-          />
+            ].filter(Boolean).join(' · ');
+            return (
+              <Section>
+                <SectionHead title="Trainer Payroll" />
+                <View accessible accessibilityLabel={`Trainer payroll, ${figure}, ${note}`}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+                </View>
+              </Section>
+            );
+          })()}
 
           {/* Queued is not paid, said where the figure is rather than in a
               caption under the fold. `Flag` puts the tone in a 6pt dot beside
@@ -547,33 +891,62 @@ export default function OwnerClassAnalytics() {
           {queued ? (
             <Flag tone={t.warn}>
               {queued.cents != null && queued.currency
-                ? `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll — ${money(queued.cents, queued.currency)} — and none of it has left the account. A payroll run in the console is what hands it over.`
-                : `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll, in more than one currency, so there is no one total to state. None of it has left the account — a payroll run in the console is what hands it over.`}
+                ? `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll (${money(queued.cents, queued.currency)}), and none of it has left the account. A payroll run in the console is what hands it over.`
+                : `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll, in more than one currency, so there is no one total to state. None of it has left the account. A payroll run in the console is what hands it over.`}
             </Flag>
           ) : null}
 
-          <Rule />
+          {/* ── the range as tiles on the ground ─────────────────────────
+              Classes purple — the colour a class is everywhere in the app —
+              check-ins blue, and the classes no rate reaches in amber, because
+              an unpriced class is the one of the three an owner acts on. No
+              trend strips: this screen reads one range and holds no history of
+              the ranges before it. */}
+          <KpiRow tiles items={[
+            { label: 'Classes', tone: 'purple', value: fig(num(totals.classes)) },
+            { label: 'Check-ins', tone: 'blue', value: fig(num(totals.attended)), delta: `of ${num(totals.booked)} booked` },
+            { label: 'Unpriced', tone: 'amber', value: fig(pay === null ? null : num(totals.unpriced)), delta: pay === null ? 'the pay rates could not be read' : 'classes whose coach has no class rate' },
+          ]} />
 
           <Section>
             {/* Named, not "This Range". The console pays against August; this
                 screen now reads the same August, and says which. */}
+            {/* Fill and Show are over two different denominators and sit side
+                by side. The line that says which is which was a source comment
+                — "Fill is booked/capacity; show is attended/booked" — and a
+                comment is not on screen. It is the `sub` inside each ring now,
+                and the help row keeps the longer account. */}
+            <ScreenHelp screen="owner-classes" />
             <SectionHead title="This Range" note={periodLabel} />
-            <KpiRow items={[
-              { label: 'Classes', value: fig(totals.classes) },
-              { label: 'Check-ins', value: fig(totals.attended) },
-              // Fill is booked/capacity; show is attended/booked. Both are on
-              // screen now, so neither has to stand in for the other.
-              { label: 'Avg Fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },
-              { label: 'Avg Show', value: totals.showPct == null ? '—' : String(totals.showPct), unit: totals.showPct == null ? undefined : '%' },
-            ]} />
+            {/* Null — a range where no class recorded its places, or nobody
+                booked — is the track and a dash, never an empty ring that
+                reads as "nobody came". */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap', gap: sp.lg }}>
+              <Ring size={120} tone="purple" value={totals.fill ?? null}
+                figure={totals.fillPct == null ? null : `${totals.fillPct}%`} sub="places booked"
+                spoken={totals.fillPct == null ? 'Average fill, not known' : `Average fill, ${totals.fillPct}% of places booked`} />
+              <Ring size={120} tone="brand" value={totals.show ?? null}
+                figure={totals.showPct == null ? null : `${totals.showPct}%`} sub="booked turned up"
+                spoken={totals.showPct == null ? 'Average show, not known' : `Average show, ${totals.showPct}% of those booked turned up`} />
+            </View>
           </Section>
-
-          <Rule />
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by Trainer" note={money(totals.payrollCents, cur) ?? undefined} />
+            {/* The same figure as the hero and therefore the same currency
+                rule: withheld where the rates behind it do not agree on one
+                money, rather than headed in the gym's. */}
+            <SectionHead title="Payroll by Trainer" note={money(totals.payrollCents, totals.payrollCurrency) ?? undefined} />
             {cur ? null : noCurrency}
+            {/* And said here as well as on the hero, because this is the
+                section whose per-coach lines an owner would otherwise add up
+                themselves. One string, framed twice, so the two cannot drift
+                into two different accounts of the same silence. */}
+            {payGap ? (
+              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                {`The total for this section is not stated: ${payGap}. Each coach's line below is in that coach's own currency.`}
+              </Flag>
+            ) : null}
             {writeErr ? (
               <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{writeErr}</Flag>
             ) : null}
@@ -596,15 +969,20 @@ export default function OwnerClassAnalytics() {
                 <View key={v.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{v.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{v.name}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                         {v.classes} classes · {v.attended} check-ins
                         {own?.classRateCents != null && own.classPayKind
-                          ? ` · ${money(own.classRateCents, own.currency ?? cur) ?? '—'} ${own.classPayKind === 'per_attendee' ? 'each person' : 'the class'}`
+                          ? ` · ${money(own.classRateCents, coachCurrency(own)) ?? '—'} ${own.classPayKind === 'per_attendee' ? 'each person' : 'the class'}`
                           : ' · no class rate set'}
                       </Text>
                     </View>
-                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{fig(money(cents, cur))}</Text>
+                    {/* This coach's own money, not the gym's — the same
+                        expression the rate beside the name is printed in, and
+                        the same one the write below files a line with. This
+                        line is one coach's rows and they are all in one
+                        currency, so it is stated rather than withheld. */}
+                    <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>{fig(money(cents, coachCurrency(own)))}</Text>
                   </View>
                   {cur ? (
                     editing === v.id
@@ -612,7 +990,7 @@ export default function OwnerClassAnalytics() {
                                  onSave={(amount, kind) => saveRate(v.id, amount, kind)}
                                  onCancel={() => setEditing(null)} />
                       : <View style={{ marginTop: sp.sm, alignSelf: 'flex-start' }}>
-                          <Ghost label={own?.classRateCents != null ? 'Change Rate' : 'Set A Class Rate'} onPress={() => { setWriteErr(null); setEditing(v.id); }} />
+                          <Ghost label={own?.classRateCents != null ? 'Change Rate' : 'Set a Class Rate'} onPress={() => { setWriteErr(null); setEditing(v.id); }} />
                         </View>
                   ) : null}
                 </View>
@@ -628,65 +1006,180 @@ export default function OwnerClassAnalytics() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Each coach&rsquo;s own rate, applied to the classes they actually taught, and nothing
               else. Nothing here is estimated. Adding a class to payroll below writes the line the
-              next payroll run picks up &mdash; the money itself still leaves the account from
+              next payroll run picks up. The money itself still leaves the account from
               Payroll in the console, which is the one screen that hands anything over.
             </Text>
           </Section>
 
-          <Rule />
-
           {/* ── where the check-ins are ──────────────────────────────────── */}
           <Section>
-            <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} booked`} />
+            <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} Booked`} />
             {byBranch.map(([b, v]) => (
-              <Bar key={b} t={t} label={b} note={`${v.attended} / ${v.booked}`} pct={Math.round((v.attended / maxBranch) * 100)} />
+              <Meter key={b} label={b} tone="blue" val={v.attended} target={maxBranch} note={`${num(v.attended)} of ${num(v.booked)} came`} />
             ))}
           </Section>
-
-          <Rule />
 
           <Section>
             <SectionHead title="Popularity by Class Type" />
             {byKind.map(([k, v]) => (
-              <Bar key={k} t={t} label={k} note={`${v.attended} · ${v.classes} run`} pct={Math.round((v.attended / maxKind) * 100)} dim />
+              <Meter key={k} label={k} tone="purple" val={v.attended} target={maxKind} note={`${num(v.attended)} check-ins · ${num(v.classes)} run`} />
             ))}
           </Section>
 
-          <Rule />
+          {/* ── which hours of which days are working ──────────────────────
+              The question this screen had every figure for and never asked. It
+              grouped by branch and by class type; `startsAt` was on every row
+              and nothing grouped by WHEN — which is what an owner is actually
+              deciding when they open a class report, because it is the only one
+              of the three they can change next week.
+
+              Emptiest first. A full slot needs no decision and a half-empty one
+              does, so the list is ordered by the thing it exists to surface
+              rather than by size. src/lib/classSlots.ts holds the ordering, the
+              fill rule and the timezone rule, with a test under plain node.
+
+              Bucketed on the GYM's clock. A 06:00 class read from another
+              country would otherwise split across two buckets or merge with the
+              07:00 one, and the fill rate this section is for would then be
+              taken over the wrong set of classes. */}
+          <Section>
+            <SectionHead
+              title="By Time of Day"
+              note={slots.slots.length ? `${slots.slots.length} Slot${slots.slots.length === 1 ? '' : 's'}` : undefined}
+            />
+            {/* Said before the bars, because it governs what they are made of.
+                Three sentences for three silences — a gym that has not set a
+                timezone, a zone read that did not come back, and a handful of
+                start times that would not parse are three different things with
+                three different next steps. */}
+            {slotGap ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{slotGap}</Flag> : null}
+            {!zoneRead ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Checking what time it is at the gym, before the timetable is bucketed by it.
+              </Text>
+            ) : slots.slots.length === 0 ? (
+              // Only when there is nothing ELSE to say: an unplaced count is
+              // already explained above, and "no classes ran" over a range whose
+              // classes simply could not be placed would be the false half of
+              // the two.
+              slotGap ? null : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No classes ran in this range, so there is no timetable to read.
+                </Text>
+              )
+            ) : (
+              <>
+                {slots.slots.map((sl) => (
+                  // Amber under half full, the accent above it, grey where no
+                  // class in the slot recorded its places — and the words in
+                  // the note say the same thing, so the colour is never alone.
+                  <Meter
+                    key={`${sl.weekday}:${sl.hour}`}
+                    label={sl.label}
+                    tone={sl.fill == null ? 'neutral' : sl.fill < 0.5 ? 'amber' : 'brand'}
+                    val={sl.booked} target={maxSlotBooked}
+                    // The fill rate is the figure, and a dash where no class in
+                    // the slot recorded what it could hold. A 0% there would
+                    // read as a slot nobody booked, which is the opposite of
+                    // "nobody wrote down how many places it had".
+                    // The BAR is booked-against-the-busiest-slot, not the fill
+                    // rate, so a slot with no capacity on record still draws at
+                    // its true size rather than at nothing. The fill rate is on
+                    // the line beside it, where it can be withheld.
+                    note={`${sl.fill == null ? '—' : Math.round(sl.fill * 100) + '% full'} · ${sl.booked} booked · ${sl.classes} run`}
+                  />
+                ))}
+                {/* How to read the bars is reference, so it is behind a row
+                    rather than under every timetable. The sentence after it is
+                    NOT — it is a fact about this range's registers. */}
+                <View style={{ marginTop: sp.md }}>
+                  <Expandable title="How to Read This">
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      Emptiest first, so the slot worth a decision is at the top. The bar is how many
+                      people booked, against your busiest slot; the percentage is how full it was, and
+                      is a dash for a slot where no class recorded how many places it had.
+                    </Text>
+                  </Expandable>
+                </View>
+                {/* A separate fact and a separate sentence, because it is not a
+                    fill rate and must never be read as one. "Nobody came" and
+                    "nobody took the register" are indistinguishable in this
+                    table, and saying the first would send an owner to cut a
+                    class that may be full. */}
+                {slots.noPresent > 0 ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {slots.noPresent} class{slots.noPresent === 1 ? '' : 'es'} in this range had
+                    bookings and nobody marked present. That is either a class nobody turned up to
+                    or a register nobody took, and this screen cannot tell which. Both are
+                    worth a word with whoever taught them.
+                  </Text>
+                ) : null}
+              </>
+            )}
+          </Section>
 
           {/* ── the log the numbers came from ────────────────────────────── */}
           <Section>
-            <SectionHead title="Classes" note={`${list.length} in range`} />
+            <SectionHead title="Classes" note={`${list.length} in Range`} />
             {list.map((r, i) => {
               const on = already.has(r.classId);
               const cents = worth(r);
-              const blocker = classPayBlocker(pay?.get(r.trainerId), r.attended, on);
+              const own = pay?.get(r.trainerId);
+              const blocker = classPayBlocker(own, r.attended, on);
               return (
                 <View key={r.classId} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.branch} · {r.trainerName}</Text>
-                    </View>
-                    {r.attended >= r.booked ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} /> : null}
-                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{r.attended}/{r.booked}</Text>
-                  </View>
+                  {/* Each class as its own fill bar: places booked against the
+                      places it was set up with, and who came in the note. A
+                      class that never recorded its places has no fill — no
+                      bar, and the note says so — because `capacity` is 0 for
+                      "never recorded" and a bar over nought is a full one. The
+                      figure the row used to end in is the note's last part. */}
+                  <Meter label={r.title} tone="purple"
+                    val={r.capacity > 0 ? r.booked : null} target={r.capacity > 0 ? r.capacity : 1}
+                    note={r.capacity > 0
+                      ? `${num(r.booked)} of ${num(r.capacity)} places · ${num(r.attended)} came`
+                      : `${num(r.booked)} booked · ${num(r.attended)} came · places not recorded`} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{r.branch} · {r.trainerName}</Text>
                   {/* Withheld entirely while `paid` is null: offering "Add to
                       payroll" over a list that might already contain this class
                       is how a coach gets paid for the same Tuesday twice. The
                       unique index on (class_id, trainer_id) would refuse the
                       second one, but a refusal after the tap is a worse way to
-                      learn it than not being offered. */}
+                      learn it than not being offered.
+
+                      That index was a claim in a comment with nothing holding
+                      it; it is now a checked one. `gym_class_pay_uq`, UNIQUE
+                      (class_id, trainer_id), confirmed present on the live
+                      database 14 September 2026. So the backstop this sentence
+                      leans on is real: a duplicate line cannot reach the table
+                      however the button is pressed. */}
                   {cur && paid !== null ? (
                     <View style={{ marginTop: sp.sm, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       {on ? (
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>On payroll</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>On Payroll</Text>
                       ) : blocker ? (
                         <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{blocker}</Text>
                       ) : (
                         <>
-                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add To Payroll'} onPress={() => putOnPayroll(r)} />
-                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{money(cents, cur) ?? '—'}</Text>
+                          {/* The label already said 'Adding…' and the control
+                              stayed live, so a second tap fired a second INSERT
+                              rather than nothing. `gym_class_pay_uq` refuses it
+                              — the money is safe either way — but what the
+                              owner then reads is `writeErr` carrying Postgres's
+                              own "duplicate key value violates unique
+                              constraint" on a payroll screen. Off while its own
+                              write is in flight; the other rows stay live,
+                              because `busy` holds one class id and they are
+                              different lines. */}
+                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add to Payroll'} disabled={busy === r.classId} onPress={() => putOnPayroll(r)} />
+                          {/* THE SAME EXPRESSION `putOnPayroll` files the line
+                              with. It said `cur` while the insert said the
+                              coach's own currency, so at a gym that had changed
+                              currency the owner read one money beside this
+                              button and another one was written to
+                              `gym_class_pay` — a permanent record of what
+                              somebody is owed. */}
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{money(cents, coachCurrency(own)) ?? '—'}</Text>
                         </>
                       )}
                     </View>

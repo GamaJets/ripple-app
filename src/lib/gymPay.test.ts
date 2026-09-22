@@ -8,14 +8,18 @@
 // that stops the third version of that, and these are the assertions that keep
 // it that shape.
 import {
-  rateForSession, withResolvedRates, payCurrency, parseRate, payRateBlocker,
+  rateForSession, withResolvedRates, payCurrency, parseRate, payRateBlocker, saveTrainerPay,
   classPayAmount, classPayBlocker, adjustmentSign, adjustmentBlocker,
   runTotal, runCurrencyBlocker, reversalReasonBlocker,
-  adjustmentsTotal, runScopeOf, scopedToRun,
+  adjustmentsTotal, runScopeOf, scopedToRun, payLinesTotal, unreadableAmountBlocker,
   ADJUSTMENT_KINDS,
   type PayIndex, type TrainerPay,
 } from './gymPay';
 import { payrollByTrainer, settleableSessions, settlementAmount, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
+// The reader that decides whether a run may be paid as one payment. It is the
+// consumer of the currency `withResolvedRates` now carries, and it is what makes
+// those assertions about behaviour rather than about a field.
+import { settleCurrencyBlocker } from './gymRateCurrency';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -28,7 +32,7 @@ const ago = (h: number) => new Date(NOW - h * 3600_000).toISOString();
 const sess = (o: Partial<PtSession> = {}): PtSession => ({
   id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'c1', clientName: 'Sara',
   startsAt: ago(24), durationMin: 60, status: 'booked', outcome: 'completed',
-  outcomeAt: ago(23), rateCents: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
+  outcomeAt: ago(23), rateCents: null, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 const rate = (o: Partial<TrainerPay> = {}): TrainerPay => ({
@@ -93,6 +97,57 @@ const rate = (o: Partial<TrainerPay> = {}): TrainerPay => ({
   eq(settleableSessions(bare, PAY_DELIVERED_ONLY, NOW).length, 0, 'and is not settleable');
 }
 
+/* ── the unit is resolved with the number ──────────────────────────────────
+ *
+ * A resolved row used to carry an amount and no currency, and
+ * `settleCurrencyBlocker` reads a run of those as 'unrecorded' — which it
+ * deliberately waves through at a gym that HAS a currency. So a coach whose own
+ * rate row states the code the gym charged in before it changed would have been
+ * settled with the new code stamped on the old money, on a permanent payment
+ * row an accountant reconciles. These are the assertions that keep the unit
+ * travelling with the figure, layer by layer.
+ */
+{
+  const pay: PayIndex = new Map([
+    ['t1', rate({ sessionRateCents: 4500, currency: 'EUR' })],
+    ['t2', rate({ trainerId: 't2', sessionRateCents: 9000, currency: null })],
+  ]);
+  const rows = withResolvedRates([
+    sess({ id: 'snap', trainerId: 't1', rateCents: 3000, rateCurrency: 'AED' }),
+    sess({ id: 'own', trainerId: 't1' }),
+    sess({ id: 'ownNoCcy', trainerId: 't2' }),
+    sess({ id: 'fee', trainerId: 't9' }),
+  ], pay, 2500, 'gbp');
+
+  const of = (id: string) => rows.find((s) => s.id === id)!;
+  eq(of('snap').rateCurrency, 'AED',
+    'layer 1: a snapshotted rate keeps its snapshotted currency — nothing here may relabel history');
+  eq(of('snap').rateCents, 3000, 'and its amount is untouched too');
+  eq(of('own').rateCurrency, 'EUR',
+    'layer 2: the coach’s own rate is in the coach’s own rate currency, NOT the gym’s — which is exactly the run that must be refused rather than settled as GBP');
+  eq(of('ownNoCcy').rateCurrency, 'GBP',
+    'a rate row stating no currency falls back to the gym’s, because that is what it was set in');
+  eq(of('fee').rateCurrency, 'GBP',
+    'layer 3: the gym’s standard fee is in the gym’s currency, normalised to upper case');
+  eq(of('fee').rateCents, 2500, 'and still carries the fee itself');
+
+  // The whole reason the unit is carried: `settleCurrencyBlocker` can now SEE
+  // the disagreement. Without a currency on the resolved row this run reads as
+  // 'unrecorded' and settles silently.
+  const clash = settleCurrencyBlocker([of('own')], 'GBP');
+  ok(clash !== null, 'a coach’s EUR rate at a GBP gym blocks the settlement instead of being stamped GBP');
+  ok(/EUR/.test(clash ?? '') && /GBP/.test(clash ?? ''),
+    'and the refusal names both codes, because the person reading it has to know which is which');
+
+  eq(settleCurrencyBlocker([of('fee')], 'GBP'), null,
+    'while a run priced off the gym’s own fee agrees with the gym and settles as it always did');
+
+  // And with no gym currency nothing is priced anyway, so nothing is labelled.
+  const unnamed = withResolvedRates([sess({ id: 'x', trainerId: 't9' })], new Map(), null, null);
+  eq(unnamed[0].rateCurrency, null, 'a gym that has named no currency labels nothing');
+  eq(unnamed[0].rateCents, null, 'and prices nothing, which is not a rate of zero');
+}
+
 /* ── one currency, or none ─────────────────────────────────────────────────── */
 
 eq(payCurrency([], 'GBP'), 'GBP', 'no stated rates means the gym’s own currency');
@@ -103,17 +158,77 @@ eq(payCurrency([rate({ currency: 'EUR' })], 'GBP'), null,
   'a rate in one currency at a gym priced in another is a real disagreement, not a fallback');
 eq(payCurrency([rate({ currency: null })], 'GBP'), 'GBP',
   'a coach with no rate states nothing and does not disagree');
+// Whitespace is not a currency. Without the trim, a row holding two spaces
+// states "  ", which is one distinct stated currency, which disagrees with the
+// gym's own — and the payroll total for the whole gym goes blank on the
+// strength of a cell somebody tabbed through.
+eq(payCurrency([rate({ currency: '   ' })], 'GBP'), 'GBP',
+  'a currency of nothing but spaces states nothing and does not blank the gym’s total');
+eq(payCurrency([rate({ currency: 'gbp' })], 'GBP'), 'GBP',
+  'and a lowercase tag is the same currency as the gym’s, not a second one');
 
 /* ── a rate, as somebody types it ──────────────────────────────────────────── */
 
 {
-  const cents = (s: string) => { const r = parseRate(s); return r.kind === 'rate' ? r.cents : r.kind; };
+  const cents = (s: string, c = 'GBP') => { const r = parseRate(s, c); return r.kind === 'rate' ? r.cents : r.kind; };
   eq(cents('45'), 4500, 'whole units in, minor units out');
   eq(cents('52.50'), 5250, 'and the halves survive');
   eq(cents(''), 'clear', 'an empty field CLEARS — this coach is on the gym’s standard fee');
   eq(cents('0'), 0, 'a typed zero is a value: the gym pays this coach nothing per session, deliberately');
   eq(cents('-5'), 'bad', 'a negative rate is refused — a deduction is an adjustment line, not a rate');
-  eq(cents('4,500'), 450000, 'a thousands comma is stripped rather than truncating the figure');
+
+  // ── the assertion that pinned the bug ────────────────────────────────────
+  //
+  // This read `eq(cents('4,500'), 450000, 'a thousands comma is stripped
+  // rather than truncating the figure')`, and it was true: the parser stripped
+  // every comma before looking at the number.
+  //
+  // It is right for a British typist and catastrophic for a European one. The
+  // same rule turns `52,50` — how most of Europe writes fifty-two fifty — into
+  // `5250`, and the hundred then makes it 525,000 minor units. A front desk
+  // setting a coach's rate to fifty-two fifty set it to five thousand two
+  // hundred and fifty, on the console AND on the owner's phone, silently.
+  //
+  // Neither reading may be picked on the typist's behalf, so both are refused.
+  // Being asked costs a keystroke; guessing costs somebody's wages.
+  // `4,500` is refused: three digits after a separator cannot be a two-place
+  // fraction, so this is a thousands comma and its reading is genuinely
+  // ambiguous — four thousand five hundred here, four and a half in Frankfurt.
+  eq(cents('4,500'), 'bad', 'a thousands separator is refused rather than guessed at');
+  // `52,50` is NOT ambiguous and is not refused. Two digits after a single
+  // comma can only be a decimal comma — nobody writes a thousands separator two
+  // digits from the end — so it reads as fifty-two fifty, which is what the
+  // person typing it meant. The old parser stripped the comma and made it
+  // 525,000; refusing it outright would have been the other overcorrection.
+  eq(cents('52,50'), 5250, 'the European decimal comma is read, not stripped and not refused');
+
+  // And the hundred, which was wrong on its own terms for a third of the
+  // currencies this product supports.
+  eq(cents('5000', 'JPY'), 5000, 'a Tokyo gym paying ¥5,000 an hour records ¥5,000, not ¥500,000');
+  eq(cents('5000.50', 'JPY'), 'bad', 'the yen has no smaller unit, so there is nothing after the point');
+  eq(cents('52.500', 'KWD'), 52500, 'the dinar is thousandths — 52.500 is 52,500 fils');
+  eq(cents('52.50', 'KWD'), 52500, 'and a short fraction is padded to the right place, not read as hundredths');
+  eq(cents('45', null as unknown as string), 'bad',
+    'and with no currency a rate is just a number — refused, because this is what somebody is paid');
+
+  // ── the ceiling, at the boundary rather than near it ─────────────────────
+  //
+  // `rate_cents` is a plain int4, so 2^31-1 MINOR units is the largest rate the
+  // column will hold and anything past it comes back as a 22003 after the form
+  // has closed. The number is derived from the column's width rather than
+  // copied from the implementation's literal: a test that pastes the same
+  // 2_147_483_647 the code contains agrees with the code by construction and
+  // would keep agreeing if somebody changed both.
+  //
+  // Both sides of the boundary, because `>` and `>=` differ by exactly one
+  // minor unit and only the boundary can tell them apart. `>=` would refuse a
+  // figure the database would have accepted.
+  const INT4_MAX = 2 ** 31 - 1;
+  const typed = (minor: number) => `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')}`;
+  eq(cents(typed(INT4_MAX)), INT4_MAX,
+    'the largest rate the column can hold is accepted — the boundary is inclusive');
+  eq(cents(typed(INT4_MAX + 1)), 'bad',
+    'and one minor unit past it is refused here, rather than by the database after the form has closed');
 }
 
 eq(payRateBlocker('45', '', '', 'GBP'), null, 'a session rate alone is fine');
@@ -121,8 +236,141 @@ eq(payRateBlocker('', '8', 'per_attendee', 'GBP'), null, 'a class rate with a co
 ok(payRateBlocker('', '8', '', 'GBP') != null,
   '"80" and "8 a head" are the same digits and different money — a class rate must say which');
 ok(payRateBlocker('', '', 'per_class', 'GBP') != null, 'a counting method with no rate pays nothing');
-ok(payRateBlocker('45', '', '', null) != null, 'no currency, no rate — what somebody is paid is a permanent record');
+// ── no currency, and WHICH refusal ─────────────────────────────────────────
+//
+// This was a bare `!= null`, and a bare `!= null` cannot tell one refusal from
+// another. Both of these were in fact refused upstream, by `parseRate`, which
+// will not read an amount at all without a currency to denominate it — so the
+// assertion passed without ever reaching `payRateBlocker`'s own currency
+// clause, and went on passing with that clause inverted.
+//
+// That much was right, and the conclusion drawn from it was not. What got
+// pinned was the sentence the owner happened to be getting: `parseRate`'s
+// generic "an amount typed in would not be an amount of any money", with
+// "Session rate:" in front of it. Pinning it froze the wrong one. The clause
+// below it in `payRateBlocker` was not merely unreachable, it was BETTER — it
+// names the gym's currency as the missing setting and says why it cannot be
+// skipped — and it stayed dead behind an assertion that said the dead state
+// was the contract. `payRateBlocker` now asks about the currency before it
+// asks the parser to read money in it, so the sentence written for this case
+// is the one that arrives.
+//
+// The field prefix went with it, deliberately. Neither box is wrong: the owner
+// typed a perfectly good number, and the thing that is missing is one setting
+// away on another screen. "Session rate: …" points at the wrong screen.
+{
+  const fromSession = String(payRateBlocker('45', '', '', null));
+  ok(payRateBlocker('45', '', '', null) != null,
+    'no currency, no rate — what somebody is paid is a permanent record');
+  ok(/currency/i.test(fromSession),
+    'and the refusal names the missing thing as the currency, not the rate');
+  ok(/actually paid/.test(fromSession),
+    'and says why that cannot be waved through: a rate is what somebody is actually paid');
+  ok(!/^Session rate:/.test(fromSession),
+    'not attributed to a box, because neither box is what is wrong');
+  ok(!/Nothing can be worked out from it/.test(fromSession),
+    'and not the parser\u2019s generic complaint, which describes a difficulty rather than a setting');
+  // The other box, because a currency rule reachable only through the session
+  // rate is a currency rule with a hole in it: an owner who prices a coach for
+  // classes and not for private work goes through this path and no other.
+  const fromClass = String(payRateBlocker('', '8', 'per_class', null));
+  ok(payRateBlocker('', '8', 'per_class', null) != null,
+    'a class rate alone with no currency is refused on the same ground');
+  eq(fromClass, fromSession,
+    'and reads the same, because it is the same missing setting and the same reason');
+}
 eq(payRateBlocker('', '', '', null), null, 'clearing everything needs no currency, because nothing is denominated');
+
+/* ── what actually gets written when a rate is saved ───────────────────────
+ *
+ * `saveTrainerPay` is the write that decides what a coach is paid, and nothing
+ * anywhere in this repository exercised it. The clause worth holding is the
+ * currency one: `gym_trainer_pay_amount_has_currency` requires a row carrying
+ * an amount to carry a currency too and a row carrying neither to carry none,
+ * so `&&` and `||` here are the difference between a save that lands and a
+ * constraint violation thrown in an owner's face — for the ordinary case of a
+ * coach priced for one kind of work and not the other.
+ *
+ * A gym is white-label and every one of them is in its own currency, so there
+ * is no default to fall back on when this goes wrong.
+ *
+ * The only async assertions in this file, so they are gathered into one
+ * function and awaited at the bottom rather than floated — an unhandled
+ * rejection would print a warning and exit 0, which is a test that cannot
+ * fail. */
+async function writeAssertions(): Promise<void> {
+{
+  const saved = async (p: Partial<Parameters<typeof saveTrainerPay>[2]> = {}) => {
+    let sent: Record<string, unknown> | null = null;
+    let conflict: string | undefined;
+    let counted = false;
+    const sb = {
+      from: () => ({
+        upsert: (row: Record<string, unknown>, o?: { onConflict?: string; count?: string }) => {
+          sent = row; conflict = o?.onConflict; counted = o?.count === 'exact';
+          return Promise.resolve({ error: null, count: 1 });
+        },
+      }),
+    } as any;
+    await saveTrainerPay(sb, 'gym-1', {
+      trainerId: 't1', sessionRateCents: 4500, classPayKind: null,
+      classRateCents: null, currency: 'GBP', updatedBy: 'owner-1', ...p,
+    });
+    return { row: sent as unknown as Record<string, unknown>, conflict, counted };
+  };
+
+  // A coach priced for private work only. This is the common case — most gyms
+  // set a session rate long before they pay anybody to teach — and it is the
+  // one an `||` here would send with a null currency against a non-null
+  // amount, which the constraint refuses outright.
+  const sessionOnly = await saved({ sessionRateCents: 4500, classRateCents: null });
+  eq(sessionOnly.row.currency, 'GBP', 'a row priced for sessions alone still says what money that is');
+  // And the mirror, because a currency rule that only holds for the session
+  // box is a rule with a hole in it.
+  const classOnly = await saved({ sessionRateCents: null, classRateCents: 8000, classPayKind: 'per_class' });
+  eq(classOnly.row.currency, 'GBP', 'and so does one priced for classes alone');
+  const both = await saved({ sessionRateCents: 4500, classRateCents: 8000, classPayKind: 'per_class' });
+  eq(both.row.currency, 'GBP', 'and one priced for both');
+
+  // The other half of the same constraint, and the honest state: nothing has
+  // been priced, so nothing is denominated — even when the form still had a
+  // currency sitting in it.
+  const cleared = await saved({ sessionRateCents: null, classRateCents: null, currency: 'GBP' });
+  eq(cleared.row.currency, null,
+    'clearing both rates clears the currency with them — a row with no amounts on it is denominated in nothing');
+
+  eq(both.row.session_rate_cents, 4500, 'the session rate is written as given');
+  eq(both.row.class_rate_cents, 8000, 'and the class rate');
+  eq(both.row.tenant_id, 'gym-1', 'against the gym it belongs to');
+  eq(both.row.updated_by, 'owner-1', 'and stamped with whoever changed it');
+  // Named, because PostgREST defaults an upsert to the primary key, which never
+  // collides — an unnamed one writes a second rate row for the same coach every
+  // time Save is pressed, and the read then returns whichever it orders first.
+  eq(both.conflict, 'tenant_id,trainer_id', 'the conflict target is the unique index, not the primary key');
+  ok(both.counted, 'and the write is counted, so a 2xx that changed nothing is not read as a saved rate');
+}
+
+{
+  // A write the server accepted without touching a row must not report success.
+  // `saveTrainerPay` throwing is what stops the screen saying a senior coach's
+  // rate is set while payroll goes on paying the standing fee.
+  const refuse = (answer: { error: unknown; count: number | null }) => ({
+    from: () => ({ upsert: () => Promise.resolve(answer) }),
+  }) as any;
+  const threw = async (answer: { error: unknown; count: number | null }) => {
+    try {
+      await saveTrainerPay(refuse(answer), 'gym-1', {
+        trainerId: 't1', sessionRateCents: 4500, classPayKind: null,
+        classRateCents: null, currency: 'GBP', updatedBy: 'o',
+      });
+      return false;
+    } catch { return true; }
+  };
+  ok(await threw({ error: null, count: 0 }), 'a write that matched no rows is not a saved rate');
+  ok(await threw({ error: null, count: null }), 'and neither is one nobody counted');
+  ok(await threw({ error: { message: 'nope' }, count: null }), 'and a refused one is certainly not');
+}
+}
 
 /* ── a class somebody taught ───────────────────────────────────────────────── */
 
@@ -135,6 +383,14 @@ eq(classPayAmount('per_attendee', 800, 0), 0, 'an empty class is a real zero —
 eq(classPayAmount('per_attendee', 800, null), null,
   'a per-head class with no register is UNKNOWN, not free');
 eq(classPayAmount('per_class', -1, null), null, 'a negative rate prices nothing');
+// Zero is a VALUE here, the same way it is in `parseRate` above, and the line
+// between them is one character wide: `rateCents < 0` refuses nothing at zero,
+// `rateCents <= 0` turns "this gym pays nothing to teach" — a volunteer, an
+// owner covering their own class — into "nobody has priced this", which is the
+// state that falls back to another rate entirely.
+eq(classPayAmount('per_class', 0, null), 0,
+  'a deliberate zero class rate pays zero rather than reading as unpriced');
+eq(classPayAmount('per_attendee', 0, 12), 0, 'and per head, twelve times nothing is still nothing');
 
 {
   const paid = rate({ classPayKind: 'per_attendee', classRateCents: 800 });
@@ -174,6 +430,39 @@ eq(runTotal({ sessionCents: null, sessions: 0, classCents: 9600, classes: 1, adj
 eq(runTotal({ sessionCents: 0, sessions: 0, classCents: 9600, classes: 1, adjustmentCents: 0, adjustments: 0 }),
   9600, 'a coach who taught classes and delivered no one-to-ones is owed for the classes');
 
+// ── and the other two parts can be unstateable too ────────────────────────
+//
+// The note on `runTotal` used to say a class line and an adjustment "cannot
+// exist unpriced", which was true of the schema and never true of the READ:
+// `Number(r.amount_cents) || 0` made a column that did not come back into a
+// class taught for nothing, and the run that paid for it recorded itself as the
+// whole of what was owed.
+eq(runTotal({ sessionCents: 7500, sessions: 2, classCents: null, classes: 1, adjustmentCents: 0, adjustments: 0 }),
+  null, 'a class line nobody could price makes the run unstateable, not cheaper');
+eq(runTotal({ sessionCents: 7500, sessions: 2, classCents: 0, classes: 0, adjustmentCents: null, adjustments: 1 }),
+  null, 'and so does an adjustment nobody could read');
+
+/* ── a total is every line or it is nothing ──────────────────────────────── */
+
+eq(payLinesTotal([]), 0, 'no lines really is no money from lines');
+eq(payLinesTotal([{ amountCents: 4000 }, { amountCents: 600 }]), 4600, 'lines that were all read add up');
+eq(payLinesTotal([{ amountCents: 4000 }, { amountCents: null }]), null,
+  'one unreadable line makes the total null — a smaller figure here looks exactly like the truth');
+eq(payLinesTotal([{ amountCents: 0 }, { amountCents: 500 }]), 500,
+  'a line genuinely worth nothing is still a line that was read');
+
+/* ── and the run says which of the two it is ─────────────────────────────── */
+
+eq(unreadableAmountBlocker([{ amountCents: 1 }], [{ amountCents: 2 }]), null, 'everything read, nothing to say');
+{
+  const one = unreadableAmountBlocker([{ amountCents: null }], []);
+  ok(one != null && /One line/.test(one), 'one unreadable line is named singular');
+  ok(one != null && !/settle it now/i.test(one) && /Read it again/.test(one),
+    'and the instruction is to read the run again, never to settle it');
+  const two = unreadableAmountBlocker([{ amountCents: null }], [{ amountCents: null }]);
+  ok(two != null && /^2 lines/.test(two), 'both halves are counted into one sentence');
+}
+
 eq(runCurrencyBlocker(['GBP', 'GBP', null]), null, 'one currency, and a silent part, is one currency');
 ok(runCurrencyBlocker(['GBP', 'EUR']) != null, 'two currencies on one run is not a total');
 eq(runCurrencyBlocker([null, null]), null, 'nothing stated is nothing to disagree about');
@@ -190,7 +479,7 @@ eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reaso
  * button, but only after the figure has been believed.
  */
 {
-  const adj = (kind: 'bonus' | 'deduction' | 'reimbursement' | 'advance', amountCents: number, currency: string | null) =>
+  const adj = (kind: 'bonus' | 'deduction' | 'reimbursement' | 'advance', amountCents: number | null, currency: string | null) =>
     ({ kind, amountCents, currency } as const);
 
   const one = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('deduction', -1500, 'GBP')]);
@@ -215,6 +504,20 @@ eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reaso
     'and an adjustment stating no currency is not silently the gym’s');
   eq(adjustmentsTotal([adj('bonus', 100, ' gbp ')]).currency, 'GBP',
     'spacing and case are one currency, not two — the same normalisation sharedCurrency does');
+
+  // ── the third reason there is no figure ────────────────────────────────
+  //
+  // An amount that did not come back. `Number(r.amount_cents) || 0` in
+  // `fetchAdjustments` used to make it a bonus of nothing, which adds cleanly
+  // and is wrong — and the column on /payroll would have printed the rest as
+  // the total.
+  const unread = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('deduction', null, 'GBP')]);
+  eq(unread.cents, null, 'one unreadable amount leaves the column with no total');
+  eq(unread.taxableCents, null, 'and no split either — a split of a partial sum is two wrong figures');
+  eq(unread.reimbursementCents, null, 'both halves withheld together');
+  eq(unread.unreadable, 1, 'the screen is told how many, so it can say which problem this is');
+  eq(unread.currency, 'GBP', 'the currency is still known, which is why it cannot be the sentence');
+  eq(adjustmentsTotal([adj('bonus', 5000, 'GBP')]).unreadable, 0, 'and a clean set says none');
 }
 
 /* ── a run pays for its own period ────────────────────────────────────────
@@ -246,8 +549,10 @@ eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reaso
     'the run takes the period’s own lines and the stranded earlier ones, and nothing from the future');
 }
 
-if (errors.length) {
-  console.error(`gymPay: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
-  process.exit(1);
-}
-console.log('gymPay ok');
+writeAssertions().then(() => {
+  if (errors.length) {
+    console.error(`gymPay: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
+    process.exit(1);
+  }
+  console.log('gymPay ok');
+}).catch((e) => { console.error('gymPay — threw:', e); process.exit(1); });

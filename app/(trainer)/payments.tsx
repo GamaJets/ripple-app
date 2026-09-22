@@ -228,16 +228,35 @@
 // so a currency this screen chose would be wrong for half the gyms running it.
 // A gym that has not set one cannot put a package on sale, and is told that,
 // rather than being given a price with a unit invented for it.
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead, fig, Meter } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, value, numeric, font } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
+// Which clients the figure at the top of this screen is made of. A BREAKDOWN
+// of a total already here, and deliberately not a lifetime value — that figure
+// is `clientValue` in src/lib/clientValue.ts, it adds the cash a coach records
+// themselves, and app/(trainer)/money.tsx renders it. See the header of
+// src/lib/payerBook.ts for why this may never be labelled as the other one.
+import {
+  payerBook, payerPayments, payerGaveBack,
+  PAYER_NAMELESS, PAYER_IS_CARD_ONLY, PAYER_IS_GROSS, PAYER_WHOLE_FIGURE_IS_ELSEWHERE,
+  type PayerCharge,
+} from '../../src/lib/payerBook';
+import { reportError } from '../../src/lib/reportError';
+import { isoDate } from '../../src/lib/format';
+import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
+// Whether the money reaches the coach, which `payoutStage` does not ask —
+// supabase/parts/161's two payout columns, read here for the first time.
+import { payoutReach, transferState, payoutHeading, payoutNote, transferNote } from '../../src/lib/payoutReach';
+import { stripePulse, stripePulseLine, stripeEventsLine, STRIPE_PULSE_IS_NOT_YOUR_SALES, STRIPE_PULSE_IS_NOT_A_HEALTH_CHECK, type StripeHeard } from '../../src/lib/stripeHeartbeat';
+import { fetchStripeHeard } from '../../src/ui/stripeHeartbeat';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
 // src/lib/disputes.ts: the deadline is the content, a missing deadline is its
 // own sentence, and none of it is a judgement about whether to fight the case.
@@ -252,14 +271,15 @@ import {
   readValidityDays, validityLine, expiryLine, strandedNote, expiryDayLabel, packWindow,
   VALIDITY_NOT_RETROACTIVE, NO_VALIDITY_IS_FOREVER, EXPIRY_IS_NOT_A_REFUND,
 } from '../../src/lib/packExpiry';
-import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
-import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { packageEditBlocker, isReprice, isRename, repriceNote, RENAME_RELABELS_HISTORY } from '../../src/lib/packageEdit';
+import { fetchMySubscribers, fetchMySubscriptionPayments, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import {
   normaliseCode, promoBlocker, promoState, promoStateLabel, promoUseLine,
   PROMO_IS_A_PERCENTAGE, PROMO_IS_TYPED_AT_CHECKOUT, PROMO_LIVES_AT_STRIPE, PROMO_WITHDRAW_IS_FORWARD_ONLY,
   type PromoCode, type PromoTarget,
 } from '../../src/lib/packagePromo';
 import { isoToday } from '../../src/lib/dayPlan';
+import { useToday } from '../../src/ui/today';
 import {
   refundBlocker, refundableRow, refundableCents, refundAmountBlocker, refundBalanceNote, refundConfirmLine,
   isPartlyRefunded, isFullyRefunded,
@@ -268,6 +288,8 @@ import {
   type Refundable,
 } from '../../src/lib/refunds';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import { currencyFromNote, myCurrencyLine, type CurrencyFrom, type MyCurrencyGap } from '../../src/lib/currencySource';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, currencyDecimals, readMinorAmount, majorFromMinor, feeMismatches, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 // Deliberately no `readNumber` on this screen. It is the house reader for a
 // typed figure and it is right for a load or a distance, where leniency costs
@@ -276,6 +298,9 @@ import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, pack
 // `readMinorAmount`, which takes the decimal comma itself and refuses the
 // ambiguous separator rather than choosing a reading of somebody's price.
 import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
+// Why a credit did not move, in the words every other draw site uses. One copy
+// of those sentences, in the pure module that owns the outcome union.
+import { drawReason } from '../../src/lib/packDraw';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -375,15 +400,44 @@ const billingWords = (p: TrainerPackage): string => {
   return `${price ?? fig(null)}${what}`;
 };
 
+/**
+ * A `timestamptz` as the READER's calendar day, or null when there is none to
+ * read.
+ *
+ * Every timestamp on this screen arrives from PostgREST serialised in UTC, and
+ * the first ten characters of that string are Greenwich's day rather than
+ * anybody else's. `isoDate` is built from the local getters, so this is the day
+ * the coach holding the phone is standing in. See the note at the chargeback
+ * row, which is the one place it decides whether somebody answers in time.
+ *
+ * Null rather than a guess on anything unparseable: the caller has a sentence
+ * for "no date", and inventing today's would be the one outright lie available.
+ */
+function dayOf(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? isoDate(new Date(ms)) : null;
+}
+
 export default function TrainerPayments() {
   const t = useTheme();
   const router = useRouter();
   const [conn, setConn] = useState<ConnectStatus | null>(null);
-  // null is not []. [] is a trainer who sells nothing; null is a price list we
-  // could not read, and telling someone they have no packages when they do is
-  // how a duplicate price list gets built.
-  const [pkgs, setPkgs] = useState<TrainerPackage[] | null>(null);
-  const [pkgErr, setPkgErr] = useState(false);
+  // The other half of `conn`, and the reason this screen used to lie about
+  // somebody's payout account. `fetchMyConnect` answers null for "could not
+  // read" and a zeroed row for "no account" — its own comment says the caller
+  // renders those differently — but `conn` is initialised to null too, so the
+  // value alone cannot tell a failed read from a read that has not happened
+  // from an account that does not exist. The status is held beside it and the
+  // pair is resolved by `payoutStage`.
+  const [connRead, setConnRead] = useState<LoadStatus>('loading');
+  // 'ready' with nothing is not 'error'. Nothing under 'ready' is a trainer who
+  // sells nothing; 'error' is a price list we could not read, and telling
+  // someone they have no packages when they do is how a duplicate price list
+  // gets built. 'partial' is the third — more packages than one read returns,
+  // on which the number beside the heading is a floor and not a total.
+  const [pkgs, setPkgs] = useState<TrainerPackage[]>([]);
+  const [pkgRead, setPkgRead] = useState<LoadStatus>('loading');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
@@ -398,8 +452,24 @@ export default function TrainerPayments() {
   // here means the gym has not set one, and a price is not offered until it
   // has — a package priced in a currency nobody chose is a wrong number in
   // front of every client who ever sees it.
+  //
+  // Read through `fetchMyCurrency`, not `myTenantCurrency`. The gym is still
+  // the authority wherever there is one; the difference is a coach who has NO
+  // gym, whose currency lives on `trainers.currency` (part 940) and who could
+  // otherwise never price a package at all — Add Package was disabled for them
+  // for ever, under a sentence naming a gym owner who does not exist.
+  //
+  // `gap` rather than an error string, because the six causes are six
+  // different sentences and only one of them is anybody's setting: see
+  // src/lib/currencySource.ts.
   const [currency, setCurrency] = useState<string | null>(null);
-  const [currencyErr, setCurrencyErr] = useState<string | null>(null);
+  const [currencyGap, setCurrencyGap] = useState<MyCurrencyGap | null>(null);
+  // Where the code came from, kept beside it. The two sources behave
+  // differently and the coach can only act on one: a gym's currency changes
+  // when its owner changes it, and their own never changes at all. A price
+  // field labelled with three letters and no account of where they came from
+  // is the thing that let one coach be denominated by a gym they had left.
+  const [currencyFrom, setCurrencyFrom] = useState<CurrencyFrom | null>(null);
   // Who is paying this coach every month. 'ready' with nothing means nobody has
   // subscribed; 'error' with nothing means we could not find out, and those are
   // not the same fact about somebody's income.
@@ -460,26 +530,70 @@ export default function TrainerPayments() {
   // amount and a fixed deadline goes past while nobody is told.
   const [disputes, setDisputes] = useState<CoachDispute[]>([]);
   const [disputesStatus, setDisputesStatus] = useState<LoadStatus>('loading');
+  // Whether this app has heard from Stripe at all, and when it last did.
+  //
+  // Every figure in "Taken Through Stripe" below is written by one thing, the
+  // stripe-webhook, so an empty screen has two causes with one appearance:
+  // nobody has bought anything, or the webhook has never been reached and
+  // clients are being charged while this app is never told. Until part 2630
+  // there was no way to tell those apart from inside the product, because
+  // `stripe_webhook_events` — the only evidence either way — was read by
+  // nothing in `app/` or `src/`.
+  const [heard, setHeard] = useState<StripeHeard | null>(null);
+  const [heardStatus, setHeardStatus] = useState<LoadStatus>('loading');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
-    setConn(c); setPkgs(p); setPkgErr(p === null);
+    const [c, p, s, cur, b, r, pr, dp, hb] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), fetchMyCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes(), fetchStripeHeard()]);
+    setConn(c); setConnRead(c === null ? 'error' : 'ready'); setPkgs(p.rows); setPkgRead(p.status);
     setSubs(s.rows); setSubsStatus(s.status);
-    setCurrency(cur.currency); setCurrencyErr(cur.error);
+    setCurrency(cur.currency); setCurrencyGap(cur.gap); setCurrencyFrom(cur.from);
     setBuys(b.rows); setBuysStatus(b.status);
     setPays(r.rows); setPaysStatus(r.status);
     setPromos(pr);
     setDisputes(dp.rows); setDisputesStatus(dp.status);
+    setHeard(hb.heard); setHeardStatus(hb.status);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Eight reads in one call, and they stay in one call. Stripe writes most of
+  // what this screen shows — a subscriber lapsing, a purchase settling, a
+  // DISPUTE opening with a fixed deadline on it — and none of it reaches the
+  // coach's phone by itself. The disputes are the reason this matters most:
+  // an empty list under a failed read is an all-clear made out of our own
+  // failure, on the one question where being wrongly reassured costs the
+  // whole amount while a deadline goes past.
+  const pull = usePullToRefresh(load);
 
-  const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
+  /** What the coach currently sells. Derived once because it was filtered four
+   *  separate times in the markup — the heading count, the empty state, the
+   *  list, and the promo-code targets — and four copies of one predicate is
+   *  four places for the count and the list to stop agreeing. */
+  const activePkgs = pkgs.filter((p) => p.active);
+
+  /**
+   * Which package a discount code takes its percentage off, or null when this
+   * screen cannot say.
+   *
+   * Read from `pkgs` rather than `activePkgs`: a code can perfectly well be
+   * attached to a package the coach has since withdrawn, and answering "not one
+   * of yours" for that would be worse than saying nothing. Null under a read
+   * that did not come back whole, and null for a code with no package on it —
+   * the caller says which silence it is rather than printing a blank.
+   */
+  const promoPkgLine = (p: PromoCode): string | null => {
+    if (!p.packageId) return null;
+    if (pkgRead !== 'ready') return null;
+    const found = pkgs.find((k) => k.id === p.packageId);
+    if (!found) return null;
+    return found.active ? `On ${found.name}` : `On ${found.name}, which you have withdrawn`;
+  };
+
+  const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts Setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
   const addPkg = async () => {
     const nm = name.trim();
-    if (!nm) { Alert.alert('Name it', 'Give the package a name.'); return; }
+    if (!nm) { Alert.alert('Name It', 'Give the package a name.'); return; }
     // The currency check comes BEFORE the price, because without one the price
     // cannot be interpreted at all — a yen has no minor unit and a dinar has a
     // thousand — and because "your gym has not set a currency" is a different
@@ -489,9 +603,11 @@ export default function TrainerPayments() {
     // Nothing is priced in a currency nobody chose. There is no sensible
     // default in a white-label product — see tenants.currency, part 99.
     if (!currency) {
-      Alert.alert('No currency set', currencyErr
-        ? 'We could not read what your gym charges in, so a price would have no unit. Try again in a moment.'
-        : 'Your gym has not set a currency yet, so there is nothing to price this in. An owner sets it in the gym settings.');
+      // One sentence per cause, and the causes are not interchangeable: a read
+      // that failed is fixed by trying again, a gym with no currency is fixed
+      // by its owner, and a coach with no gym fixes it themselves in Settings.
+      // All three used to arrive as the middle one.
+      Alert.alert('No Currency Set', myCurrencyLine(currencyGap ?? 'unreadable', 'there is nothing to price this in'));
       return;
     }
     // A recurring package is never also a session pack — the constraint in part
@@ -515,9 +631,9 @@ export default function TrainerPayments() {
     // REFUSES the ambiguous one with a sentence naming the fix, which is the
     // whole reason it exists — so nothing is parsed before it any more.
     const read = readMinorAmount(price, currency);
-    if (!read.ok) { Alert.alert('Set a price', read.reason); return; }
+    if (!read.ok) { Alert.alert('Set a Price', read.reason); return; }
     const cents = read.minorUnits;
-    if (!(cents > 0)) { Alert.alert('Set a price', 'Enter a price greater than 0. A package that costs nothing is not one clients can buy.'); return; }
+    if (!(cents > 0)) { Alert.alert('Set a Price', 'Enter a price greater than 0. A package that costs nothing is not one clients can buy.'); return; }
     // The last thing before a recurring price goes on sale is the coach reading
     // it back in the currency it will actually be charged in. A subscription
     // priced by accident in the wrong currency is not one wrong sale, it is a
@@ -527,19 +643,19 @@ export default function TrainerPayments() {
     // days the coach actually meant. `readValidityDays` is the one place that
     // reading happens, and it is asserted in src/lib/packExpiry.test.ts.
     const typedValidity = readValidityDays(interval || !(sess && sess > 0) ? '' : validity);
-    if (!typedValidity.ok) { Alert.alert('How long is it good for?', typedValidity.reason); return; }
-    const confirmLine = `${pkgPriceLine(cents, currency, interval) ?? fig(null)} — ${nm}`;
+    if (!typedValidity.ok) { Alert.alert('How Long Is It Good For?', typedValidity.reason); return; }
+    const confirmLine = `${pkgPriceLine(cents, currency, interval) ?? fig(null)} · ${nm}`;
     const go = async () => {
       setBusy(true);
       const r = await createPackage({ name: nm, price_cents: cents, sessions: sess && sess > 0 ? sess : null, currency, billing_interval: interval, validity_days: typedValidity.days });
       setBusy(false);
-      if (!r.ok) { Alert.alert('Could not save', r.error || 'Try again.'); return; }
+      if (!r.ok) { Alert.alert('Could Not Save', r.error || 'Try again.'); return; }
       setName(''); setPrice(''); setSessions(''); setInterval(null); setValidity(''); load();
     };
     if (!interval) { go(); return; }
-    Alert.alert('Charge this every ' + (interval === 'month' ? 'month' : 'year') + '?',
+    Alert.alert('Charge This Every ' + (interval === 'month' ? 'Month' : 'Year') + '?',
       `${confirmLine}\n\nClients who subscribe are charged again every ${interval === 'month' ? 'month' : 'year'} until they cancel.`,
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'Put On Sale', onPress: go }]);
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Put on Sale', onPress: go }]);
   };
 
   /**
@@ -580,13 +696,13 @@ export default function TrainerPayments() {
       // failure because whatever Stripe does think is truer than what is on
       // screen, on success because the edge function has already mirrored
       // Stripe's answer into the row this list reads.
-      if (!r.ok) Alert.alert(to === 'resume' ? 'Not restarted' : 'Not stopped',
+      if (!r.ok) Alert.alert(to === 'resume' ? 'Not Restarted' : 'Not Stopped',
         (r.error || 'The change did not go through.') + (to === 'resume' ? '\n\nThis subscription is still set to end.' : '\n\nThis subscription is still charging.'));
       load();
     };
     if (to === 'resume') {
-      Alert.alert('Let this keep running?',
-        `${who}${price ? ` — ${price}` : ''}\n\nIt was set to end${ends ? ` on ${ends}` : ''}. Restarting it means they are charged again on that date, as normal.`,
+      Alert.alert('Let This Keep Running?',
+        `${who}${price ? ` · ${price}` : ''}\n\nIt was set to end${ends ? ` on ${ends}` : ''}. Restarting it means they are charged again on that date, as normal.`,
         [{ text: 'Leave It', style: 'cancel' }, { text: 'Keep Running', onPress: go }]);
       return;
     }
@@ -596,8 +712,8 @@ export default function TrainerPayments() {
     // it returns nothing, so `END_NOW_TAKES_THE_REST` is the sentence the coach
     // reads before they confirm rather than the one they work out afterwards.
     if (to === 'end_now') {
-      Alert.alert('End it today?',
-        `${who}${price ? ` — ${price}` : ''}\n\n${END_NOW_TAKES_THE_REST}\n\n${REFUND_IS_FINAL.replace('A refund cannot be taken back.', 'This cannot be taken back either.')}`,
+      Alert.alert('End It Today?',
+        `${who}${price ? ` · ${price}` : ''}\n\n${END_NOW_TAKES_THE_REST}\n\n${REFUND_IS_FINAL.replace('A refund cannot be taken back.', 'This cannot be taken back either.')}`,
         [{ text: 'Leave It', style: 'cancel' }, { text: 'End It Today', style: 'destructive', onPress: go }]);
       return;
     }
@@ -605,12 +721,12 @@ export default function TrainerPayments() {
     // rather than beside it. A coach reaching for "stop" nearly always means
     // the end of the period, and a screen that put the irreversible option next
     // to the reversible one at the same weight would get it tapped by mistake.
-    Alert.alert('Stop this subscription?',
-      `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.\n\nIf they have asked to be stopped TODAY, the second option ends it now — which takes the rest of the period off them and still refunds nothing.`,
+    Alert.alert('Stop This Subscription?',
+      `${who}${price ? ` · ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.\n\nIf they have asked to be stopped TODAY, the second option ends it now. That takes the rest of the period off them and still refunds nothing.`,
       [
         { text: 'Leave It', style: 'cancel' },
         { text: 'End It Today', style: 'destructive', onPress: () => switchCancel(s, 'end_now') },
-        { text: 'Stop At Period End', style: 'destructive', onPress: go },
+        { text: 'Stop at Period End', style: 'destructive', onPress: go },
       ]);
   };
 
@@ -701,15 +817,14 @@ export default function TrainerPayments() {
    * question. `pkgMoney` is not involved — this is the raw minor-unit figure
    * the arithmetic runs on.
    */
-  const promoTargets: PromoTarget[] = (pkgs ?? [])
-    .filter((p) => p.active)
+  const promoTargets: PromoTarget[] = activePkgs
     .map((p) => ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active, priceCents: p.price_cents }));
 
   const promoTarget = promoTargets.find((p) => p.id === promoPkg) ?? null;
   const promoProblems = promoBlocker(promoCode, Math.trunc(Number(promoPct)), promoTarget);
 
   const addPromo = async () => {
-    if (promoProblems.length) { Alert.alert('Not yet', promoProblems.join('\n\n')); return; }
+    if (promoProblems.length) { Alert.alert('Not Yet', promoProblems.join('\n\n')); return; }
     setPromoBusy(true);
     const r = await createPromoCode({
       code: normaliseCode(promoCode),
@@ -717,16 +832,22 @@ export default function TrainerPayments() {
       packageId: promoTarget!.id,
     });
     setPromoBusy(false);
-    if (!r.ok) { Alert.alert('That code was not created', r.error || 'Nothing was created.'); return; }
+    if (!r.ok) { Alert.alert('That Code Was Not Created', r.error || 'Nothing was created.'); return; }
     setPromoCode(''); setPromoPct(''); setPromoPkg(null);
     load();
-    Alert.alert('Code created', `${r.promo?.code ?? 'It'} is live. ${PROMO_IS_TYPED_AT_CHECKOUT}`);
+    Alert.alert('Code Created', `${r.promo?.code ?? 'It'} is live. ${PROMO_IS_TYPED_AT_CHECKOUT}`);
   };
 
   const withdrawPromo = (p: PromoCode) => {
     Alert.alert(
       `Withdraw ${p.code}?`,
-      `${PROMO_WITHDRAW_IS_FORWARD_ONLY}\n\n${promoUseLine(p)}`,
+      // WHICH PACKAGE. A coach running "NEWYEAR 50% off" on a £300 program
+      // and "SUMMER 10% off" on a £60 pack was shown a code, a percentage and
+      // nothing else — here and in the list — so withdrawing the wrong one
+      // leaves the expensive offer live and stops the cheap one, and nothing
+      // on the confirmation could have told them apart. `packageId` has been
+      // on `PromoCode` since the feature was written and no screen read it.
+      `${promoPkgLine(p) ?? 'Which package this applies to could not be read, so check it at Stripe before withdrawing.'}\n\n${PROMO_WITHDRAW_IS_FORWARD_ONLY}\n\n${promoUseLine(p)}`,
       [
         { text: 'Leave It', style: 'cancel' },
         {
@@ -740,7 +861,7 @@ export default function TrainerPayments() {
               // `ok: false` means it is STILL LIVE, and a screen that redrew it
               // as withdrawn would leave a coach handing out an offer they
               // believe they have stopped.
-              if (!r.ok) Alert.alert('Still live', r.error || 'It was not withdrawn, so it still works.');
+              if (!r.ok) Alert.alert('Still Live', r.error || 'It was not withdrawn, so it still works.');
               load();
             })();
           },
@@ -762,7 +883,7 @@ export default function TrainerPayments() {
     if (!isPartlyRefunded(r) && !isFullyRefunded(r)) return null;
     const back = minorMoney(r.refundedCents, target.rule.currency);
     if (isFullyRefunded(r)) {
-      return back ? `Refunded in full — ${back} went back` : 'Refunded in full';
+      return back ? `Refunded in full: ${back} went back` : 'Refunded in full';
     }
     const left = minorMoney(refundableCents(r), target.rule.currency);
     return back && left ? `${back} refunded, ${left} of it still stands` : 'Partly refunded';
@@ -773,7 +894,7 @@ export default function TrainerPayments() {
     // convenience; connect-refund runs the same one from the same module, so
     // the two cannot say different things.
     const blocked = refundBlocker(target.rule);
-    if (blocked) { Alert.alert('Nothing to refund', blocked); return; }
+    if (blocked) { Alert.alert('Nothing to Refund', blocked); return; }
     setRefunding(target);
     setRefundWhole(true);
     setRefundAmt('');
@@ -798,7 +919,22 @@ export default function TrainerPayments() {
       : await refundPurchase(target.id, cents);
     setRefundBusy(null);
     if (!r.ok) {
-      Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
+      // Two failures, and they are opposites. A REFUSAL happened before Stripe
+      // was asked, or is Stripe's own rejection, and for those "nothing has
+      // changed" is true and is the reassurance the coach needs. An
+      // UNCONFIRMED call reached the network and lost the answer, so the money
+      // may already be gone — and this branch used to append the reassurance
+      // to that one too, under the title "No refund was made", flatly
+      // contradicting the sentence `callRefund` had just written. A coach who
+      // reads "they have not been refunded" refunds again, and the client is
+      // credited twice out of the coach's own Stripe balance.
+      if (r.unconfirmed) {
+        Alert.alert('This Refund Could Not Be Confirmed',
+          (r.error || 'The refund was not confirmed.')
+          + `\n\nDo NOT send it again from here until you have looked. Your Stripe dashboard is the record of whether the money moved, and this ${thing} still shows the amount it showed before.`);
+      } else {
+        Alert.alert('No Refund Was Made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
+      }
       load();
       return;
     }
@@ -806,13 +942,19 @@ export default function TrainerPayments() {
     // not write it down. Saying "it failed" would be false and the coach's
     // next act would be to refund it a second time.
     if (r.mirrored === false) {
-      Alert.alert('Refunded, and not recorded here',
-        `The money has gone back to them. This app could not write the refund onto the ${thing}, so the figures on this screen are still showing the full amount. Do NOT refund it again — check your Stripe dashboard, which is the record of what actually moved.`);
+      Alert.alert('Refunded, and Not Recorded Here',
+        `The money has gone back to them. This app could not write the refund onto the ${thing}, so the figures on this screen are still showing the full amount. Do NOT refund it again. Check your Stripe dashboard, which is the record of what actually moved.`);
     } else {
       // Stripe's own figure, not the one asked for. They are the same today,
       // and a screen that echoed the request back would be reporting an
       // intention as a fact about somebody's card.
-      Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? 0, r.currency ?? target.rule.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
+      // `?? null`, not `?? 0`. `refundedCents` is `number | null` precisely so a
+      // refund whose figure did not come back can say so, and settling it here
+      // would put "0.00 has gone back to them" under the word Refunded — which
+      // is the one sentence a coach would read out to the client. `minorMoney`
+      // answers null for a null amount exactly as it does for a missing
+      // currency, and the fallback below names the amount without inventing it.
+      Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? null, r.currency ?? target.rule.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
     }
     load();
   };
@@ -834,15 +976,100 @@ export default function TrainerPayments() {
     // Whose balance it leaves, read off THIS CHARGE rather than off the coach's
     // current setting: a coach who has moved to direct charges still has older
     // sales and older renewals on the platform, and the two sentences are not
-    // interchangeable. Null when the row does not say, and nothing is said in
-    // that case.
-    const balance = refundBalanceNote(accountForObject({ stripe_account_id: target.account }) ? 'direct' : 'destination');
+    // interchangeable.
+    //
+    // ── The third state, which this used to spend ────────────────────────
+    //
+    // It was `accountForObject(…) ? 'direct' : 'destination'`, so an absent
+    // account was read as a destination charge and the coach was told, in the
+    // confirm, that "the refund leaves Repple's balance and your next payout is
+    // smaller by that amount". For a row written before part 161 that is true.
+    // For a STANDARD-account coach whose row simply carries no account — the
+    // column is nullable and nothing backfills it — it is the opposite of what
+    // happens: Stripe debits THEIR balance, and if it is short it comes out of
+    // their bank. Told the other sentence, they budget for a payout that is
+    // about to be short by the whole amount rather than by nothing.
+    //
+    // So an absent account is only read as the platform where the coach's own
+    // account is one that could only ever have charged that way. A legacy
+    // Express account sells under destination charges and nothing else, so a
+    // platform charge on one is certain. On a standard account, or where Stripe
+    // has not said what the account is, NOTHING is said — which is
+    // `refundBalanceNote`'s own null branch, the rule the rest of this screen
+    // already keeps for a null `account_type`, and the honest answer.
+    const onAccount = accountForObject({ stripe_account_id: target.account });
+    const balance = refundBalanceNote(
+      onAccount ? 'direct' : accountTypeOf(conn) === 'express' ? 'destination' : null,
+    );
     Alert.alert(
-      'Give this money back?',
-      `${who}${money ? ` — ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
+      'Give This Money Back?',
+      `${who}${money ? ` · ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
       [
         { text: 'Leave It', style: 'cancel' },
         { text: 'Refund It', style: 'destructive', onPress: () => { setRefunding(null); void sendRefund(target, cents); } },
+      ],
+    );
+  };
+
+  // ── the credit a refund does not give back ───────────────────────────────
+  //
+  // `REFUND_DOES_NOT` has told the coach for months that a refund "does not put
+  // a session credit back on a pack", and there was nowhere in the product to
+  // act on it. This is that act, and it is deliberately NOT wired into the
+  // refund: the two are separate decisions, and a coach may want either one
+  // without the other.
+  //
+  // One row at a time, keyed by purchase id, so two taps on two clients cannot
+  // both claim the spinner and so a slow write on one row does not grey out the
+  // rest of the list.
+  const [creditBusy, setCreditBusy] = useState<string | null>(null);
+
+  /**
+   * Ask first, then move it, then say what the DATABASE said happened.
+   *
+   * The reported balance is the one that came back from the write and never one
+   * computed here — `adjustPackCredit` refuses to call anything a success that
+   * did not come back as exactly one row naming a known outcome, because
+   * PostgREST answers an UPDATE matching zero rows with no error at all. A
+   * credit the coach believes was returned and was not is one the client has
+   * paid for twice.
+   */
+  const moveCredit = async (b: CoachPurchase, delta: 1 | -1) => {
+    if (creditBusy) return;
+    setCreditBusy(b.id);
+    const r = await adjustPackCredit(b.id, delta);
+    setCreditBusy(null);
+    if (!r.ok) {
+      const why = drawReason({ outcome: r.outcome, remaining: r.remaining, purchaseId: b.id, total: null });
+      Alert.alert(
+        'Nothing Was Changed',
+        (why ? `That credit did not move: ${why}.` : 'That credit did not move.')
+        + '\n\nTheir balance is exactly what it was. Nothing has been refunded and nothing has been charged.',
+      );
+      load();
+      return;
+    }
+    Alert.alert(
+      delta === 1 ? 'Credit Given Back' : 'Credit Taken Off',
+      `${b.client_name || 'They'} now ${r.remaining == null ? 'have a different balance on that pack' : `${r.remaining === 1 ? 'has' : 'have'} ${r.remaining} left on that pack`}. Nobody has been told. Their own screen is where they will see it, and no money has moved either way.`,
+    );
+    load();
+  };
+
+  /** The last thing between a tap and somebody's balance. Both directions get
+   *  one, because both change what a client can book and neither is undone by
+   *  tapping the other — a credit given back and then taken off again is two
+   *  writes on somebody's account, not a toggle. */
+  const confirmCredit = (b: CoachPurchase, delta: 1 | -1) => {
+    const who = b.client_name || 'this client';
+    Alert.alert(
+      delta === 1 ? 'Give a Session Credit Back?' : 'Take a Session Credit Off?',
+      delta === 1
+        ? `One credit goes back onto ${who}’s pack, so they can book one more session against it.\n\nNO MONEY MOVES. This is only the balance on their pack. If you also mean to give money back, refund the sale separately.\n\nThey are not told; their own screen is where they will see it.`
+        : `One credit comes off ${who}’s pack, so they can book one fewer session against it.\n\nNO MONEY MOVES, and nothing is charged. Use this where a session was delivered and never marked.\n\nThey are not told; their own screen is where they will see it.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: delta === 1 ? 'Give It Back' : 'Take It Off', onPress: () => { void moveCredit(b, delta); } },
       ],
     );
   };
@@ -871,18 +1098,60 @@ export default function TrainerPayments() {
   const [editErr, setEditErr] = useState<string | null>(null);
   const [subCount, setSubCount] = useState<number | null>(null);
 
+  /* Whose answer is allowed to land.
+   *
+   * `void countActiveSubscribers(p.id).then(setSubCount)` had no request
+   * identity on it, and these reads do not come back in the order they went
+   * out. Open package A's sheet, close it, open B: A's answer arrives second
+   * and sets the count for B. `repriceNote(0)` then states "Nobody is currently
+   * subscribed at the old price" over a package with five subscribers on it —
+   * in the one warning on this screen that exists to be read BEFORE a coach
+   * changes what people are charged, and whose whole point (see the header of
+   * src/lib/packageEdit.ts) is that a reprice must never happen quietly.
+   *
+   * Same idiom as `wanted` in src/ui/clientAttendance.ts and
+   * app/(trainer)/class-checkin.tsx. Dropping the stale answer is the whole of
+   * it: `subCount` stays null, and null is already its own sentence — "whether
+   * anybody is subscribed at the old price could not be read" — which is the
+   * honest thing to say about a package nothing has answered for yet. */
+  const wantedPkg = useRef<string | null>(null);
+
   const openEdit = (p: TrainerPackage) => {
+    // Set before the read starts, so an answer for the previously opened
+    // package that is still in flight fails its check on arrival.
+    wantedPkg.current = p.id;
     setEditing(p);
     setEditName(p.name);
     // Shown in MAJOR units, which is what the coach thinks in and what the Add
     // form above already takes. The conversion happens once, on save.
+    //
     // Divided by the currency's OWN factor, not by a hundred. Reading a KWD
     // price back as `price_cents / 100` showed the coach ten times what they
     // had set, which they would then correct — writing the error in properly.
-    setEditPrice(majorFromMinor(p.price_cents, currency));
+    //
+    // And it is THIS PACKAGE'S currency, not the gym's. `currency` above is
+    // `tenants.currency`, which is nullable on purpose (part 99) and is NULL
+    // for most live tenants: `majorFromMinor` answers '' for a currency it was
+    // not told, so the box opened EMPTY on a package that has a perfectly good
+    // price, and `readMinorAmount` then refused to save whatever was typed into
+    // it. A coach could not correct a price on a gym that had never set a
+    // currency. It is also wrong the other way round, and worse: a coach
+    // selling in sterling inside a gym denominated in dirhams had their
+    // sterling price read back through the dirham's decimal places, which is
+    // the same figure and a different amount of money. The package's own
+    // currency is the one it is charged in and it is the only one that can
+    // interpret its own price — which is exactly why `packageEdit.ts` refuses
+    // to let the currency itself be edited.
+    setEditPrice(majorFromMinor(p.price_cents, p.currency));
     setEditErr(null);
     setSubCount(null);
-    void countActiveSubscribers(p.id).then(setSubCount);
+    void countActiveSubscribers(p.id).then(
+      (n) => { if (wantedPkg.current === p.id) setSubCount(n); },
+      // `countActiveSubscribers` answers null rather than throwing on every
+      // failure it knows about, but a rejection here would otherwise be an
+      // unhandled one and the sheet would sit on null with nothing logged.
+      (e) => { if (wantedPkg.current === p.id) setSubCount(null); reportError('payments.subCount', e); },
+    );
   };
 
   /** The patch as typed, or null when the price box does not hold a number.
@@ -896,7 +1165,11 @@ export default function TrainerPayments() {
     // major-unit figure is the only rounding in this path, and packageEdit
     // refuses a fractional minor unit rather than rounding a second time — two
     // roundings on one price is how 74.995 becomes a number nobody typed.
-    const readEdit = readMinorAmount(editPrice, currency);
+    //
+    // Read back through the PACKAGE's own currency, matching `openEdit` above.
+    // The reader and the writer have to agree about how many decimal places
+    // this price has, and the gym's currency is not the one it is charged in.
+    const readEdit = readMinorAmount(editPrice, editing.currency);
     if (!readEdit.ok) return null;
     const cents = readEdit.minorUnits;
     const patch: { name?: string; price_cents?: number } = {};
@@ -919,16 +1192,43 @@ export default function TrainerPayments() {
     load();
   };
 
-  const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => {
+  const remove = (id: string) => Alert.alert('Remove Package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => {
     // deactivatePackage used to return void and swallow the error, so this
     // refreshed and said nothing — a package the trainer believes is withdrawn
     // stays on sale until a client buys it.
     const ok = await deactivatePackage(id);
-    if (!ok) { Alert.alert('Not removed', 'That package is still on sale — the change did not save. Try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Removed', 'That package is still on sale. The change did not save. Try again in a moment.'); return; }
     load();
   } }]);
 
-  const active = conn?.charges_enabled;
+  /**
+   * Whether this coach can be paid — and, separately, whether we know.
+   *
+   * Was `const active = conn?.charges_enabled;`, and everything below branched
+   * on `!active`. That is true of a live account whose read failed, and of one
+   * that has not been read yet, so a coach in a lift was shown "Set Up Payouts"
+   * with a button under it that starts a SECOND Stripe onboarding — a duplicate
+   * account, with their passport and their bank details in it, that nobody can
+   * pay them through. src/lib/payoutAccount.ts keeps the five states apart.
+   */
+  const stage = payoutStage(conn, connRead);
+  const active = stage === 'active';
+
+  /**
+   * Whether the money actually reaches them, which `stage` does not ask.
+   *
+   * `payoutStage` is about `charges_enabled`. These two are about the two hops
+   * after it — the account to their bank, and Repple to the account — and
+   * neither had ever been read here. Both resolve to 'unrecorded' rather than
+   * to a No when Stripe has not said, which is the state every row written
+   * before supabase/parts/161 is in. See src/lib/payoutReach.ts.
+   *
+   * Computed unconditionally and rendered only inside the 'active' arm: the
+   * other stages have their own sentence about onboarding, and a coach with no
+   * account at all is not owed a paragraph about payouts from one.
+   */
+  const reach = payoutReach(conn);
+  const transfers = transferState(conn);
 
   /**
    * Whose money this is, in one word, read off Stripe rather than assumed.
@@ -952,8 +1252,24 @@ export default function TrainerPayments() {
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   /** One row of mutually exclusive choices, drawn from the same tokens as the
-   *  inputs beside it. Local rather than in the kit because it is one form. */
-  const Pick = ({ label, options, chosen, onPick }: {
+   *  inputs beside it. Local rather than in the kit because it is one form.
+   *
+   *  A PLAIN FUNCTION, called as `{pick({…})}` and not rendered as `<Pick …/>`.
+   *  Declared in this body, a capitalised component is a new function object on
+   *  every render, so React sees a different element TYPE and unmounts the row
+   *  instead of reconciling it. This screen is ~3,300 lines and re-renders on
+   *  every figure that lands, so each of the three pickers was being destroyed
+   *  and rebuilt repeatedly — including while somebody was mid-way through the
+   *  promo, package and refund forms they sit in.
+   *  This is the ONE of the five on the ratchet that carries accessibility
+   *  attributes: the Pressables below are `accessibilityRole="button"` with an
+   *  `accessibilityState` and a composed label, so a remount moved the screen
+   *  reader's cursor off the option somebody had just selected. Those three
+   *  attributes are unchanged, line for line, below. It stays in this body
+   *  rather than at module scope because it closes over `t`. The `key` on the
+   *  `options.map` is untouched — it was already on the returned Pressable
+   *  inside this function, and nothing maps over `pick` itself. */
+  const pick = ({ label, options, chosen, onPick }: {
     label: string; options: { key: string | null; label: string }[]; chosen: string | null; onPick: (k: any) => void;
   }) => (
     <View>
@@ -968,7 +1284,7 @@ export default function TrainerPayments() {
                 paddingHorizontal: sp.md, paddingVertical: 9, borderRadius: radius.pill,
                 backgroundColor: on ? t.brand : t.surface2,
               }}>
-              <Text style={{ ...ty.caption, fontWeight: '600', color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: on ? t.bg : t.ink2 }}>{o.label}</Text>
             </Pressable>
           );
         })}
@@ -1022,6 +1338,46 @@ export default function TrainerPayments() {
   const renewMonth = earnedWhole ? sumTaken(since(renewals, mStart)) : null;
   const takenMonth = oneOffMonth && renewMonth ? combineTaken(oneOffMonth, renewMonth) : null;
 
+  // ── what went back out, said beside the gross and never taken off it ──────
+  //
+  // The block below prints "This is the GROSS" and then names the two things
+  // that come out of it: Stripe's processing fee and the platform fee, neither
+  // of which this app is told. It named a third thing nowhere, and this app IS
+  // told about that one — `refunded_cents` is on both tables, written by
+  // connect-refund and by the `charge.refunded` branch of the webhook, and the
+  // Refund button three sections down is what puts it there.
+  //
+  // So a coach who refunded a pack in full read their whole takings back at the
+  // amount they had given away, with no cue anywhere above the fold. The per-row
+  // "Refunded in full" line existed, and it is a row in a list somebody has to
+  // scroll to and add up in their head — which is precisely the sum this screen
+  // exists to do for them.
+  //
+  // NOT SUBTRACTED, and that is deliberate rather than timid. A refund is its
+  // own recorded fact on its own day: `refunded_cents` says how much has gone
+  // back and says nothing about WHEN, so netting it into "This month" would date
+  // it to the sale, and netting it into "All time" alone would leave the two
+  // figures built on different rules. The same argument the Statement of Record
+  // makes about payouts — "taken 4,800, received 4,281" is two facts and not a
+  // subtraction — and the same one the pack row already makes in its own words
+  // ("stated BESIDE the sale rather than taken off the amount above it").
+  //
+  // One currency at a time, because `sumTaken` is the only summer in this file
+  // and it pots by currency: a refund in dirhams and a refund in sterling do not
+  // add, here any more than anywhere else. Rows with nothing given back are
+  // filtered out first, so `unpriced` stays about amounts Stripe never stated
+  // and `unlabelled` about the currency that was only ever on a deleted package.
+  const givenBack = earnedWhole
+    ? sumTaken([
+      ...paid
+        .filter((b) => Number(b.refunded_cents ?? 0) > 0)
+        .map((b): TakenRow => ({ amount_cents: Number(b.refunded_cents), currency: b.currency, created_at: b.created_at })),
+      ...pays
+        .filter((p) => Number(p.refunded_cents ?? 0) > 0)
+        .map((p): TakenRow => ({ amount_cents: Number(p.refunded_cents), currency: p.currency, created_at: p.paid_at ?? '' })),
+    ])
+    : null;
+
   // ── the one figure in here that came from a PREDICTION ────────────────────
   //
   // A discount code on a one-off is the only place this app names a number
@@ -1038,7 +1394,15 @@ export default function TrainerPayments() {
   // this. Under 'error' there are no rows to count and nothing is claimed —
   // which is the house rule, and here it means "we could not check", never
   // "everything reconciles".
-  const feeGaps = buysStatus === 'error' ? null : feeMismatches(buys);
+  // `buysWhole`, not `buysStatus !== 'error'`. This is a COUNT and a SUM over
+  // `buys`, and under 'partial' that is a count over a prefix — "4 sales had
+  // Repple's share worked out wrongly" when there are eleven. It renders today
+  // only inside the `earnedStatus === 'ready'` arm, so nothing is wrong on the
+  // screen; the gate is here rather than left to that arm because a moved JSX
+  // block is all it takes, and `check:whole` cannot see a `=== 'error'`
+  // ternary. Under 'partial' nothing is claimed, which is the house rule:
+  // "we could not check" is never "everything reconciles".
+  const feeGaps = buysWhole ? feeMismatches(buys) : null;
 
   // A standing price, not a takings. Renewals ARE now recorded as money and are
   // in the figures above; this is a different statement — what the live
@@ -1046,7 +1410,18 @@ export default function TrainerPayments() {
   const recurring = subsStatus === 'ready' ? sumRecurring(liveSubs) : null;
   // The packs a coach has to know about: sold, and how much of each is left.
   // Listable under 'partial' (the rows are real); not countable.
-  const packs = buys.filter((b) => b.sessions_total != null);
+  //
+  // PAID, and that guard was missing. `client_purchases` carries a row from the
+  // moment a Checkout Session is created, and `status` is what says whether the
+  // money arrived — `paid` above filters on it for every takings figure on this
+  // screen, and `isLivePack` in src/lib/packDraw.ts filters on it for the
+  // client's own balance. This list did not, so an abandoned checkout — a
+  // client who opened the payment page and closed it — appeared here as a pack
+  // sold, with a full balance of credits on it, in a list a coach reads to find
+  // out who has sessions left. Every figure derived from it was wrong the same
+  // way: `stranded` counted credits nobody bought, and `runOut` told the coach
+  // to go and sell to somebody who had never paid in the first place.
+  const packs = buys.filter((b) => b.status === 'paid' && b.sessions_total != null);
   // Used up and RAN OUT OF TIME are the same two numbers by the time part 612's
   // nightly pass has been over a pack — it reduces `sessions_total` to
   // `sessions_used` so that every draw site in the database stops at it — and
@@ -1056,7 +1431,17 @@ export default function TrainerPayments() {
   // Fixed for the render. Every expiry sentence below is about a day rather
   // than an instant, and a bound recomputed per row would let two lines on the
   // same screen disagree about what today is across a midnight.
-  const todayKey = isoToday(new Date());
+  // `useToday()`, not `isoToday(new Date())`. This screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once and is never
+  // torn down, and this day is the second argument to every expiry judgement
+  // below — `packWindow`, `expiryLine`, `strandedNote`, `daysLeftOn`. A bare
+  // read here is only as fresh as the last render, and a screen nobody has
+  // touched does not render: a pack whose last day was yesterday would go on
+  // reading as live. Same failure as the one `check:frozen-day` was written
+  // for on app/(trainer)/credentials.tsx, one dependency array away from where
+  // that gate can see it. `useToday` re-reads at local midnight and on
+  // foreground and compares before it sets, so an open screen costs nothing.
+  const todayKey = useToday();
   // Cases that are still open, which is what the count beside the heading is
   // about. A closed one stays in the list — a coach looking for the money that
   // went missing last month has to be able to find it — but it is not a thing
@@ -1075,18 +1460,94 @@ export default function TrainerPayments() {
   // within each group is unchanged (newest first, as fetchClientPurchases
   // returns them), so nothing else about the list moves.
   const packsShown = [...packs].sort((a, b) => Number(packRunOut(b)) - Number(packRunOut(a)));
+  // ── the sales that were in every figure and on no list ────────────────────
+  //
+  // `packs` is `sessions_total != null`, and the other half of what this screen
+  // sells is a ONE-OFF MEMBERSHIP: `billingWords` above prints "· one-off
+  // membership" for exactly that package, `addPkg` creates one whenever no
+  // interval and no session count is given, and the stripe-webhook writes it to
+  // `client_purchases` with a null `sessions_total` because there are no credits
+  // on it to count. The webhook's own guard — `meta.package_id && sess.mode !==
+  // 'subscription'` — is what keeps a subscription out of this table, so these
+  // are one-off sales and nothing else: there is no double count with Renewals
+  // Paid below.
+  //
+  // Every one of them was inside `paid`, so it was inside "Taken Through
+  // Stripe" — a coach's headline takings — and it appeared in no list anywhere
+  // on this screen. Three things followed from that, and the third is the bad
+  // one:
+  //
+  //   · The coach could not see who had bought a membership, or when.
+  //   · A membership already refunded went on reading at its full amount in the
+  //     takings, with nothing on the screen saying any of it had gone back —
+  //     `refundedLine` is drawn per row and these had no row.
+  //   · THE REFUND CONTROL WAS UNREACHABLE. `openRefund` is offered on a pack
+  //     row and on a renewal row and nowhere else, so a coach who had to give a
+  //     membership back had no way to do it from this app at all. `refundBlocker`
+  //     would have allowed it; there was simply no button, which is the quietest
+  //     kind of dead end — nothing is disabled and nothing explains itself.
+  //
+  // Listable under 'partial' for the same reason `packs` is: the rows that came
+  // back are real sales. Nothing is counted off them — see the heading note.
+  const memberships = buys.filter((b) => b.status === 'paid' && b.sessions_total == null);
+
+  // ── which clients the figure at the top is made of ────────────────────────
+  //
+  // "Taken Through Stripe" says AED 18,400 and says nothing about whose. Both
+  // halves of it are already in memory here and both carry `client_name`, so
+  // the breakdown is a grouping rather than a read — there is no new query on
+  // this screen for it, which is also why it can never be the WHOLE figure:
+  // `coach_receipts` is not read here.
+  //
+  // `earnedStatus`, the same gate the takings figure uses, and for the same
+  // reason doubled: this spans the two tables, so it is only as complete as the
+  // worse of them, and a per-client breakdown over a truncated read is the one
+  // shape of this that looks entirely correct while being wrong about a person
+  // by name. `payerBook` returns null under everything but 'ready' and the
+  // section below draws the same three arms every section beside it draws.
+  //
+  // GROSS and NOT NETTED, following the doctrine two sections up: a refund has
+  // no date on it, so it is printed beside the client's figure and taken off
+  // nothing. That is the opposite of what `clientValue` does on the Money
+  // screen, deliberately — that figure is all-time by construction and this one
+  // sits under a heading that also prints a month — and
+  // `PAYER_IS_GROSS` says which is which on the screen.
+  const payers = payerBook(
+    [
+      ...paid.map((b): PayerCharge => ({
+        client_id: b.client_id, client_name: b.client_name,
+        amount_cents: b.amount_cents, currency: b.currency,
+        refunded_cents: b.refunded_cents, kind: 'one-off',
+      })),
+      ...pays.map((p): PayerCharge => ({
+        client_id: p.client_id, client_name: p.client_name ?? null,
+        amount_cents: p.amount_cents, currency: p.currency,
+        refunded_cents: p.refunded_cents, kind: 'renewal',
+      })),
+    ],
+    earnedStatus,
+  );
 
   /** A row of money pots, one per currency. Never one figure: AED 600 and
    *  GBP 90 do not add to 690 of anything, and a white-label product sees both
-   *  on the same coach's book the first time a visitor buys a session. */
-  const Pots = ({ label, pots }: { label: string; pots: Pot[] }) => (
+   *  on the same coach's book the first time a visitor buys a session.
+   *
+   *  A plain function called as `{potsRow(…)}`, for the reason on `pick` above —
+   *  and in the same dialect as `potLine` immediately below it, which was
+   *  already written this way. Nothing here is labelled and nothing here is a
+   *  `TextInput`, so no caret and no screen-reader cursor was ever at risk in
+   *  this one: what the conversion saves is the whole totals block being torn
+   *  down and rebuilt every time a figure lands, which is often on this screen.
+   *  The `key={p.currency}` on the `pots.map` is untouched — it is on the
+   *  returned View inside this function, and nothing maps over `potsRow`. */
+  const potsRow = (label: string, pots: Pot[]) => (
     <View style={{ flex: 1 }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
       {pots.length === 0 ? (
-        <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(null)}</Text>
+        <Text style={{ ...value(26), color: t.ink, marginTop: 4 }}>{fig(null)}</Text>
       ) : pots.map((p) => (
         <View key={p.currency} style={{ marginTop: 4 }}>
-          <Text style={{ ...value(22), color: t.ink }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ ...value(26), color: t.ink }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
           {/* "payments", not "sales": a pot now holds one-off purchases and
               subscription renewals together, and a renewal is not a sale. */}
           <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count === 1 ? 'from 1 payment' : 'from ' + p.count + ' payments'}</Text>
@@ -1108,11 +1569,39 @@ export default function TrainerPayments() {
    *  the totals because "how much of this repeats next month" is the question a
    *  membership business actually runs on, and it is not answerable from a
    *  single combined figure. */
-  const Made = ({ label, taken }: { label: string; taken: { pots: Pot[] } }) => (
+  /* A plain function called as `{made(…)}`, for the reason on `pick` above.
+     Two lines of unlabelled static `Text`: no caret, no screen-reader cursor,
+     nothing that holds state. The remount was pure waste — four of these were
+     thrown away and rebuilt on every render of a screen that re-renders on
+     every figure — and nothing maps over `made`, so no `key` moved. */
+  const made = (label: string, taken: { pots: Pot[] }) => (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: 4 }}>
       <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{label}</Text>
-      <Text style={{ ...ty.caption, color: t.ink2, fontWeight: '500' }}>{fig(potLine(taken.pots))}</Text>
+      <Text style={{ ...ty.caption, color: t.ink2, ...font('500') }}>{fig(potLine(taken.pots))}</Text>
     </View>
+  );
+
+  /** What a total is made of, as meters: one-off green and renewals blue, the
+   *  hues those two strands have on Payments and Analytics. ONE CURRENCY AT A
+   *  TIME — each bar is a strand's pot out of the same currency's pot in the
+   *  total, so nothing here is a share of two moneys. A total with no pots
+   *  keeps the old dashed lines: there is no whole to be a share of. */
+  const madeMeters = (total: { pots: Pot[] }, oneOff: { pots: Pot[] }, renew: { pots: Pot[] }) => (
+    total.pots.length === 0 ? (<>
+      {made('One-off Sales and Packs', oneOff)}
+      {made('Subscription Renewals', renew)}
+    </>) : total.pots.map((pot) => {
+      const part = (x: { pots: Pot[] }) => x.pots.find((q) => q.currency === pot.currency)?.minorUnits ?? 0;
+      const tag = total.pots.length > 1 ? ` · ${pot.currency}` : '';
+      return (
+        <View key={pot.currency}>
+          <Meter label={`One-off Sales and Packs${tag}`} val={part(oneOff)} target={pot.minorUnits} tone="brand"
+            note={fig(minorMoney(part(oneOff), pot.currency))} />
+          <Meter label={`Subscription Renewals${tag}`} val={part(renew)} target={pot.minorUnits} tone="blue"
+            note={fig(minorMoney(part(renew), pot.currency))} />
+        </View>
+      );
+    })
   );
   // The typed price read back in the gym's currency, or null when either half
   // is missing. Never a number with a unit put on it for the look of the thing.
@@ -1155,50 +1644,91 @@ export default function TrainerPayments() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting paid</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Payments</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Get paid by your clients — memberships &amp; session packs.
-        </Text>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("Getting paid") was a line of prose above the title; what it said is
+            still said by the first card below. */}
+        <PageHead title="Payments & Packages" />
 
-        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
+        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading how you get paid…" /> : (
           <>
             {/* ── payout status: the one decision on this screen ──────────── */}
-            {!active ? (
+            {/* Three renders, not two. The middle one is new: a read that did
+                not come back is not a coach without an account, and the button
+                is what makes the difference matter — `onboard` opens Stripe and
+                a second onboarding under the same coach is a second live
+                account. `canOnboard` is the gate and it is false here on
+                purpose; the only control offered is the one that asks again. */}
+            {stage === 'unreadable' ? (
+              <View style={{ marginTop: sp.xl }}>
+                <Notice tone={t.crit} kicker="Payouts" title="Could Not Read Your Payout Account"
+                  note="This is not a statement that you have none. If you had set one up, it is still set up, and any client payment already on its way is unaffected. Nothing about setting one up is offered here until we can see what you already have.">
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label={loading ? 'Checking…' : 'Try Again'} wide disabled={loading} onPress={() => { void load(); }} />
+                  </View>
+                </Notice>
+              </View>
+            ) : !active ? (
               <View style={{ marginTop: sp.xl }}>
                 {/* The arrangement is added to the NOTE rather than dropped in
                     as a second Text, because the kit reads kicker, title and
                     note out as one statement and a stray line beside them is
                     skipped by a screen reader. It is only added once Stripe has
                     said what the account is — see `kind`. */}
-                <Notice tone={t.warn} kicker="Payouts" title="Set Up Payouts"
-                  note={conn?.stripe_account_id
+                <Notice tone={t.warn} kicker="Payouts" title={stage === 'started' ? 'Finish Setting Up Payouts' : 'Set Up Payouts'}
+                  note={stage === 'started'
                     ? 'Finish verifying with Stripe to go live.' + (kind === 'standard' ? ' Payments land in your own Stripe account, and its fees, refunds and chargebacks come out of your balance.' : '')
                     : 'Connect a payout account with Stripe.'}>
                   <View style={{ marginTop: sp.lg }}>
-                    <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy} onPress={onboard} />
+                    <Cta label={busy ? 'Opening…' : (stage === 'started' ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy || !canOnboard(stage)} onPress={onboard} />
                   </View>
                 </Notice>
               </View>
             ) : (
               <Section>
                 <SectionHead title="Payouts" />
+                {/* ── the tick is about CHARGES, and the heading said payouts ──
+                  *
+                  * `payoutStage` answers 'active' off `charges_enabled`, which
+                  * is whether a client's card can be taken. Whether the money
+                  * then reaches the coach is `connect_accounts.payouts_enabled`
+                  * (supabase/parts/161), and this screen had never read it —
+                  * nor `transfers_status`. Stripe routinely enables charges
+                  * before payouts, so a coach with identity or bank details
+                  * outstanding was taking money all week under a green tick and
+                  * the words "Payouts active", with nothing anywhere telling
+                  * them what was left to finish.
+                  *
+                  * Three renders now, and the mark is chosen by the payout
+                  * answer rather than by the charge one. Null is its own state
+                  * and draws neither a tick nor a warning: part 161 records that
+                  * these columns are filled in by `account.updated`, so a null
+                  * is a webhook that has not fired and claiming either way from
+                  * it would be a claim about somebody's wages. */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="check" size={17} color={t.brand} />
+                    <Icon name={reach === 'reaching' ? 'check' : 'info'} size={17}
+                      color={reach === 'held' ? t.warn : reach === 'reaching' ? t.brand : t.ink3} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Payouts active</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>You can accept client payments.</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{payoutHeading(reach)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{payoutNote(reach)}</Text>
                   </View>
                 </View>
+
+                {/* The other hop, on its own line, because it has its own
+                    remedy: `transfers_status` is what lets Repple move a
+                    destination charge onto the account at all, and a coach can
+                    have it without payouts or payouts without it. Null renders
+                    nothing — `transferNote` returns null for the two states
+                    there is nothing to report about. */}
+                {transferNote(transfers, conn?.transfers_status ?? null) ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {transferNote(transfers, conn?.transfers_status ?? null)}
+                  </Text>
+                ) : null}
 
                 {/* The three things that changed when coaches moved onto their
                     own Stripe accounts, and that nothing in this app said until
@@ -1212,7 +1742,7 @@ export default function TrainerPayments() {
                 {kind === 'standard' ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     Your clients pay your own Stripe account. Stripe&apos;s processing fee comes out of it,
-                    and so does any refund or chargeback — those are yours to answer, not Repple&apos;s.
+                    and so does any refund or chargeback. Those are yours to answer, not Repple&apos;s.
                     Your payouts, disputes and receipts are in the full Stripe dashboard at dashboard.stripe.com.
                   </Text>
                 ) : kind === 'express' ? (
@@ -1230,10 +1760,52 @@ export default function TrainerPayments() {
             {/* ── what has actually been taken ───────────────────────────── */}
             <Section>
               <SectionHead title="Taken Through Stripe" />
+              {/* ── when this app last heard from Stripe ───────────────────
+                  Everything below this line is written by the stripe-webhook
+                  and by nothing else, so an empty screen has two causes with
+                  one appearance: nobody has bought anything, or the webhook
+                  has never been reached and clients are being charged while
+                  this app is never told. `stripe_webhook_events` is the only
+                  evidence either way and nothing read it until part 2630.
+
+                  Drawn in all four states, including the failed read, because
+                  a heartbeat that disappears when it cannot be taken is worse
+                  than none: its absence reads as an all-clear. The age is
+                  computed at render from this phone's clock — it is a fact
+                  about the moment the screen was drawn and claims nothing
+                  more, which is why nothing here is refreshed on a timer.
+
+                  Never a diagnosis. Stripe calls only when something happens,
+                  so an old date is a quiet stretch; the state worth acting on
+                  is "never", and it says so in its own words. */}
+              {(() => {
+                const pulse = stripePulse(heard, heardStatus, Date.now());
+                const events = stripeEventsLine(pulse);
+                return (
+                  <View style={{ marginBottom: sp.md }}>
+                    <Text style={{ ...ty.caption, color: pulse.kind === 'silent' ? t.ink : t.ink3 }}>
+                      {stripePulseLine(pulse)}
+                    </Text>
+                    {events ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{events}</Text>
+                    ) : null}
+                    {/* The two misreadings, said out loud rather than left to
+                        be made. Only where there is a heartbeat to misread —
+                        a failed read has nothing to be mistaken for, and the
+                        "never" sentence carries its own explanation. */}
+                    {pulse.kind === 'heard' || pulse.kind === 'unreadable' ? (
+                      <>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{STRIPE_PULSE_IS_NOT_YOUR_SALES}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{STRIPE_PULSE_IS_NOT_A_HEALTH_CHECK}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })()}
               {earnedStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   {buysStatus === 'error' && paysStatus === 'error'
-                    ? 'Your sales and your renewals could not be read, so there is no figure here. This is not a statement that nothing has been paid — anything a client has paid, they have paid.'
+                    ? 'Your sales and your renewals could not be read, so there is no figure here. This is not a statement that nothing has been paid. Anything a client has paid, they have paid.'
                     : buysStatus === 'error'
                       ? 'Your one-off sales could not be read, so there is no figure here. Your renewals were read fine, but half of what you have taken is not a total and will not be shown as one.'
                       : 'Your subscription renewals could not be read, so there is no figure here. Your one-off sales were read fine, but half of what you have taken is not a total and will not be shown as one.'}
@@ -1242,8 +1814,8 @@ export default function TrainerPayments() {
                 <PartialRead what="payments" shown={buys.length + pays.length} onPress={load} />
               ) : takenAll && takenMonth && oneOffAll && renewAll && oneOffMonth && renewMonth ? (<>
                 <View style={{ flexDirection: 'row', gap: sp.md }}>
-                  <Pots label="This month" pots={takenMonth.pots} />
-                  <Pots label="All time" pots={takenAll.pots} />
+                  {potsRow('This Month', takenMonth.pots)}
+                  {potsRow('All Time', takenAll.pots)}
                 </View>
 
                 {/* What the total is made of. A membership business lives on the
@@ -1253,11 +1825,9 @@ export default function TrainerPayments() {
                     completely different positions next month. */}
                 <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 2 }}>This month, made up of</Text>
-                  <Made label="One-off sales and packs" taken={oneOffMonth} />
-                  <Made label="Subscription renewals" taken={renewMonth} />
+                  {madeMeters(takenMonth, oneOffMonth, renewMonth)}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: 2 }}>All time, made up of</Text>
-                  <Made label="One-off sales and packs" taken={oneOffAll} />
-                  <Made label="Subscription renewals" taken={renewAll} />
+                  {madeMeters(takenAll, oneOffAll, renewAll)}
                 </View>
 
                 {/* An amount we cannot put a unit on is missing from the totals
@@ -1266,13 +1836,27 @@ export default function TrainerPayments() {
                     132 onward; older sales were backfilled from the package they
                     came from, and one already deleted by then left the amount
                     unlabelled for good. */}
+                {/* TWO sentences, not one of two. The test outside was `||`
+                    and the test inside was a ternary, so a coach with both
+                    kinds of hole — some payments whose currency is
+                    unrecoverable AND some Stripe never stated an amount for —
+                    was told about the first kind only. The second kind stayed
+                    missing from every figure on the screen with nothing
+                    anywhere saying so, which is the exact thing this flag
+                    exists to prevent, half-done. They are separate facts about
+                    separate payments and each gets its own line. */}
                 {takenAll.unlabelled || takenAll.unpriced ? (
                   <View style={{ marginTop: sp.md }}>
-                    <Flag tone={t.warn}>
-                      {takenAll.unlabelled
-                        ? `${takenAll.unlabelled === 1 ? 'One payment is' : takenAll.unlabelled + ' payments are'} not in the figures above: the package ${takenAll.unlabelled === 1 ? 'it was' : 'they were'} bought from is gone, and the currency was only ever recorded there. Stripe still has ${takenAll.unlabelled === 1 ? 'it' : 'them'}.`
-                        : `${takenAll.unpriced === 1 ? 'One payment has' : takenAll.unpriced + ' payments have'} no amount recorded, so ${takenAll.unpriced === 1 ? 'it is' : 'they are'} not in the figures above.`}
-                    </Flag>
+                    {takenAll.unlabelled ? (
+                      <Flag tone={t.warn}>
+                        {`${takenAll.unlabelled === 1 ? 'One payment is' : takenAll.unlabelled + ' payments are'} not in the figures above: the package ${takenAll.unlabelled === 1 ? 'it was' : 'they were'} bought from is gone, and the currency was only ever recorded there. Stripe still has ${takenAll.unlabelled === 1 ? 'it' : 'them'}.`}
+                      </Flag>
+                    ) : null}
+                    {takenAll.unpriced ? (
+                      <Flag tone={t.warn} style={takenAll.unlabelled ? { marginTop: sp.sm } : undefined}>
+                        {`${takenAll.unpriced === 1 ? 'One payment has' : takenAll.unpriced + ' payments have'} no amount recorded, so ${takenAll.unpriced === 1 ? 'it is' : 'they are'} not in the figures above.`}
+                      </Flag>
+                    ) : null}
                   </View>
                 ) : null}
 
@@ -1311,14 +1895,55 @@ export default function TrainerPayments() {
                 ) : null}
 
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  Everything your clients have been charged through Repple — one-off packages,
-                  session packs and subscription renewals — in the currency each was charged in, and
+                  Everything your clients have been charged through Repple (one-off packages,
+                  session packs and subscription renewals), in the currency each was charged in, and
                   dated by when Stripe took the money.
                 </Text>
+                {/* ── the refunds, which the GROSS sentence below never named ──
+                    One line per currency, stated as its own fact and taken off
+                    nothing. See `givenBack` above for why it is not a
+                    subtraction: `refunded_cents` carries no date, so it belongs
+                    to no month, and a figure netted into All time but not into
+                    This month would be two totals built on two rules.
+
+                    Drawn only where something HAS gone back — a coach who has
+                    never refunded anything should not be made to read a zero —
+                    and `unlabelled` gets its own sentence for the same reason
+                    the takings' does: a refund whose currency was only ever on a
+                    package since deleted is not an amount of any money, and
+                    leaving it out silently would make this line short by an
+                    amount nobody can see. */}
+                {givenBack && (givenBack.pots.length > 0 || givenBack.unlabelled > 0) ? (
+                  <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 2 }}>Given back, and not taken off the figures above</Text>
+                    {givenBack.pots.map((p) => (
+                      <View key={p.currency} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: 4 }}>
+                        <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                          {p.count === 1 ? 'On 1 payment' : 'On ' + p.count + ' payments'}
+                        </Text>
+                        <Text style={{ ...ty.caption, color: t.ink2, ...font('500') }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+                      </View>
+                    ))}
+                    {givenBack.unlabelled ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        {`${givenBack.unlabelled === 1 ? 'One refund is' : givenBack.unlabelled + ' refunds are'} not in the figures on this line: the package ${givenBack.unlabelled === 1 ? 'the sale was' : 'the sales were'} made from is gone, and the currency was only ever recorded there. Stripe still has ${givenBack.unlabelled === 1 ? 'it' : 'them'}.`}
+                      </Flag>
+                    ) : null}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      A refund happened on its own day and Stripe tells us the amount, not the date, so
+                      this belongs to no month and is subtracted from nothing above. A chargeback is a
+                      different thing again and is under Chargebacks.
+                    </Text>
+                  </View>
+                ) : null}
+
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                   This is the GROSS. Stripe&apos;s processing fee and the platform fee come out of it
                   and Repple is told neither, so nothing here is a payout, a balance, or what has
                   landed in your bank. Your Stripe dashboard is the only place those exist.
+                  {givenBack && (givenBack.pots.length > 0 || givenBack.unlabelled > 0)
+                    ? ' Anything you have refunded is stated above and has not been taken off it.'
+                    : ''}
                 </Text>
               </>) : null}
             </Section>
@@ -1343,7 +1968,7 @@ export default function TrainerPayments() {
                 // amount plus a fee, and the deadline goes past regardless.
                 <Flag tone={t.crit}>
                   We could not read whether you have any chargebacks, so this is not a statement
-                  that you have none. Your Stripe dashboard is the record — check it if a payment
+                  that you have none. Your Stripe dashboard is the record. Check it if a payment
                   has gone missing.
                 </Flag>
               ) : disputesStatus === 'partial' ? (
@@ -1358,9 +1983,38 @@ export default function TrainerPayments() {
               {(disputesStatus === 'error' ? [] : disputes).map((d, i) => {
                 const over = isClosed(d.status, d.closed_at);
                 const tone = disputeTone({ evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at });
+                // Parsed, not sliced. `client_disputes.evidence_due_by` is a
+                // `timestamptz` — confirmed against the live schema, and part
+                // 611 declares it as one — so PostgREST serialises it in UTC
+                // and `String(...).slice(0, 10)` was GREENWICH's calendar day.
+                // A coach in Dubai (UTC+4) whose evidence is due 01:30 on 6
+                // September holds 2026-09-05T21:30Z, and this row named the
+                // 5th: a day early on the one deadline on this screen that
+                // costs the whole amount plus a fee if it is missed. In Los
+                // Angeles it runs the other way and names a day the coach does
+                // not have.
+                //
+                // check-utc-day.mjs deliberately does not flag this shape —
+                // its header says whether a slice is wrong "depends entirely
+                // on what column `iso` came from" and needs the schema, not
+                // the line. The schema says it is wrong. Fixed the way
+                // app/(owner)/deletions.tsx was.
+                //
+                // The reader's own day, because this screen reads no gym
+                // timezone and no tenant has one set — the same fallback
+                // deletions.tsx, financials.tsx and equipment.tsx take.
+                //
+                // It also puts the two halves of this sentence back on one
+                // calendar. `deadlineLine` computes "due within the DAY" and
+                // "due TOMORROW" from `Date.parse(evidenceDueBy)`, the true
+                // instant, while `when` was UTC's day — so the row could say
+                // "due within the DAY, by 5 September" to a coach for whom the
+                // deadline falls on the 6th, a sentence that contradicts
+                // itself in the half a hurrying reader trusts.
+                const dueDay = dayOf(d.evidence_due_by);
                 const due = deadlineLine(
                   { evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at },
-                  d.evidence_due_by ? expiryDayLabel(String(d.evidence_due_by).slice(0, 10)) : null,
+                  dueDay ? expiryDayLabel(dueDay) : null,
                 );
                 return (
                   <View key={d.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -1368,7 +2022,7 @@ export default function TrainerPayments() {
                         Everything else about a chargeback can wait until the
                         coach has read the deadline; the deadline cannot. */}
                     {due ? (
-                      <Text style={{ ...ty.body, fontWeight: '500', color: tone === 'urgent' ? t.ink : t.ink2 }}>{due}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: tone === 'urgent' ? t.ink : t.ink2 }}>{due}</Text>
                     ) : null}
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: due ? 4 : 0 }}>
                       {/* A name we could not read is a dash, and so is a
@@ -1376,11 +2030,11 @@ export default function TrainerPayments() {
                           whenever the charge it is against was never recorded
                           here. That is a real state, and it is the case with
                           the least other warning attached to it. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(d.client_name)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink, flex: 1 }}>{fig(d.client_name)}</Text>
                       {/* Dashed rather than dollared when Stripe stated no
                           currency. There is no default currency in this
                           product and this screen invents nothing. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(d.amount_cents, d.currency))}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(d.amount_cents, d.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: over ? t.ink3 : tone === 'urgent' ? t.crit : t.warn }} />
@@ -1399,6 +2053,174 @@ export default function TrainerPayments() {
               {disputesStatus !== 'error' && disputes.length ? (<>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{DISPUTE_MONEY_IS_ALREADY_GONE}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{EVIDENCE_GOES_TO_STRIPE}</Text>
+              </>) : null}
+            </Section>
+
+            <Rule />
+
+            {/* ── which clients that money came from ──────────────────────
+                The figure at the top of this screen is a month and an all-time
+                total, and a coach reading it has one obvious next question that
+                nothing here could answer: WHOSE. Three lists existed below —
+                packs, memberships, renewals — and a coach wanting to know what
+                one client had put through their card had to find that person in
+                all three and add it up in their head, per currency.
+
+                A BREAKDOWN, NOT A LIFETIME VALUE, and the distinction is the
+                whole of why this section is allowed to exist. `clientValue` in
+                src/lib/clientValue.ts is this app's answer to "what has this
+                person paid me": it adds `coach_receipts` — the cash and the
+                bank transfers, which for most self-employed coaches are the
+                LARGER half — and it takes refunds off. app/(trainer)/money.tsx
+                renders it under "What Each Client Has Paid" and
+                app/(trainer)/client.tsx renders it per person. Nothing here
+                computes a second one. This is the same total already at the top
+                of this screen, split by who paid it, card only and gross,
+                and all three of those words are on the screen underneath it.
+
+                Never ranked across currencies. `orderedBy` names the one
+                currency the order is by, and a coach paid in two is told the
+                other exists rather than shown a league table built out of an
+                exchange rate nobody supplied. */}
+            <Section>
+              {/* Counted only under 'ready'. `payerBook` returns nothing at all
+                  under the other three, so there is no list here to count over
+                  when the count would be over a prefix. */}
+              <SectionHead title="Who Paid You" note={payers && payers.payers.length ? String(payers.payers.length) : undefined} />
+              {earnedStatus === 'error' ? (
+                // Never an empty list under 'error'. A coach shown no clients
+                // under a heading about who has paid them reads it as nobody.
+                <Flag tone={t.crit}>
+                  {buysStatus === 'error' && paysStatus === 'error'
+                    ? 'Your sales and your renewals could not be read, so there is nothing here about who has paid you. Nobody has stopped paying you because a read failed.'
+                    : buysStatus === 'error'
+                      ? 'Your one-off sales could not be read, so this cannot be split by client. Half of what each person has paid you is missing and it will not be shown as the whole.'
+                      : 'Your subscription renewals could not be read, so this cannot be split by client. Half of what each person has paid you is missing and it will not be shown as the whole.'}
+                </Flag>
+              ) : earnedStatus === 'partial' ? (
+                // The rows that came back are real; the SET is a prefix. Every
+                // name would be right and a client who has been paying for a
+                // year would show three payments, which is the one version of
+                // this figure a coach has no way to doubt.
+                <PartialRead what="payments" shown={buys.length + pays.length} onPress={load} />
+              ) : payers && payers.payers.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Nobody has paid you through Stripe yet. Anything paid in cash or by bank transfer
+                  is under Receipts and is not counted here.
+                </Text>
+              ) : payers ? (<>
+                {payers.payers.map((r, i) => (
+                  <View key={r.clientId} style={{
+                    paddingVertical: sp.md,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                      {/* A name that could not be read gets a sentence, not a
+                          dash and not the word "Unknown": the payment is real,
+                          the person is real, and the failure is ours to state.
+                          Same wording as the Memberships Sold list below. */}
+                      <Text
+                        style={{ ...ty.body, ...font('500'), color: r.name ? t.ink : t.ink3, flex: 1 }}
+                        numberOfLines={1}
+                      >
+                        {r.name || PAYER_NAMELESS}
+                      </Text>
+                      {/* One figure per currency, stacked. AED 600 and GBP 90
+                          are two amounts of money and there is no third. */}
+                      <View style={{ alignItems: 'flex-end' }}>
+                        {r.taken.pots.map((p) => (
+                          <Text key={p.currency} style={{ ...ty.body, ...numeric, color: t.ink }}>
+                            {fig(minorMoney(p.minorUnits, p.currency))}
+                          </Text>
+                        ))}
+                      </View>
+                    </View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {payerPayments(r) === 1 ? '1 payment' : payerPayments(r) + ' payments'}
+                      {r.renewals ? (r.renewals === 1 ? ' · 1 of them a renewal' : ' · ' + r.renewals + ' of them renewals') : ''}
+                    </Text>
+                    {/* What has gone back, stated beside the figure and taken
+                        off nothing — `refunded_cents` carries no date, so a
+                        netted number here would belong to no period and would
+                        disagree with the gross figure at the top of the screen.
+                        One line per currency, for the same reason the totals
+                        are potted. Null for nearly everybody. */}
+                    {payerGaveBack(r) ? (
+                      <View style={{ marginTop: 2 }}>
+                        {r.givenBack.pots.map((p) => (
+                          <Text key={p.currency} style={{ ...ty.caption, color: t.ink3 }}>
+                            {'Refunded, and not taken off the figure above: '}
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+                          </Text>
+                        ))}
+                        {r.givenBack.unlabelled ? (
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>
+                            {r.givenBack.unlabelled === 1
+                              ? 'One refund to them has no currency recorded, so it has no figure here.'
+                              : r.givenBack.unlabelled + ' refunds to them have no currency recorded, so they have no figure here.'}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {/* A hole in this person's figure, sized. Counted by
+                        `sumTaken` and never summed into a unit nobody stated. */}
+                    {r.taken.unlabelled || r.taken.unpriced ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        {r.taken.unlabelled
+                          ? (r.taken.unlabelled === 1
+                            ? 'One of their payments has no currency recorded and is in no figure above. '
+                            : r.taken.unlabelled + ' of their payments have no currency recorded and are in no figure above. ')
+                          : ''}
+                        {r.taken.unpriced
+                          ? (r.taken.unpriced === 1
+                            ? 'One has no amount recorded at all.'
+                            : r.taken.unpriced + ' have no amount recorded at all.')
+                          : ''}
+                      </Flag>
+                    ) : null}
+                  </View>
+                ))}
+
+                {/* Two currencies is two books. Said once, under the list,
+                    because the order above is a fact about one of them. */}
+                {payers.currencies.length > 1 && payers.orderedBy ? (
+                  <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+                    {'You have been paid in ' + payers.currencies.join(' and ')
+                      + '. Those are separate amounts of money, they are never added together, and the order above is by '
+                      + payers.orderedBy + ' alone.'}
+                  </Flag>
+                ) : null}
+
+                {/* Money on this screen's own totals that belongs to nobody in
+                    the list. Counted and reported rather than dropped: a
+                    breakdown of a figure that silently omits part of it is the
+                    defect this section exists to close, one level down. */}
+                {payers.unattached.pots.length > 0 || payers.unattached.unpriced > 0 || payers.unattached.unlabelled > 0 ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                    {'Some payments in the totals above carry no client and are in nobody’s figure here: '}
+                    {payers.unattached.pots.map((p) => minorMoney(p.minorUnits, p.currency)).filter(Boolean).join(' · ')}
+                    {payers.unattached.pots.length ? '. ' : ''}
+                    {payers.unattached.unlabelled || payers.unattached.unpriced
+                      ? 'Some of them have no amount or no currency recorded either.'
+                      : ''}
+                  </Flag>
+                ) : null}
+
+                {/* How many people in the list above are a sentence rather than
+                    a name, said once instead of being left to be counted. */}
+                {payers.nameless ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {payers.nameless === 1
+                      ? 'One name above could not be read. The payment is real and so is the person; only the name is missing.'
+                      : payers.nameless + ' names above could not be read. Those payments are real and so are the people; only the names are missing.'}
+                  </Text>
+                ) : null}
+
+                {/* The three sentences this figure cannot be read without. Card
+                    only, gross, and where the whole of it lives. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{PAYER_IS_CARD_ONLY}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYER_IS_GROSS}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYER_WHOLE_FIGURE_IS_ELSEWHERE}</Text>
               </>) : null}
             </Section>
 
@@ -1438,12 +2260,39 @@ export default function TrainerPayments() {
                   did not. Only the second is a conversation somebody has to
                   start, and folding the two into one count would hide it inside
                   a number that reads as ordinary business. */}
-              {buysStatus !== 'error' && stranded > 0 ? (
+              {/* ── `buysWhole`, not `buysStatus !== 'error'` ─────────────
+                  `stranded` is a SUM over `packs`, and `packs` under 'partial'
+                  is the page that came back rather than the book. "3 sessions
+                  your clients paid for ran out of time" said off a truncated
+                  read is a figure with a full stop after it, computed over an
+                  unknown fraction — and unlike the run-out count above it, this
+                  one is a coach's list of conversations to have. Three when it
+                  is thirty is the difference between an afternoon's phone calls
+                  and one.
+                  `!== 'error'` also let it draw while the read was still
+                  LOADING, off whatever had arrived. Five states, and only one
+                  of them may carry a total: the house rule is `isWhole`, never
+                  `!== 'error'`. The sibling if/else above already gets this
+                  right; this block was a separate sibling and did not. */}
+              {buysWhole && stranded > 0 ? (
                 <View style={{ marginBottom: sp.md }}>
                   <Flag tone={t.warn}>
                     {stranded === 1
                       ? 'One session somebody paid for ran out of time before it was used. It is marked below.'
                       : stranded + ' sessions your clients paid for ran out of time before they were used. They are marked below.'}
+                  </Flag>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
+                </View>
+              ) : buysStatus === 'partial' && stranded > 0 ? (
+                <View style={{ marginBottom: sp.md }}>
+                  {/* Stated as a floor, because that is what it is. Withholding
+                      it entirely would be worse than a floor: somebody's paid-
+                      for sessions have been lost and the coach can act on
+                      "at least one" — they cannot act on silence. */}
+                  <Flag tone={t.warn}>
+                    At least {stranded} session{stranded === 1 ? '' : 's'} your clients paid for ran out of time before
+                    {stranded === 1 ? ' it was' : ' they were'} used. Only part of your purchases loaded, so there may be more
+                    than this. The ones that did load are marked below.
                   </Flag>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
                 </View>
@@ -1463,11 +2312,11 @@ export default function TrainerPayments() {
                   <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client'. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(b.client_name)}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(b.client_name)}</Text>
                       {/* Dashed rather than dollared when the package it was
                           sold from is gone: that row held the only record of
                           what this amount is denominated in. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: out || (gone && lost > 0) ? t.warn : t.brand }} />
@@ -1493,9 +2342,9 @@ export default function TrainerPayments() {
                           // so neither can be absent, and a dash producer in a
                           // sentence is a hole where a word should be (check:prose).
                           ? (lost > 0
-                            ? `Ran out of time — ${lost} of ${sold} unused`
-                            : `Ran out of time — all ${sold} had been used`)
-                          : out ? `Used up — all ${fig(sold)} sessions` : `${fig(left)} of ${fig(sold)} left`}
+                            ? `Ran out of time · ${lost} of ${sold} unused`
+                            : `Ran out of time · all ${sold} had been used`)
+                          : out ? `Used up · all ${fig(sold)} sessions` : `${fig(left)} of ${fig(sold)} left`}
                         {b.package_name ? ' · ' + b.package_name : ''}
                         {' · '}{new Date(b.created_at).toLocaleDateString()}
                       </Text>
@@ -1514,10 +2363,22 @@ export default function TrainerPayments() {
                         that is the coach's to make. Both are null for a pack
                         with no window, which is every pack sold before part
                         612 — so nothing is added to the ninety-nine per cent of
-                        rows this does not concern. */}
-                    {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey) ? (
+                        rows this does not concern.
+
+                        `left` is passed now, and that is the whole of the fix
+                        for a refund that landed on a closed pack. Until it was,
+                        `strandedNote` keyed on `sessionsExpired` alone and
+                        returned null for exactly that case, so this fell
+                        through to `expiryLine` — and `expiryLine` is written
+                        voice-neutral BECAUSE it is read by both apps, which
+                        meant the coach's own screen was showing the client's
+                        sentence about the coach's own client. There was no
+                        sentence here telling the coach that a credit they
+                        refunded is sitting somewhere nothing can book it, and
+                        moving it is the one thing only they can do. */}
+                    {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey) ? (
                       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
-                        {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey)}
+                        {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey)}
                       </Text>
                     ) : expiryLine({ expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
@@ -1527,16 +2388,66 @@ export default function TrainerPayments() {
                     {refundedLine(target) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(target)}</Text>
                     ) : null}
-                    {refundBlocker(target.rule) === null ? (
-                      <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
-                        disabled={refundBusy === b.id}
-                        accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
-                        style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
-                          {refundBusy === b.id ? 'Refunding…' : 'Refund'}
-                        </Text>
-                      </Pressable>
-                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.xs, flexWrap: 'wrap' }}>
+                      {refundBlocker(target.rule) === null ? (
+                        <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
+                          disabled={refundBusy === b.id}
+                          accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
+                          accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: refundBusy === b.id ? t.ink3 : t.brandText }}>
+                            {refundBusy === b.id ? 'Refunding…' : 'Refund'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                      {/* The act `REFUND_DOES_NOT` names and nothing in this
+                          product could do.
+                          "A refund gives money back and does nothing else … it
+                          does not put a session credit back on a pack" is shown
+                          to the coach in the confirm dialog, seconds before
+                          somebody's card is credited, and there was no control
+                          anywhere to act on it. A coach who refunded two
+                          sessions of a ten-pack gave the money back and left
+                          the credits, so the client had both — and neither
+                          screen mentioned the other.
+                          Separate from Refund, and staying separate: a credit
+                          may be given back without money (a session that never
+                          happened) and money without a credit (goodwill on a
+                          pack they are keeping). Hidden on a closed pack rather
+                          than offered and refused, because part 661 will not
+                          put a credit onto one no draw site can ever spend. */}
+                      {!gone && Number(b.sessions_used ?? 0) > 0 ? (
+                        <Pressable onPress={() => confirmCredit(b, 1)} hitSlop={8} accessibilityRole="button"
+                          disabled={creditBusy === b.id}
+                          accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
+                          accessibilityLabel={`Put a session credit back on the pack for ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: creditBusy === b.id ? t.ink3 : t.brandText }}>
+                            {creditBusy === b.id ? 'Working…' : 'Give a Credit Back'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                      {!gone && left != null && left > 0 ? (
+                        <Pressable onPress={() => confirmCredit(b, -1)} hitSlop={8} accessibilityRole="button"
+                          disabled={creditBusy === b.id}
+                          accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
+                          accessibilityLabel={`Take a session credit off the pack for ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          {/* Both arms of this ternary were `t.ink3`, so the
+                              one control on the row that could not say it was
+                              working said nothing: "Give a credit back" dims and
+                              relabels while `adjustPackCredit` is in flight and
+                              this sat there unchanged, inviting a second tap on
+                              a write that moves somebody's session credit. The
+                              label carries the state now, the same way its
+                              sibling does; the colour cannot, because this one
+                              is drawn in the quiet ink to begin with. */}
+                          <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>
+                            {creditBusy === b.id ? 'Working…' : 'Take One Off'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
                   </View>
                 );
               })}
@@ -1544,24 +2455,112 @@ export default function TrainerPayments() {
 
             <Rule />
 
+            {/* ── memberships sold, which were in the takings and on no list ──
+                The other half of what `client_purchases` holds. A pack has
+                credits to count down and gets the section above; a one-off
+                membership has none, which is the only reason it was filtered
+                out of that list — and being uncountable is not a reason to be
+                invisible. See `memberships` for what that cost: the money was
+                in the headline figure, the refund control was reachable from
+                nowhere, and a membership already given back went on reading at
+                its full amount.
+
+                Deliberately thinner than the pack row. There is no balance, no
+                expiry and no credit to move, so the row is who, how much, when,
+                and the two things that can be true of the money afterwards —
+                what has gone back, and the button that sends it. */}
+            <Section>
+              {/* Counted only under a whole read, the same rule as Session
+                  Packs: under 'partial' the rows are real and the COUNT is the
+                  size of one page of somebody's sales. */}
+              <SectionHead title="Memberships Sold" note={buysWhole && memberships.length ? String(memberships.length) : undefined} />
+              {buysStatus === 'error' ? (
+                <Flag tone={t.crit}>
+                  We could not read what your clients have bought, so this is not a list of their
+                  memberships. Anyone who has bought one still has it.
+                </Flag>
+              ) : buysStatus === 'partial' ? (
+                <PartialRead what="purchases" shown={buys.length} onPress={load} />
+              ) : memberships.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Nobody has bought a one-off membership yet. Add a package below with no billing
+                  period and no session count and the sales appear here.
+                </Text>
+              ) : null}
+              {(buysStatus === 'error' ? [] : memberships).map((b, i) => {
+                const target = purchaseTarget(b);
+                return (
+                  <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
+                        {b.client_name || 'A client whose name could not be read'}
+                      </Text>
+                      {/* `fig` over `minorMoney`, so a sale whose currency was
+                          only ever on a deleted package is a dash rather than a
+                          bare number in a unit nobody chose — the same rule the
+                          takings pots keep. */}
+                      <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>
+                        {fig(minorMoney(b.amount_cents, b.currency))}
+                      </Text>
+                    </View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                      {b.package_name || 'The package this was bought from has been deleted'}
+                      {' · '}{new Date(b.created_at).toLocaleDateString()}
+                    </Text>
+                    {refundedLine(target) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(target)}</Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.xs, flexWrap: 'wrap' }}>
+                      {/* Absent rather than dead where the act would be refused,
+                          and `refundBlocker` is the same reader `openRefund` and
+                          the edge function both use. */}
+                      {refundBlocker(target.rule) === null ? (
+                        <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
+                          disabled={refundBusy === b.id}
+                          accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
+                          accessibilityLabel={`Refund the membership sold to ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: refundBusy === b.id ? t.ink3 : t.brandText }}>
+                            {refundBusy === b.id ? 'Refunding…' : 'Refund'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                A membership carries no session credits, so there is no balance to count down and
+                nothing here expires. What a client is entitled to under one is between you and them.
+              </Text>
+            </Section>
+
+            <Rule />
+
             {/* ── what clients can buy ───────────────────────────────────── */}
             <Section>
-              <SectionHead title="Your Packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
-              {pkgErr ? (
+              {/* The number beside the heading is only ever drawn over a read
+                  that came back WHOLE. Under 'partial' it would be the count of
+                  what fitted in one read, printed as the size of the coach's
+                  price list, and the note below says so in words instead. */}
+              <SectionHead title="Your Packages" note={pkgRead === 'ready' && activePkgs.length ? String(activePkgs.length) : undefined} />
+              {pkgRead === 'error' ? (
                 <Flag tone={t.crit}>
                   Your packages could not be read, so this is not a list of what you sell. Do not add
-                  them again from here — reopen the screen once you have signal.
+                  them again from here. Reopen the screen once you have signal.
                 </Flag>
-              ) : (pkgs ?? []).filter((p) => p.active).length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
+              ) : pkgRead === 'partial' ? (
+                <PartialRead what="packages" shown={activePkgs.length} onPress={() => { void load(); }} />
+              ) : activePkgs.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below: a monthly membership or a pack of sessions.</Text>
               ) : null}
-              {(pkgs ?? []).filter((p) => p.active).map((p, i) => (
+              {activePkgs.map((p, i) => (
                 <View key={p.id} style={{
                   flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                   borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{billingWords(p)}</Text>
                   </View>
                   {/* Edit before remove, and to the left of it: a coach whose
@@ -1590,7 +2589,7 @@ export default function TrainerPayments() {
               {subsStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   We could not read your subscribers, so this is not a list of who is paying you. It is
-                  not a statement that nobody is — anyone subscribed still is.
+                  not a statement that nobody is. Anyone subscribed still is.
                 </Flag>
               ) : subsStatus === 'partial' ? (
                 <PartialRead what="subscribers" shown={subs.length} onPress={load} />
@@ -1620,8 +2619,8 @@ export default function TrainerPayments() {
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client' —
                           the money beside it is real either way. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : stopping ? t.warn : t.brand }} />
@@ -1647,7 +2646,7 @@ export default function TrainerPayments() {
                           </View>
                         ) : (
                           <Ghost
-                            label={stopping ? 'Keep Running' : 'Stop At Period End'}
+                            label={stopping ? 'Keep Running' : 'Stop at Period End'}
                             a11yLabel={(stopping ? 'Keep running the subscription for ' : 'Stop the subscription for ') + (s.client_name || 'this client') + ' at the end of the period'}
                             onPress={() => switchCancel(s, stopping ? 'resume' : 'cancel')}
                           />
@@ -1669,11 +2668,11 @@ export default function TrainerPayments() {
                   that is not charging. */}
               {subsStatus !== 'error' && unsettledSubs.length ? (
                 <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>Neither charging nor finished</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Neither Charging nor Finished</Text>
                   {unsettledSubs.map((s) => (
                     <View key={s.id} style={{ marginTop: sp.md }}>
                       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, flex: 1 }}>{fig(s.client_name)}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink2, flex: 1 }}>{fig(s.client_name)}</Text>
                         <Text style={{ ...ty.label, color: t.ink3 }}>{statusLabel(s.status)}</Text>
                       </View>
                       <Flag tone={t.warn} style={{ marginTop: 4 }}>{unsettledNote(s.status)}</Flag>
@@ -1689,16 +2688,37 @@ export default function TrainerPayments() {
                   from the takings at the top of the screen, which are money
                   that has already moved: this one is forward-looking, and a
                   charge nobody has made yet is not earnings. */}
-              {recurring && recurring.pots.length ? (
+              {/* Drawn whenever the read came back whole and there is
+                  ANYTHING to say — a pot, or a subscription that could not go
+                  into one. The test was `recurring.pots.length` alone, so
+                  `sumRecurring`'s `unlabelled` and `unpriced` were computed and
+                  never read: a live subscription with no currency, no billing
+                  interval or no amount on it fell out of "Priced to recur" in
+                  silence, and a coach whose subscriptions were ALL like that
+                  got no block at all rather than a sentence saying three of
+                  them are not in any figure. `sumTaken` gets this treatment
+                  four hundred lines above and it is the same rule: an amount
+                  left out of a total is stated, never dropped. */}
+              {recurring && (recurring.pots.length || recurring.unlabelled || recurring.unpriced) ? (
                 <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>Priced to recur</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Priced to Recur</Text>
                   {recurring.pots.map((p) => (
                     <Text key={p.currency + p.interval} style={{ ...value(20), color: t.ink, marginTop: 4 }}>
                       {fig(pkgPriceLine(p.minorUnits, p.currency, p.interval))}
                     </Text>
                   ))}
+                  {recurring.unlabelled ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      {`${recurring.unlabelled === 1 ? 'One live subscription is' : recurring.unlabelled + ' live subscriptions are'} not in the figure${recurring.pots.length === 1 ? '' : 's'} above: ${recurring.unlabelled === 1 ? 'it carries' : 'they carry'} no currency or no billing period, and a price with neither is not a figure to plan against. Stripe is still charging ${recurring.unlabelled === 1 ? 'it' : 'them'}.`}
+                    </Flag>
+                  ) : null}
+                  {recurring.unpriced ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      {`${recurring.unpriced === 1 ? 'One live subscription has' : recurring.unpriced + ' live subscriptions have'} no amount recorded, so ${recurring.unpriced === 1 ? 'it is' : 'they are'} not in the figure${recurring.pots.length === 1 ? '' : 's'} above.`}
+                    </Flag>
+                  ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    What your live subscriptions are priced at — what they are set to charge next,
+                    What your live subscriptions are priced at: what they are set to charge next,
                     if nobody cancels and no card fails. It is not money you have been paid. What
                     you have actually been paid is in Taken Through Stripe at the top, renewals
                     included.
@@ -1718,7 +2738,7 @@ export default function TrainerPayments() {
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                     Stopping a subscription ends it at the close of the period the client has already
-                    paid for — they keep what they bought, and are not charged again. You can put it
+                    paid for. They keep what they bought, and are not charged again. You can put it
                     back any time before it ends, and the client can do both from their Memberships
                     screen too. Ending one today is offered inside that confirmation, and it cannot
                     be undone.
@@ -1760,7 +2780,7 @@ export default function TrainerPayments() {
               {paysStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   Your renewals could not be read, so this is not a list of what your subscribers have
-                  paid. It is not a statement that nobody has renewed — every payment that has been
+                  paid. It is not a statement that nobody has renewed. Every payment that has been
                   taken has been taken, and Stripe still holds all of them.
                 </Flag>
               ) : paysStatus === 'partial' ? (
@@ -1784,8 +2804,8 @@ export default function TrainerPayments() {
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client'.
                           The money beside it is real either way. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(target.who)}</Text>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(p.amount_cents, p.currency))}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(target.who)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(p.amount_cents, p.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: p.paid_at ? t.brand : t.warn }} />
@@ -1809,9 +2829,10 @@ export default function TrainerPayments() {
                     {refundBlocker(target.rule) === null ? (
                       <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
                         disabled={refundBusy === p.id}
+                        accessibilityState={{ disabled: refundBusy === p.id, busy: refundBusy === p.id }}
                         accessibilityLabel={`Refund the renewal paid by ${target.who || 'this client'}`}
                         style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === p.id ? t.ink3 : t.brand }}>
+                        <Text style={{ ...ty.label, ...font('500'), color: refundBusy === p.id ? t.ink3 : t.brandText }}>
                           {refundBusy === p.id ? 'Refunding…' : 'Refund'}
                         </Text>
                       </Pressable>
@@ -1822,7 +2843,7 @@ export default function TrainerPayments() {
               {paysStatus !== 'error' && pays.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                   Each line is one payment Stripe actually took, and giving one back does not stop the
-                  subscription — it keeps running and charges again next period. Stop it in Subscribers
+                  subscription. It keeps running and charges again next period. Stop it in Subscribers
                   above if that is what you mean.
                 </Text>
               ) : null}
@@ -1846,7 +2867,7 @@ export default function TrainerPayments() {
                 `promoBlocker` refuses a one-off package by name so a coach
                 reads WHY rather than finding the option missing. */}
             <Section>
-              <SectionHead title="Discount Codes" note="Typed by your client on the payment page" />
+              <SectionHead title="Discount Codes" note="Typed by Your Client on the Payment Page" />
 
               {/* An empty list and an unreadable one are different sentences.
                   A coach who has just printed a poster must not be told they
@@ -1871,21 +2892,33 @@ export default function TrainerPayments() {
                     return (
                       <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: state === 'live' ? t.ink : t.ink3, flex: 1 }}>
+                          <Text style={{ ...ty.body, ...font('600'), color: state === 'live' ? t.ink : t.ink3, flex: 1 }}>
                             {p.code}
                           </Text>
                           <Text style={{ ...ty.label, ...numeric, color: state === 'live' ? t.ink2 : t.ink3 }}>
-                            {p.percentOff}% off
+                            {/* `fig`: this row comes back from Stripe, whose
+                                `percent_off` is a decimal. The code the coach
+                                created here is whole (`Math.trunc` above), one
+                                made in the Stripe dashboard need not be. */}
+                            {fig(p.percentOff)}% off
                           </Text>
                         </View>
+                        {/* The package the code is attached to. Two codes at
+                            two percentages off two packages were rendered as
+                            two identical-looking rows, and Withdraw is
+                            destructive and forward-only. */}
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                          {promoPkgLine(p) ?? 'Which package this applies to could not be read'}
+                        </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
                           {promoStateLabel(state)} · {promoUseLine(p)}
                         </Text>
                         {state === 'live' ? (
                           <Pressable onPress={() => withdrawPromo(p)} hitSlop={8} accessibilityRole="button"
                             disabled={promoBusy} accessibilityLabel={`Withdraw the code ${p.code}`}
+                            accessibilityState={{ disabled: promoBusy, busy: promoBusy }}
                             style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                            <Text style={{ ...ty.label, fontWeight: '500', color: promoBusy ? t.ink3 : t.brand }}>Withdraw</Text>
+                            <Text style={{ ...ty.label, ...font('500'), color: promoBusy ? t.ink3 : t.brandText }}>Withdraw</Text>
                           </Pressable>
                         ) : null}
                       </View>
@@ -1907,9 +2940,12 @@ export default function TrainerPayments() {
               {promos.status !== 'error' ? (
                 promoTargets.length ? (
                   <View style={{ marginTop: sp.lg }}>
-                    <Pick label="For which package"
-                      options={promoTargets.map((p) => ({ key: p.id, label: p.name }))}
-                      chosen={promoPkg} onPick={(k: string | null) => setPromoPkg(k)} />
+                    {pick({
+                      label: 'For Which Package',
+                      options: promoTargets.map((p) => ({ key: p.id, label: p.name })),
+                      chosen: promoPkg,
+                      onPick: (k: string | null) => setPromoPkg(k),
+                    })}
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
                       <View style={{ flex: 2 }}>
                         <TextInput value={promoCode} onChangeText={(v) => setPromoCode(normaliseCode(v))}
@@ -1938,10 +2974,33 @@ export default function TrainerPayments() {
                     </View>
                   </View>
                 ) : (
+                  /* Four causes and not one. `promoTargets` comes off
+                     `activePkgs`, which is `[]` under 'error' and 'loading'
+                     exactly as it is for a coach who genuinely sells nothing —
+                     so this told a coach their price list was empty on the
+                     strength of a read that never answered, two sections below
+                     the same screen correctly saying it could not be read. It
+                     is also short rather than empty under 'partial', where the
+                     picker would quietly omit packages a code could be
+                     attached to. */
+                  pkgRead === 'error' ? (
+                    <Flag style={{ marginTop: sp.lg }}>
+                      Your packages could not be read, so there is nothing to choose from here. That is not a
+                      statement that you have none on sale. Anything already on sale still is.
+                    </Flag>
+                  ) : pkgRead === 'loading' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Still reading your packages.</Text>
+                  ) : pkgRead === 'partial' ? (
+                    <Flag style={{ marginTop: sp.lg }}>
+                      You have more packages than came back in one read, so this list is not all of them. Reload
+                      before attaching a code, or the one you want may not be here.
+                    </Flag>
+                  ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                     You have nothing on sale, so there is nothing to attach a code to yet. Add a package below
                     and it appears here.
                   </Text>
+                  )
                 )
               ) : null}
 
@@ -1955,24 +3014,30 @@ export default function TrainerPayments() {
             {/* ── add a package ──────────────────────────────────────────── */}
             <Section>
               <SectionHead title="Add a Package" />
-              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} />
+              <TextInput value={name} onChangeText={setName} placeholder="Name, e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Package name" />
 
               <View style={{ marginTop: sp.md }}>
-                <Pick label="Billing" options={INTERVALS.map((i) => ({ key: i.key, label: i.label }))} chosen={interval}
-                  onPick={(k: BillingInterval | null) => { setInterval(k); if (k) setSessions(''); }} />
+                {pick({
+                  label: 'Billing',
+                  options: INTERVALS.map((i) => ({ key: i.key, label: i.label })),
+                  chosen: interval,
+                  onPick: (k: BillingInterval | null) => { setInterval(k); if (k) setSessions(''); },
+                })}
               </View>
 
-              {/* The gym's currency, stated rather than picked — and dashed
+              {/* The coach's currency, stated rather than picked — and dashed
                   rather than guessed. Repple is white-labelled, so there is no
                   currency this screen could assume that is not simply wrong for
-                  half the gyms running it. Null is a missing setting an owner
-                  fixes, not a value to fill in here. */}
+                  half the people running it.
+                  Six causes, six sentences, and only ONE of them is a gym
+                  owner's to fix. This branch used to offer two, and the second
+                  of them — "an owner sets it in the gym settings" — was shown
+                  to a coach with no gym and nobody to ask, which is what made
+                  Add Package permanently dead for the self-employed. */}
               {!currency ? (
                 <View style={{ marginTop: sp.md }}>
                   <Flag tone={t.warn}>
-                    {currencyErr
-                      ? 'We could not read what your gym charges in, so a price here would have no unit. Nothing can go on sale until we can.'
-                      : 'Your gym has not set a currency yet, so a price here would have no unit. An owner sets it in the gym settings, then packages can go on sale.'}
+                    {myCurrencyLine(currencyGap ?? 'unreadable', 'a price here would have no unit and nothing can go on sale')}
                   </Flag>
                 </View>
               ) : null}
@@ -1981,6 +3046,16 @@ export default function TrainerPayments() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Price ({fig(currency)})</Text>
                   <TextInput value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="500" placeholderTextColor={t.ink3} style={input} />
+                  {/* Which of the two places these three letters came from,
+                      said out loud. It is the answer to the question a coach
+                      cannot otherwise ask of this field — and the disagreement
+                      that existed for a year (a gym's currency on the invoices
+                      of a coach who had left it) was invisible precisely
+                      because every screen printed the code and none of them
+                      printed its source. */}
+                  {currencyFromNote(currencyFrom, currency) ? (
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: 5 }}>{currencyFromNote(currencyFrom, currency)}</Text>
+                  ) : null}
                 </View>
                 {/* Not offered at all on a recurring package. `sessions` is a
                     balance granted once and drawn down; nothing renews it, so
@@ -1989,7 +3064,7 @@ export default function TrainerPayments() {
                     combination outright. */}
                 {interval ? null : (
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Sessions (blank = membership)</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Sessions (Blank = Membership)</Text>
                     <TextInput value={sessions} onChangeText={setSessions} keyboardType="number-pad" placeholder="10" placeholderTextColor={t.ink3} style={input} />
                   </View>
                 )}
@@ -2009,7 +3084,7 @@ export default function TrainerPayments() {
                   holding. It did not, and that is the whole design. */}
               {!interval && sessions.trim() && parseInt(sessions, 10) > 0 ? (
                 <View style={{ marginTop: sp.md }}>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Valid for (days — blank = never expires)</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Valid For (Days, Blank = Never Expires)</Text>
                   <TextInput value={validity} onChangeText={setValidity} keyboardType="number-pad" placeholder="90" placeholderTextColor={t.ink3} style={input} />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>
                     {validityLine(readValidityDays(validity).ok ? (readValidityDays(validity) as { ok: true; days: number | null }).days : null) ?? NO_VALIDITY_IS_FOREVER}
@@ -2052,97 +3127,135 @@ export default function TrainerPayments() {
           A sheet rather than an alert because an alert cannot hold a box, the
           currency beside the box, and the exact figure read back — and without
           those three a typed amount is a figure nobody checked. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the amount to give back is typed halfway down it.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          {/* The heading names WHICH KIND of charge, because the two are
-              adjacent acts on the same screen and a coach who meant to give
-              back last month's renewal must not be looking at a sheet that
-              says sale. */}
-          <Text style={{ ...ty.head, color: t.ink }}>{refunding?.kind === 'renewal' ? 'Refund This Renewal' : 'Refund This Sale'}</Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {/* What was charged and what is still standing. Both, because the
-                second is the number the amount below is judged against and a
-                coach looking at a partly refunded charge would otherwise work
-                from the first. */}
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-              {refunding?.who || 'This client'}
-              {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` — ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
-            </Text>
-            {refunding?.what ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refunding.what}</Text>
-            ) : null}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              {refundLeftMoney
-                ? `${refundLeftMoney} of it can still be given back.`
-                : `What is left on this ${refunding?.kind === 'renewal' ? 'renewal' : 'sale'} can be given back.`}
-            </Text>
-
-            <View style={{ marginTop: sp.lg }}>
-              <Pick label="How much"
-                options={[{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }]}
-                chosen={refundWhole ? 'whole' : 'part'}
-                onPick={(k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); }} />
-            </View>
-
-            {!refundWhole ? (
-              <>
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Amount</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  {/* The SALE's own currency, shown and not editable. A refund
-                      is made in the money the charge was made in and in no
-                      other, and there is no currency this box could offer that
-                      would not be a different amount of money. */}
-                  <Text style={{ ...ty.label, color: t.ink3 }}>{(refunding?.rule.currency || '').toUpperCase()}</Text>
-                  {/* The keyboard follows the currency. A yen has no minor unit,
-                      so a decimal point on that pad is a key that can only
-                      produce a slip; everything else can carry a fraction and
-                      the pad has to have the point on it. */}
-                  <TextInput value={refundAmt} onChangeText={setRefundAmt}
-                    keyboardType={refundDp === 0 ? 'number-pad' : 'decimal-pad'}
-                    placeholder={refundDp === 0 ? '0' : '0.' + '0'.repeat(refundDp ?? 2)} placeholderTextColor={t.ink3}
-                    accessibilityLabel={`Amount to refund, in ${(refunding?.rule.currency || '').toUpperCase()}`}
-                    style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-                </View>
-                {/* Read back before it is sent. The coach checks the figure this
-                    app understood, not the characters they typed. */}
-                {refundMoney ? (
-                  <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{refundMoney} would go back.</Text>
-                ) : null}
-                {refundProblem ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{refundProblem}</Flag> : null}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{REFUND_PART_IS_EXACT}</Text>
-              </>
-            ) : null}
-
-            {/* Everything a refund does not do, said before the tap rather than
-                discovered afterwards. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{REFUND_DOES_NOT}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFUND_FEES_NOTE}</Text>
-            {/* Whose balance it leaves, read off THIS CHARGE. A coach who has
-                since moved to direct charges still has older sales and older
-                renewals on the platform, and the two sentences say opposite
-                things. */}
-            {refunding ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {refundBalanceNote(accountForObject({ stripe_account_id: refunding.account }) ? 'direct' : 'destination')}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+            {/* The heading names WHICH KIND of charge, because the two are
+                adjacent acts on the same screen and a coach who meant to give
+                back last month's renewal must not be looking at a sheet that
+                says sale. */}
+            <Text style={{ ...ty.head, color: t.ink }}>{refunding?.kind === 'renewal' ? 'Refund This Renewal' : 'Refund This Sale'}</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* What was charged and what is still standing. Both, because the
+                  second is the number the amount below is judged against and a
+                  coach looking at a partly refunded charge would otherwise work
+                  from the first. */}
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+                {refunding?.who || 'This client'}
+                {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` · ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
               </Text>
-            ) : null}
-            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide
-            disabled={!refundReady || refundBusy === refunding?.id}
-            label={refundBusy === refunding?.id ? 'Refunding…' : refundWhole ? 'Refund What Is Left' : 'Refund This Amount'}
-            onPress={() => {
-              if (!refunding || !refundReady) return;
-              // Whole sends NO amount at all, so the server resolves it from the
-              // row rather than from anything this screen believes about it.
-              if (refundWhole) confirmRefund(refunding, undefined, refundLeftMoney, false);
-              else if (refundCents != null) confirmRefund(refunding, refundCents, refundMoney, refundCents < refundLeft);
-            }} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setRefunding(null)} />
-        </View>
+              {refunding?.what ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refunding.what}</Text>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                {refundLeftMoney
+                  ? `${refundLeftMoney} of it can still be given back.`
+                  : `What is left on this ${refunding?.kind === 'renewal' ? 'renewal' : 'sale'} can be given back.`}
+              </Text>
+
+              <View style={{ marginTop: sp.lg }}>
+                {pick({
+                  label: 'How Much',
+                  options: [{ key: 'whole', label: 'All of It' }, { key: 'part', label: 'Part of It' }],
+                  chosen: refundWhole ? 'whole' : 'part',
+                  onPick: (k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); },
+                })}
+              </View>
+
+              {!refundWhole ? (
+                <>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Amount</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    {/* The SALE's own currency, shown and not editable. A refund
+                        is made in the money the charge was made in and in no
+                        other, and there is no currency this box could offer that
+                        would not be a different amount of money. */}
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{(refunding?.rule.currency || '').toUpperCase()}</Text>
+                    {/* The keyboard follows the currency. A yen has no minor unit,
+                        so a decimal point on that pad is a key that can only
+                        produce a slip; everything else can carry a fraction and
+                        the pad has to have the point on it. */}
+                    <TextInput value={refundAmt} onChangeText={setRefundAmt}
+                      keyboardType={refundDp === 0 ? 'number-pad' : 'decimal-pad'}
+                      placeholder={refundDp === 0 ? '0' : '0.' + '0'.repeat(refundDp ?? 2)} placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Amount to refund, in ${(refunding?.rule.currency || '').toUpperCase()}`}
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                  </View>
+                  {/* Read back before it is sent. The coach checks the figure this
+                      app understood, not the characters they typed. */}
+                  {refundMoney ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{refundMoney} would go back.</Text>
+                  ) : null}
+                  {refundProblem ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{refundProblem}</Flag> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{REFUND_PART_IS_EXACT}</Text>
+                </>
+              ) : null}
+
+              {/* Everything a refund does not do, said before the tap rather than
+                  discovered afterwards. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{REFUND_DOES_NOT}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFUND_FEES_NOTE}</Text>
+              {/* Whose balance it leaves, read off THIS CHARGE. A coach who has
+                  since moved to direct charges still has older sales and older
+                  renewals on the platform, and the two sentences say opposite
+                  things.
+
+                  THREE states, not two. This was
+                  `accountForObject(…) ? 'direct' : 'destination'` — the exact
+                  expression `confirmRefund` documents at length as the defect
+                  it was fixed for, and which was fixed there and not here. An
+                  absent account is not evidence of a platform charge: the
+                  column is nullable and nothing backfills it, so a
+                  STANDARD-account coach whose row simply carries no account
+                  was read this sheet's "the refund leaves Repple's balance and
+                  your next payout is smaller by that amount" while Stripe was
+                  about to debit THEIR balance and, if it was short, their
+                  bank. One refund, two sentences about whose money it is —
+                  the sheet asserting one and the confirm dialog two taps later
+                  correctly saying nothing. Only a legacy Express account can
+                  make a platform charge certain; anything else says nothing,
+                  which is `refundBalanceNote`'s own null branch. */}
+              {refunding ? (() => {
+                const note = refundBalanceNote(
+                  accountForObject({ stripe_account_id: refunding.account })
+                    ? 'direct'
+                    : accountTypeOf(conn) === 'express' ? 'destination' : null,
+                );
+                return note ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{note}</Text>
+                ) : null;
+              })() : null}
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide
+              disabled={!refundReady || refundBusy === refunding?.id}
+              label={refundBusy === refunding?.id ? 'Refunding…' : refundWhole ? 'Refund What Is Left' : 'Refund This Amount'}
+              onPress={() => {
+                if (!refunding || !refundReady) return;
+                // Whole sends NO amount at all, so the server resolves it from the
+                // row rather than from anything this screen believes about it.
+                if (refundWhole) confirmRefund(refunding, undefined, refundLeftMoney, false);
+                else if (refundCents != null) confirmRefund(refunding, refundCents, refundMoney, refundCents < refundLeft);
+              }} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setRefunding(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── change a package's name or price ────────────────────────────────
@@ -2153,56 +3266,81 @@ export default function TrainerPayments() {
           new rate has NOT, because connect-checkout inlines the price into each
           Stripe subscription at checkout and Stripe bills that one forever
           after. Telling them quietly would be worse than not offering it. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: a package's name and its price are both typed below the fold.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Name</Text>
-            <TextInput value={editName} onChangeText={(v) => { setEditName(v); if (editErr) setEditErr(null); }}
-              placeholder="What your client sees" placeholderTextColor={t.ink3}
-              accessibilityLabel="Package name"
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Name</Text>
+              <TextInput value={editName} onChangeText={(v) => { setEditName(v); if (editErr) setEditErr(null); }}
+                placeholder="What your client sees" placeholderTextColor={t.ink3}
+                accessibilityLabel="Package name"
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Price</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-              {/* The package's OWN currency, shown and not editable. It is a
-                  lookup that older `client_purchases` rows still fall back to
-                  — part 132 added their currency column and rows before it are
-                  null — so changing it here would redenominate sales that have
-                  already happened. */}
-              <Text style={{ ...ty.label, color: t.ink3 }}>{editing?.currency ? editing.currency.toUpperCase() : ''}</Text>
-              <TextInput value={editPrice} onChangeText={(v) => { setEditPrice(v); if (editErr) setEditErr(null); }}
-                keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={t.ink3}
-                accessibilityLabel={`Price in ${editing?.currency ? editing.currency.toUpperCase() : 'this package’s currency'}`}
-                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              A package keeps the currency it was created in for its whole life. To sell in another one, withdraw this and create a new package.
-            </Text>
-
-            {/* Said only when the price has actually moved. A coach warned
-                about their subscribers every time they correct a typo stops
-                reading the warning, and this is the warning that matters. */}
-            {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
-            ) : null}
-
-            {editing && (editing.sessions != null || editing.billing_interval) ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {editing.billing_interval
-                  ? 'How often this charges cannot be changed here — a running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
-                  : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Price</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                {/* The package's OWN currency, shown and not editable. It is a
+                    lookup that older `client_purchases` rows still fall back to
+                    — part 132 added their currency column and rows before it are
+                    null — so changing it here would redenominate sales that have
+                    already happened. */}
+                <Text style={{ ...ty.label, color: t.ink3 }}>{editing?.currency ? editing.currency.toUpperCase() : ''}</Text>
+                <TextInput value={editPrice} onChangeText={(v) => { setEditPrice(v); if (editErr) setEditErr(null); }}
+                  keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={t.ink3}
+                  accessibilityLabel={`Price in ${editing?.currency ? editing.currency.toUpperCase() : 'this package’s currency'}`}
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                A package keeps the currency it was created in for its whole life. To sell in another one, withdraw this and create a new package.
               </Text>
-            ) : null}
 
-            {editErr ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{editErr}</Flag> : null}
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={editBusy} label={editBusy ? 'Saving…' : 'Save Changes'} onPress={() => { void saveEdit(); }} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setEditing(null)} />
-        </View>
+              {/* Said only when the price has actually moved. A coach warned
+                  about their subscribers every time they correct a typo stops
+                  reading the warning, and this is the warning that matters. */}
+              {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
+              ) : null}
+
+              {/* The rename warning, and it is a different warning. A price
+                  edit cannot reach a sale already made; a NAME edit relabels
+                  every one of them, because no sale carries a name of its own
+                  and every list resolves one with a live package lookup. Said
+                  only when the name has actually moved, for the same reason
+                  the reprice note is. */}
+              {editing && isRename(editPatch() ?? {}, editing.name) ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{RENAME_RELABELS_HISTORY}</Flag>
+              ) : null}
+
+              {editing && (editing.sessions != null || editing.billing_interval) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {editing.billing_interval
+                    ? 'How often this charges cannot be changed here. A running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
+                    : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
+                </Text>
+              ) : null}
+
+              {editErr ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{editErr}</Flag> : null}
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={editBusy} label={editBusy ? 'Saving…' : 'Save Changes'} onPress={() => { void saveEdit(); }} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setEditing(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

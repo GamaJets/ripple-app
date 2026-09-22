@@ -362,7 +362,7 @@ export function planSession(g: SessionGroup): PlannedWorkout | SkippedSession {
   if (!dur) {
     return {
       key: g.key, t: g.t, exercises, code: 'no-duration',
-      reason: 'No length recorded. Apple Health needs a start and an end, and nothing here measured one — enter how long this session ran and it can be written.',
+      reason: 'No length recorded. Apple Health needs a start and an end, and nothing here measured one. Enter how long this session ran and it can be written.',
     };
   }
   const act = sessionActivity(g.entries);
@@ -456,7 +456,7 @@ export function summariseResult(r: WriteResult): string {
   } else if (r.failed.length === 0) {
     parts.push(`Wrote ${r.written.length} ${r.written.length === 1 ? 'session' : 'sessions'} to Apple Health.`);
   } else {
-    parts.push(`Wrote ${r.written.length} of ${attempted} sessions to Apple Health — ${r.failed.length} failed.`);
+    parts.push(`Wrote ${r.written.length} of ${attempted} sessions to Apple Health; ${r.failed.length} failed.`);
   }
   if (r.alreadyWritten > 0) parts.push(`${r.alreadyWritten} already there.`);
   if (r.skipped.length > 0) {
@@ -499,7 +499,10 @@ function lazy(mod: NativeMod): any {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     else if (mod === 'react-native') m = require('react-native');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    else if (mod === 'health') m = require('react-native-health');
+    // The shim, not react-native-health: that package is legacy-architecture
+    // and does not register under RN 0.86, so `saveWorkout` was never on it.
+    // See src/lib/wearables/appleHealthShim.ts.
+    else if (mod === 'health') m = require('./appleHealthShim').AppleHealthCompat;
     return m?.default ?? m;
   } catch {
     return null;
@@ -552,22 +555,33 @@ export function ledgerAvailable(): boolean {
 function nativeHk(): any {
   const rn = lazy('react-native');
   if (!rn || rn.Platform?.OS !== 'ios') return null;
-  if (!rn.NativeModules?.AppleHealthKit) return null;
+  if (!healthKitHere()) return null;
   const k = lazy('health');
   return k && typeof k.saveWorkout === 'function' ? k : null;
+}
+
+/** Apple's own answer to "does this device have HealthKit".
+ *
+ *  `NativeModules.AppleHealthKit` was the test and is undefined on every build
+ *  now — see the shim — so it said "no HealthKit" on an iPhone that has it. */
+function healthKitHere(): boolean {
+  // Same order as `nativePresent` in appleHealth.ts, for the same reason: a
+  // shim that will not load is remembered by `healthModule('health')` rather
+  // than re-thrown on every call.
+  try { if (!require('./appleHealth').healthKitPresent()) return false; return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
 }
 
 /** Why writing is impossible in this binary, or null if it is possible. */
 export function writeUnavailableReason(): string | null {
   const rn = lazy('react-native');
   if (!rn) return 'Apple Health is only available in the Repple app.';
-  if (rn.Platform?.OS !== 'ios') return 'Writing to Apple Health is iPhone-only — Health does not exist on this platform.';
-  if (!rn.NativeModules?.AppleHealthKit) {
+  if (rn.Platform?.OS !== 'ios') return 'Writing to Apple Health is iPhone-only. Health does not exist on this platform.';
+  if (!healthKitHere()) {
     return 'Needs the Repple app build. HealthKit is native code and is not present in Expo Go or the iOS Simulator without it.';
   }
   if (!nativeHk()) return 'The Apple Health module in this build cannot save workouts. A newer build is needed.';
   if (!ledgerAvailable()) {
-    return 'Repple cannot remember what it has already written on this device, so it will not write — the risk is duplicate workouts you would have to delete by hand.';
+    return 'Repple cannot remember what it has already written on this device, so it will not write. The risk is duplicate workouts you would have to delete by hand.';
   }
   return null;
 }

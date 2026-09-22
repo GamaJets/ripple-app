@@ -16,11 +16,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 
 import { mergeExerciseLists, type CoachExercise } from '../lib/coachExerciseList';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
+import { writeFailure } from '../lib/wroteRows';
 
 export { mergeExerciseLists, type CoachExercise };
 
@@ -45,6 +48,10 @@ export interface CoachExercisesApi {
    */
   remember: (name: string, group?: string) => Promise<boolean>;
   forget: (name: string) => Promise<boolean>;
+  /** Read the saved names again. Under 'error' the list is empty because the
+   *  read failed, not because the coach has saved nothing — the picker says
+   *  so, and this is how it stops saying it. */
+  reload: () => void;
 }
 
 const byName = (a: CoachExercise, b: CoachExercise) => a.name.localeCompare(b.name);
@@ -54,26 +61,51 @@ export function useCoachExercises(): CoachExercisesApi {
   const [saved, setSaved] = useState<CoachExercise[]>([]);
   const [status, setStatus] = useState<CoachExerciseStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and WHY there is nobody, when there is nobody ────
+        //
+        // This was `const { data: sess } = await supabase.auth.getSession()`
+        // with a bare `if (!sess?.session)` under it, and the comment that
+        // justified the shape said getUser() REJECTS when nobody is signed in.
+        // It does not. src/lib/authReadFate.ts quotes the installed library:
+        // both calls RESOLVE on a failure, `getSession()` with
+        // `{ data: { session: null }, error }` when the stored access token has
+        // expired and the refresh cannot reach the server. The `error` was not
+        // named, so a gym with no signal arrived here as `session: null` — the
+        // same value a phone that has never been signed in produces — and this
+        // provider answered 'ready' with an empty list. The picker above it
+        // then says the coach has saved no names of their own, which is a
+        // statement about them, made out of an outage.
+        //
+        // `sessionUid` keeps the getSession call (it answers from device
+        // storage, so it answers offline, which is the whole reason this hook
+        // asks it rather than getUser) and classifies the error once, in the
+        // one place that discrimination is written down.
+        const who = await sessionUid('coachExercises.saved');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out is not a failure — there is simply nobody to have saved
-        // anything. The built-in list stands on its own.
-        if (!id) { setStatus('ready'); return; }
+        // Told apart by `fate`, never by `!who.uid`. The two are equivalent
+        // here and the compiler will not say so: `!who.uid` DOES narrow the
+        // union in the surviving branch, because `uid` is `string | null` and a
+        // truthy one excludes the null member. Where it does not narrow is
+        // inside the failure branch — `fate` stays `AuthReadFate | null` there,
+        // which is exactly where `authGateStatus` has to be called, and
+        // src/ui/coachReceipts.ts is the site that proves it with a type error.
+        // So the failure is discriminated on the thing that discriminates it.
+        //
+        // Signed out is not a failure: there is nobody to have saved anything,
+        // the built-in list stands on its own, and 'ready' over that empty list
+        // is true. An unreadable read is not that — nothing is known about who
+        // this is, so nothing may be said about what they have saved.
+        // src/lib/authGateStatus.ts holds the mapping and is tested on it.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
         // Ordered as well as capped. The list is re-sorted by name below, so the
         // order here is purely about WHICH names survive the ceiling — and left
@@ -95,7 +127,16 @@ export function useCoachExercises(): CoachExercisesApi {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** A name the coach typed a moment ago is held optimistically and is NOT
+   *  merged by the read below — it assigns — so a refresh drops an optimistic
+   *  name whose write never landed. That is the honest outcome: the name was
+   *  never saved, and the list is supposed to be what the server holds. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const remember = useCallback(async (name: string, group = ''): Promise<boolean> => {
     const nm = name.trim();
@@ -118,10 +159,25 @@ export function useCoachExercises(): CoachExercisesApi {
     setSaved((p) => p.filter((x) => x.name !== name));
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('coach_exercises').delete().eq('coach_id', uid).eq('name', name);
-      return !error;
-    } catch { return false; }
-  }, [uid]);
+      // COUNTED, and put back when the server did not confirm. The row is
+      // dropped from state above before the request goes out, and PostgREST
+      // answers a DELETE that matched nothing with a 204 and `error: null` —
+      // so `!error` was `true` for a refusal, and the movement vanished from
+      // the coach's own list while the row stayed on the server and came back
+      // at the next load.
+      const del = await supabase.from('coach_exercises')
+        .delete({ count: 'exact' }).eq('coach_id', uid).eq('name', name);
+      if (writeFailure('That movement', del)) {
+        // Re-read rather than reinstate from memory. `reload` is what this
+        // hook already treats as the truth about what the server holds, and a
+        // row put back by hand would be this device's guess at a row it has
+        // just been told it did not delete.
+        reload();
+        return false;
+      }
+      return true;
+    } catch { reload(); return false; }
+  }, [uid, reload]);
 
-  return { saved, status, remember, forget };
+  return { saved, status, remember, forget, reload };
 }

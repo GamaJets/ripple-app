@@ -186,6 +186,33 @@ export function dayOf(at: string, now: Date = new Date()): string {
 export const todayKey = (now: Date = new Date()): string => dayOf(now.toISOString(), now);
 
 /**
+ * How long until the local day rolls over, in milliseconds.
+ *
+ * ── Why a screen needs this ───────────────────────────────────────────────
+ *
+ * `todayKey()` read once into a `useMemo` with an empty dependency array is
+ * fixed for the life of the MOUNT, and a phone app screen is not remounted by
+ * being backgrounded. app/(trainer)/credentials.tsx judged every expiry against
+ * it: a coach who opened that screen on Sunday and came back to it on Wednesday
+ * was told their public liability insurance was current, two days after it ran
+ * out. Everything else on that screen is scrupulous about not saying more than
+ * it knows.
+ *
+ * LOCAL midnight, computed by rolling the date forward and zeroing the clock
+ * rather than by adding 24 hours — the two are 23 or 25 hours apart across a
+ * daylight-saving boundary, and a screen that woke an hour late on the last
+ * Sunday in October would spend that hour stating yesterday.
+ *
+ * Never zero or negative: a timer scheduled at 0 fires immediately and reads
+ * the same day back, which is a loop rather than a refresh.
+ */
+export function msUntilNextLocalDay(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  const ms = next.getTime() - now.getTime();
+  return ms > 0 ? ms : 1;
+}
+
+/**
  * The cached entries that belong to `day`.
  *
  * For a store that reads one day at a time. Yesterday's unsent meal is still
@@ -240,7 +267,7 @@ export function unsentCount(ids: readonly string[], isUnsent: (id: string) => bo
  */
 export function unsentNote(n: number, noun: string, nounPlural = `${noun}s`): string | null {
   if (n <= 0) return null;
-  return `${n} ${n === 1 ? noun : nounPlural} saved on this phone and not sent yet — ${n === 1 ? 'it goes' : 'they go'} up next time you have signal.`;
+  return `${n} ${n === 1 ? noun : nounPlural} saved on this phone and not sent yet. ${n === 1 ? 'It goes' : 'They go'} up next time you have signal.`;
 }
 
 /* ── When the queue actually gets sent ─────────────────────────────────────
@@ -300,6 +327,70 @@ let running: Promise<number> | null = null;
 let askedAgain = false;
 
 /**
+ * How many passes one flight may make, however many times it is asked again.
+ *
+ * ── The loop this bounds, and why it is not hypothetical ──────────────────
+ *
+ * `askedAgain` is unconditional: any call to `flushAll` while a pass is in
+ * flight books one more pass, and the pass after that may book another. There
+ * was no ceiling on that, and there is a path straight back into it from inside
+ * the flush itself:
+ *
+ *   a provider's write SUCCEEDS  →  `noteReached` (src/lib/reachability.ts)
+ *   →  the state goes not-online → online  →  the reconnect edge fires
+ *   →  src/ui/offlineFlush.tsx's subscriber calls `flushAll`  →  askedAgain.
+ *
+ * Every write in the app reports through `observedFetch`, so every flusher is a
+ * candidate. All it takes to keep the loop alive is a connection that keeps
+ * flipping — one write times out (`noteUnreachable`, offline), the next one
+ * lands (`noteReached`, online, edge, one more pass) — which is a stairwell out
+ * of a basement gym, i.e. the exact place this whole file is aimed at. A
+ * simulated flusher that re-enters `flushAll` runs for ever today; the test
+ * holds that it stops.
+ *
+ * Three, for the reason MAX_ATTEMPTS in src/lib/readRefresh.ts is three: past
+ * that a re-pass is no longer recovering from a moment that was missed, it is
+ * retrying a connection that is not working, on somebody's battery, with a
+ * queue whose ambiguous writes may already have committed. What is dropped by
+ * the ceiling is not work — the queue is untouched and the next foreground or
+ * reconnect flushes it.
+ */
+export const MAX_FLUSH_PASSES = 3;
+
+/**
+ * Wait for the flush that is already running, or start one.
+ *
+ * ── Why this exists next to `flushAll` ────────────────────────────────────
+ *
+ * `flushAll` treats a call made during a pass as NEWS — it books one more pass,
+ * because whatever prompted it may have arrived after a provider had already
+ * read its queue. That is right for a trigger.
+ *
+ * It is wrong for a second subscriber to the SAME trigger, and the app has one.
+ * src/ui/offlineFlush.tsx and src/lib/readRefresh.ts are both wired to the
+ * reconnect edge and both to AppState, and `refreshStale` flushes before it
+ * re-reads. So every reconnect and every return to the foreground raised two
+ * calls a few microseconds apart and ran every provider's queue TWICE, back to
+ * back, on the connection least able to afford it — measured, not inferred.
+ *
+ * The second of those two carries nothing the first has not got. It is the same
+ * event. And a doubled pass is not free: a write that timed out at the ceiling
+ * (src/lib/requestTimeout.ts) may have committed and lost only its reply, so
+ * offering it again is how one logged session becomes two — which is why
+ * `retryOnTimeout` refuses to resend a write at the transport layer and why
+ * `newRowId` exists in src/lib/outbox.ts. Doing it once per edge instead of
+ * twice halves that exposure for the two queues that still insert without a
+ * device-minted id.
+ *
+ * So a caller that only needs "the queue has been offered before I read" joins
+ * the pass in flight instead of booking another. Nothing is lost: the running
+ * pass has not finished, so it has not yet reported that anything is unsent.
+ */
+export function flushAllOrJoin(): Promise<number> {
+  return running ?? flushAll();
+}
+
+/**
  * Run every registered flush, once.
  *
  * SINGLE FLIGHT, and this is the part that has to be right. The two triggers
@@ -310,6 +401,10 @@ let askedAgain = false;
  * dropped either: it sets `askedAgain`, and one more pass runs when the current
  * one finishes, because the state that prompted it may have arrived after that
  * provider had already read its queue.
+ *
+ * BOUNDED at `MAX_FLUSH_PASSES`, because "one more pass" composes into a loop
+ * with no exit — see that constant. A caller that is only sequencing itself
+ * behind the queue rather than reporting news should use `flushAllOrJoin`.
  *
  * Resolves with the number of flushers that were run in the final pass.
  */
@@ -325,8 +420,10 @@ export function flushAll(): Promise<number> {
   running = pass;
   void (async () => {
     let ran = 0;
+    let passes = 0;
     do {
       askedAgain = false;
+      passes += 1;
       // A snapshot, so a provider registering mid-flush is picked up by the
       // next pass rather than being called while this list is being walked.
       const batch = [...flushers.values()];
@@ -338,7 +435,10 @@ export function flushAll(): Promise<number> {
         // going back into the queue they came from.
         try { await fn(); } catch { /* this provider keeps its own rows; the rest still go */ }
       }
-    } while (askedAgain);
+      // Bounded. See MAX_FLUSH_PASSES: a flusher's own successful write raises
+      // the reconnect edge, which asks again, which is a loop with no exit on a
+      // connection that keeps flipping.
+    } while (askedAgain && passes < MAX_FLUSH_PASSES);
     // Cleared before the promise resolves, so a caller that chains another
     // flush onto this one gets a fresh pass rather than this same settled
     // promise handed straight back.

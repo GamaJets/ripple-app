@@ -18,6 +18,7 @@ import {
   BODY_METRICS, SCAN_STALE_DAYS, DIRECTION_CAVEAT,
   type BodyScanRow, type ManualRow,
 } from './clientBody';
+import { fmtAxisDay } from './format';
 
 const errors: string[] = [];
 let checks = 0;
@@ -115,7 +116,13 @@ ok(mv.first.atISO === '2026-06-01' && mv.last.atISO === '2026-08-01', 'across th
 const line = readingLine(three.weight, 'kg');
 ok(line.startsWith('3 readings'), 'the line counts the readings');
 ok(line.includes('−2 kg'), 'and signs the change');
-ok(line.includes('1 Jun'), 'and dates what it is measured from');
+// Derived, not pinned. `dayHeading` renders in the reader's own language now
+// — a Norwegian coach sees a Norwegian month — so a literal '1 Jun' here would
+// assert the formatter's English output rather than this module's contract.
+// What is actually being claimed is that the line dates the change from the
+// FIRST reading and not the last, which is what this comparison catches.
+ok(line.includes(fmtAxisDay(2026, 5, 1)), 'and dates what it is measured from');
+ok(!line.includes(fmtAxisDay(2026, 7, 1)), 'from the first reading, never the last');
 // Never "since their first scan": under a truncated read the oldest scans are
 // the ones that did not arrive, so a date is true where that claim would not be.
 ok(!line.includes('first scan'), 'without claiming the earliest reading is their first ever');
@@ -216,7 +223,7 @@ ok(!manualFigures(onlyWeight, 'kg', 'Sam').includes('body fat'), 'a typed weight
 
 ok(bodyLine(true, false, null, false, '2026-08-20', 'Sam').includes('unknown rather than none'), 'a failed read is not an empty one');
 ok(bodyLine(false, true, null, false, '2026-08-20', 'Sam') === 'Reading their scans…', 'a read in flight says so');
-ok(bodyLine(false, false, null, false, '2026-08-20', 'Sam').includes('No InBody scan on record'), 'never scanned is its own answer');
+ok(bodyLine(false, false, null, false, '2026-08-20', 'Sam') === 'No InBody scan yet', 'never scanned is its own answer');
 ok(bodyLine(false, false, '2026-08-18', false, '2026-08-20', 'Sam').includes('A second one'), 'one scan is a reading, not a trend');
 ok(bodyLine(false, false, '2026-08-18', true, '2026-08-20', 'Sam').includes('earlier scans'), 'two or more is a trend');
 ok(bodyLine(false, false, '2026-08-18', true, '2026-08-20', 'Sam').includes('2 days ago'), 'and it dates the newest one');

@@ -57,13 +57,13 @@ const env = (k: string): string => {
     // env-indirect-ok: falls back to Constants.expoConfig.extra, which is baked in by app.config.ts
     const val = (process.env as any)?.[k];
     if (val) return val;
-  } catch { }
-  
+  } catch { /* no process.env on this platform — the Constants read below is the other half of the pair, and '' is what a missing key means either way */ }
+
   try {
     const val = (Constants.expoConfig?.extra as any)?.[k];
     if (val) return val;
-  } catch { }
-  
+  } catch { /* no expoConfig either, so nothing on this device can answer for `k`. '' is the honest answer and the one the callers already handle: `isConfigured` is false without a client id, and the screen says the vendor is not set up rather than opening a consent page with no client. */ }
+
   return '';
 };
 
@@ -92,6 +92,41 @@ const env = (k: string): string => {
 // 10; this is the half of that the app is responsible for.
 export const OAUTH_REDIRECT = `${BRAND.apps.client.scheme}://wearables/callback`;
 
+/**
+ * The redirect for ONE vendor, when that vendor's dashboard holds a different
+ * one from the shared default.
+ *
+ * "Cannot connect oura ring keeps saying invalid request." Oura's application
+ * has `repple://oura/callback` registered, this file was sending
+ * `repple://wearables/callback`, and a provider refuses a redirect URI that is
+ * not on its list before the member is ever shown a consent screen. Confirmed
+ * by asking Oura's authorize endpoint both ways: the registered one answers
+ * 302 to the real consent page and the shared one answers 400.
+ *
+ * The fix is HERE rather than in the dashboard deliberately. Both would work —
+ * adding the shared URI to Oura's application would have done it — but one is
+ * a code change that goes through the gates and ships with everything else,
+ * and the other is a setting in somebody's browser that nothing in this
+ * repository can check. Between two fixes of equal effect, the one that can be
+ * tested is the one to take.
+ *
+ * `OAUTH_REDIRECT` remains the default and is what WHOOP and Fitbit use. It is
+ * not changed to match Oura: their registrations are what they are, and this
+ * file does not get to assume they agree with each other.
+ *
+ * Brand-aware for the same reason OAUTH_REDIRECT is — see above. A new brand
+ * needs its own URI added to each vendor, which is docs/WHITE-LABEL.md step 10.
+ */
+const VENDOR_REDIRECT: Partial<Record<ProviderId, string>> = {
+  oura: `${BRAND.apps.client.scheme}://oura/callback`,
+};
+
+/** Where `id` sends people back to. The shared default unless that vendor's
+ *  dashboard says otherwise. */
+export function redirectFor(id: ProviderId): string {
+  return VENDOR_REDIRECT[id] ?? OAUTH_REDIRECT;
+}
+
 export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
   fitbit: {
     id: 'fitbit',
@@ -105,7 +140,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // offered as a working option for long enough that somebody who taps it and
     // reads only "not set up" will reasonably wonder whether their Fitbit
     // account is the problem.
-    clientNote: 'Repple has not finished setting Fitbit up, so there is nothing here to sign in to yet — nothing is wrong with your Fitbit. WHOOP and Oura connect today, and an Apple Watch reads through Apple Health.',
+    clientNote: 'Repple has not finished setting Fitbit up, so there is nothing here to sign in to yet. Nothing is wrong with your Fitbit. WHOOP and Oura connect today, and an Apple Watch reads through Apple Health.',
   },
   oura: {
     id: 'oura',
@@ -119,7 +154,16 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // thing that makes a vendor unreachable is an empty env var in one build
     // profile, which is a deploy away and gives no warning — and the fallback
     // for a missing sentence must not be the owner's setup instructions.
-    clientNote: 'Oura is not available in this version of Repple, so there is nothing here to sign in to — nothing is wrong with your ring.',
+    //
+    // This used to say "Oura is not available in this version of Repple". That
+    // sentence sends the reader to the App Store, and no update can ever fix
+    // it: nothing is missing from the binary, the client id is simply empty in
+    // the profile this build was made from. Google Calendar shipped with that
+    // exact wording, coaches went hunting for an app update that did not exist,
+    // and the feature was withdrawn. The version is never the reason — say the
+    // integration is not set up, which is both true and not something the
+    // member can act on wrongly.
+    clientNote: 'Repple has not set Oura up, so there is nothing here to sign in to. Nothing is wrong with your ring.',
   },
   whoop: {
     id: 'whoop',
@@ -154,8 +198,11 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     clientId: env('EXPO_PUBLIC_WHOOP_CLIENT_ID'),
     usePKCE: false,
     note: 'Register at developer.whoop.com → set EXPO_PUBLIC_WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET.',
-    // As with Oura: configured today, so unreachable today. See the note there.
-    clientNote: 'WHOOP is not available in this version of Repple, so there is nothing here to sign in to — nothing is wrong with your strap.',
+    // As with Oura: configured today, so unreachable today. See the note there,
+    // including why this no longer says "not available in this version of
+    // Repple" — that blamed the build for a missing client id and sent people
+    // looking for an update that could not carry the fix.
+    clientNote: 'Repple has not set WHOOP up, so there is nothing here to sign in to. Nothing is wrong with your strap.',
   },
   garmin: {
     id: 'garmin',
@@ -171,7 +218,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // writes into HealthKit, so an iPhone owner gets their Garmin days by
     // connecting Apple Health — and sleepMerge already treats a Garmin night
     // arriving that way as a Garmin night (family 'garmin'), not a watch night.
-    clientNote: 'Garmin has to approve Repple before it will hand over your data, and it has not yet — so this is not something you can sign in to. On an iPhone, your Garmin already writes into Apple Health: connect that above and these days come through.',
+    clientNote: 'Garmin has to approve Repple before it will hand over your data, and it has not yet, so this is not something you can sign in to. On an iPhone, your Garmin already writes into Apple Health: connect that above and these days come through.',
   },
 };
 

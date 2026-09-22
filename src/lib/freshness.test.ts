@@ -7,10 +7,13 @@
 // fetched. The number was not wrong; it was unlabelled, which is worse.
 //
 //   AGE          how long ago, rounded the safe way
-//   ELAPSED      no calendar in it, so no timezone in it either
+//   ELAPSED      no calendar in it, so no timezone needed to produce it
 //   SENTENCE     every combination of (read yet?) × (reachable?)
+//   THE GYM'S    the hour on the gym's own wall, added where the gym has said
+//   OWN CLOCK    which wall — and omitted, never guessed, where it has not
 //   MARK         when the line earns a dot beside it
-import { agePhrase, fetchedNote, fetchedNeedsMark, isStale, STALE_MS } from './freshness';
+//   OLDEST       one stamp over several reads is the age of the worst of them
+import { agePhrase, fetchedNote, fetchedNeedsMark, isStale, oldestFetch, STALE_MS } from './freshness';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -89,6 +92,44 @@ const DAY = 24 * HOUR;
     'a backwards clock does not produce a negative duration on screen');
 }
 
+/* ── THE GYM'S OWN CLOCK ──────────────────────────────────────────────────
+ * `tenants.timezone` exists as of supabase/parts/710, so the sentence can now
+ * carry the hour the clock ON THE GYM'S WALL said — which is the only thing an
+ * owner standing at that wall can check the figure against. Asserted as an
+ * ADDITION: every sentence above has to survive unchanged, because a screen
+ * that has not been given a zone is every screen today.
+ */
+{
+  // 22:07 UTC. Three gyms, three different clocks, one instant — and none of
+  // them is the clock of the machine this test is running on, which is the
+  // whole point and is why `npm run test:zones` sweeps six of those.
+  const readAt = Date.UTC(2026, 5, 15, 22, 7, 0);
+  const now = readAt + 3 * MIN;
+
+  eq(fetchedNote(readAt, now, 'online'), 'Read 3 minutes ago',
+    'no zone: exactly the sentence that was there before, with no hour invented from the reader’s phone');
+  eq(fetchedNote(readAt, now, 'online', null), 'Read 3 minutes ago',
+    'and an explicit null is the same as saying nothing');
+  eq(fetchedNote(readAt, now, 'online', 'Europe/Londn'), 'Read 3 minutes ago',
+    'and a zone this runtime cannot resolve adds nothing rather than an hour it had to guess at');
+
+  eq(fetchedNote(readAt, now, 'online', 'Asia/Dubai'), 'Read 3 minutes ago, at 02:07 at the gym',
+    'with a zone, the gym’s own wall clock is on the end');
+  eq(fetchedNote(readAt, now, 'online', 'Europe/London'), 'Read 3 minutes ago, at 23:07 at the gym',
+    'and it is that gym’s hour, summer time included, not this machine’s');
+  eq(fetchedNote(readAt, now, 'online', 'America/Los_Angeles'), 'Read 3 minutes ago, at 15:07 at the gym',
+    'and the same instant is a different hour again on the other side of it');
+
+  const off = fetchedNote(readAt, now, 'offline', 'Asia/Dubai');
+  ok(off.includes('Offline') && off.includes('02:07 at the gym'),
+    'the offline sentence carries it too, and still says the figures are frozen');
+  ok(off.includes('Nothing here will change until there is signal'),
+    'in that order — the clock is an aside, the freeze is the warning');
+
+  eq(fetchedNote(null, now, 'online', 'Asia/Dubai'), 'Reading…',
+    'and a screen that has read nothing has no hour to state, zone or no zone');
+}
+
 /* ── MARK ─────────────────────────────────────────────────────────────────
  * A dot beside the line, never a coloured sentence — src/theme/scale.ts
  * reserves the status colours for marks. This decides whether there is one.
@@ -108,6 +149,36 @@ const DAY = 24 * HOUR;
   eq(fetchedNeedsMark(null, at, 'unknown'), false, 'a screen that is still loading is not marked as stale');
   eq(fetchedNeedsMark(null, at, 'offline'), true, 'but one that cannot read at all is');
 }
+
+/* ── OLDEST ───────────────────────────────────────────────────────────────
+ * A screen fed by three providers under one stamp is claiming an age for all
+ * three. The claim is only true of the oldest, and a source that has never
+ * come back has no age to contribute — so it takes the whole thing back to
+ * "not read yet" rather than letting two fresh reads speak for a third that
+ * never happened.
+ */
+{
+  const at = Date.parse('2026-09-01T09:00:00Z');
+
+  eq(oldestFetch(at), at, 'one source is its own age');
+  eq(oldestFetch(at, at + MIN), at, 'two sources take the older');
+  eq(oldestFetch(at + MIN, at), at, 'and the order they arrive in does not matter');
+  eq(oldestFetch(at + HOUR, at + MIN, at), at, 'three sources take the oldest of the three');
+
+  eq(oldestFetch(null), null, 'a source that has never come back has no age');
+  eq(oldestFetch(at, null), null,
+    'and one unread source makes the whole stamp unread — a fresh figure beside one that was never read must not be labelled fresh');
+  eq(oldestFetch(null, at), null, 'whichever side the hole is on');
+  eq(oldestFetch(), null, 'no sources at all is nothing to be the age of');
+
+  // The sentence the stamp is for, end to end.
+  eq(fetchedNote(oldestFetch(at, at + 20 * MIN), at + 20 * MIN, 'online'),
+    'Read 20 minutes ago',
+    'the line reports the age of the older read, not of the refresh that just landed beside it');
+  eq(fetchedNeedsMark(oldestFetch(at, at + 20 * MIN), at + 20 * MIN, 'online'), true,
+    'and it earns its mark on the older read, which a newest-wins stamp would have hidden');
+}
+
 
 if (errors.length) {
   console.error(`freshness: ${errors.length} failure(s)`);

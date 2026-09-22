@@ -12,7 +12,7 @@
 // re-armable, and a session outside the window the caller actually read is
 // never cancelled on the strength of a query that did not ask about it.
 import {
-  remindAt, toArm, staleReminders, expiredReminders, reminderBody,
+  remindAt, toArm, staleReminders, expiredReminders, reminderBody, readWindow,
   backlogDue, backlogBody, backlogNote,
   COACH_LEAD_MINUTES, ARM_AHEAD_DAYS, MAX_ARMED, BACKLOG_FLOOR,
   type ArmedMap, type RemindableSession,
@@ -171,6 +171,49 @@ eq(backlogNote(null, false), null, 'and an absent count with no failure says not
 ok((backlogNote(null, true) ?? '').includes('unknown'),
   'but a FAILED check says the queue is unknown rather than clear');
 ok((backlogNote(4, false) ?? '').includes('4 session'), 'and a real backlog states it');
+
+/* ── the window a cancellation pass is allowed to speak about ──────────────
+ *
+ * `staleReminders` refuses to cancel outside the window it is given, and the
+ * coach's screen used to build that window as min/max of the starts that came
+ * back. The row that needs cancelling is the row that is GONE, so the furthest
+ * session in the book took the window's far edge with it as it went and its own
+ * banner could never be taken back. The coach was sent to it.
+ */
+{
+  const cancelled: ArmedMap = { s1: { notifId: 'n1', startsAt: new Date(NOW + 3 * DAY).toISOString() } };
+
+  // 'ready' is unbounded, which is the whole point: a session that is not in
+  // the list is genuinely gone, whatever its date.
+  const whole = readWindow('ready', []);
+  ok(whole != null, 'a whole read may speak');
+  eq(whole?.from, -Infinity, 'and about any instant before');
+  eq(whole?.to, Infinity, 'and any instant after');
+  eq(staleReminders(cancelled, [], whole!.from, whole!.to).length, 1,
+    'so the deleted furthest-future session finally has its banner cancelled');
+
+  // The old derivation, kept here as the thing that must never come back: a
+  // window built from the rows that came back cannot reach the row that did
+  // not.
+  eq(staleReminders(cancelled, [], NOW, NOW).length, 0,
+    'where a window taken from the returned rows reaches nothing at all');
+
+  eq(readWindow('loading', [new Date(NOW + DAY).toISOString()]), null,
+    'a read still in flight may not cancel anything');
+  eq(readWindow('error', [new Date(NOW + DAY).toISOString()]), null,
+    'and a failed read certainly may not — one bad query must not silence a coach’s phone');
+
+  // 'partial' is the newest ROW_CAP of a newest-first read, so everything from
+  // the oldest row that came back is in hand and everything before it was never
+  // looked at.
+  const oldest = new Date(NOW - 30 * DAY).toISOString();
+  const cut = readWindow('partial', [new Date(NOW + 9 * DAY).toISOString(), oldest]);
+  eq(cut?.from, Date.parse(oldest), 'a truncated read speaks from its oldest row');
+  eq(cut?.to, Infinity, 'and forward without limit, which is where the diary is');
+  eq(readWindow('partial', ['not a date']), null,
+    'a truncated read with nothing readable in it speaks about nothing');
+  eq(readWindow('partial', []), null, 'and neither does an empty one');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('coachReminders.test.ts — ok');

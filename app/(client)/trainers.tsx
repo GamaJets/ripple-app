@@ -44,17 +44,28 @@
 // <Notice> for the one thing that needs a decision — an invitation. Every
 // query, conditional and route above is untouched.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead, TonedChip } from '../../src/ui/kit';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+// The reader's locale, resolved once with a fallback — never a literal tag.
+// See scripts/check-locale.mjs for the 2,860 kcal day that read as 2.86.
+import { appLocale } from '../../src/lib/locale';
+import { sp, layout, radius, hairline, elevation, type as ty, value, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
+// The GYM's invitation, which is a different record from the coach's and had no
+// screen at all: src/lib/memberInvites.ts could read and redeem one and nothing
+// imported either function, so the email telling two hundred people to "sign up
+// with this exact address" ended here, on the screen the getting-started
+// checklist points at, with nothing about their gym on it.
+import { useGymInvites } from '../../src/ui/gymInvites';
+import { gymInviteCards, acceptedMessage, type GymInviteCard } from '../../src/lib/gymInvite';
 import { joinByCode } from '../../src/ui/joinCode';
 import { isPlausibleCode, normaliseCode, CODE_LENGTH } from '../../src/lib/joinCode';
 import { peekJoinCode, clearJoinCode } from '../../src/ui/pendingJoinCode';
@@ -62,29 +73,139 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+// Who is signed in, with the failure kept rather than collapsed into "nobody".
+// `sessionUid` for the storage-first read (it answers offline, which is the
+// whole reason this screen asks it that way) and `signedInUid` for the one
+// place that genuinely wants the server's verdict. See src/lib/authReadFate.ts
+// for why a null session is not a sign-out.
+import { sessionUid } from '../../src/lib/sessionUid';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { authGateMessage } from '../../src/lib/authedUid';
+
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode } from '../../src/lib/types';
 // Who coaches you, asked the way the database asks it — BOTH links, so this
 // screen and the photo-sharing screen can never disagree about whether somebody
 // is your coach.
 import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
-import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel } from '../../src/lib/endCoaching';
-import type { LoadStatus } from '../../src/ui/loadStatus';
-import { fetchCredentials, fetchRatingSummaries, fetchReviews, todayKey } from '../../src/ui/reviews';
+import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel, replaceCoachNote } from '../../src/lib/endCoaching';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// ── What became of the coaches this member asked ──────────────────────────
+//
+// `coach_requests` was read on this screen as `select('trainer_id')` filtered to
+// 'pending', for one purpose: greying out a button. `status`, `note`,
+// `responded_at` and `source` were never read by anything, so a request that was
+// declined left no trace anywhere in the client app — and the push about it
+// (COACH_DECLINED_ROUTE in src/lib/notifyCopy.ts) routes HERE, to a screen that
+// listed nothing about it. Miss the banner and the answer was gone.
+//
+// The narrow pending read below is kept and is not a duplicate of this one. It
+// feeds `sent`, which is also set optimistically the moment a request is made,
+// so it is local state about this session rather than a second copy of the
+// history.
+import { fetchMyCoachRequests, type MyCoachRequestRow } from '../../src/ui/myCoachRequests';
+import {
+  COACH_REQUEST_LABEL, coachRequestAnswerLine, coachRequestLine, coachRequestSourceNote,
+  coachRequestWaitingNote, coachRequestsUnreadNote, myCoachRequestsNewestFirst, openCoachRequests,
+} from '../../src/lib/coachRequestOutcome';
+import { fetchCredentials, fetchRatingSummaries, fetchReviews } from '../../src/ui/reviews';
 import {
   credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
   credentialsSummaryLine, insuranceClaim, insuranceLine, CLAIM_NOTE, type Credential,
 } from '../../src/lib/coachCredentials';
 import {
   ratingDisplay, ratingLine, reviewListState, reviewerLabel, gymLine,
-  MAX_RATING, type RatingSummary, type Review,
+  MAX_RATING, reviewScoreLabel, type RatingSummary, type Review,
 } from '../../src/lib/reviews';
 // What a session fee is denominated in, and the four different reasons there
 // might be no answer. `wholeMoney` is the whole-unit formatter a human-typed
 // rate wants, and it knows the zero-decimal currencies — a ¥50,000 rate divided
 // by a hundred is the bug at the other end of this one.
 import { wholeMoney } from '../../src/lib/coachMoney';
+// How a bare figure is spelled when there is no currency to put in front of it.
+// `String(27.5)` is an English full stop in every locale there has ever been —
+// see `plainExact`'s own header — and this screen prints a session fee bare
+// whenever the coach's gym has not said which money it charges in. So a coach
+// charging 27.50 read "EUR 27,50" on a German handset where the currency was
+// known and "27.5" where it was not: one figure, two spellings, decided by
+// whether a gym had filled in a field. That is exactly the defect
+// `feeAmountLine` in src/lib/booking.ts records and fixes with this same
+// function, and this screen is the other half of it.
+import { plainExact } from '../../src/lib/units';
 import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
 import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type SessionFee } from '../../src/lib/sessionFee';
+// What may be drawn as somebody's photo, and what may not. `avatarSource`
+// returns null for a device path — `file:`, `ph:`, `/var/…` — which is a URL
+// only on the phone that chose it and resolves to nothing anywhere else. Part
+// 961 nulled the ones already stored and src/ui/coachProfile.tsx stopped
+// writing them, but a value that has been in a column once can be in it again,
+// and a broken circle in a directory reads as a coach who has not bothered.
+import { avatarSource } from '../../src/lib/avatarImage';
+import { useToday, useNow } from '../../src/ui/today';
+import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
+
+// `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
+// the `String(null)` mistake in another costume: any run of two spaces yields
+// an empty part, `''[0]` is undefined, and `join` spells that out — so
+// "Sam  Rivera" was drawn on the avatar as "SundefinedR". Dropping the empty
+// parts is the fix; a name that leaves nothing falls back to a dash.
+const initials = (n: string) => n.split(/\s+/).filter(Boolean).map((x) => x[0].toUpperCase()).join('') || '—';
+
+/**
+ * A coach's face, or their monogram — in the directory row and again on the
+ * profile sheet the row opens.
+ *
+ * The directory drew a monogram for everybody, which is the one screen where a
+ * photo is doing actual work: this is a member choosing between strangers, and
+ * the thing they are choosing on is largely whether the person looks like
+ * somebody they want in a room with them. The photos existed — part 961 put
+ * them in a bucket and the coach app has been uploading them — and nothing here
+ * had ever asked for the column.
+ *
+ * ── why the monogram is still here ────────────────────────────────────────
+ *
+ * Three ways there is no photo to draw, and all three land on the monogram
+ * rather than on a grey disc:
+ *
+ *   · the coach has not set one — `photo` is null;
+ *   · what is stored is a device path, which is a URL only on the phone that
+ *     chose it. `avatarSource` returns null for those;
+ *   · the fetch fails — the object was deleted out of the bucket, or the phone
+ *     is on a captive-portal wifi that answers every request with a login page.
+ *     That is the `onError` below, and it is the reason this is a component
+ *     with state rather than a ternary at each call site.
+ *
+ * The broken URL is remembered rather than a boolean flag, because the sheet
+ * keeps ONE instance of this component across every coach a member taps: a
+ * boolean set by the first coach whose photo failed would have monogrammed
+ * every coach opened afterwards.
+ */
+function CoachFace({ photo, name, size, mono }: { photo: string | null; name: string; size: number; mono: number }) {
+  const t = useTheme();
+  const [brokenUri, setBrokenUri] = useState<string | null>(null);
+  const uri = avatarSource(photo);
+  // The mockups' monogram plate: the accent's pale plate under its measured
+  // text colour, where this was the accent on grey.
+  const box = { width: size, height: size, borderRadius: radius.pill, backgroundColor: t.brandSoft };
+  if (uri && brokenUri !== uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={box}
+        resizeMode="cover"
+        accessibilityIgnoresInvertColors
+        onError={() => setBrokenUri(uri)}
+      />
+    );
+  }
+  return (
+    <View style={{ ...box, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ ...value(mono), color: t.brandText }}>{initials(name)}</Text>
+    </View>
+  );
+}
 
 interface Coach {
   id: string;
@@ -96,6 +217,10 @@ interface Coach {
    *  row below renders a zero as no fee at all. */
   sessionFee: SessionFee;
   bio: string;
+  /** The coach's photo as a URL other accounts can fetch, or null. Null is
+   *  also what a device path and a failed name read leave here — see
+   *  `avatarSource`. Never a device path, and never the string 'null'. */
+  photo: string | null;
 }
 
 /**
@@ -112,7 +237,12 @@ export default function FindTrainer() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const { received, acceptInvite, declineInvite } = useInvites();
+  const { received, acceptInvite, declineInvite, reload: reloadInvites } = useInvites();
+  const gym = useGymInvites();
+  const reach = useReachability();
+  // Which one is mid-accept, so the button says so and no second tap can fire a
+  // second redemption at the same row.
+  const [acceptingGym, setAcceptingGym] = useState<string | null>(null);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   // Three answers where there were two. `coaches: []` meant both "no trainer has
   // published a profile" and "we never got an answer from the server", and this
@@ -129,17 +259,41 @@ export default function FindTrainer() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'partial' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
   const [sel, setSel] = useState<Coach | null>(null);
+  // The directory and its ratings both run off `attempt` — the same counter the
+  // three "Try Again" buttons on this screen bump — and the invitations waiting
+  // at the top of it are their own read. An invitation sent while this screen
+  // was open appeared nowhere until the app was killed.
+  const pull = usePullToRefresh(useCallback(() => {
+    setAttempt((n) => n + 1); reloadInvites(); gym.reload(); cd.reload();
+  }, [reloadInvites, gym.reload, cd.reload]));
   const [sent, setSent] = useState<Record<string, boolean>>({});
   // Set only when the pending-requests read itself failed. Absence of a request
   // and an unreadable list of requests are different things: the first means
   // "ask this coach", the second means "we don't know whether you already did".
   const [pendingUnknown, setPendingUnknown] = useState(false);
+  // ── every request this member has made, and what became of it ────────────
+  //
+  // Its own read and its own status, deliberately not folded into the directory
+  // effect above: a directory that loads and a request history that does not is
+  // a real state, and the one that must never be inferred from the other is
+  // "you have asked nobody". The names come back separately again, because a
+  // coach who has left the directory cannot be named at all — see
+  // `MyCoachRequestRow.coachName`.
+  const [myReqs, setMyReqs] = useState<MyCoachRequestRow[]>([]);
+  const [myReqStatus, setMyReqStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [myReqNames, setMyReqNames] = useState(true);
   // The trust surface of a listing. Both are read for the whole page at once
   // and both carry their own status: a directory that loads and a set of
   // ratings that does not is a real, common state, and the coaches must still
   // be shown — with no rating beside them rather than a fabricated "no reviews
   // yet", which is a sentence about somebody's reputation.
-  const today = useMemo(() => todayKey(), []);
+  // `useMemo(() => todayKey(), [])` froze this at the moment the screen mounted.
+  // It is the date every credential on this directory is judged expired-or-not
+  // against, and a phone that has this screen open at midnight — or in a pocket
+  // for a day, which is the ordinary case — went on telling a member that a
+  // lapsed insurance certificate was current. `useToday()` re-reads at the local
+  // day boundary and on return from the background. See src/ui/today.ts.
+  const today = useToday();
   const [ratings, setRatings] = useState<Record<string, RatingSummary>>({});
   const [ratingStatus, setRatingStatus] = useState<LoadStatus>('loading');
   const [creds, setCreds] = useState<Record<string, Credential[]> | null>(null);
@@ -182,6 +336,23 @@ export default function FindTrainer() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Keyed on `attempt`, which is the counter every "Try Again" on this screen
+  // bumps and which pull-to-refresh bumps too — so an answer that arrived while
+  // this screen was open is one pull away, rather than waiting for the app to
+  // be killed. `cancelled` because both awaits below can outlive the screen.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out = await fetchMyCoachRequests();
+      if (cancelled) return;
+      setMyReqs(out.rows);
+      setMyReqStatus(out.status);
+      setMyReqNames(out.namesRead);
+    })();
+    return () => { cancelled = true; };
+  }, [attempt]);
+
   const [codeBusy, setCodeBusy] = useState(false);
   // ── The way out ────────────────────────────────────────────────────────────
   //
@@ -210,7 +381,7 @@ export default function FindTrainer() {
     // narrows it for the RPC and says why.
     const r = await joinByCode(code, cd.coachingMode === 'solo' ? 'online' : cd.coachingMode);
     setCodeBusy(false);
-    if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
+    if (!r.ok) { Alert.alert('That Code Didn’t Work', r.reason); return; }
     // Spent, so it does not come back next time. Only now — not when it was
     // shown — because a code that was merely displayed has not done its job.
     setCode('');
@@ -220,7 +391,7 @@ export default function FindTrainer() {
     // already coached by this person. Saying "request sent" again would have
     // them waiting on a second answer that is never coming.
     Alert.alert(
-      r.already ? 'You’ve already asked ' + r.trainerName : 'Request sent to ' + r.trainerName,
+      r.already ? 'You’ve Already Asked ' + r.trainerName : 'Request Sent to ' + r.trainerName,
       r.already
         ? 'Nothing new was sent. ' + r.trainerName + ' has your earlier request, or already coaches you.'
         : r.trainerName + ' sees your request in their app and adds you once they accept. Not who you expected? Check the code with them before they do.',
@@ -245,9 +416,29 @@ export default function FindTrainer() {
         // Signed out is a true answer, not a failed check — and fetchMyCoach()
         // throws when there is no session, which would land in the catch below
         // and report an error to somebody who is simply not signed in.
-        const { data: sess } = await supabase.auth.getSession();
+        //
+        // But "no session" was being read off `sess?.session` alone, and that
+        // is not only the signed-out answer. `getSession()` goes to the network
+        // to refresh an access token that has actually expired, and when that
+        // refresh cannot reach the server it RESOLVES with `session: null` and
+        // a retryable error beside it — byte-identical, at this line, to a
+        // device nobody has ever signed in on. So an outage took the branch
+        // below, and the screen settled into 'ready' with `coach` null: "You
+        // don't have a coach yet", in front of somebody who does. That is the
+        // exact state in which a coached member stops asking to leave, and it
+        // is the sentence the 'error' branch further down was written to avoid.
+        //
+        // sessionUid() keeps the two apart, and where they cannot be told
+        // apart it answers 'unreadable' — which lands on the honest screen
+        // rather than on the confident wrong one.
+        const who = await sessionUid('findTrainer.myCoach');
         if (cancelled) return;
-        if (!sess?.session) { setCoach(null); setCoachStatus('ready'); return; }
+        // Narrowed on `fate`, never on `!who.uid`: UidRead's members are told
+        // apart by fate, and `string` includes '', so `!who.uid` does not
+        // discriminate the union.
+        if (who.fate === 'signed-out') { setCoach(null); setCoachStatus('ready'); return; }
+        if (who.fate !== null) { setCoachStatus('error'); return; }
+
         const mine = await fetchMyCoach();
         if (cancelled) return;
         setCoach(mine);
@@ -348,14 +539,64 @@ export default function FindTrainer() {
     const { mode: m, ok } = await acceptInvite(id);
     if (!ok) {
       Alert.alert(
-        'Not connected yet',
-        'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here — try accepting it again in a moment.',
+        'Not Connected Yet',
+        'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here. Try accepting it again in a moment.',
       );
       return;
     }
     cd.setCoachingMode(m);
     notifySuccess();
-    Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
+    Alert.alert('You Are Connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
+  };
+
+  // Every sentence on these cards is composed in src/lib/gymInvite.ts, where it
+  // is tested — including the two this screen would otherwise get wrong: a plan
+  // attached but unreadable is not "no plan", and a gym this account cannot yet
+  // read the name of is described rather than named.
+  /* `nowMs` passed, and IN the dependency list. `gymInviteCards` defaults its
+   * third argument to `Date.now()`, and that argument is what `isRedeemable`
+   * decides on — which invitations are OPEN, which order the cards come in, and
+   * what each card's sentence says. Read inside a memo keyed on the invites and
+   * the gym names, it was the moment the screen first mounted, and this screen
+   * is reached from a tab that never unmounts. An invitation that lapsed while
+   * the phone was in a pocket kept its Accept button, and the tap came back
+   * with the server's refusal instead of the card saying it had run out. */
+  const gymCardsNow = useNow().getTime();
+  const gymCards = useMemo(
+    () => gymInviteCards(gym.invites, { byTenant: gym.gymNames }, gymCardsNow),
+    [gym.invites, gym.gymNames, gymCardsNow],
+  );
+
+  /**
+   * Accept the gym's invitation.
+   *
+   * Nothing is said to have happened until the server returns the membership it
+   * opened — the hook returns that id and nothing else counts as a yes. The
+   * failure sentence comes from the reason the SQL raised, so "you had already
+   * accepted this" and "this has lapsed" stay two different answers, which is
+   * exactly what accept_member_invite went to the trouble of distinguishing.
+   */
+  const acceptGym = async (card: GymInviteCard) => {
+    const inv = gym.invites.find((i) => i.id === card.id) ?? null;
+    setAcceptingGym(card.id);
+    const r = await gym.accept(card.id);
+    setAcceptingGym(null);
+    if (!r.ok) {
+      Alert.alert('Not Accepted', r.message ?? 'Nothing was accepted.');
+      // Ask again: the invitation may have been withdrawn or used elsewhere,
+      // and the card must stop offering a button for a row that is gone.
+      gym.reload();
+      return;
+    }
+    notifySuccess();
+    Alert.alert(
+      'You Have Joined',
+      acceptedMessage(inv ? gym.gymNames.get(inv.tenantId) ?? null : null),
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Open Membership', onPress: () => router.push('/(client)/membership') },
+      ],
+    );
   };
 
   useEffect(() => {
@@ -364,8 +605,26 @@ export default function FindTrainer() {
       if (!USE_SUPABASE) { setStatus('ready'); return; }
       setStatus('loading');
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id ?? null;
+        // `uid` is used for exactly two things below, and an outage used to
+        // take the `!uid` path through both of them without saying so:
+        //
+        //   · it drops your own listing out of the directory. Unavoidably
+        //     best-effort — nobody can be filtered out when nobody has been
+        //     identified — and harmless, because the request path re-asks who
+        //     you are and now refuses to write when it cannot tell.
+        //   · it gates the "which coaches have you already asked" read. THAT
+        //     one mattered: with `uid` null the read never happened,
+        //     `pendingUnknown` was never set, and the screen went on drawing
+        //     plain "Request" buttons — which is the screen asserting it
+        //     looked and found nothing outstanding, over a check it never
+        //     made.
+        //
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('findTrainer.load');
+        if (cancelled) return;
+        const uid = who.uid;
+        if (who.fate === 'unreadable') setPendingUnknown(true);
+
 
         // supabase-js resolves; it does not throw. An RLS refusal or a dead
         // connection arrives as `error` set and `data` null, so a query read for
@@ -392,7 +651,7 @@ export default function FindTrainer() {
         // `.in(ids)` with at most `ROW_CAP` ids can itself come back at the
         // cap, and a name that did not arrive drops its coach from the list
         // below — so this one is capped too and its truncation counts.
-        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
+        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name, avatar').in('id', ids).limit(capLimit());
         if (cancelled) return;
         // Names live in `profiles`, not in `trainers`, and a coach we cannot name
         // is dropped below as an unfinished profile. So a failure here does not
@@ -403,6 +662,12 @@ export default function FindTrainer() {
         if (profsErr) throw profsErr;
         const profPage = capped((profs ?? []) as any[]);
         const nameById = new Map<string, string>(profPage.rows.map((p: any) => [p.id, p.full_name]));
+        // Read from the same page as the names, so a coach whose row was cut by
+        // the cap loses their name and their face together rather than arriving
+        // as a face with nobody behind it.
+        const photoById = new Map<string, string | null>(
+          profPage.rows.map((p: any) => [p.id, typeof p.avatar === 'string' ? p.avatar : null]),
+        );
 
         const list: Coach[] = rows
           .filter((r: any) => ids.includes(r.id))
@@ -413,6 +678,7 @@ export default function FindTrainer() {
             specialties: Array.isArray(r.specialties) ? r.specialties : [],
             sessionFee: readSessionFee(r.session_fee),
             bio: typeof r.bio === 'string' ? r.bio : '',
+            photo: photoById.get(r.id) ?? null,
           }))
           // A coach with no name has not set up a profile — don't show a blank card.
           .filter((c) => c.name.length > 0);
@@ -435,7 +701,15 @@ export default function FindTrainer() {
             setSent(Object.fromEntries((reqs ?? []).map((r: any) => [r.trainer_id, true])));
             setPendingUnknown(false);
           }
+        } else if (who.fate === 'signed-out') {
+          // Nobody is signed in, so there are genuinely no outstanding
+          // requests to hide. Said explicitly rather than left to the initial
+          // state, because this effect re-runs on Try Again and would
+          // otherwise carry a previous read's answers over a new one.
+          setSent({});
+          setPendingUnknown(false);
         }
+
 
         if (!cancelled) { setCoaches(list); setStatus(page.truncated || profPage.truncated ? 'partial' : 'ready'); }
 
@@ -496,35 +770,192 @@ export default function FindTrainer() {
 
   const request = useCallback(async (coach: Coach, mode: CoachedMode) => {
     setSel(null);
+    // Whether the row is on the server, read by the catch below. The `try` runs
+    // past the insert — a profile read and a push — so a throw after this point
+    // is a request that HAS been made, and telling that member their coach was
+    // never asked would send them to ask again and stack a second row against
+    // the unique index.
+    let stored = false;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { Alert.alert('Sign in required', `Sign in to ${BRAND.label} to request coaching.`); return; }
+      // ── two answers that were told as one ────────────────────────────────
+      //
+      // This was `const uid = auth?.user?.id; if (!uid) Alert.alert('Sign in
+      // required', …)`. `getUser()` is a network call that does not reject:
+      // offline, a captive portal, a 502 from the auth host — each resolves
+      // with `user: null` and a retryable error that this line discarded. So
+      // the sentence a signed-in member read during an outage was a statement
+      // about THEM, that they were not signed in, made by code that had not
+      // managed to ask. It sends them to a login form that was never the
+      // problem, and it is the same substitution as the one on the coach card
+      // above.
+      //
+      // Nothing is written on either fate — both return before the insert —
+      // so the 'unreadable' sentence's "nothing has been changed" is true
+      // here.
+      const asker = await signedInUid('findTrainer.request');
+      // Narrowed on `fate`, never on `!asker.uid`: `string` includes ''.
+      if (asker.fate !== null) {
+        Alert.alert(
+          asker.fate === 'signed-out' ? 'Sign In Required' : 'We Couldn’t Check Your Account',
+          asker.fate === 'signed-out'
+            ? `Sign in to ${BRAND.label} to request coaching.`
+            : authGateMessage(asker.fate),
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+      const uid = asker.uid;
+
+
       // `source` is what makes the coach's attribution add up. The column and
       // its check constraint have allowed 'directory' since part 56 and nothing
       // ever wrote it: this insert left it null, so a client who found their
       // coach by browsing was indistinguishable from a row created before the
       // column existed, and the coach's "where did people come from?" had one
       // real bucket and one permanently empty one.
-      const { error } = await supabase.from('coach_requests').insert({
+      // `.select('id')` so a genuine insert can be told from a duplicate. It
+      // matters for the push below: a client tapping Request twice must not
+      // buzz the coach's phone twice for one request.
+      const { data: made, error } = await supabase.from('coach_requests').insert({
         client_id: uid, trainer_id: coach.id, mode, status: 'pending', source: 'directory',
-      });
-      if (error && !/duplicate|unique/i.test(error.message)) {
-        Alert.alert('Could not send request', error.message);
+      }).select('id');
+      const duplicate = !!error && /duplicate|unique/i.test(error.message);
+      if (error && !duplicate) {
+        Alert.alert('Could Not Send Request', error.message);
         return;
       }
+
+      // ── a duplicate and a write that stored nothing are not the same ─────
+      //
+      // They were handled by one branch — `if (duplicate || !made?.length)` —
+      // under a badge that had already been set to "Request pending". But an
+      // insert PostgREST narrows to zero rows under a policy is NOT an error;
+      // it resolves with `error: null` and an empty array, a fact this very
+      // file relies on elsewhere. So a request the server stored nothing for
+      // was reported back as "you have already asked them", the row was badged
+      // as pending, and the member waited for an answer to a question nobody
+      // had been asked.
+      //
+      // The unique violation is a real duplicate: a request of theirs IS
+      // sitting with that coach, so the badge and the sentence are both true.
+      if (duplicate) {
+        setSent((s) => ({ ...s, [coach.id]: true }));
+        notifySuccess();
+        Alert.alert(
+          'Already Asked',
+          `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list; they still have the first one.`,
+          [{ text: 'Got It' }],
+        );
+        return;
+      }
+      // No row came back and nothing objected. Nothing was written, so nothing
+      // is claimed and no badge is set.
+      if (!made?.length) {
+        reportError('findTrainer.request', new Error('coach_requests insert returned no row'));
+        Alert.alert(
+          'Not Sent',
+          `Your request to ${coach.name} was not stored, so they have not been asked. Nothing has been sent anywhere. Try again in a moment.`,
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+
+      stored = true;
       setSent((s) => ({ ...s, [coach.id]: true }));
       notifySuccess();
+
+      // ── the push that was never sent ──────────────────────────────────────
+      //
+      // Until now this insert was the whole of it. The row landed, the coach's
+      // dashboard would show it WHENEVER THEY NEXT OPENED THE APP, and the
+      // alert below said so plainly — which was honest and useless. A person
+      // deciding to be coached is at their most likely to change their mind in
+      // the hours after asking, and the coach had no way to know they had been
+      // asked until they happened to look.
+      //
+      // 'clients' is the channel COACH_CHANNELS calls "Somebody asking to be
+      // coached by you, and somebody ending their coaching", so a coach who has
+      // muted chat still hears about this one.
+      //
+      // The name is the CLIENT'S OWN, read from their own profile — a coach
+      // cannot read a stranger's row (no policy runs client to coach before a
+      // relationship exists), so it has to travel in the message rather than be
+      // looked up on the other side. A name that could not be read is left out
+      // of the sentence rather than dashed into it.
+      // no-error-ok: a name that could not be read is left out of the push
+      // sentence entirely — the fallback below says "Somebody" rather than
+      // dashing a blank into the middle of it. The request itself has already
+      // been written at this point, so a failure here costs a name and nothing
+      // else, and there is no honest way to report it that a person would act on.
+      const { data: me, error: meErr } = await supabase.from('profiles').select('full_name').eq('id', uid).maybeSingle();
+      // A failed read is not a nameless client, it is an unknown name — and both
+      // land on the same sentence below, which says 'Somebody' rather than
+      // dashing a blank into the middle of it.
+      const who = meErr ? '' : (me?.full_name || '').trim();
+      const push = await sendPushChecked(
+        [coach.id],
+        'New coaching request',
+        who
+          ? `${who} has asked you to coach them: ${COACHED_MODE_SHORT[mode].toLowerCase()}.`
+          : `Somebody has asked you to coach them: ${COACHED_MODE_SHORT[mode].toLowerCase()}.`,
+        { route: '/(trainer)/dashboard' },
+        'clients',
+      );
+
+      // Two different sentences, because they are two different situations for
+      // the person waiting. `sendPushChecked` records the inbox row before it
+      // sends, so a failed push still leaves something the coach will see.
       Alert.alert(
-        'Request sent',
-        `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request on their dashboard. You'll be connected once they accept — nothing changes on your app until then.`,
-        [{ text: 'Got it' }]
+        'Request Sent',
+        push.ok
+          ? `${coach.name} has been notified on their phone. You'll be connected once they accept. Nothing changes on your app until then.`
+          : `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request the next time they open their app. We couldn't reach their phone just now. You'll be connected once they accept.`,
+        [{ text: 'Got It' }]
       );
     } catch (e) {
       reportError('findTrainer.request', e);
-      Alert.alert('Could not send request', 'Check your connection and try again.');
+      // The whole of this alert used to be "Check your connection and try
+      // again" — a sentence with no first half at all, so it did not say the
+      // one thing the member needed, which is whether the coach has been asked.
+      //
+      // It is now answered from `stored` rather than assumed, because both
+      // answers are reachable here: a throw before the insert means nothing was
+      // written, and a throw after it — the profile read, the push — means the
+      // request is sitting with the coach and only the notification failed.
+      // Telling the second member to try again is how a second row gets stacked
+      // against the unique index and comes back as "Already asked".
+      //
+      // `retryLine` is the second half where there is something to retry — it
+      // says whether the phone or the server is the reason, rather than sending
+      // somebody to their router over a refusal. See src/lib/reachability.ts.
+      Alert.alert(
+        stored ? 'Request Sent, but Not Notified' : 'Could Not Send Request',
+        stored
+          ? `${coach.name} has your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request and will see it the next time they open their app. We couldn't reach their phone just now. Do not ask again: it is already with them.`
+          : `${coach.name} has not been asked and nothing has been sent anywhere. ${retryLine(reach)}`,
+      );
     }
-  }, []);
+  }, [reach]);
+
+  /**
+   * The tap. Asks first when there is a coach to lose.
+   *
+   * The Flag above the buttons says what accepting would do; this is the
+   * confirmation, because reading a warning and acting on it are different
+   * things and the consequence here is somebody's coaching relationship. With
+   * no coach — the ordinary case — it goes straight through, unchanged.
+   */
+  const askToRequest = (c: Coach, m: CoachedMode) => {
+    if (!coach || coach.id === c.id) { void request(c, m); return; }
+    Alert.alert(
+      `Ask ${c.name} Instead of ${coachLabel(coach.name)}?`,
+      replaceCoachNote(coach.name, c.name),
+      [
+        { text: 'Keep My Coach', style: 'cancel' },
+        { text: `Ask ${c.name}`, onPress: () => { void request(c, m); } },
+      ],
+    );
+  };
 
   // Reviews for the open profile. Reset to 'loading' the moment the sheet
   // changes coach, so the previous coach's reviews can never sit under a new
@@ -559,6 +990,22 @@ export default function FindTrainer() {
     wholeMoney(fee, ccyStatus === 'ready' ? (feeCcy[id] ?? null) : null);
 
   /**
+   * The fee as the reader actually spells numbers, with its currency where the
+   * app has been told one and bare where it has not.
+   *
+   * The bare arm stays bare — that decision is argued at length at the row
+   * below and is not being reopened. What changes is HOW the bare figure is
+   * written. Three call sites handed the raw `number` to a `<Text>` or dropped
+   * it into a template string, and both of those are `String(n)`: a full stop,
+   * always, on a handset that writes a comma everywhere else including in the
+   * priced arm three characters away. `plainExact` changes the separator and
+   * nothing else — it does not round, so no subdivision is invented for a
+   * currency that has none, and it does not group, so the digits are the ones
+   * this screen has always printed.
+   */
+  const feeText = (id: string, fee: number): string => feeMoney(id, fee) ?? plainExact(fee);
+
+  /**
    * Why there is no currency in front of that number, in the third person.
    *
    * The status handed to `currencyGapOfStatus` is per COACH, not per screen: a
@@ -579,27 +1026,45 @@ export default function FindTrainer() {
   const credsFor = (id: string): Credential[] | null =>
     credStatus === 'ready' && creds ? (creds[id] ?? []) : null;
 
+  /**
+   * A stored instant as a day the reader recognises, or null.
+   *
+   * Null and never a dash: every caller below draws the whole line or none of
+   * it, because a sentence built around a value that would not read is the
+   * defect scripts/check-prose.mjs exists for. The locale is the READER's —
+   * `appLocale()`, never a literal — and the parse is `Date.parse` on a
+   * timestamptz, which is a full instant rather than the bare `YYYY-MM-DD` this
+   * codebase compares as a string.
+   */
+  const stamp = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return null;
+    return new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
+  /** The member's own history, newest question first. Sorted here as well as in
+   *  the query because the cap takes a prefix of the query's order, and the
+   *  list has to be right once anything at all is done to it. */
+  const listedRequests = useMemo(() => myCoachRequestsNewestFirst(myReqs), [myReqs]);
+
   const G = layout.gutter;
-  // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
-  // the `String(null)` mistake in another costume: any run of two spaces yields
-  // an empty part, `''[0]` is undefined, and `join` spells that out — so
-  // "Sam  Rivera" was drawn on the avatar as "SundefinedR". Dropping the empty
-  // parts is the fix; a name that leaves nothing falls back to a dash.
-  const initials = (n: string) => n.split(/\s+/).filter(Boolean).map((x) => x[0].toUpperCase()).join('') || '—';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
+        <PageHead title="Find a Trainer" subtitle={`Enter your coach’s code, or browse everyone coaching on ${BRAND.label}`} />
 
         {/* ── your coach, and the way out ─────────────────────────────────
             Above the invitations and the directory because it is the fact the
@@ -616,7 +1081,7 @@ export default function FindTrainer() {
                 being coached must not read this as confirmation that nobody
                 is — that is the state in which they would stop asking to
                 leave. */}
-            <Notice tone={t.warn} kicker="Your coach" title="We couldn’t check who coaches you"
+            <Notice tone={t.warn} kicker="Your Coach" title="We Couldn’t Check Who Coaches You"
               note="This is our end, not an answer about you. Until it loads we can’t show you your coach or let you leave them, so don’t read this as nobody coaching you.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
@@ -627,15 +1092,15 @@ export default function FindTrainer() {
           <Section>
             <SectionHead title="Your Coach" />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-              <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: coach.name?.trim() ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                 {/* A coach who has not set a name is a real state — part 67
                     returns a row with a null name for exactly that — and a dash
                     is what the record supports. Never a placeholder that reads
                     like a name. */}
-                <Text style={{ ...value(13), color: t.brand }}>{coach.name?.trim() ? initials(coach.name) : '—'}</Text>
+                <Text style={{ ...value(16), color: coach.name?.trim() ? t.brandText : t.ink3 }}>{coach.name?.trim() ? initials(coach.name) : '—'}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{coach.name?.trim() || '—'}</Text>
+                <Text style={{ ...ty.head, color: t.ink }}>{coach.name?.trim() || '—'}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                   Sees your workouts, measurements, check-ins, scans and anything you send them.
                 </Text>
@@ -654,9 +1119,9 @@ export default function FindTrainer() {
           <View style={{ marginTop: sp.lg }}>
             {received.map((iv) => (
               <Notice key={iv.id} tone={t.brand}
-                kicker="Coaching invitation"
-                title={`${iv.coachName || 'A Coach'} invited you`}
-                note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
+                kicker="Coaching Invitation"
+                title={`${iv.coachName || 'A Coach'} Invited You`}
+                note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect, and their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
                   <View style={{ flex: 2 }}><Cta label="Accept Invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
@@ -666,15 +1131,180 @@ export default function FindTrainer() {
           </View>
         ) : null}
 
-        <Rule />
+        {/* ── the gym's invitation ────────────────────────────────────────
+            A different record from the coach invitation above and, until now,
+            one with no screen anywhere: the gym emails "sign up with this exact
+            address — that is how the invitation finds you", the member does
+            exactly that, and every route in the app ended without mentioning
+            their gym. The plan the gym attached sat pending until reception
+            typed them in again.
+
+            Nothing is drawn while the read is in flight. An error is drawn,
+            because "we could not check" is not "nobody has invited you", and
+            the member is the only person who can tell those apart by trying
+            again. */}
+        {/* A truncated read, which the ternary below cannot say.
+            `fetchMyInvites` can now answer 'partial' — it took a `.limit()`
+            and reports when it filled it (src/ui/gymInvites.ts:106) — and the
+            branch below tests only 'error', so a partial read falls through and
+            draws the cards. That is right as far as it goes, because it counts
+            nothing and every card drawn is a real invitation. What it cannot do
+            is say that the list may be short, and this is the one screen where
+            the missing row is the member's own gym.
+
+            Its own block rather than a branch of the ternary, so it is also
+            drawn when the cards come back empty: 'partial' with nothing to show
+            is a read that ran out of room, not a member nobody has invited.
+            Matches src/ui/CoachRequests.tsx:311. */}
+        {gym.status === 'partial' ? (
+          <View style={{ marginTop: sp.lg }}>
+            <PartialRead what="invitations from gyms" shown={gymCards.length} onPress={gym.reload} />
+          </View>
+        ) : null}
+
+        {gym.status === 'error' ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="Your Gym" title="We Couldn’t Check for a Gym Invitation"
+              note="This is our end, not an answer about you. If a gym has invited you, it is still waiting. This screen simply could not read it.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try Again" wide onPress={gym.reload} />
+              </View>
+            </Notice>
+          </View>
+        ) : gymCards.length > 0 ? (
+          <View style={{ marginTop: sp.lg }}>
+            {gymCards.map((card) => (
+              <Notice key={card.id} tone={card.canAccept ? t.brand : t.warn}
+                kicker="Gym Invitation" title={card.title} note={card.note}>
+                {/* No button at all on one that cannot be redeemed. The SQL
+                    would refuse it, and a button that fails is worse than the
+                    sentence explaining why there is none. */}
+                {card.canAccept ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label={acceptingGym === card.id ? 'Accepting…' : 'Accept and Join'} wide
+                      disabled={acceptingGym != null}
+                      onPress={() => acceptGym(card)} />
+                  </View>
+                ) : null}
+              </Notice>
+            ))}
+          </View>
+        ) : null}
+
+        {/* ── what became of the coaches you asked ─────────────────────────
+            The surface a refused request did not have. src/lib/notifyCopy.ts
+            says why it matters more than the accepted half: "an accepted client
+            eventually notices their Coach screen has filled in, while a
+            declined one sees exactly what they saw yesterday — a request they
+            believe is still pending". The push about that decline routes to
+            this screen, and until now this screen said nothing about it.
+
+            Above the code field and the directory because it is the fact the
+            rest of the screen is relative to: whether asking somebody else is
+            the thing to do next depends on what the last answer was.
+
+            Drawn whenever there is anything to say OR any doubt about whether
+            there is — `myReqStatus !== 'ready'` keeps the failed read visible.
+            A member with no history and a landed read sees nothing, which is
+            the one case where silence is a true answer. */}
+        {USE_SUPABASE && (myReqStatus !== 'ready' || myReqs.length > 0) ? (
+          <>
+            <Section>
+              <SectionHead title="Coaches You’ve Asked" />
+              {myReqStatus === 'error' ? (
+                /* Not "you have asked nobody". The read failed, and the member
+                   who most needs this section is the one waiting on an answer —
+                   telling them they have no requests is what sends them off to
+                   ask a second coach. */
+                <Flag tone={t.warn}>{coachRequestsUnreadNote('error')}</Flag>
+              ) : myReqStatus === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coachRequestsUnreadNote('loading')}</Text>
+              ) : (
+                <>
+                  {myReqStatus === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{coachRequestsUnreadNote('partial')}</Flag>
+                  ) : null}
+                  {/* A name we could not ASK about is not the same as a coach
+                      RLS will not name, and the rows read differently for it:
+                      under this flag every "the coach you asked" is our end
+                      rather than theirs. */}
+                  {!myReqNames ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>
+                      We couldn’t read the coaches’ names just now, so these say what happened without saying who.
+                    </Flag>
+                  ) : null}
+                  {listedRequests.map((r, i) => {
+                    const answered = coachRequestAnswerLine(r, r.coachName, stamp(r.respondedAt));
+                    const asked = stamp(r.createdAt);
+                    const how = coachRequestSourceNote(r.source);
+                    return (
+                      <View key={r.id}>
+                        {i ? <Rule /> : null}
+                        <View style={{ paddingVertical: sp.md }}>
+                          {/* The answer as a chip: amber is still waiting, the
+                              accent is a yes, red is a no, and one the member
+                              took back themselves is nobody's verdict. */}
+                          <TonedChip label={COACH_REQUEST_LABEL[r.status]}
+                            tone={r.status === 'pending' ? 'amber' : r.status === 'accepted' ? 'brand' : r.status === 'declined' ? 'red' : 'neutral'} />
+                          {/* Never a dash as the subject of the row. A coach who
+                              has left the directory cannot be named here at all
+                              and this is still true of them. */}
+                          <Text style={{ ...ty.head, color: t.ink, marginTop: 6 }}>
+                            {r.coachName ?? 'A coach you asked'}
+                          </Text>
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{coachRequestLine(r, r.coachName)}</Text>
+                          {/* Who refused it and when. `responded_at` has been
+                              stamped since answering was written and read by
+                              nobody: "declined" with no date reads as this
+                              morning however old it is. */}
+                          {answered ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{answered}</Text>
+                          ) : null}
+                          {/* Only where there is a readable instant. A sentence
+                              assembled around a missing value is worse than one
+                              that is not drawn — see scripts/check-prose.mjs. */}
+                          {asked ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You asked on {asked}.</Text>
+                          ) : null}
+                          {how ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{how}</Text>
+                          ) : null}
+                          {r.note ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You said: {r.note}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {/* Only over a whole read. A count off a truncated one is a
+                      figure about an unknown fraction of the set — see isWhole
+                      in src/ui/loadStatus.ts. */}
+                  {isWhole(myReqStatus) && listedRequests.length ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      {coachRequestWaitingNote(openCoachRequests(listedRequests).length)
+                        ?? 'No coach still has a request of yours outstanding.'}
+                    </Text>
+                  ) : null}
+                </>
+              )}
+            </Section>
+          </>
+        ) : null}
+
 
         {/* ── the direct path ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Have a code from your coach?" />
+          <SectionHead title="Have a Code from Your Coach?" />
+          {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
+            called X, and inside it the thing called Y". The separator belongs to
+            the sentence, not to the layout: dropping FORWARD_CHAR into it would
+            put a mirrored chevron in the middle of an unmirrored English clause,
+            which is worse than leaving it. When the catalogue is translated the
+            whole sentence moves and the separator goes with it. */}
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
             {fromLink
-              ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready — they see the request and add you once they accept.'
-              : 'Ask them for their coaching code — it’s six characters, in their app under Clients › Add a client. This works even if they aren’t listed in the directory below.'}
+              ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready. They see the request and add you once they accept.'
+              : 'Ask them for their coaching code. It’s six characters, in their app under Clients › Add a client. This works even if they aren’t listed in the directory below.'}
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
             <TextInput
@@ -704,7 +1334,6 @@ export default function FindTrainer() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the directory ──────────────────────────────────────────────── */}
         <Section>
@@ -715,7 +1344,7 @@ export default function FindTrainer() {
               screen turned this into "No coaches listed yet", which a client has
               no way to tell apart from the truth. */}
           {status === 'error' ? (
-            <Notice tone={t.warn} kicker="Directory" title="We couldn’t load the directory"
+            <Notice tone={t.warn} kicker="Directory" title="We Couldn’t Load the Directory"
               note={`This is our end, not an empty directory. Until it loads we can't tell you who is coaching on ${BRAND.label}.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
@@ -726,25 +1355,47 @@ export default function FindTrainer() {
           ) : null}
 
           {status === 'loading' ? (
-            <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading the coach directory…" /></View>
           ) : status === 'error' ? null : coaches.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}>
                 <Icon name="people" size={24} color={t.ink3} />
               </View>
-              <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No coaches listed yet</Text>
+              <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No Coaches Listed Yet</Text>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>Trainers appear here once they publish their profile to the directory. If a coach has invited you directly, their invitation shows above.</Text>
             </View>
           ) : coaches.map((c, i) => (
             <View key={c.id}>
-              {i > 0 ? <Rule inset={46} /> : null}
-              <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={c.name}
+              {i > 0 ? <Rule inset={58} /> : null}
+              {/* Everything the row draws, in the order it draws it.
+                  A Pressable is ONE accessibility element — it renders
+                  `accessible={true}` — so an `accessibilityLabel` on it does
+                  not add to the lines below, it REPLACES them. This said
+                  `c.name`, and the whole of what a person picks a coach by
+                  went with it: the tagline, the rating, the credentials, the
+                  specialities, whether a request is already pending, and the
+                  session fee — the figure the long note further down this file
+                  exists to get right. A member using VoiceOver was handed a
+                  directory of names and no way to tell one coach from another,
+                  and no way to know they had already asked. */}
+              <Pressable onPress={() => setSel(c)} accessibilityRole="button"
+                accessibilityLabel={[
+                  c.name,
+                  c.tagline?.trim() || null,
+                  [rateLine(c.id), credentialsSummaryLine(credsFor(c.id), today)].filter(Boolean).join(' · ') || null,
+                  sent[c.id] ? 'Request Pending' : null,
+                  c.specialties.slice(0, 3).join(', ') || null,
+                  // The same figure the row prints, said the same way: the
+                  // priced arm never acquires a currency nobody chose, and the
+                  // other three keep the three different nothings apart.
+                  sessionFeeAmount(c.sessionFee) != null
+                    ? `${feeText(c.id, sessionFeeAmount(c.sessionFee)!)} per session`
+                    : sessionFeeShort(c.sessionFee),
+                ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ ...value(13), color: t.brand }}>{initials(c.name)}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                <CoachFace photo={c.photo} name={c.name} size={46} mono={16} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{c.name}</Text>
                   {c.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{c.tagline}</Text> : null}
                   {/* The two lines a person actually decides on. Each is null
                       when the read behind it did not complete — a rating that
@@ -758,17 +1409,12 @@ export default function FindTrainer() {
                   ) : null}
                   {c.specialties.length > 0 || sent[c.id] ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 7, flexWrap: 'wrap' }}>
-                      {sent[c.id] ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>Request pending</Text>
-                        </View>
-                      ) : null}
-                      {c.specialties.slice(0, 3).map((sx) => (
-                        <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 3 }}>
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>{sx}</Text>
-                        </View>
-                      ))}
+                      {/* Amber — it is waiting on somebody — and in words.
+                          The specialities are the coach's own, on the accent's
+                          plate as they are under a name on Your Coach. All of
+                          it is already in the row's spoken label above. */}
+                      {sent[c.id] ? <TonedChip label="Request Pending" tone="amber" icon="clock" /> : null}
+                      {c.specialties.slice(0, 3).map((sx) => <TonedChip key={sx} label={sx} tone="brand" />)}
                     </View>
                   ) : null}
                 </View>
@@ -807,13 +1453,13 @@ export default function FindTrainer() {
                     twenty of them stacked down a directory is unreadable. */}
                 {sessionFeeAmount(c.sessionFee) != null ? (
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ ...value(17), color: t.ink }}>{feeMoney(c.id, sessionFeeAmount(c.sessionFee)!) ?? sessionFeeAmount(c.sessionFee)}</Text>
+                    <Text style={{ ...value(17), color: t.ink }}>{feeText(c.id, sessionFeeAmount(c.sessionFee)!)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
                 ) : (
-                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'right', flexShrink: 1 }}>{sessionFeeShort(c.sessionFee)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: END_ALIGN, flexShrink: 1 }}>{sessionFeeShort(c.sessionFee)}</Text>
                 )}
-                <Icon name="chevron" size={16} color={t.ink3} />
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
               </Pressable>
             </View>
           ))}
@@ -821,14 +1467,13 @@ export default function FindTrainer() {
       </ScrollView>
 
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
           {sel && (
             <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
-                <View style={{ width: 58, height: 58, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ ...value(20), color: t.brand }}>{initials(sel.name)}</Text>
-                </View>
+                <CoachFace photo={sel.photo} name={sel.name} size={58} mono={20} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.title, color: t.ink }}>{sel.name}</Text>
                   {sel.tagline ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2 }}>{sel.tagline}</Text> : null}
@@ -841,13 +1486,13 @@ export default function FindTrainer() {
               <View style={{ marginBottom: sp.lg }}>
                 {sessionFeeAmount(sel.sessionFee) != null ? (
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                    <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
-                    <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sessionFeeAmount(sel.sessionFee)!) ?? sessionFeeAmount(sel.sessionFee)}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session Fee</Text>
+                    <Text style={{ ...value(20), color: t.ink }}>{feeText(sel.id, sessionFeeAmount(sel.sessionFee)!)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 4 }}>/ session</Text>
                   </View>
                 ) : (
                   <>
-                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 2 }}>Session fee</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 2 }}>Session Fee</Text>
                     {/* The one field on this sheet that could not say it was
                         unknown. An unreadable rate is flagged; a rate nobody has
                         stated, and a rate of nothing, are facts rather than
@@ -877,7 +1522,7 @@ export default function FindTrainer() {
                   the thing a serious client is here to check. Every row says
                   whose claim it is; nothing on this screen may imply Repple
                   looked at a certificate, because Repple has not. */}
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Qualifications & insurance</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Qualifications & Insurance</Text>
               {credStatus === 'loading' ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>Loading.</Text>
               ) : credsFor(sel.id) === null ? (
@@ -886,13 +1531,13 @@ export default function FindTrainer() {
                 </Text>
               ) : credsFor(sel.id)!.length === 0 ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
-                  {sel.name} hasn’t listed any. Ask them before you book — it is a normal thing to ask.
+                  {sel.name} hasn’t listed any. Ask them before you book. It is a normal thing to ask.
                 </Text>
               ) : (
                 <View style={{ marginBottom: sp.xl }}>
                   {sortCredentials(credsFor(sel.id)!, today).map((c) => (
                     <View key={c.id} style={{ marginBottom: sp.md }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.title}</Text>
                       {credentialLine(c) ? (
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{credentialLine(c)}</Text>
                       ) : null}
@@ -918,11 +1563,7 @@ export default function FindTrainer() {
               {sel.specialties.length > 0 ? (<>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialties</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: sp.xl }}>
-                  {sel.specialties.map((sx) => (
-                    <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{sx}</Text>
-                    </View>
-                  ))}
+                  {sel.specialties.map((sx) => <TonedChip key={sx} label={sx} tone="brand" />)}
                 </View>
               </>) : null}
 
@@ -947,7 +1588,7 @@ export default function FindTrainer() {
                      reputation that nothing here has any basis for. */
                   return (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
-                      We couldn’t load the reviews. This is our end — it does not mean there are none.
+                      We couldn’t load the reviews. This is our end. It does not mean there are none.
                     </Text>
                   );
                 }
@@ -964,7 +1605,7 @@ export default function FindTrainer() {
                     {selReviews.map((r) => (
                       <View key={r.id} style={{ marginBottom: sp.lg }}>
                         <Text style={{ ...ty.caption, color: t.ink2 }}>
-                          {r.rating} / {MAX_RATING} · {reviewerLabel(r)}{r.edited ? ' · edited' : ''}
+                          {reviewScoreLabel(r)} · {reviewerLabel(r)}{r.edited ? ' · edited' : ''}
                         </Text>
                         {/* A review earned at another gym is shown, and said to
                             be from another gym. Hiding it would report a coach
@@ -977,7 +1618,7 @@ export default function FindTrainer() {
                           <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{r.body}</Text>
                         ) : null}
                         {r.coachReply ? (
-                          <View style={{ marginTop: sp.sm, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                          <View style={{ marginTop: sp.sm, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
                             <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.name.toUpperCase()} REPLIED</Text>
                             <Text style={{ ...ty.body, color: t.ink2, marginTop: 2 }}>{r.coachReply}</Text>
                           </View>
@@ -990,14 +1631,11 @@ export default function FindTrainer() {
 
               {sent[sel.id] ? (
                 <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.md }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Request pending</Text>
-                  </View>
+                  <TonedChip label="Request Pending" tone="amber" icon="clock" />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sel.name} has your request. You'll be connected when they accept.</Text>
                 </View>
               ) : (<>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start coaching</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start Coaching</Text>
                 {/* Without the pending-requests read, the absence of a "Request
                     pending" badge is not evidence that none is outstanding —
                     it's evidence we couldn't look. Sending again is harmless
@@ -1008,13 +1646,29 @@ export default function FindTrainer() {
                     We couldn’t check your existing requests, so we can’t tell whether you’ve already asked {sel.name}. Sending again won’t create a second request.
                   </Text>
                 ) : null}
+                {/* You already have a coach, and accepting ends them.
+                    `link_coaching` (part 155) ends every other active
+                    relationship — "one person has one coach in this product" —
+                    so these three buttons were one accept away from removing
+                    the coach whose name is drawn at the top of this same
+                    screen, and said nothing about it. */}
+                {coach && coach.id !== sel.id ? (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{replaceCoachNote(coach.name, sel.name)}</Flag>
+                ) : null}
+                {/* And when we could not read who coaches them, that is not
+                    evidence that nobody does. */}
+                {coachStatus === 'error' ? (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                    We couldn’t check who coaches you. If somebody does, asking {sel.name} would replace them once they accept.
+                  </Flag>
+                ) : null}
                 {/* Three buttons, each with the line that says what it changes.
                     "Hybrid" is a word until it is spelled out, and the same is
                     true of the two that were already here — a client picking
                     between them had nothing to pick on. */}
                 {COACHED_MODES.map((m) => (
                   <View key={m} style={{ marginBottom: sp.md }}>
-                    <Cta label={`Request ${COACHED_MODE_SHORT[m].toLowerCase()} coaching`} wide onPress={() => request(sel, m)} />
+                    <Cta label={`Request ${COACHED_MODE_SHORT[m]} Coaching`} wide onPress={() => askToRequest(sel, m)} />
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, textAlign: 'center' }}>{COACHING_MODE_NOTE[m]}</Text>
                   </View>
                 ))}

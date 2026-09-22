@@ -51,6 +51,14 @@ eq(publishConsentOf('p1', COACH, [], 'ready'), 'absent',
   'an empty list under ready is a real answer: this client has agreed to nothing');
 eq(publishConsentOf('p1', COACH, grants, 'partial'), 'granted',
   'a capped read still proves the row it returned');
+// The other direction, which is not symmetrical and used to be. Not finding a
+// grant in a PREFIX of the grants is not finding it: 'absent' would send the
+// coach off to ask a client who may already have agreed on the far side of the
+// page, which is the exact errand this module's docstring forbids.
+eq(publishConsentOf('p2', COACH, grants, 'partial'), 'unknown',
+  'a capped read cannot prove the row it did NOT return, so absence is unknown');
+eq(publishConsentOf('p2', COACH, grants, 'ready'), 'absent',
+  'and off a whole read the same missing row is a real "they have not agreed"');
 
 /* ── the picker is built from permissions, not from visibility ────────────── */
 
@@ -60,6 +68,9 @@ eq(JSON.stringify(publishablePhotos(visible, COACH, grants, 'ready')), JSON.stri
   'only the photo the client agreed to is offered, out of three the coach can see');
 eq(publishablePhotos(visible, COACH, grants, 'error'), null,
   'a failed permissions read offers nothing and says nothing — null, not an empty list');
+eq(publishablePhotos(visible, COACH, grants, 'partial'), null,
+  'and neither does a truncated one: a picker filtered by a prefix of the grants is silently short, '
+  + 'and the array it returns has nowhere to say so');
 eq(publishablePhotos(visible, COACH, null, 'ready'), null, 'and neither does an absent one');
 eq(publishablePhotos(visible, null, grants, 'ready'), null, 'nor a coach who is not established');
 eq(publishablePhotos(null, COACH, grants, 'ready'), null,

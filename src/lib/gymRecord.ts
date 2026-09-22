@@ -51,6 +51,15 @@ export interface Membership {
   startedOn: string;
   endsOn: string | null;
   status: MembershipStatus;
+  /**
+   * The pause on this membership, both ends inclusive, or null because none is
+   * recorded. Null is NOT "never paused for ever" and it is NOT "paused with
+   * no end" — supabase/parts/2616 refuses half a range at the write, and
+   * src/lib/membershipFreeze.ts keeps 'none' and 'unreadable' apart, because
+   * the difference between them is somebody's access to a building.
+   */
+  frozenFrom: string | null;
+  frozenTo: string | null;
 }
 
 /**
@@ -199,7 +208,7 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
   const rows = await readAll<any>(
     (from, to) => sb
       .from('memberships')
-      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status, frozen_from, frozen_to')
       .eq('tenant_id', tenantId)
       .order('started_on', { ascending: false })
       .order('id', { ascending: false })
@@ -226,7 +235,56 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
     startedOn: r.started_on,
     endsOn: r.ends_on ?? null,
     status: r.status,
+    frozenFrom: r.frozen_from ?? null,
+    frozenTo: r.frozen_to ?? null,
   }));
+}
+
+/**
+ * Record or lift a pause on one membership.
+ *
+ * Both dates together or both null — there is no half a pause, and the check
+ * constraint refuses one at the write. Passing null for both is how an owner
+ * lifts a pause that was recorded in error, which is a different act from a
+ * pause that has run its course and needs nothing done to it at all.
+ *
+ * Counts the rows, for the reason `setMembershipStatus` beside it does: a
+ * PostgREST UPDATE matching zero rows is not an error, so the version that
+ * checked only `error` reported a refusal as a success — and an owner who
+ * believes they have paused a membership stops chasing the payment.
+ *
+ * The end date is NOT moved here. `thawedEndsOn` computes the new one and the
+ * owner accepts it on the screen, once: a write that moved it automatically
+ * would move it again from the already-moved value the moment somebody
+ * corrected the range, so a corrected pause would compound instead of replace.
+ */
+export async function setMembershipFreeze(
+  sb: Queryable, membershipId: string, from: string | null, to: string | null,
+  /**
+   * The end date the owner accepted, written in the SAME update.
+   *
+   * Undefined leaves `ends_on` alone, which is what lifting a pause does. One
+   * statement and not two because the pair must not half-apply: a membership
+   * with the new end date and no pause recorded is one nobody can explain, and
+   * a second round trip is exactly where that happens.
+   */
+  endsOn?: string | null,
+): Promise<void> {
+  const both = from != null && to != null;
+  const neither = from == null && to == null;
+  if (!both && !neither) {
+    throw new Error('A pause needs both a first and a last day, or neither.');
+  }
+  const patch: Record<string, unknown> = { frozen_from: from, frozen_to: to };
+  if (endsOn !== undefined) patch.ends_on = endsOn;
+  const r = await sb
+    .from('memberships')
+    .update(patch, { count: 'exact' })
+    .eq('id', membershipId);
+  if (r.error) throw r.error;
+  if ((r.count ?? 0) === 0) {
+    throw new Error('That membership was not updated. It may no longer exist, or it is not yours to change.');
+  }
 }
 
 export async function createMembership(
@@ -429,6 +487,33 @@ export interface OnlineOrder {
   /** Whether a `gym_payments` row names this order — see part 480. False on a
    *  paid order is money Stripe took that this ledger does not have. */
   inLedger: boolean;
+
+  /* ── the refund half, added by supabase/parts/800 ────────────────────────
+   *
+   * `refundedCents` is what STRIPE says went back on this order's charge, a
+   * running total it assigns rather than adds. `reversedCents` is what the
+   * LEDGER has actually taken off — the sum over every `gym_payments` row
+   * whose `reverses_payment_id` names this order's payment.
+   *
+   * Both, rather than a flag, because the exception `onlineOrderProblem`
+   * raises from them clears itself the moment somebody records the missing
+   * correction by hand. Stripe does not redeliver an event it has already
+   * answered with a 200, so nothing would ever come back to clear a flag.
+   */
+
+  /** `gym_orders.refunded_cents`. NULL means Stripe has never mentioned a
+   *  refund on this charge, which is a different fact from zero. */
+  refundedCents: number | null;
+  /** `gym_orders.refunded_currency`, upper case, or NULL when Stripe stated
+   *  none. Not defaulted to `currency`: a refund whose currency disagrees with
+   *  the payment it reverses is refused rather than netted, and this is the
+   *  column that says what the disagreement was. */
+  refundedCurrency: string | null;
+  /** What the ledger has taken off this order's payment, in minor units and
+   *  positive. Zero when nothing has been reversed. */
+  reversedCents: number;
+  /** `gym_orders.refund_note` — why the webhook could not mirror a refund. */
+  refundNote: string | null;
 }
 
 /**
@@ -465,7 +550,7 @@ export async function fetchOnlineOrders(
   const rows = await readAll<any>(
     (from, to) => sb
       .from('gym_orders')
-      .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at')
+      .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at, refunded_cents, refunded_currency, refund_note')
       .eq('tenant_id', tenantId)
       .in('status', ['paid', 'failed'])
       .gte('paid_at', sinceISO)
@@ -493,6 +578,52 @@ export async function fetchOnlineOrders(
   // is about — every order it could not confirm would be drawn as an exception.
   const inLedger = new Set(paid.map((p: any) => p.gym_order_id));
 
+  // ── what the ledger has taken back off those sales ────────────────────────
+  //
+  // A third read rather than a fourth column, because a reversal is a ROW —
+  // supabase/parts/180 settled that and its header argues it at length. So
+  // "how much has been refunded against this sale" is a SUM over rows pointing
+  // at the payment, and it is asked here rather than in Postgres for the same
+  // reason `inLedger` is: an aggregate embed is a thing this module cannot
+  // assert without a live database, in exchange for nothing.
+  //
+  // Keyed by PAYMENT id and then mapped back to the order, because
+  // `reverses_payment_id` names the payment and the reversal deliberately
+  // carries no `gym_order_id` of its own — part 480's unique index allows one
+  // row per order, and the sale row has already taken it.
+  //
+  // Paged and chunked exactly as the read above is, and for the same reason:
+  // `reverses_payment_id` is a foreign key rather than a unique one, so a
+  // chunk can legitimately answer with more rows than it had ids.
+  const paymentToOrder = new Map<string, string>();
+  for (const p of paid as any[]) if (p?.id && p?.gym_order_id) paymentToOrder.set(String(p.id), String(p.gym_order_id));
+
+  const reversals = paymentToOrder.size
+    ? await readByIds<any>(
+        [...paymentToOrder.keys()],
+        (chunk, from, to) => sb
+          .from('gym_payments')
+          .select('id, reverses_payment_id, amount_cents')
+          .eq('tenant_id', tenantId)
+          .in('reverses_payment_id', chunk)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'the refunds recorded against those online sales',
+      )
+    : [];
+
+  // Absolute, because a reversal is stored negative and this figure is compared
+  // against Stripe's `amount_refunded`, which is positive. Adding the signed
+  // value would make every comparison read as though nothing had been reversed.
+  const reversedByOrder = new Map<string, number>();
+  for (const v of reversals as any[]) {
+    const orderId = paymentToOrder.get(String(v?.reverses_payment_id ?? ''));
+    if (!orderId) continue;
+    const cents = Number(v?.amount_cents);
+    if (!Number.isFinite(cents)) continue;
+    reversedByOrder.set(orderId, (reversedByOrder.get(orderId) ?? 0) + Math.abs(cents));
+  }
+
   const names = await namesFor(sb, rows.map((r: any) => r.member_id).filter(Boolean));
   return rows.map((r: any) => ({
     id: r.id,
@@ -505,6 +636,15 @@ export async function fetchOnlineOrders(
     failureNote: r.failure_note ?? null,
     paidAt: r.paid_at ?? null,
     inLedger: inLedger.has(r.id),
+    // NULL is preserved rather than coerced to 0. "Stripe has never mentioned a
+    // refund" and "Stripe refunded nothing" are different facts, and
+    // `onlineOrderProblem` raises nothing on either — but a screen that later
+    // wants to say "refunded, in full, and correctly recorded" needs to be able
+    // to tell them apart.
+    refundedCents: Number.isFinite(r.refunded_cents) ? r.refunded_cents : null,
+    refundedCurrency: r.refunded_currency ?? null,
+    reversedCents: reversedByOrder.get(r.id) ?? 0,
+    refundNote: r.refund_note ?? null,
   }));
 }
 
@@ -519,6 +659,16 @@ export type CorrectionKind = 'refund' | 'correction';
  * person would say it. The sign is applied by `reversePayment`, never typed,
  * because a screen that asks somebody to enter a negative number will one day
  * be handed a positive one and file a second payment.
+ *
+ * The over-reversal sentence used to read `(remaining / 100).toFixed(2)`, and
+ * it is the one line here that prints a figure rather than a rule. A hundred is
+ * the factor for about eighty per cent of currencies and for none of the
+ * twenty-one others: a gym in Tokyo owed ¥6,300 was told "63.00 is still
+ * outstanding", and one in Kuwait was told ten times what was left. It goes
+ * through `money()` now, which asks the currency how many places it has and
+ * puts the code in front of the figure — and the currency is the payment's own,
+ * which `reversePayment` also copies onto the correction, so the sentence and
+ * the row it refuses are denominated the same way.
  */
 export function reversalBlocker(
   original: GymPayment,
@@ -526,7 +676,7 @@ export function reversalBlocker(
   amountCents: number,
 ): string | null {
   if (original.kind !== 'payment') {
-    return 'That row is itself a correction. Correcting a correction leaves two rows nobody can read as a pair — reverse the original payment instead.';
+    return 'That row is itself a correction. Correcting a correction leaves two rows nobody can read as a pair. Reverse the original payment instead.';
   }
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
     return 'Enter what is being taken back, as a positive amount. Repple applies the minus.';
@@ -536,7 +686,15 @@ export function reversalBlocker(
     return 'This payment has already been reversed in full. Reversing it again would take back money the gym never had.';
   }
   if (amountCents > remaining) {
-    return `That is more than is left on this payment — ${(remaining / 100).toFixed(2)} of ${(original.amountCents / 100).toFixed(2)} is still outstanding against it.`;
+    const left = money(remaining, original.currency);
+    const whole = money(original.amountCents, original.currency);
+    // A payment whose currency nobody recorded still cannot be over-reversed —
+    // the refusal stands, and it simply does not quote two figures in a money
+    // it cannot name. A bare "6300.00" is read in whatever currency the reader
+    // happens to be thinking in.
+    return left && whole
+      ? `That is more than is left on this payment: ${left} of ${whole} is still outstanding against it.`
+      : 'That is more than is left on this payment.';
   }
   return null;
 }
@@ -664,6 +822,59 @@ export async function recordPayment(
 }
 
 /**
+ * Put a payment — and every correction against it — against the right member.
+ *
+ * The whole argument for doing this rather than reversing and re-recording is
+ * in src/lib/reattribute.ts, which also holds the refusals. This is only the
+ * write, and it is deliberately narrow: `member_id` and `membership_id`, on the
+ * ids the caller was handed by `reattributeRows`, and nothing else. The amount,
+ * the currency, the method and `taken_at` are not in the update at all, so the
+ * closed-month trigger (supabase/parts/182, `before insert or update of
+ * taken_at, amount_cents`) does not fire and a mistake found in September can
+ * be corrected in a filed August without reopening it. Nothing a close signed
+ * for has moved: the month's total is the same money on the same day.
+ *
+ * ── why the count is compared and not merely checked ──────────────────────
+ *
+ * `assertWrote` asks whether the write landed on ANY row, which is the right
+ * question for a single-row update and the wrong one here. A payment with a
+ * refund against it is two rows, and a partial success — the payment moved, the
+ * correction did not — is exactly the split this feature exists to prevent, and
+ * it comes back as `count: 1` with a null error. So the number is compared
+ * against the number of ids asked for, and anything else throws with both
+ * figures in the sentence.
+ *
+ * The throw is honest about not knowing which rows landed, because it does not:
+ * PostgREST returns a count and not a manifest. "Some of these moved and some
+ * did not, go and look" is the true sentence and it is the one the owner gets.
+ */
+export async function reattributePayment(
+  sb: Queryable,
+  tenantId: string,
+  /** From `reattributeRows` — the payment first, then its corrections. */
+  ids: string[],
+  to: { memberId: string | null; membershipId: string | null },
+): Promise<number> {
+  // A guard against a caller that filtered its way to nothing: an empty `in`
+  // list matches no rows, which is indistinguishable on the wire from an RLS
+  // refusal, and the sentence the owner would read would be about permissions.
+  if (ids.length === 0) throw new Error('There is no payment to re-attribute.');
+  const r = await sb.from('gym_payments')
+    .update({ member_id: to.memberId, membership_id: to.membershipId }, { count: 'exact' })
+    .eq('tenant_id', tenantId)
+    .in('id', ids);
+  if (r.error) throw r.error;
+  assertWrote('That payment', r);
+  const changed = r.count ?? 0;
+  if (changed !== ids.length) {
+    throw new Error(
+      `${changed} of ${ids.length} rows were re-attributed. A payment and the corrections against it have to move together, and this one did not. The register now has them filed against different people. Reload this screen and check the payment and every correction under it before doing anything else.`,
+    );
+  }
+  return changed;
+}
+
+/**
  * Match a payment to the invoice it settled, or unmatch it.
  *
  * Nothing infers this and nothing may. /accounting's 45-day rule is explicitly
@@ -735,8 +946,29 @@ export function sharedCurrency(rows: Array<{ currency?: string | null }>): strin
 }
 
 /**
+ * What a currency column SPELLS, with case and spacing settled — or null when
+ * it holds nothing at all. The shape is not checked here.
+ *
+ * This is the smaller half of `normaliseCurrency`, split out of it and exported
+ * for exactly one caller: `strayCurrencies` in src/lib/strayCurrency.ts, whose
+ * whole job is to tell an owner that a row holds `Pounds` and to QUOTE it back
+ * to them. That module needs to see the non-code in order to report it, and it
+ * is the only thing in this tree that does — everything else compares, folds or
+ * prints, and for all of those a non-code must not survive contact with a
+ * currency at all.
+ *
+ * So: this function answers "what does the column say", and
+ * `normaliseCurrency` below answers "what money is this". Two different
+ * questions that were one function, which is how `'pounds'` came to be a
+ * currency everywhere downstream.
+ */
+export function currencyText(currency: string | null | undefined): string | null {
+  return (currency ?? '').trim().toUpperCase() || null;
+}
+
+/**
  * One currency code, as this product stores and compares them, or null for
- * "nobody has said".
+ * "this is not a currency this app can name".
  *
  * Empty string is normalised to null for the same reason `money()` refuses it:
  * "" and null are the same fact, and letting "" through as a stated value hands
@@ -745,12 +977,49 @@ export function sharedCurrency(rows: Array<{ currency?: string | null }>): strin
  * are one currency, and a comparison that says otherwise withholds a total the
  * gym is entitled to.
  *
+ * ── THE SHAPE IS CHECKED, AND THAT IS NEW ─────────────────────────────────
+ *
+ * This used to be `trim().toUpperCase() || null` and nothing else, so it
+ * answered `'POUNDS'` for `'pounds'` — a truthy, stable, comparable value that
+ * is not a currency. Five money columns in this schema carry no format check of
+ * any kind (`gym_passes`, `gym_pass_types`, `membership_plans`, `gym_invoices`,
+ * `gym_orders`; `gym_payments` is a sixth), so `'pounds'`, `'GB'` and `'£'` all
+ * satisfy `not null` and reach this function from a real row.
+ *
+ * What that cost, twice, in one night:
+ *
+ *   · Two rows both holding `'pounds'` normalised to the same string, COMPARED
+ *     EQUAL, were subtracted from one another and placed a member on the list
+ *     price — the exact fold src/lib/priceBook.ts exists to refuse, arrived at
+ *     through the currency rather than through the amount.
+ *   · `sharedCurrency` above answered `'POUNDS'` for a whole register of them,
+ *     and every figure built on that answer was labelled with it.
+ *
+ * `/^[A-Z]{3}$/` is not a sixth spelling of this rule. It is the one
+ * `priceBook.ts` uses, and `coachCosts.ts`, `coachInvoice.ts`, `costBudgets.ts`,
+ * `coachReceipts.ts`, `csvImport.ts`, `coachCurrency.ts`, `monthlyHistory.ts`
+ * and `publicProfile.ts` already apply, and it is the constraint
+ * `tenants_currency_is_iso` holds in the database.
+ *
+ * ── NULL IS NOT ZERO AND IT IS NOT AN OMISSION ────────────────────────────
+ *
+ * A null out of here means "this money cannot be spelled", which is a fact
+ * about the NAMING and never about the amount. Every caller must go on counting
+ * the row: `unstatedTakings` in ./gymBanked.ts counts it, `incomeOf` in
+ * ./monthEnd.ts makes null a member of its currency set so the month's total is
+ * WITHHELD rather than invented, `passRevenueCents` in ./gymPasses.ts does the
+ * same, and `denominate` in ./siteRollUp.ts adds null to `codes` so an
+ * unlabelled site cannot be absorbed into a labelled neighbour's currency. None
+ * of them may turn this null into a default, into `tenants.currency`, or into
+ * a row missing from a count.
+ *
  * Exported because `sharedCurrency` is not the only place this question is
  * asked — `incomeOf` in src/lib/monthEnd.ts groups by it — and a rule about
  * money that exists twice will eventually be two rules.
  */
 export function normaliseCurrency(currency: string | null | undefined): string | null {
-  return (currency ?? '').trim().toUpperCase() || null;
+  const spelled = currencyText(currency);
+  return spelled != null && /^[A-Z]{3}$/.test(spelled) ? spelled : null;
 }
 
 export function summarise(

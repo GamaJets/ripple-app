@@ -57,17 +57,36 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { reportError } from '../../src/lib/reportError';
-import { Rule, Section, SectionHead, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, Flag, TonedChip } from '../../src/ui/kit';
+import { movementIsProgress } from '../../src/lib/deltaLabel';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { listProgressPhotos, comparePair, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, shareStateOf, shareLabel, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
 import {
   compareRows, compareBasis, compareSummary, readingText, deltaText, spanLabel,
   selectionFromParams, COMPARE_DISCLAIMER,
 } from '../../src/lib/photoCompare';
+// Which way the person was facing, which `progress_photos.pose` has recorded
+// all along and nothing has ever read — so a front-on March photo could sit
+// beside a side-on September one under one heading and one set of figures. See
+// src/lib/photoPose.ts, including what it refuses to do: it never looks at a
+// picture, and it never chooses the pair.
+import { fetchPhotoPoses, poseLabel, poseMismatchNote, type Pose } from '../../src/lib/photoPose';
+// The CALENDAR-day distance between the two photographs — see `spanDays`.
+// There are two `daysApart`s in this tree and they answer different questions;
+// this is the one that counts days the way the person living them counts.
+import { daysApart as calendarDaysApart } from '../../src/lib/photoTimeline';
+// The long view of the body. src/lib/longView.ts gave the TRAINING side its
+// year and the body side kept only snapshots — this screen included, which
+// until now showed two days the member had to pick and nothing either side of
+// them. See src/ui/BodyYear.tsx.
+import { BodyYear } from '../../src/ui/BodyYear';
+import { useNow } from '../../src/ui/today';
 import { shareText } from '../../src/lib/exportShare';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** Expo Router hands a repeated query param back as an array and a single one
  *  as a string. Neither shape is special-cased at the two call sites. */
@@ -79,6 +98,11 @@ export default function Compare() {
   const router = useRouter();
   const cd = useClientData();
   const wu = useSettings().weightUnit;
+  // Today, from the app's own clock rather than a `Date.now()` read inside a
+  // memo. Nothing unmounts this screen when the phone is pocketed, so a window
+  // anchored at mount would still end on yesterday's month tomorrow morning —
+  // see src/ui/today.ts.
+  const now = useNow();
   const params = useLocalSearchParams<{ before?: string | string[]; after?: string | string[] }>();
 
   // `null` is "not asked yet, or the ask failed" — never "you have none". The
@@ -90,6 +114,13 @@ export default function Compare() {
   // of these", which is a reassurance this screen cannot check.
   const [shares, setShares] = useState<ShareGrant[] | null>(null);
   const [coach, setCoach] = useState<CoachRef | null>(null);
+  // Why the badges are dashes. The em-dash was the honest half and the screen
+  // stopped there: no sentence, and no gesture that would ask again — the pull
+  // handler below did not touch this read. So a member looking at two
+  // photographs of their own body could not find out whether their coach can
+  // open them, for as long as the screen stayed open. The sibling read on
+  // app/(client)/scans.tsx has had a sentence and a Try Again the whole time.
+  const [sharesErr, setSharesErr] = useState<string | null>(null);
   const [sel, setSel] = useState<string[]>([]);
 
   const loadPhotos = useCallback(async () => {
@@ -107,25 +138,52 @@ export default function Compare() {
   // A failed read used to strand this screen for the whole session — the only
   // way to ask again was to leave and come back. Pull to refresh is the gesture
   // people already try; see src/ui/pullToRefresh.tsx.
-  const pull = usePullToRefresh(useCallback(() => { void loadPhotos(); }, [loadPhotos]));
+  // The photos were the only half being asked for. The rows between them —
+  // weight, body fat and muscle at each date — come from `cd.scans`, which has
+  // its own status and its own three sentences on this screen, and none of them
+  // had a way back.
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
-        if (cancelled) return;
-        setCoach(c);
-        setShares(g);
-      } catch (e) {
-        reportError('compare.photos.shares', e);
-        // Left null on purpose. Every badge below renders unknown as an
-        // em-dash rather than as "only you can see this".
-        if (!cancelled) setShares(null);
-      }
-    })();
-    return () => { cancelled = true; };
+  // The pose of each photo, keyed by id, or null when nobody has asked yet or
+  // the ask failed — the same three states as the list above it, and for the
+  // same reason. An empty map would say "none of your photos has a pose
+  // recorded", which is a statement about the member's own records that a
+  // failed read cannot make.
+  const [poses, setPoses] = useState<Map<string, Pose | null> | null>(null);
+  const [posesErr, setPosesErr] = useState(false);
+  const loadPoses = useCallback(async () => {
+    try {
+      setPoses(await fetchPhotoPoses());
+      setPosesErr(false);
+    } catch (e) {
+      reportError('compare.photos.poses', e);
+      setPoses(null);
+      setPosesErr(true);
+    }
   }, []);
+  useEffect(() => { void loadPoses(); }, [loadPoses]);
+
+  const loadShares = useCallback(async () => {
+    setSharesErr(null);
+    try {
+      const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
+      setCoach(c);
+      setShares(g);
+    } catch (e) {
+      reportError('compare.photos.shares', e);
+      // Left null on purpose. Every badge below renders unknown as an
+      // em-dash rather than as "only you can see this" — and now the screen
+      // says why, and offers to ask again.
+      setShares(null);
+      setSharesErr('We couldn’t read who can see these photos.');
+    }
+  }, []);
+  useEffect(() => { void loadShares(); }, [loadShares]);
+
+  // The shares read is in the pull now too. It was the one read on this screen
+  // with no way back at all.
+  const pull = usePullToRefresh(useCallback(() => {
+    void loadPhotos(); void loadShares(); void loadPoses(); cd.reload();
+  }, [loadPhotos, loadShares, loadPoses, cd.reload]));
 
   // The pair named in the URL, seeded ONCE the photo list has landed.
   //
@@ -162,6 +220,37 @@ export default function Compare() {
   };
 
   const pair = photos ? comparePair(photos, sel) : null;
+  /**
+   * How far apart the two photographs are, in CALENDAR DAYS.
+   *
+   * ── why this is not `pair.days` ──────────────────────────────────────────
+   *
+   * `comparePair` fills `days` from `daysApart` in src/lib/progressPhotos.ts,
+   * which is `Math.round((b - a) / 86400000)` over two instants — elapsed
+   * 24-hour periods, not days. Everything else on this screen counts calendar
+   * days: `fmtFullDay` prints each photo's own LOCAL day under it, and
+   * `readingOn` pairs a scan to a photo on the LOCAL day through `sameDay`.
+   * So the one line that says how far apart they are was measuring a different
+   * quantity from the two lines directly above it, and the disagreement is
+   * visible on screen in both directions:
+   *
+   *   22:00 and 00:30 the next night — two hours, so "Same day", printed under
+   *   two captions reading 10 Aug and 11 Aug.
+   *   08:00 Monday and 20:00 Tuesday — 36 hours, so "2 days apart", printed
+   *   under two captions one day apart.
+   *
+   * It travels, too: `compareSummary` puts this in the heading of the text a
+   * member shares with their coach, where the dates are beside it.
+   *
+   * `photoTimeline.daysApart` is the same arithmetic done on two local
+   * midnights, which is the version this tree already trusts for a photo
+   * timeline. `progressPhotos` is left alone — app/(client)/scans.tsx reads it
+   * too and is another lane's file this hour.
+   *
+   * Null when either date will not parse, which `spanLabel` prints as a dash
+   * rather than as "Same day".
+   */
+  const spanDays = pair ? calendarDaysApart(pair.before.takenAt, pair.after.takenAt) : null;
   // The rows are only built when the scans are actually known. Under 'error'
   // the table is replaced by a sentence, because a table of dashes says "there
   // was no scan on those days" and that is not what a failed read means.
@@ -172,11 +261,21 @@ export default function Compare() {
   const rows = pair && cd.scansStatus === 'ready'
     ? compareRows(pair.before.takenAt, pair.after.takenAt, cd.scans, wu)
     : null;
-  const dayOf = (p: ProgressPhoto) => new Date(p.takenAt).toLocaleDateString();
+  // The app's resolver, and guarded: this string also goes into the summary
+  // the member shares, where "Invalid Date" would travel out of the app.
+  const dayOf = (p: ProgressPhoto) => fmtFullDay(p.takenAt);
+  /** What the member said about this photo, or null. `?? null` rather than
+   *  `.get()` alone: an id missing from the map is a photo nobody labelled, and
+   *  `undefined` and "no pose" must not be two different things downstream. */
+  const poseOf = (p: ProgressPhoto): Pose | null => poses?.get(p.id) ?? null;
+  // Said only when both photos are labelled and the labels disagree. Never on
+  // an unlabelled pair — which is every pair today — because a caveat that
+  // fires on every comparison is a caveat nobody reads.
+  const poseWarning = pair ? poseMismatchNote(poseOf(pair.before), poseOf(pair.after)) : null;
 
   const sendFigures = () => {
     if (!pair || !rows) return;
-    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), pair.days, rows), 'My progress comparison');
+    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), spanDays, rows), 'My Progress Comparison');
   };
 
   const G = layout.gutter;
@@ -186,22 +285,16 @@ export default function Compare() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Progress photos</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Before &amp; After</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Before & After" />
 
-        <Rule />
 
         {photos === null ? (
           <Section>
             {photosErr ? (
               <View>
                 <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                  {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
+                  {photosErr} Nothing has been deleted. This screen only failed to read the list, so it cannot tell you what is there.
                 </Text>
                 <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={loadPhotos} /></View>
               </View>
@@ -214,7 +307,7 @@ export default function Compare() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {photos.length === 0
                 ? 'No progress photos yet. Add them on the Progress tab and they will appear here to compare.'
-                : 'One photo so far. A comparison needs two — add another on the Progress tab, on a different day, and this screen fills in.'}
+                : 'One photo so far. A comparison needs two. Add another on the Progress tab, on a different day, and this screen fills in.'}
             </Text>
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
               <Ghost label="Go to Progress" onPress={() => router.push('/(client)/scans')} />
@@ -243,18 +336,44 @@ export default function Compare() {
                             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture unavailable</Text>
                           </View>
                         )}
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
+                        <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginTop: 6 }}>{label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3 }}>{dayOf(ph)}</Text>
+                        {/* The view the member said this was. Absent when they
+                            were never asked, which is every photo taken before
+                            the column was read — and an absent label prints
+                            nothing at all rather than "Unknown", which would
+                            claim the app looked at the picture. */}
+                        {poseLabel(poseOf(ph)) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{poseLabel(poseOf(ph))}</Text>
+                        ) : null}
                         {/* "Can my coach see this one?" answered on the picture
                             itself, including the honest non-answer when the
                             grants could not be read. */}
-                        <Text style={{ ...ty.caption, fontWeight: '500', color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>
+                        <Text style={{ ...ty.caption, ...font('500'), color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>
                           {shareLabel(shareStateOf(ph.id, shares))}
                         </Text>
                       </View>
                     ))}
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(pair.days)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(spanDays)}</Text>
+
+                  {/* ── two different views ─────────────────────────────────
+                      Above the figures, because it qualifies the pictures and
+                      not the readings: the weight and the body fat are true of
+                      both days whichever way the camera pointed, and the shape
+                      is the part that is not comparable across an angle. */}
+                  {poseWarning ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.md }}>{poseWarning}</Flag>
+                  ) : null}
+                  {/* And the honest non-answer. Without it a failed pose read
+                      is indistinguishable from two photos that match: the
+                      warning above simply does not appear, which is exactly
+                      what it looks like when there is nothing to warn about. */}
+                  {posesErr ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+                      We couldn’t check whether these two show the same view. Pull down to try again.
+                    </Text>
+                  ) : null}
 
                   {/* ── the readings from those two days ──────────────────
                       The InBody scan recorded on each photo's own calendar
@@ -274,13 +393,26 @@ export default function Compare() {
                     </Flag>
                   ) : cd.scansStatus === 'loading' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Reading the scans from those days…</Text>
+                  ) : cd.scansStatus === 'partial' ? (
+                    // The fourth status, which this branch chain did not have.
+                    // `rows` is built only under 'ready' (see the note on it),
+                    // so under 'partial' every arm above was false, `rows` was
+                    // null and the whole figures panel rendered as nothing at
+                    // all — silently, under two photographs, to exactly the
+                    // member this screen is for: the one with a long enough
+                    // scan history to have passed the row cap. A sentence,
+                    // like the other three, and for the same reason: an absence
+                    // with no explanation beside it reads as a broken app.
+                    <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+                      You have more scans than we can read in one go, so the readings from these two days are not shown beside them. A blank column here would say you were not measured on a day you may well have been. The photos and their dates above are unaffected.
+                    </Flag>
                   ) : rows ? (
                     <View style={{ marginTop: sp.lg }}>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingBottom: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                         <Text style={{ ...ty.micro, color: t.ink3, flex: 1.3 }}>Reading</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Before</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>After</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Change</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>Before</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>After</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1.2, textAlign: END_ALIGN }}>Change</Text>
                       </View>
                       {rows.map((r) => (
                         <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
@@ -288,9 +420,24 @@ export default function Compare() {
                           {/* An unmeasured cell is t.ink3 as well as an
                               em-dash: it must not sit in the same weight as a
                               figure somebody actually recorded. */}
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.before, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.after, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: 'right' }}>{deltaText(r.delta, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.before, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.after, r.unit)}</Text>
+                          {/* The change as a chip, and the accent only where it
+                              is movement the member's OWN goal asked for — a
+                              loss is green for somebody cutting and grey for
+                              somebody building. Grey is also every change the
+                              goal has no opinion on; it is never "bad". No
+                              change to show is still the quiet dash: a chip
+                              round nothing would be a verdict on a day nobody
+                              was measured. */}
+                          {r.delta === null ? (
+                            <Text style={{ ...ty.label, ...numeric, color: t.ink3, flex: 1.2, textAlign: END_ALIGN }}>{deltaText(r.delta, r.unit)}</Text>
+                          ) : (
+                            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                              <TonedChip label={deltaText(r.delta, r.unit)}
+                                tone={movementIsProgress(r.delta, cd.goal, r.key === 'weightKg' ? 'weight' : r.key === 'bodyFatPct' ? 'bodyFat' : 'muscle') === true ? 'brand' : 'neutral'} />
+                            </View>
+                          )}
                         </View>
                       ))}
                       {/* Which days were scanned, named. A blank column with no
@@ -307,7 +454,7 @@ export default function Compare() {
                         <Ghost icon="share" label="Share These Figures" onPress={sendFigures} />
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                        Sends the dates and the readings above as text. The photos are not attached — they stay private to your account
+                        Sends the dates and the readings above as text. The photos are not attached; they stay private to your account
                         {coach ? `, and sending one to ${coach.name || 'your coach'} is a separate choice you make per photo on the Progress tab.` : '.'}
                       </Text>
                     </View>
@@ -316,14 +463,29 @@ export default function Compare() {
               )}
             </Section>
 
-            <Rule />
 
             {/* ── the strip you pick from ──────────────────────────────── */}
             <Section>
-              <SectionHead title="Your Photos" note={`${photos.length} saved`} />
+              <SectionHead title="Your Photos" note={`${photos.length} Saved`} />
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                 Oldest first. Tap two to compare; tap a selected one again to drop it. To send a photo to your coach, or delete one, press and hold it on the Progress tab.
               </Text>
+              {/* The three states of the shares read, said out loud. The badges
+                  below already draw 'unknown' as an em-dash; this is the
+                  sentence that says what the dash means and the gesture that
+                  asks again. Same shape as app/(client)/scans.tsx. */}
+              {sharesErr ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Flag tone={t.warn}>
+                    {sharesErr} Nothing has changed either way. This screen just could not read the list, so it will not tell you these are private.
+                  </Flag>
+                  <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                    <Ghost label="Try Again" onPress={() => { void loadShares(); }} />
+                  </View>
+                </View>
+              ) : shares === null ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Checking what your coach can see…</Text>
+              ) : null}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
                 {photos.map((p) => {
                   const selIdx = sel.indexOf(p.id);
@@ -332,7 +494,11 @@ export default function Compare() {
                     <Pressable key={p.id} onPress={() => toggle(p.id)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: selIdx >= 0 }}
-                      accessibilityLabel={`Progress photo from ${dayOf(p)} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
+                      // The view is spoken where it is known and omitted where
+                      // it is not. A clause saying "pose not recorded" on every
+                      // thumbnail would add four words to every photo in the
+                      // strip to convey nothing.
+                      accessibilityLabel={`Progress photo from ${dayOf(p)}${poseLabel(poseOf(p)) ? `, ${poseLabel(poseOf(p))?.toLowerCase()}` : ''} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
                       accessibilityHint="Tap to add it to the comparison above">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         {p.url ? (
@@ -343,12 +509,12 @@ export default function Compare() {
                           </View>
                         )}
                         {selIdx >= 0 ? (
-                          <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text>
+                          <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={{ ...ty.caption, ...font('600'), color: t.brandInk }}>{selIdx + 1}</Text>
                           </View>
                         ) : null}
                         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-                          <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                          <Text style={{ ...ty.caption, ...font('500'), textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
                         </View>
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{dayOf(p)}</Text>
@@ -364,6 +530,25 @@ export default function Compare() {
             </Section>
           </View>
         )}
+
+        {/* ── the year ─────────────────────────────────────────────────────
+            Outside the photo branch above on purpose. This panel is drawn from
+            the SCAN history, which a member has whether or not they have ever
+            taken a progress photo — and "one photo so far" is exactly the
+            member most likely to have a year of weigh-ins and nothing that
+            shows them. Gating it on having two photos would hide a year of
+            their own measurements behind a camera. */}
+        <BodyYear
+          scans={cd.scans}
+          status={cd.scansStatus}
+          unit={wu}
+          // The goal decides which direction of travel is progress, and it is
+          // withheld when the PROFILE read did not land: `cd.goal` falls back
+          // to a constructed default, and a default goal would have the panel
+          // congratulate somebody for moving the way somebody else wanted to.
+          goal={cd.profileStatus === 'ready' ? cd.goal : null}
+          now={now.getTime()}
+        />
       </ScrollView>
     </SafeAreaView>
   );

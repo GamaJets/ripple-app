@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- Reassigning a programme destroyed the one before it, and nothing anywhere
+-- Reassigning a program destroyed the one before it, and nothing anywhere
 -- remembered.
 --
 -- `assigned_programs` has ONE row per client — `client_id` is the primary key —
@@ -30,7 +30,7 @@
 --     make one.
 --
 --   · An accidental overwrite is unrecoverable. `guardOverwrite` withholds the
---     Assign control until the current programme has been READ, which stops the
+--     Assign control until the current program has been READ, which stops the
 --     coach writing over something they never saw — it cannot undo the write
 --     they did see and meant differently.
 --
@@ -43,7 +43,7 @@
 -- history that depended on five call sites each remembering to snapshot first
 -- is a history with holes in it exactly where somebody was in a hurry — and a
 -- history with holes is worse than none, because a screen reading it says "no
--- earlier programme" about a client who had six.
+-- earlier program" about a client who had six.
 --
 -- A BEFORE trigger on UPDATE and DELETE catches every one of them, including
 -- the SQL editor, and cannot be forgotten by a screen written next year.
@@ -66,14 +66,14 @@
 --
 -- ── Why the snapshot is conditional ───────────────────────────────────────
 --
--- Only when the PROGRAMME or the START DATE actually changed. Every assign
+-- Only when the PROGRAM or the START DATE actually changed. Every assign
 -- writes the whole row, and a bulk re-assign of an unchanged template would
 -- otherwise write a history row per client per tap — a timeline full of
 -- identical entries an hour apart, which a coach reading it would take as their
--- client having been moved between six programmes.
+-- client having been moved between six programs.
 --
 -- `is distinct from` rather than `<>`: a jsonb `<>` null is null, which is not
--- true, so a programme going from NULL to something would not be recorded. That
+-- true, so a program going from NULL to something would not be recorded. That
 -- cannot happen today (`program` is NOT NULL) and the operator is written for
 -- when it can.
 --
@@ -81,7 +81,7 @@
 --
 -- `updated_at` is `default now()` and the upsert never sends it, so a DEFAULT
 -- only applies on INSERT: every overwrite left the timestamp at the moment the
--- client's FIRST programme was assigned. Every screen that has printed "updated
+-- client's FIRST program was assigned. Every screen that has printed "updated
 -- 3 March" over an assignment rewritten in August was reading that. The history
 -- rows below are stamped from it, so a lie there would become a lie in the
 -- timeline; a trigger sets it, which is where a server-side truth belongs
@@ -92,7 +92,7 @@
 
 create table if not exists public.assigned_program_history (
   id          uuid        primary key default gen_random_uuid(),
-  -- The person whose programme this WAS. Cascades with them: a deleted profile
+  -- The person whose program this WAS. Cascades with them: a deleted profile
   -- takes their own training history with it, exactly as `assigned_programs`
   -- and `workouts` already do.
   client_id   uuid        not null references public.profiles(id) on delete cascade,
@@ -100,7 +100,7 @@ create table if not exists public.assigned_program_history (
   -- `assigned_programs.coach_id`: a coach leaving the platform must not delete
   -- the record of what their former clients were training.
   coach_id    uuid        references public.profiles(id) on delete set null,
-  -- The programme, in full, exactly as it was. Not a diff and not a summary —
+  -- The program, in full, exactly as it was. Not a diff and not a summary —
   -- the whole point is that a coach can look at what they actually wrote, and a
   -- diff is only readable against a version that itself has to exist.
   program     jsonb       not null,
@@ -109,7 +109,7 @@ create table if not exists public.assigned_program_history (
   -- column existed, which is what null there has always meant.
   starts_on   date,
   -- When the row being replaced was last written. Taken from the OLD row, so it
-  -- is when this programme was ASSIGNED rather than when it was replaced.
+  -- is when this program was ASSIGNED rather than when it was replaced.
   assigned_at timestamptz,
   -- When it stopped being what they were on.
   replaced_at timestamptz not null default now(),
@@ -119,9 +119,9 @@ create table if not exists public.assigned_program_history (
   -- an admin's repair is a false statement about a person.
   replaced_by uuid,
   -- 'replaced' or 'removed'. A DELETE is a coach taking somebody OFF a
-  -- programme (builder's Revert, the roster's unassign) and it is a different
+  -- program (builder's Revert, the roster's unassign) and it is a different
   -- event from swapping one block for another — a timeline that could not tell
-  -- them apart would show a gap as a programme change.
+  -- them apart would show a gap as a program change.
   reason      text        not null check (reason in ('replaced', 'removed'))
 );
 
@@ -178,7 +178,7 @@ grant select on public.assigned_program_history to authenticated;
 -- but the trigger is dropped and recreated too, so re-running this file is a
 -- no-op rather than a second trigger firing twice on every assign — which
 -- would write two history rows per overwrite and make every timeline read as
--- double the programmes.
+-- double the programs.
 create or replace function public.snapshot_assigned_program()
 returns trigger
 language plpgsql
@@ -214,7 +214,7 @@ begin
   -- The stale-timestamp fix, stated in the header. `default now()` fires on
   -- INSERT only, and no writer in this app sends the column, so before this
   -- line every overwritten assignment still carried the date of the client's
-  -- FIRST programme.
+  -- FIRST program.
   new.updated_at := now();
   return new;
 end $$;
@@ -228,19 +228,19 @@ create trigger snapshot_assigned_program_trg
 
 -- ── What is deliberately NOT here ─────────────────────────────────────────
 --
--- No "restore this block" function. Putting an old programme back is an ASSIGN
+-- No "restore this block" function. Putting an old program back is an ASSIGN
 -- — it writes over what somebody is training this evening — and every refusal
 -- that guards an assign belongs in front of it: the overwrite guard, the
 -- per-client injury gate (a client's shoulder in September is not the shoulder
--- they had in March, and a programme written before a disclosure must not go
+-- they had in March, and a program written before a disclosure must not go
 -- back out without it being read), and the acknowledgement record. All three
 -- are coach-facing decisions made against what the coach has read, so restoring
 -- goes through the same `assignProgramTo` path as any other assign, from a
--- screen, with the programme loaded into the builder first. A `restore(id)` RPC
+-- screen, with the program loaded into the builder first. A `restore(id)` RPC
 -- would be a way around all of them and it would look like the convenient
 -- option.
 --
--- No retention limit and no pruning. A programme is a few kilobytes of jsonb
+-- No retention limit and no pruning. A program is a few kilobytes of jsonb
 -- and a coach with a five-year client accumulates a few dozen rows; a cap would
 -- delete the oldest block, which is the one somebody is asking about when they
 -- ask what they did two years ago.

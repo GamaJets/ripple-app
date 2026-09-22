@@ -159,7 +159,7 @@ export function triedLine(c: Contact, now: number = Date.now()): string {
   const who = contactBy(c);
   const when = d == null ? 'at an unreadable time' : d === 0 ? 'today' : `${d} day${d === 1 ? '' : 's'} ago`;
   const by = who ? ` by ${who}` : '';
-  return `${CHANNEL_LABEL[c.channel]}${by}, ${when} — ${OUTCOME_LABEL[c.outcome].toLowerCase()}.`;
+  return `${CHANNEL_LABEL[c.channel]}${by}, ${when}: ${OUTCOME_LABEL[c.outcome].toLowerCase()}.`;
 }
 
 /* ── pacing, from the member's own pattern ─────────────────────────────────── */
@@ -284,7 +284,13 @@ export function paceFor(baselinePerWeek: number | null, bounds?: PaceBounds | nu
       // With no pattern the number is a convention rather than a measurement —
       // and where the coach has stated their own convention, theirs is the one
       // that applies. Only when they have not does the module's fortnight stand.
-      cooldownDays: bounds?.minCooldownDays != null && floor !== MIN_COOLDOWN_DAYS
+      // `floor !== MIN_COOLDOWN_DAYS` was standing in for "the coach's
+      // preference was accepted", and it is not the same test: `cooldownFloor`
+      // also RETURNS the minimum when it accepts a preference of exactly that.
+      // So a coach who typed 7 — which `parseCooldown` accepts and
+      // `cooldownNote` prints back as "Never inside 7 days" — silently got 14,
+      // while 6 and 8 were honoured either side of it.
+      cooldownDays: bounds?.minCooldownDays != null && floor === Math.round(bounds.minCooldownDays)
         ? floor
         : DEFAULT_COOLDOWN_DAYS,
       judgeAfterDays: null,
@@ -559,7 +565,7 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     const short = Math.ceil((readFrom - baselineFrom) / DAY);
     return blank(
       'outside-the-read',
-      `This contact is older than the attendance history read here — it needs ${short} more day${short === 1 ? '' : 's'} of record before it to say what their pattern was. Not judged, rather than judged on a short baseline.`,
+      `This contact is older than the attendance history read here. It needs ${short} more day${short === 1 ? '' : 's'} of record before it to say what their pattern was. Not judged, rather than judged on a short baseline.`,
       noPace,
     );
   }
@@ -579,8 +585,15 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     return blank(
       'no-baseline',
       baselineActive === 0
-        ? `Nothing recorded in the ${Math.round(windows.historyDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect" — no measurement.`
-        : `Only ${baselineActive} active day${baselineActive === 1 ? '' : 's'} before this contact — no settled pattern to judge a change against.`,
+        // The window ACTUALLY measured, which is not `historyDays`.
+        // `baselineActive` is counted over [at − historyDays, at − recentDays)
+        // — it deliberately stops short of the contact so the baseline is not
+        // contaminated by it — and the sentence named the whole span anyway. A
+        // member with seven active days in the fortnight before the contact was
+        // told "nothing recorded in the 56 days before this contact", which is
+        // false about their record. The verdict is right; the sentence was not.
+        ? `Nothing recorded in the ${Math.round(baselineSpan)} days up to ${Math.round(windows.recentDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect", but no measurement.`
+        : `Only ${baselineActive} active day${baselineActive === 1 ? '' : 's'} before this contact, so no settled pattern to judge a change against.`,
       pace,
       { baselinePerWeek: null },
     );
@@ -609,7 +622,7 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     const d = Math.max(0, Math.floor((nextAt - at) / DAY));
     return blank(
       'recontacted',
-      `Somebody contacted them again after ${d} day${d === 1 ? '' : 's'}, inside the ${judgeAfter} days this one needed. Whatever happened next followed both, and the record cannot say which — so neither is credited.`,
+      `Somebody contacted them again after ${d} day${d === 1 ? '' : 's'}, inside the ${judgeAfter} days this one needed. Whatever happened next followed both, and the record cannot say which, so neither is credited.`,
       pace,
       partial,
     );
@@ -692,7 +705,7 @@ function followUpReason(
  * folding those rows away would make the loop look more conclusive than it is.
  */
 export const WHY_NO_RATE =
-  'No percentage is shown, and there is not one to show. Everybody here was contacted because they were drifting, so there is no comparable group who were left alone — and members furthest below their own average tend to drift back toward it regardless, which would flatter any figure taken from this table alone. These are counts of what FOLLOWED each contact, in sequence. None of them is evidence that the contact caused it.';
+  'No percentage is shown, and there is not one to show. Everybody here was contacted because they were drifting, so there is no comparable group who were left alone, and members furthest below their own average tend to drift back toward it regardless, which would flatter any figure taken from this table alone. These are counts of what FOLLOWED each contact, in sequence. None of them is evidence that the contact caused it.';
 
 export interface FollowUpTally {
   /** Every contact considered. */
@@ -746,7 +759,22 @@ export function summariseFollowUps(list: FollowUpRead[] | null): FollowUpTally |
 /** The sentence above the tally, or null when nothing has been tried at all. */
 export function loopHeadline(t: FollowUpTally | null): string | null {
   if (t == null || t.total === 0) return null;
+  // ── why these counts are not grouped ──────────────────────────────────────
+  //
+  // `t.total` is every follow-up contact a gym has recorded in the read window,
+  // and a chain working its retention list passes a thousand — so this WOULD be
+  // a defect anywhere else. It is not fixable here.
+  //
+  // studio-web/app/retention/page.tsx renders this sentence through `@lib/*`,
+  // and `num()` in src/lib/format.ts latches `appLocale()`, which Next.js
+  // resolves on the server during render and again in the browser during
+  // hydration. src/lib/consoleSearch.ts carries the full argument and the shape
+  // of the eventual fix — the caller passing in its own spelling function,
+  // which is a console-side change.
+  //
+  // numbers-ok: console-shared module — no reader whose locale could be asked.
   if (t.judged === 0) {
+    // numbers-ok: as above, a console-shared module has no locale to spell in.
     return `${t.total} contact${t.total === 1 ? '' : 's'} recorded, none of them old enough or backed by enough history to say what followed. That is the honest state of a loop that has just started, not a result.`;
   }
   const parts = [
@@ -755,6 +783,7 @@ export function loopHeadline(t: FollowUpTally | null): string | null {
     `${t.keptFalling} by a further fall`,
   ];
   const waiting = t.tooEarly + t.noBaseline + t.recontacted + t.outsideTheRead + t.unreadable;
+  // numbers-ok: as above, a console-shared module has no locale to spell in.
   let out = `Of ${t.total} contact${t.total === 1 ? '' : 's'}, ${t.judged} can be looked at: ${parts.join(', ')}.`;
   if (waiting) out += ` The other ${waiting} cannot be judged yet.`;
   return out;

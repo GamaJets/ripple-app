@@ -60,26 +60,53 @@
 //     trainer to share a clip a second time, or to swear they never shared one
 //     they did — so a failed read draws no toggles at all, and says why.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
-import { useRouter } from 'expo-router';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Rule, Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, FigureCard, Meter, TonedChip, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
 import { clipOwner, canManageClip, canRemoveClip } from '../../src/lib/clipOwner';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
-import { isAcademyClip } from '../../src/lib/exerciseId';
+import { videoForExercise } from '../../src/lib/exerciseId';
+// ── two rows, one movement, and only one of them ever plays ────────────────
+//
+// This list is the clip library, one row per clip, and nothing on it said when
+// two rows were the same movement. A coach who re-filmed a lift they were not
+// happy with had both takes sitting here looking equally live, while
+// videoForExercise served whichever came back first from a read ordered by
+// nothing in particular — so the take they meant to replace kept playing and
+// the screen agreed with them that it had been replaced.
+import { clipsPerMovement, movementSlug, duplicateClipNote } from '../../src/lib/clipSources';
+// ── arriving here to film ONE movement ─────────────────────────────────────
+//
+// app/(trainer)/exercise.tsx ends on "Record a clip for this movement" and used
+// to push a bare route, so the coach landed on a screen that did not know which
+// movement. They filmed, and the "Name This Clip" sheet handed them an empty
+// box — so the name was retyped from memory, and a clip is matched to a
+// catalogue row by the slug of that name with exact equality and no fuzzy
+// fallback (src/lib/exerciseId.ts). "Bent Over Row" typed for "Bent-Over Row"
+// is a clip that resolves to nothing: it sits in the library below looking
+// filmed, is counted as filmed, and the client it was filmed for is served the
+// catalogue animation for ever. Every other coaching app of this kind records
+// against the exercise you were looking at; this is that, built out of the
+// prefill `upload()` has taken since the row-tap path was written.
 import { supabase } from '../../src/lib/supabase';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { chunkIds, uniqueIds } from '../../src/lib/idLookup';
 import { USE_SUPABASE } from '../../src/lib/config';
 
 /**
@@ -90,12 +117,68 @@ import { USE_SUPABASE } from '../../src/lib/config';
  * say, because a truncated permission is worse than none.
  */
 const VIS: { key: Visibility; label: string; chip: string; note: string }[] = [
-  { key: 'private', label: 'Only Me', chip: 'Only me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
-  { key: 'clients', label: 'My Clients', chip: 'My clients', note: 'Everyone you coach sees it in their program, on any device.' },
-  { key: 'gym', label: 'Everyone at the Gym', chip: 'The gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
+  { key: 'private', label: 'Only Me', chip: 'Only Me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
+  { key: 'clients', label: 'My Clients', chip: 'My Clients', note: 'Everyone you coach sees it in their program, on any device.' },
+  { key: 'gym', label: 'Everyone at the Gym', chip: 'The Gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
   { key: 'public', label: 'Anyone on Repple', chip: 'Anyone', note: 'Anyone on Repple can watch it. Only choose this for a clip you are happy to publish.' },
 ];
 const visOf = (v: Visibility) => VIS.find((c) => c.key === v) ?? VIS[1];
+
+/**
+ * Why a pasted link is not a link, or null when it is one.
+ *
+ * ── the write this closes ─────────────────────────────────────────────────
+ *
+ * "Add by link" validated the NAME and nothing else. With the URL box left
+ * empty, `saveLink` called `addVideo({ name, group, url: '' })`, and
+ * src/ui/exerciseVideos.ts writes `url: v.url || null, video_path: v.path ||
+ * null` — so the insert succeeded with BOTH columns null, returned 'remote',
+ * and the coach was told the clip was in the exercise library and that
+ * "Everyone you coach sees it in their program, on any device." There was
+ * nothing to see. The one field that makes the row a video was the one field
+ * nothing checked.
+ *
+ * ── what it insists on, and what it deliberately does not ─────────────────
+ *
+ * An ABSOLUTE http(s) URL with a host. Not a guess at what the coach meant:
+ * "youtube.com/watch?v=..." is not silently promoted to https:// — a link this
+ * app repairs on the coach's behalf is a link the coach never checked, and it
+ * is stored and served to every client they have. They are asked for the whole
+ * thing instead, which is what the copy/paste they just did would have given
+ * them.
+ *
+ * http and https and nothing else, because the row's `url` is handed to a
+ * player. A `javascript:` or `data:` scheme in a column that reaches a WebView
+ * is the shape src/lib/redirectTarget.ts refuses for the same reason, and
+ * neither is a video anybody can watch.
+ *
+ * It does NOT try to say whether the video exists, is public, or is on a host
+ * this app can play. That needs the network, and a check this screen cannot
+ * actually perform must not be implied by a sentence saying it did.
+ */
+function linkProblem(raw: string): string | null {
+  const url = raw.trim();
+  if (!url) return 'Paste the link to the video. Without one there is nothing for your clients to watch.';
+  // Whitespace inside a URL is a truncated paste or two links stuck together;
+  // a backslash is a Windows path. Neither is a link, and both parse.
+  if (/[\s\\]/.test(url)) return 'That link has a space or a backslash in it, so it is not a web address. Paste the whole link again.';
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(url);
+  if (!scheme) {
+    return 'That is not a full link. Paste the whole address, starting with https://. Repple will not guess the missing half and store a link nobody has opened.';
+  }
+  const s = scheme[1].toLowerCase();
+  if (s !== 'http' && s !== 'https') {
+    return `“${s}” links cannot be played in the app. Paste an http:// or https:// address to the video.`;
+  }
+  // Something has to follow the scheme, and it has to be a host rather than a
+  // slash: "https://" and "https:///watch" both pass the test above.
+  const rest = url.slice(scheme[0].length);
+  const host = rest.split(/[/?#]/)[0];
+  if (!host || !host.includes('.')) {
+    return 'That link has no website in it. Paste the whole address, the way it appears in your browser.';
+  }
+  return null;
+}
 
 /** The picker itself — a row of chips, used on a library row and on the sheet
  *  that names a newly recorded clip so both offer the same four words. */
@@ -116,7 +199,7 @@ function VisibilityChoice({ value, onChange, subject, disabled }: {
               paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill,
               backgroundColor: on ? t.brand : t.surface2,
             }}>
-            <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
+            <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
           </Pressable>
         );
       })}
@@ -158,9 +241,16 @@ function useGrantableClients(enabled: boolean) {
     if (!USE_SUPABASE) { setPeople([]); setHandAdded(0); setStatus('ready'); return; }
     setStatus('loading');
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { setStatus('error'); return; }
+      // `signedInUid`, not `const { data: auth } = await getUser()`. That line
+      // threw the `error` away, so a dropped connection and a genuine sign-out
+      // both arrived as a missing id with nothing recorded anywhere. Both still
+      // land on 'error' here, which is right — 'error' is UNKNOWN on this screen
+      // and the picker draws no list under it — but the outage now leaves a
+      // trace, and the discrimination is the one in src/lib/authedUid.ts rather
+      // than a second copy of it.
+      const me = await signedInUid('videos.grantableClients');
+      if (me.uid === null) { setStatus('error'); return; }
+      const uid = me.uid;
 
       const { data: cls, error } = await supabase.from('clients').select('id').eq('trainer_id', uid);
       if (error) { setStatus('error'); return; }
@@ -169,9 +259,18 @@ function useGrantableClients(enabled: boolean) {
       // Names come from profiles, keyed on the same id. A list of uuids is not
       // a list a trainer can pick a person out of, so a failed name read is a
       // failed read of the whole control, not a cosmetic loss.
+      // CHUNKED, and not because the roster read above is capped — it is not
+      // capped at all. `ids` is every row of `clients` for this trainer, and a
+      // coach with two hundred people on their book sends two hundred uuids:
+      // about 7.8KB of `in.("…","…")`, past the 8KB request line nginx and most
+      // CDNs enforce by default. The proxy answers 414, supabase-js hands that
+      // back as `data: null` with no error this code can distinguish from an
+      // empty result, and the sheet then offers a picker with nobody in it to a
+      // trainer who has more clients than anyone else on the platform. 150 at a
+      // time (src/lib/idLookup.ts) cannot reach the limit.
       const names = new Map<string, string>();
-      if (ids.length) {
-        const { data: profs, error: nameErr } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      for (const chunk of chunkIds(uniqueIds(ids))) {
+        const { data: profs, error: nameErr } = await supabase.from('profiles').select('id, full_name').in('id', chunk);
         if (nameErr) { setStatus('error'); return; }
         (profs ?? []).forEach((p: any) => names.set(p.id, (p.full_name || '').trim()));
       }
@@ -194,7 +293,21 @@ function useGrantableClients(enabled: boolean) {
 
   // Lazy on purpose: a library of thirty clips must not cost a roster read on
   // mount for the twenty-nine nobody opened.
-  useEffect(() => { if (enabled && status === 'idle') load(); }, [enabled, status, load]);
+  //
+  // But `status === 'idle'` made it lazy AND once. This hook is mounted at
+  // screen level, so that read happened the first time any sheet was opened and
+  // never again for the life of the screen: a coach who signed a client up on
+  // Monday spent the week unable to send them a form-check clip, because the
+  // only list that would name them was read before that client existed. The
+  // screen's pull-to-refresh does not include this list either, and nothing on
+  // the sheet says it is old — so the conclusion available to the coach is that
+  // the client did not join.
+  //
+  // `load` is stable, so this fires once per OPENING of a sheet and not once
+  // per render. Dropping the status guard also lets a previous failure be
+  // retried by closing the sheet and opening it again, which is what a person
+  // does anyway.
+  useEffect(() => { if (enabled) load(); }, [enabled, load]);
 
   return { status, people, handAdded, reload: load };
 }
@@ -225,9 +338,9 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
 
   return (
     <View style={{ marginTop: sp.lg }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>Shared with</Text>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>Shared With</Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-        Anyone you name here can watch this clip whatever the setting above says — a name reaches even a clip set to “Only me”.
+        Anyone you name here can watch this clip whatever the setting above says. A name reaches even a clip set to “Only me”.
       </Text>
 
       {reading && peopleStatus !== 'error' ? (
@@ -247,7 +360,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
       {peopleStatus === 'ready' && grants?.status === 'error' ? (
         <View>
           <Text style={{ ...ty.label, color: t.ink2 }}>
-            We could not read who “{video.name}” is shared with, so we are not going to show you a list. This is not a list of nobody — check before you share it again.
+            We could not read who “{video.name}” is shared with, so we are not going to show you a list. This is not a list of nobody. Check before you share it again.
           </Text>
           <View style={{ height: sp.md }} />
           <Ghost label="Try Again" a11yLabel={`Try reading who ${video.name} is shared with again`} onPress={onRetryGrants} />
@@ -280,7 +393,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
                 }}>
                 {busy ? <ActivityIndicator size="small" color={on ? t.brandInk : t.ink3} />
                   : on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-                <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{p.name}</Text>
+                <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{p.name}</Text>
               </Pressable>
             );
           })}
@@ -291,7 +404,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           {handAdded === 1
             ? 'One person on your roster was added by hand and has'
-            : `${handAdded} people on your roster were added by hand and have`} no Repple account, so they are not listed — there is no account for the clip to reach.
+            : `${handAdded} people on your roster were added by hand and have`} no Repple account, so they are not listed. There is no account for the clip to reach.
         </Text>
       ) : null}
     </View>
@@ -306,10 +419,10 @@ export default function TrainerVideos() {
   // Whose clips are this coach's own. `coverageFor` below was already given
   // this and already told own clips from the rest; the row list was not.
   const myId = auth.user?.id ?? null;
-  const { templates, status: tplStatus } = useProgramTemplates();
-  // ── Whose programmes this section is about ─────────────────────────────
+  const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
+  // ── Whose programs this section is about ─────────────────────────────
   //
-  // The heading says "What Your Programmes Need", and the list under it has to
+  // The heading says "What Your Programs Need", and the list under it has to
   // be the coach's own work or the sentence is false. Two things stood between
   // it and that, and the section was running with neither:
   //
@@ -317,11 +430,11 @@ export default function TrainerVideos() {
   //    Legs, Fat-loss Circuit, Tone & Sculpt — so the list is NEVER empty. A
   //    coach who has saved nothing (which, against phgfwzpkkwdysftlgkoq today,
   //    is every coach: `program_templates` holds zero rows) was shown the
-  //    movements of three demonstration programmes, counted, and told how many
+  //    movements of three demonstration programs, counted, and told how many
   //    of them they had still to film. Nobody had written any of it.
   //  · the status was never read. Under 'error' the starters are all that is
   //    left standing where the coach's real library should be, so the coverage
-  //    would have been computed over somebody else's programmes and presented
+  //    would have been computed over somebody else's programs and presented
   //    as a fact about theirs — the same failure the provider's own header
   //    describes for the picker.
   //
@@ -329,10 +442,20 @@ export default function TrainerVideos() {
   // provider's own marker), and only off a read that landed. With nothing
   // saved there is nothing to say, `coverageLine` returns null for an empty
   // list, and the whole section is absent rather than invented.
+  //
+  // `isWhole`, and not `=== 'error' || === 'loading'`, which is what stood here
+  // and which admits the third status that is not a whole read. `readLibrary`
+  // (src/lib/templateLibrary.ts:153) reads `.limit(capLimit())` and answers
+  // 'partial' when the page came back at the ceiling, so under it
+  // `savedTemplates` is a PREFIX of the coach's library — and the section this
+  // feeds counts across it. A prefix of the programs produces a SHORTER list
+  // of movements to film, so the coach is told there is less to do than there
+  // is, which is the one direction this section must never be wrong in.
+  // `check:whole` matches the `!== 'error'` spelling and cannot see this one.
   const savedTemplates = useMemo(
-    () => (tplStatus === 'error' || tplStatus === 'loading'
-      ? null
-      : templates.filter((tpl) => !tpl.id.startsWith('seed_'))),
+    () => (isWhole(tplStatus)
+      ? templates.filter((tpl) => !tpl.id.startsWith('seed_'))
+      : null),
     [tplStatus, templates],
   );
   // Every movement this coach has written into a template, however they spelt
@@ -344,18 +467,63 @@ export default function TrainerVideos() {
   // "nothing is illustrated", and telling a coach that while their clients
   // watch animations is exactly the claim this screen got wrong.
   const cat = useExerciseCatalogue();
+  // `v.name` is the English name stored on the coach's exercise_videos row —
+  // the identity every lookup here is keyed on. `movement()` is what the row
+  // says out loud.
+  const { textOf: movement } = useMovementName();
   const illustratedSlugs = useMemo(
     () => (cat.status === 'ready'
       ? new Set(cat.rows.filter((r) => r.hasDemo).map((r) => exerciseSlug(r.name)))
       : null),
     [cat.status, cat.rows],
   );
-  const coverage = status === 'error' || status === 'loading' || !savedTemplates ? null : coverageFor(
+  // `isWhole(status)`, for the clip library, and it is the same correction the
+  // hero's note above already carries: under 'partial' `vids` is a page of a
+  // longer library, so a movement whose clip fell off the end is reported here
+  // as having NOTHING TO SHOW and counted into "N to film". That is not a
+  // smaller number, it is a false statement about work the coach has already
+  // done — the hero's own comment says so about the very same rows, and this
+  // was the half of the screen it did not reach.
+  const coverage = !isWhole(status) || !savedTemplates ? null : coverageFor(
     savedTemplates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
     vids,
     myId,
     illustratedSlugs,
   );
+  /* ── the movement this screen was opened to film ────────────────────────
+   *
+   * `record` is the catalogue's own spelling of the name, passed by
+   * app/(trainer)/exercise.tsx so the clip slugs to the row the coach was
+   * looking at rather than to whatever they retype. `group` rides with it only
+   * to fill the second box; it is cosmetic and an empty one is harmless.
+   */
+  const params = useLocalSearchParams<{ record?: string; group?: string }>();
+  const askedToFilm = (params.record || '').trim();
+  // Dismissed by hand, this sitting. The param stays on the route — going back
+  // and forward would bring it back, which is right — but a coach who has said
+  // "not now" is not asked twice on the same visit.
+  const [filmDismissed, setFilmDismissed] = useState(false);
+  /**
+   * Whether the ask has already been answered.
+   *
+   * Asked of `vids` rather than remembered, so the prompt disappears the moment
+   * the upload lands and never needs clearing. `isWhole(status)` is the gate a
+   * NEGATIVE needs: under a truncated or failed read, "you have not filmed this"
+   * is a claim about a library we do not hold, and the prompt would be inviting
+   * a coach to film a second copy of something they already have. So an unread
+   * library means no prompt at all.
+   *
+   * `clipOwner(...) === 'mine'` and not merely "a clip exists": an Academy clip
+   * is not theirs, and one saved on this phone reached nobody — in both cases
+   * filming their own is still the thing they came here to do.
+   */
+  const alreadyFilmed = useMemo(() => {
+    if (!askedToFilm) return false;
+    const hit = videoForExercise(askedToFilm, vids, myId);
+    return !!hit && clipOwner(hit, myId) === 'mine';
+  }, [askedToFilm, vids, myId]);
+  const filmPrompt = !!askedToFilm && !filmDismissed && !alreadyFilmed && isWhole(status);
+
   const [linkOpen, setLinkOpen] = useState(false);
   const [lName, setLName] = useState('');
   const [lGroup, setLGroup] = useState('');
@@ -380,6 +548,20 @@ export default function TrainerVideos() {
   const grantsAsked = useRef<Set<string>>(new Set());
   const openIsHosted = !!openId && openId.startsWith('db');
   const clients = useGrantableClients(openIsHosted);
+  // Three reads: the clips themselves, the movement catalogue they are matched
+  // against, and the program templates the coverage figure is counted over.
+  // Coverage is a ratio across all three, so refreshing one of them would print
+  // a fraction whose halves came from different reads.
+  //
+  // The grantable-client list is deliberately NOT in here. It is read per
+  // sheet, only when a hosted clip is open, and it comes off `clients` and
+  // not the roster — pulling the page down behind a closed sheet has no list
+  // to refresh, and opening the sheet now genuinely reads it fresh (it used to
+  // read once for the life of the screen; see the effect in
+  // `useGrantableClients`).
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    reload(), cat.reload(), Promise.resolve(reloadTemplates()),
+  ]), [reload, cat, reloadTemplates]));
 
   const loadGrants = async (id: string) => {
     grantsAsked.current.add(id);
@@ -415,10 +597,10 @@ export default function TrainerVideos() {
     setGrantBusy(null);
     if (!ok) {
       Alert.alert(
-        on ? 'Not removed' : 'Not shared',
+        on ? 'Not Removed' : 'Not Shared',
         on
-          ? `${person.name} can still watch “${v.name}”. The change did not reach the server — check your connection and try again.`
-          : `“${v.name}” has not been shared with ${person.name}. The change did not reach the server — check your connection and try again.`,
+          ? `${person.name} can still watch “${v.name}”. The change did not reach the server. Check your connection and try again.`
+          : `“${v.name}” has not been shared with ${person.name}. The change did not reach the server. Check your connection and try again.`,
       );
       return;
     }
@@ -447,15 +629,38 @@ export default function TrainerVideos() {
     // `url` field is for a coach who pointed at a video hosted somewhere else.
     let path: string | null = null;
     if (videoUploadAvailable()) {
-      path = await uploadExerciseVideo(pendUri);
-      if (!path) { setUpBusy(false); Alert.alert('Upload failed', 'Could not upload the clip right now. Check your connection and try again, or add it as a link.'); return; }
+      // One alert used to stand for four different refusals, and it told every
+      // one of them to check their connection. Two of the four are not about the
+      // connection at all: a coach whose session lapsed while the media picker
+      // was open is sent to check a network that is working, and so is a coach
+      // whose write the storage policy refused. `videoUploadFailureLine` in
+      // src/lib/exerciseVideoUpload.ts already knows which of the four happened
+      // — the sentence just had nowhere to go until this callback existed.
+      let why: string | null = null;
+      path = await uploadExerciseVideo(pendUri, (line) => { why = line; });
+      if (!path) {
+        setUpBusy(false);
+        // The fallback is for the one path that reports no cause: the early
+        // return on `!USE_SUPABASE || !uri`, which never calls the callback. It
+        // deliberately no longer names the connection, because that branch is
+        // not a network failure either.
+        Alert.alert('Clip Not Uploaded', why ?? 'Could not upload the clip right now. Try again in a moment, or add it as a link.');
+        return;
+      }
     }
     const chosen = upVis;
     const where = await addVideo({ name: upName.trim() || 'Exercise clip', group: upGroup.trim() || 'Uncategorised', path: path || undefined, visibility: chosen });
     setUpBusy(false); setPendUri(null);
-    Alert.alert('Clip added', where === 'remote'
+    // The local outcome is no longer "saved on this phone". The video itself is
+    // NOT kept: the row is what makes an uploaded clip readable at all — the
+    // bucket's read policy asks `exercise_videos` for the path — so a file with
+    // no row is one nobody, including this coach, could ever play. It is
+    // discarded rather than left in the bucket under their name for ever (see
+    // `orphanedVideoObject` in src/lib/exerciseVideoUpload.ts), and the coach is
+    // told that plainly instead of being told it was saved.
+    Alert.alert(where === 'remote' ? 'Clip Added' : 'Clip Not Saved', where === 'remote'
       ? `Uploaded. ${visOf(chosen).note} You can change that any time from the clip's row.`
-      : 'Saved to your library on this device only. It did not reach the server, so nobody else can see it yet — try again when you have a connection.');
+      : 'The name is in your library on this phone, but the clip itself did not reach the server and has not been kept. The video is still on your phone. Add it again when you have a connection.');
   };
 
   // Adding by link goes through exactly the same `addVideo` as the upload above,
@@ -468,27 +673,42 @@ export default function TrainerVideos() {
   const saveLink = async () => {
     if (lBusy) return;
     const name = lName.trim();
-    if (!name) { Alert.alert('Name needed', 'Give the exercise a name.'); return; }
+    if (!name) { Alert.alert('Name Needed', 'Give the exercise a name.'); return; }
+    // The link is checked the same way and in the same breath as the name, and
+    // the write is REFUSED rather than made and then described. Without this
+    // an empty box wrote a row with `url` null and `video_path` null — a clip
+    // that is neither hosted nor linked — and the alert below told the coach
+    // everyone they coach could see it in their program.
+    //
+    // Nothing is migrated for the rows already written that way, and nothing
+    // needs to be: `rowToItem` in src/ui/exerciseVideos.ts already sets
+    // `uploaded: !!(r.video_path || r.url)`, so such a row draws as
+    // "not recorded yet · To do" with a plus rather than a play button, is
+    // excluded from the "N of M recorded" figure, and tapping it offers to
+    // record or upload a clip for that exercise. The screen shows them as the
+    // empty placeholders they are, which is the truth about them.
+    const why = linkProblem(lUrl);
+    if (why) { Alert.alert('Link Needed', why); return; }
     setLBusy(true);
-    const where = await addVideo({ name, group: lGroup, url: lUrl });
+    const where = await addVideo({ name, group: lGroup, url: lUrl.trim() });
     setLBusy(false);
     if (where === 'none') {
-      Alert.alert('Not added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);
+      Alert.alert('Not Added', `“${name}” was not added to your library. Nothing was saved. Check the name and try again.`);
       return;
     }
     setLinkOpen(false);
-    Alert.alert(where === 'remote' ? 'Added' : 'Saved on this phone only', where === 'remote'
+    Alert.alert(where === 'remote' ? 'Added' : 'Saved on This Phone Only', where === 'remote'
       ? `${name} is in the exercise library. ${visOf('clients').note} You can change that any time from the clip's row.`
-      : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet — remove it and add it again when you have a connection.`);
+      : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet. Remove it and add it again when you have a connection.`);
   };
 
   // Tap a recorded clip to watch it right here; tap a not-yet-recorded exercise
   // to add one.
   const tapRow = (v: VideoItem) => {
     if (v.uploaded) { setOpenId(openId === v.id ? null : v.id); return; }
-    Alert.alert(v.name, 'No video yet for this exercise — add one now:', [
+    Alert.alert(v.name, 'No video yet for this exercise. Add one now:', [
       { text: 'Record', onPress: () => upload(true, { name: v.name, group: v.group }) },
-      { text: 'Upload from library', onPress: () => upload(false, { name: v.name, group: v.group }) },
+      { text: 'Upload from Library', onPress: () => upload(false, { name: v.name, group: v.group }) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -501,7 +721,7 @@ export default function TrainerVideos() {
     const ok = await setVisibility(v.id, next);
     setVisBusy(null);
     if (!ok) {
-      Alert.alert('Not changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server — check your connection and try again.`);
+      Alert.alert('Not Changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server. Check your connection and try again.`);
     }
   };
 
@@ -519,7 +739,7 @@ export default function TrainerVideos() {
         {
           text: 'Remove', style: 'destructive', onPress: async () => {
             const ok = await removeVideo(v.id);
-            if (!ok) { Alert.alert('Not removed', `“${v.name}” is still in your library — the delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
+            if (!ok) { Alert.alert('Not Removed', `“${v.name}” is still in your library. The delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
             if (openId === v.id) setOpenId(null);
           },
         },
@@ -531,54 +751,104 @@ export default function TrainerVideos() {
   // local-only leftovers and nothing else, so it is not the size of the library
   // and must not be printed as though it were.
   const known = status === 'ready';
+  // How many rows of this library are the same movement. Built once rather than
+  // per row: the answer is the same for every row and re-deriving it inside the
+  // map is a scan of the whole list for each of its entries.
+  const perMovement = useMemo(() => clipsPerMovement(vids), [vids]);
   const done = vids.filter((v) => v.uploaded).length;
   const G = layout.gutter;
-  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
+  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: 30, ...elevation.e2 };
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginBottom: sp.md };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>You choose who sees these</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Videos</Text>
-        </View>
-
-        {/* ── the hero ───────────────────────────────────────────────────── */}
-        <Hero
-          label="In Your Library"
-          figure={known ? fig(vids.length) : fig(null)}
-          unit={known ? (vids.length === 1 ? 'clip' : 'clips') : undefined}
-          note={
-            status === 'loading' ? 'Reading your library…'
-              : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
-                // 'partial' had no branch, so it fell through to the counting
-                // one — "8 of 12 recorded" over a page of a longer library,
-                // with the hero figure beside it already showing a dash for the
-                // same reason. Both halves of that sentence are counts, and a
-                // count over a prefix is not a smaller number, it is a wrong
-                // one: a coach reading it concludes four clips are missing that
-                // they have already filmed. src/ui/loadStatus.ts.
-                : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
-                  : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
-                    : 'Record a clip or paste a link, then choose who gets to watch it.'
-          }
+        {/* ── the tab's opening ──────────────────────────────────────────────
+            A tab root, so it opens the way every tab on the board does: the
+            quiet eyebrow, the title, and one round control at the trailing
+            edge. "Video Library" is the board's own name for this screen
+            (coach page 15, Resources, lists it under that name), and the round
+            + is Record — the one thing a coach opens this tab to do — so it is
+            reachable before the coverage card, not only under it. */}
+        <ScreenHeader
+          eyebrow="You choose who sees these"
+          title="Video Library"
+          actions={<Ghost icon="plus" a11yLabel="Record a clip" onPress={() => upload(true)} />}
         />
 
-        <Rule />
+        {/* ── the figure card ───────────────────────────────────────────────
+            The Hero this replaces drew the count on the ground; the board draws
+            every leading figure inside a card with its label over it and one
+            line of context under. Same figure, same rules: a dash unless the
+            read was whole, because `vids.length` under 'error' or 'partial' is
+            the size of a prefix, not of the library. */}
+        <FigureCard title="In Your Library"
+          figure={known ? fig(vids.length) : null}
+          unit={known ? (vids.length === 1 ? 'clip' : 'clips') : undefined}
+          spoken={`In your library, ${known ? `${vids.length} ${vids.length === 1 ? 'clip' : 'clips'}` : 'not counted'}`}
+          detail={status === 'loading' ? 'Reading your library…'
+            : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
+              // 'partial' had no branch, so it fell through to the counting
+              // one — "8 of 12 recorded" over a page of a longer library,
+              // with the hero figure beside it already showing a dash for the
+              // same reason. Both halves of that sentence are counts, and a
+              // count over a prefix is not a smaller number, it is a wrong
+              // one: a coach reading it concludes four clips are missing that
+              // they have already filmed. src/ui/loadStatus.ts.
+              : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
+                : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
+                  : 'Record a clip or paste a link, then choose who gets to watch it.'}>
+          {/* ── coverage, as meters ─────────────────────────────────────────
+              Filmed OF PROGRAMMED: every bar is a share of the distinct
+              movements in this coach's own saved programs, which is the
+              denominator `coverageFor` reports. `coverage` is null unless the
+              library, the templates AND the ownership of each clip were read
+              whole, and a null draws one bar with no fill and the words "Not
+              counted", never an empty bar that reads as "nothing filmed". A
+              coach with no saved programs has nothing to be a share of, and
+              gets no bars at all.
 
-        {/* ── what you programme but nobody has filmed ────────────────────
+              Green is the coach's own clip, blue the Academy's, purple the
+              catalogue's animation, red the movements a client has nothing for.
+              The last two are withheld when the catalogue was not read
+              (`unknownCover`): without it nobody can say which of the unfilmed
+              movements are bare. */}
+          {coverage === null && status !== 'loading' && tplStatus !== 'loading' ? (
+            <Meter label="Filmed of Programmed" val={null} target={1} note="Not counted" />
+          ) : coverage && coverage.all.length ? (
+            <>
+              <Meter label="Filmed by You" tone="brand" val={coverage.mine.length} target={coverage.all.length}
+                note={`${num(coverage.mine.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Academy Clip" tone="blue" val={coverage.academyOnly.length} target={coverage.all.length}
+                note={`${num(coverage.academyOnly.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Catalogue Animation" tone="purple" target={coverage.all.length}
+                val={coverage.unknownCover ? null : coverage.illustratedOnly.length}
+                note={coverage.unknownCover ? 'Not known' : `${num(coverage.illustratedOnly.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Nothing to Show" tone="red" target={coverage.all.length}
+                val={coverage.unknownCover ? null : coverage.missing.length}
+                note={coverage.unknownCover ? 'Not known' : `${num(coverage.missing.length)} of ${num(coverage.all.length)}`} />
+            </>
+          ) : null}
+        </FigureCard>
+
+
+        {/* ── what you program but nobody has filmed ────────────────────
             The library answers "what have I recorded". This answers the more
             useful question: what am I asking people to do that they have never
             seen done. Scoped to the movements in this coach's own templates,
-            not the whole 56-row catalogue — a list of everything is a chore
+            not the whole catalogue — a list of everything is a chore
             nobody starts. */}
         {coverage && coverageLine(coverage) ? (
           <>
             <Section>
-              <SectionHead title="What Your Programmes Need"
-                note={coverage.missing.length ? `${num(coverage.missing.length)} to film` : undefined} />
+              {/* "Programs", not "Programs". The tab bar under this heading
+                  says Programs, the Programs tab itself says Programs, and the
+                  User Guide quotes this heading — so on one screen, at the
+                  default text size, a coach read the British spelling in a
+                  section title and the American one in the tab it is about. */}
+              <SectionHead title="What Your Programs Need"
+                note={coverage.missing.length ? `${num(coverage.missing.length)} to Film` : undefined} />
               <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
 
               {coverage.missing.length ? (
@@ -586,9 +856,8 @@ export default function TrainerVideos() {
                   {coverage.missing.slice(0, 8).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>nothing to show</Text>
+                      <TonedChip tone="red" label="Nothing to Show" />
                     </View>
                   ))}
                   {coverage.missing.length > 8 ? (
@@ -602,21 +871,71 @@ export default function TrainerVideos() {
               {coverage.academyOnly.length ? (
                 <View style={{ marginTop: sp.lg }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                    Showing the Academy clip — record your own and yours is what your clients see instead.
+                    Showing the Academy clip. Record your own and yours is what your clients see instead.
                   </Text>
                   {coverage.academyOnly.slice(0, 6).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>Academy</Text>
+                      <TonedChip tone="blue" label="Academy" />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {/* The movements the coach DID film and their clients still have
+                  nothing for. These also appear in the "nothing to show" list
+                  above, which without this section reads as the app having
+                  forgotten work the coach remembers doing: a clip whose insert
+                  was refused is kept on this phone under its own `vx` id, is
+                  listed in the library below marked "this phone only", and
+                  reaches nobody. Named separately because the action is
+                  different — add it again, not film it again. */}
+              {coverage.localOnly.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                    Filmed, but saved on this phone only. The clip never reached the server, so no client can watch it. Add it again from the library below.
+                  </Text>
+                  {coverage.localOnly.slice(0, 6).map((nm, i) => (
+                    <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                      paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
+                      <TonedChip tone="amber" label="This Phone Only" />
                     </View>
                   ))}
                 </View>
               ) : null}
             </Section>
 
-            <Rule />
+          </>
+        ) : null}
+
+        {/* ── the one movement this screen was opened to film ─────────────
+            Above "Add a Clip", because it IS the add the coach came for and a
+            generic Record button below it is the one they would otherwise
+            press — landing on an empty name box, which is the whole defect.
+            Both controls pass the catalogue's own spelling through `upload`'s
+            prefill, so the clip cannot slug to a near miss. */}
+        {filmPrompt ? (
+          <>
+            <Section>
+              <SectionHead title="Film This Movement" />
+              <Text style={{ ...ty.section, color: t.ink }}>{movement(askedToFilm)}</Text>
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: 4, marginBottom: sp.md }}>
+                Not filmed yet. Your clip is filed against this exercise, and you choose who sees it.
+              </Text>
+              <Cta label="Record This" wide
+                onPress={() => upload(true, { name: askedToFilm, group: params.group || '' })} />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Upload for This" icon="plus"
+                    onPress={() => upload(false, { name: askedToFilm, group: params.group || '' })} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Not Now" onPress={() => setFilmDismissed(true)} />
+                </View>
+              </View>
+            </Section>
           </>
         ) : null}
 
@@ -630,27 +949,25 @@ export default function TrainerVideos() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The way into the catalogue, from the one screen where a coach is
               already thinking about movements. Until this row existed the 600
-              exercises a coach can programme were reachable only from inside
+              exercises a coach can program were reachable only from inside
               the builder's "Add Exercise" sheet — so looking one up, or seeing
-              which of them nobody has filmed, meant opening a programme you
+              which of them nobody has filmed, meant opening a program you
               did not want to write. */}
-          <ListRow icon="grid" title="Browse the Exercise Library" note="Every movement you can programme, and whether you have filmed it"
+          <ListRow icon="grid" tone="blue" title="Browse the Exercise Library" note="Every movement, and whether you have filmed it"
             onPress={() => router.push('/(trainer)/library')} />
           <Rule />
-          <ListRow icon="share" title="Share a Session" note="Your clip and caption, into any app you post from"
+          <ListRow icon="share" tone="purple" title="Share a Session" note="Your clip and caption, into any app you post from"
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>
 
-        <Rule />
 
         {/* ── the library ────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Library" note={known && vids.length ? `${vids.length} clip${vids.length === 1 ? '' : 's'}` : undefined} />
+          <SectionHead title="Library" note={known && vids.length ? `${vids.length} Clip${vids.length === 1 ? '' : 's'}` : undefined} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your library…</Text>
@@ -659,7 +976,7 @@ export default function TrainerVideos() {
           {status === 'error' ? (
             <View style={{ marginBottom: vids.length ? sp.lg : 0 }}>
               <Text style={{ ...ty.label, color: t.ink2 }}>
-                Your library could not be read. Whatever you have uploaded is still there — it is missing from this list, not deleted.
+                Your library could not be read. Whatever you have uploaded is still there. It is missing from this list, not deleted.
                 {vids.length ? ' What follows is only what is saved on this phone.' : ''}
               </Text>
               <View style={{ height: sp.md }} />
@@ -669,7 +986,7 @@ export default function TrainerVideos() {
 
           {known && vids.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clips yet. Record one, upload one from your library, or paste a hosted link — then say who gets to watch it.
+              No clips yet. Record one, upload one from your library, or paste a hosted link, then say who gets to watch it.
             </Text>
           ) : null}
 
@@ -712,26 +1029,54 @@ export default function TrainerVideos() {
             const open = openId === v.id;
             const busy = visBusy === v.id;
             const vis = visOf(v.visibility);
+            // Whether this row is one of several for its movement, and whether
+            // it is the one a client would actually be served. Asked through
+            // videoForExercise rather than by re-deriving the precedence here:
+            // a row that claims to be the one that plays while the player
+            // chooses a different clip is worse than saying nothing at all.
+            const held = perMovement.get(movementSlug(v)) ?? 0;
+            // Null when the player cannot resolve this name at all — a clip
+            // filed under an exercise_id its filename does not slug to. Saying
+            // "a client sees a different one" there would be a claim about a
+            // precedence nobody ran; the row stays quiet instead.
+            const plays = videoForExercise(v.name, vids, myId);
+            const collision = plays == null ? null
+              : duplicateClipNote(held, plays.id === v.id, isWhole(status));
             return (
               <View key={v.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <Pressable onPress={() => tapRow(v)} hitSlop={6} accessibilityRole="button"
-                    accessibilityLabel={v.uploaded ? (open ? `Stop watching ${v.name}` : `Play ${v.name}`) : `Add a clip for ${v.name}`}
-                    style={({ pressed }) => ({ width: 46, height: 36, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
-                    {v.uploaded ? <Icon name={open ? 'minus' : 'play'} size={17} color={t.brand} /> : <Icon name="plus" size={17} color={t.ink3} />}
+                    accessibilityLabel={v.uploaded ? (open ? `Stop watching ${movement(v.name)}` : `Play ${movement(v.name)}`) : `Add a clip for ${movement(v.name)}`}
+                    // The mockups' clip thumbnail: a night tile with the bright
+                    // play mark. It is a TILE and not a frame of the clip: no
+                    // poster image is stored for an exercise video, and a
+                    // generated picture would be a thumbnail of nothing. A
+                    // movement with no clip yet keeps the quiet grey plate.
+                    style={({ pressed }) => ({ width: 64, height: 48, borderRadius: radius.sm, backgroundColor: v.uploaded ? t.night : t.surface3, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
+                    {v.uploaded ? <Icon name={open ? 'minus' : 'play'} size={20} color={t.brandBright} /> : <Icon name="plus" size={20} color={t.ink3} />}
                   </Pressable>
 
                   <Pressable onPress={() => tapRow(v)} style={{ flex: 1 }} accessibilityRole="button"
-                    accessibilityLabel={`${v.name}, ${v.group}. ${v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet'}`}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{v.name}</Text>
+                    accessibilityLabel={[`${movement(v.name)}, ${v.group}.`, v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet', collision].filter(Boolean).join(' ')}>
+                    <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>{movement(v.name)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {v.group}{v.uploaded ? '' : ' · not recorded yet'}{localOnly ? ' · this phone only' : ''}
                     </Text>
+                    {/* Its own line rather than another clause on the one
+                        above, which is already three facts long and clipped to
+                        one line — this is the fact that changes what the coach
+                        does next, and it must not be the one that falls off the
+                        end. Ink, not t.warn as type: the status palette fails
+                        AA as text on every theme (src/theme/scale.ts), and two
+                        clips for one movement is not an error anyway. */}
+                    {collision ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{collision}</Text>
+                    ) : null}
                   </Pressable>
 
                   {mine ? (
                     <Pressable onPress={() => setOpenId(open ? null : v.id)} hitSlop={6} accessibilityRole="button"
-                      accessibilityLabel={`Who can see ${v.name}: ${vis.label}. Change this`}
+                      accessibilityLabel={`Who can see ${movement(v.name)}: ${vis.label}. Change this`}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: sp.xs, paddingHorizontal: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
                       {busy ? <ActivityIndicator size="small" color={t.ink3} /> : <Icon name={v.visibility === 'private' ? 'eye-off' : 'eye'} size={13} color={t.ink3} />}
                       <Text style={{ ...ty.caption, color: t.ink2 }} numberOfLines={1}>{vis.chip}</Text>
@@ -743,10 +1088,7 @@ export default function TrainerVideos() {
                       <Icon name="minus" size={16} color={t.ink3} />
                     </Pressable>
                   ) : (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: v.uploaded ? t.brand : t.s3 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{v.uploaded ? 'Live' : 'To do'}</Text>
-                    </View>
+                    <TonedChip tone={v.uploaded ? 'brand' : 'neutral'} label={v.uploaded ? 'Live' : 'To Do'} />
                   )}
                 </View>
 
@@ -755,7 +1097,7 @@ export default function TrainerVideos() {
                     {v.uploaded ? <ExerciseVideo video={v} exerciseName={v.name} /> : null}
                     {mine ? (
                       <View style={{ marginTop: sp.md }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Who can see this</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Who Can See This</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{vis.note}</Text>
                         <VisibilityChoice value={v.visibility} disabled={busy} subject={v.name} onChange={(next) => changeVisibility(v, next)} />
 
@@ -778,7 +1120,7 @@ export default function TrainerVideos() {
                         {localOnly
                           ? 'This clip only exists on this phone, so there is nobody to share it with. Remove it and add it again when you have a connection.'
                           : platform
-                            ? 'A clip that ships with Repple, not one of yours — everyone you coach can already watch it.'
+                            ? 'A clip that ships with Repple, not one of yours. Everyone you coach can already watch it.'
                             : 'Another coach’s clip, shared publicly. You can use it in a program and your clients can watch it, but who else sees it is theirs to change, not yours.'}
                       </Text>
                     )}
@@ -798,9 +1140,9 @@ export default function TrainerVideos() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Add a Video by Link</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Paste a hosted link (YouTube, Vimeo…). Clients watch it in their library.</Text>
-          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={[input, { marginBottom: sp.lg }]} />
+          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Exercise name" />
+          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Muscle group" />
+          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" accessibilityLabel="Link to the video" style={[input, { marginBottom: sp.lg }]} />
           <Cta label={lBusy ? 'Adding…' : 'Add to Library'} wide disabled={lBusy} onPress={saveLink} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => { if (!lBusy) setLinkOpen(false); }} />
@@ -813,34 +1155,40 @@ export default function TrainerVideos() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }}
           accessibilityRole="button" accessibilityLabel="Close, without saving this clip" />
-        <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
-          <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
+        <View style={[sheet, { maxHeight: '90%' }]}>
+          {/* Two fields, the visibility note and its chips, and two buttons. With
+              the keyboard up over the name the Upload button is under the bottom of
+              the window, on the sheet whose only purpose is naming the clip before
+              it is uploaded. */}
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+            <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device. Turn on the backend to share it with anyone.'}</Text>
+            <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Exercise name" />
+            <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Muscle group" />
 
-          {/* Asked here rather than after the fact, because the upload is the
-              moment the clip becomes visible to somebody. */}
-          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who can see it</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{visOf(upVis).note}</Text>
-          <View style={{ marginBottom: sp.lg }}>
-            <VisibilityChoice value={upVis} disabled={upBusy} subject="this clip" onChange={setUpVis} />
-          </View>
+            {/* Asked here rather than after the fact, because the upload is the
+                moment the clip becomes visible to somebody. */}
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who Can See It</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{visOf(upVis).note}</Text>
+            <View style={{ marginBottom: sp.lg }}>
+              <VisibilityChoice value={upVis} disabled={upBusy} subject="this clip" onChange={setUpVis} />
+            </View>
 
-          <Pressable onPress={saveUpload} disabled={upBusy}
-            accessibilityRole="button" accessibilityState={{ disabled: upBusy }}
-            accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to Library, seen by: ${visOf(upVis).label}` : 'Save the clip to this device')}
-            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
-            {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
-            {/* Title Case, like every other button on this screen and like
-                the <Cta label="Add to Library"> in the sheet beside it. Drawn
-                as a raw Pressable rather than a Cta so it can carry the
-                spinner, which is also why scripts/check-caps.mjs — which reads
-                the kit's own slots — never saw these two. */}
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
-          </Pressable>
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
+            <Pressable onPress={saveUpload} disabled={upBusy}
+              accessibilityRole="button" accessibilityState={{ disabled: upBusy }}
+              accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to Library, seen by: ${visOf(upVis).label}` : 'Save the clip to this device')}
+              style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
+              {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
+              {/* Title Case, like every other button on this screen and like
+                  the <Cta label="Add to Library"> in the sheet beside it. Drawn
+                  as a raw Pressable rather than a Cta so it can carry the
+                  spinner, which is also why scripts/check-caps.mjs — which reads
+                  the kit's own slots — never saw these two. */}
+              <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
+            </Pressable>
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
+          </ScrollView>
         </View>
               </KeyboardAvoidingView>
       </Modal>

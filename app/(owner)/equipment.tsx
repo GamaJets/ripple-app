@@ -22,14 +22,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag, PageHead, Donut, Legend, AttentionRow, IconPlate, type Slice } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { isoDate } from '../../src/lib/format';
+// The gym's own calendar day, and the sentence for a gym that has not said
+// which calendar that is. `tenants.timezone` (supabase/parts/710) is where a
+// gym answers; src/lib/gymToday.ts is the one place that turns the answer into
+// a day and NAMES which clock it used.
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { gymTodayWindow } from '../../src/lib/gymToday';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, staleNote } from '../../src/lib/staleRead';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
   summariseRegister, needsAttention, serviceState, nextServiceDue,
@@ -37,25 +44,39 @@ import {
 } from '../../src/lib/gymEquipment';
 
 /**
- * Today, on the calendar the owner is standing in — not UTC's.
+ * Today, on the GYM's calendar — not UTC's, and no longer the reader's either.
  *
- * This was `new Date().toISOString().slice(0, 10)`. A service recorded at 5pm
- * in Los Angeles was dated TOMORROW, and this screen then reads that date back
- * into a SAFETY CONFIRMATION: "the treadmill will be recorded as serviced on
- * …". Stating a date to somebody and writing a different one is bad; stating
- * the wrong date about a machine's service history is the kind of record an
- * insurer reads afterwards.
+ * ── Where this started ────────────────────────────────────────────────────
  *
- * `isoDate` is the local calendar day, and is what the column wants.
+ * `new Date().toISOString().slice(0, 10)`, the UTC day. A service recorded at
+ * 5pm in Los Angeles was dated TOMORROW, and this screen reads that date back
+ * into a SAFETY CONFIRMATION — "the treadmill will be recorded as serviced on
+ * …" — and forward into `serviceState`, which decides what is overdue. Stating
+ * a date to somebody and writing a different one is bad; doing it to a machine's
+ * service history is the kind of record an insurer reads afterwards.
+ *
+ * ── Why `isoDate(new Date())` was only half the fix ───────────────────────
+ *
+ * It swapped UTC's day for the READER's, and the reader is a phone. The same
+ * gym opened at the front desk and by an owner on holiday in Lisbon reports two
+ * different Tuesdays out of one database, with nothing on either screen saying
+ * which — and this screen WRITES the day it computed. An owner three hours west
+ * of their own gym, at nine in the evening, logs a service against yesterday.
+ *
+ * `tenants.timezone` exists (supabase/parts/710) and `gymTodayWindow` is the one
+ * place in TypeScript that turns it into a day. It never guesses: a gym that has
+ * not set a zone, a zone read that failed, and a stored zone this runtime cannot
+ * resolve all come back as the reader's day with `basis: 'reader'` and
+ * `NO_ZONE_NOTE` attached, which this screen prints beside the board rather than
+ * quietly substituting a calendar nobody chose.
  */
-const todayIso = () => isoDate(new Date());
 
 const STATE_LABEL: Record<ServiceState, string> = {
   overdue: 'Overdue',
   due: 'Due',
-  unrecorded: 'Never serviced',
-  ok: 'In date',
-  unscheduled: 'No schedule',
+  unrecorded: 'Never Serviced',
+  ok: 'In Date',
+  unscheduled: 'No Schedule',
 };
 
 function toneFor(t: Theme, s: ServiceState): string {
@@ -78,7 +99,35 @@ function Pill({ t, state }: { t: Theme; state: ServiceState }) {
 export default function OwnerEquipment() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
+
+  /**
+   * Which gym this is, and whether we know.
+   *
+   * `load` below opens `if (!tenant?.id) return;`, and that one test stood for
+   * three unrelated facts: the tenant read is still in flight, the tenant read
+   * FAILED, and this account is attached to no gym. In all three the loader
+   * returned in silence, `items` stayed null, `failed` stayed false — and the
+   * whole screen sat on `readState`'s 'loading' branch permanently, printing
+   * "Reading the register…" under a dash for a read that was never going to be
+   * attempted.
+   *
+   * The console version of this screen had the OPPOSITE failure — it rendered
+   * an account with no gym as a gym with no equipment, six confident claims
+   * about a building assembled out of a fact about the reader's profile. This
+   * app never made that claim, and the empty-register copy below is careful
+   * enough that it would not have. What it did instead was never answer at
+   * all, which is a smaller lie and still not the truth: an owner whose tenant
+   * read was refused in a plant room saw the same forever-loading screen as an
+   * account that has no gym to read.
+   *
+   * So the three are separated here and said in three sentences. `noGym` is
+   * the only one that is a fact about the account rather than about a read,
+   * and it is the only one gated on `tenantStatus === 'ready'`.
+   */
+  const noGym = tenantStatus === 'ready' && !tenant?.id;
+  /** Nothing about a register can be said until we know whose register it is. */
+  const gymKnown = !!tenant?.id;
 
   const [items, setItems] = useState<Equipment[] | null>(null);   // null = not loaded yet
   const [failed, setFailed] = useState(false);                    // the register read itself failed
@@ -92,8 +141,33 @@ export default function OwnerEquipment() {
    *  board an owner walks past is exactly the figure that must say its age. */
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
+  /**
+   * `tenants.timezone`, and whether it could be read at all.
+   *
+   * Read beside the register rather than pulled off the tenant context, which
+   * does not carry it. Three outcomes and they are kept apart:
+   * `{ zone: 'Asia/Dubai' }` is a gym that has said, `{ zone: null, error: null }`
+   * is a gym that has not, and `{ error }` is a read that failed — and the third
+   * must never be shown as the second, because "this gym has not set a timezone"
+   * is an instruction to go and change a setting that may already be right.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+
   const load = useCallback(async () => {
     if (!tenant?.id) return;
+    // The zone is read first and its failure is separate: a register full of
+    // kit is still worth showing to somebody whose timezone read was refused,
+    // and `gymTodayWindow` answers a null zone with the reader's day and the
+    // note that says so.
+    try {
+      const z = await fetchGymZone(supabase, tenant.id);
+      setZone(z.zone);
+      setZoneUnread(!!z.error);
+    } catch (e) {
+      reportError('equipment.zone', e);
+      setZone(null); setZoneUnread(true);
+    }
     try {
       setItems(await fetchEquipment(supabase, tenant.id));
       setFailed(false);
@@ -107,14 +181,47 @@ export default function OwnerEquipment() {
       // checking whether anything is due a service would have been shown a
       // clean board by a query that failed, and walked past a treadmill that
       // was overdue. Null keeps it "not known" and `failed` says which.
-      setItems(null);
+      //
+      // What it no longer does is throw away a register that HAD come back. The
+      // Try Again button, and now the pull, both run this loader, and a refusal
+      // on the second read says nothing about the first — the kit on screen is
+      // still what the last good read returned and the stamp above still says
+      // when. Only a first read that has never landed leaves this null.
       setFailed(true);
     }
   }, [tenant?.id]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const today = todayIso();
+  // The register is the only server read on this screen — the summary, the
+  // attention queue and the list below are all derived from it.
+  const pull = usePullToRefresh(load);
+
+  // Recomputed on every render rather than frozen into a `useState` initialiser.
+  // A board left open across midnight — which is what a maintenance screen on a
+  // front desk does — would otherwise keep marking things due against
+  // yesterday, and would write yesterday's date onto a service logged at ten
+  // past twelve.
+  const dayWindow = gymTodayWindow(zone);
+  const today = dayWindow.day;
+  /**
+   * The sentence to print beside the board about whose day it is.
+   *
+   * Two different silences and they get two different sentences. A failed zone
+   * read is not a gym that has not set a timezone.
+   */
+  const clockNote = zoneUnread
+    ? 'This gym’s timezone could not be read, so the dates and the “due” column below are your own device’s, '
+      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set. '
+      + 'Nothing about the schedules has changed.'
+    : dayWindow.note;
+  // The loader above already keeps a register that HAD come back when a later
+  // read is refused. What it did not do is tell the screen apart from a screen
+  // that has never read anything — so the hero printed a real count from the
+  // earlier read under a note saying "nothing here is known", which is a figure
+  // and a disclaimer of that figure side by side. src/lib/staleRead.ts is the
+  // four states, and the two of them that were sharing one sentence.
+  const readSt = readState(items, failed);
   const loaded = items !== null;
   const list = items ?? [];
   const sum = loaded ? summariseRegister(list, today) : null;
@@ -139,12 +246,12 @@ export default function OwnerEquipment() {
       await load();
     } catch (e) {
       reportError('equipment.add', e);
-      Alert.alert('Could not add that', 'The item was not saved. Check your connection and try again.');
+      Alert.alert('Could Not Add That', 'The item was not saved. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
   const markServiced = (e: Equipment) => {
-    Alert.alert('Serviced today?', `${e.name} will be recorded as serviced on ${today}.`, [
+    Alert.alert('Serviced Today?', `${e.name} will be recorded as serviced on ${today}.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Record', onPress: async () => {
         // Said out loud: a service that was not written leaves the machine on
@@ -167,7 +274,7 @@ export default function OwnerEquipment() {
         }
         catch (err) {
           reportError('equipment.service', err);
-          Alert.alert('Could not record that service',
+          Alert.alert('Could Not Record That Service',
             (err instanceof Error && err.message) || 'Nothing was written. Check your connection and try again.');
         }
       } },
@@ -176,7 +283,7 @@ export default function OwnerEquipment() {
 
   const toggleStatus = (e: Equipment) => {
     const next = e.status === 'in_service' ? 'out_of_service' : 'in_service';
-    const verb = next === 'out_of_service' ? 'Take out of service' : 'Put back in service';
+    const verb = next === 'out_of_service' ? 'Take Out of Service' : 'Put Back in Service';
 
     /**
      * Taking a machine out asks WHY, and putting it back does not.
@@ -194,22 +301,25 @@ export default function OwnerEquipment() {
      */
     const write = async (reason: string | null) => {
       try {
-        await setStatus(supabase, e.id, next, undefined, reason);
+        // `today` is `gymTodayWindow(zone).day` — the same day this screen
+        // hands `recordService`, so `out_of_service_since` and
+        // `last_serviced_on` are written in one calendar rather than two.
+        await setStatus(supabase, e.id, next, undefined, reason, today);
         await load();
       } catch (err) {
         reportError('equipment.status', err);
-        Alert.alert(`Could not ${verb.toLowerCase()}`,
+        Alert.alert(`Could Not ${verb}`,
           (err instanceof Error && err.message) || 'The register is unchanged. Check your connection and try again.');
       }
     };
 
     if (next === 'out_of_service' && typeof Alert.prompt === 'function') {
       Alert.prompt(
-        'What is wrong with it?',
-        `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''} — this is what everyone else sees beside it until it is back.`,
+        'What Is Wrong with It?',
+        `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''}: this is what everyone else sees beside it until it is back.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Take out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
+          { text: 'Take Out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
         ],
         'plain-text',
       );
@@ -238,62 +348,132 @@ export default function OwnerEquipment() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Equipment</Text>
-        </View>
+        <PageHead title="Equipment" />
+
+        {/* A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = !loaded ? '—' : String(queue.length);
+          // The gym comes BEFORE the register, because until we know whose
+          // register it is the loader has not run and `readSt` is describing a
+          // read that was never attempted rather than one that has not landed.
+          const note = noGym
+            ? 'This account is not attached to a gym, so there is no register to read. '
+              + 'That is a fact about this account, not a gym with no equipment in it.'
+            : tenantStatus === 'error'
+            ? 'Your gym could not be read, so its register was not asked for. Pull down to try again. '
+              + 'This is a read that failed, not a gym with nothing on its register.'
+            : tenantStatus === 'loading'
+            ? 'Finding your gym…'
+            : readSt === 'failed'
+            // Nothing has ever landed, so the figure above is a dash and this
+            // is the only thing on the screen worth reading.
+            ? 'The register could not be read, so nothing here is known. That is a failed read, not an all-clear.'
+            : readSt === 'stale'
+            // Something DID land, and the count above is real as of the stamp
+            // under the title. The old copy said "nothing here is known" over
+            // it, which was the wrong half of the truth.
+            ? staleNote('register')
+            : !loaded
+            ? 'Reading the register…'
+            : list.length === 0
+              ? 'Nothing on the register yet. Add your kit and this becomes the maintenance list.'
+              : queue.length === 0
+                ? 'Every scheduled item is in date.'
+                : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`;
+          // What is in the queue, by why it is there: red overdue, amber due,
+          // purple for a schedule nobody has ever logged against. `sum` is
+          // null until the register is in hand, and the ring is then a track
+          // and a dash — a board somebody walks past must never draw "nothing
+          // due" out of a read that did not come back.
+          const slices: Slice[] = sum ? [
+            { label: 'Overdue', tone: 'red', value: sum.overdue, shown: String(sum.overdue) },
+            { label: 'Due', tone: 'amber', value: sum.due, shown: String(sum.due) },
+            { label: 'Never Serviced', tone: 'purple', value: sum.unrecorded, shown: String(sum.unrecorded) },
+          ] : [];
+          return (
+            <Section>
+              <SectionHead title="Needing Attention" />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={slices} centre={loaded ? figure : null} sub="need you" size={112}
+                  spoken={`Needing attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
+                {sum && queue.length > 0
+                  ? <View style={{ flex: 1, minWidth: 140 }}><Legend items={slices} /></View>
+                  : <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>}
+              </View>
+            </Section>
+          );
+        })()}
 
         {/* The pull-to-refresh above already reloads; this says WHEN, which is
             the half a gesture cannot tell you, and whether the phone can even
             reach us — a plant room is a basement with weights in it. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} style={{ marginTop: 0, marginBottom: sp.md }} />
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} />
 
-        <Hero
-          label="Needing Attention"
-          figure={!loaded ? '—' : String(queue.length)}
-          note={failed
-            ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
-            : !loaded
-            ? 'Reading the register…'
-            : list.length === 0
-              ? 'Nothing on the register yet — add your kit and this becomes the maintenance list.'
-              : queue.length === 0
-                ? 'Every scheduled item is in date.'
-                : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`}
-        />
+        {/* Whose day the "due" column was cut on. Printed rather than assumed:
+            every date this screen shows, and every date it WRITES when a
+            service is logged, comes off `today` above, and a board that says
+            "Overdue" against a calendar the reader brought with them from
+            another timezone is a claim about a machine somebody stands on.
+            Nothing appears here when the gym has set a zone and it was read. */}
+        {clockNote ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{clockNote}</Flag>
+        ) : null}
 
-        <Rule />
 
+        {/* Directly under the figure they are the rows OF: the kit's
+            AttentionRow on an amber plate, red when the date has passed, each
+            with its state in words and the one action that clears it. */}
+        {queue.length > 0 ? (
+          <Section>
+            <SectionHead title="Needs Attention" />
+            {queue.map(({ item, state }, i) => (
+              <AttentionRow key={item.id} divider={i > 0}
+                avatar={<IconPlate icon="wrench" tone={state === 'overdue' ? 'red' : 'amber'} />}
+                name={item.name}
+                reason={[
+                  item.category || 'Uncategorised',
+                  item.quantity > 1 ? `${item.quantity} units` : null,
+                  state === 'unrecorded' ? 'schedule set, never logged'
+                    : nextServiceDue(item) ? `due ${nextServiceDue(item)}` : null,
+                ].filter(Boolean).join(' · ')}
+                status={STATE_LABEL[state]} tone={state === 'overdue' ? t.crit : t.warn}
+                action={{ label: 'Serviced', onPress: () => markServiced(item) }} />
+            ))}
+          </Section>
+        ) : null}
+
+        {/* The register's three figures as tiles on the ground, as the look
+            keeps them; the sentences that qualify them sit in the card under. */}
+        <KpiRow tiles items={[
+          { label: 'Items', value: !loaded || list.length === 0 ? '—' : String(sum!.items), tone: 'blue' },
+          { label: 'Usable Units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits), tone: 'brand' },
+          { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits), tone: 'amber' },
+        ]} />
+        {failed || (loaded && list.length === 0) ? (
         <Section>
-          <SectionHead title="The Register" />
-          <KpiRow items={[
-            { label: 'Items', value: !loaded || list.length === 0 ? '—' : String(sum!.items) },
-            { label: 'Usable Units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits) },
-            { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
-          ]} />
           {failed ? (
             // Said "pull the screen again" over a ScrollView with no
             // RefreshControl on it, and there was no retry anywhere else on the
             // screen either — so the only instruction offered to an owner whose
             // maintenance board had failed to load was a gesture that does
-            // nothing. The button under "All kit" below is the retry; this says
-            // so instead.
-            <Flag tone={t.crit} style={{ marginTop: sp.md }}>
-              These are blank because the read failed, not because the register is empty. Read it
-              again from the button below before assuming nothing is due.
+            // nothing. The gesture is real now, and the button under "All kit"
+            // below runs the same read.
+            <Flag tone={t.crit}>
+              {loaded
+                ? 'The register could not be read again just now. These are from the last read that came back. The stamp at the top says when.'
+                : 'These are blank because the read failed, not because the register is empty. Pull down, or read it again from the button below, before assuming nothing is due.'}
             </Flag>
           ) : loaded && list.length === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              An empty register is not an empty gym. These stay blank until the kit is entered,
-              rather than reporting a confident zero.
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              An empty register is not an empty gym. These stay blank until the kit is entered.
             </Text>
           ) : null}
         </Section>
+        ) : null}
 
-        <Rule />
 
         {/* The catalogue hangs off the register rather than off the dashboard
             because the two answer one question from opposite sides: this screen
@@ -302,53 +482,22 @@ export default function OwnerEquipment() {
             wondering what their members will actually be shown for it is one
             tap away here, and would be nowhere from a revenue roll-up. */}
         <Section>
-          <SectionHead title="What the platform can teach on it" />
-          <ListRow icon="dumbbell" title="Exercise Library"
-            note="Every movement in the catalogue, filtered by the equipment it needs"
+          <SectionHead title="What the Platform Can Teach on It" />
+          <ListRow icon="dumbbell" tone="purple" title="Exercise Library"
+            note="Every movement, filtered by the equipment it needs"
             onPress={() => router.push('/(owner)/library')} />
         </Section>
 
-        <Rule />
 
-        {queue.length > 0 ? (
-          <>
-            <Section>
-              <SectionHead title="Needs Attention" />
-              {queue.map(({ item, state }, i) => (
-                <View key={item.id}>
-                  {i > 0 ? <Rule /> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{item.name}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                        {item.category || 'Uncategorised'}
-                        {item.quantity > 1 ? ` · ${item.quantity} units` : ''}
-                        {state === 'unrecorded'
-                          ? ' · schedule set, never logged'
-                          : nextServiceDue(item) ? ` · due ${nextServiceDue(item)}` : ''}
-                      </Text>
-                    </View>
-                    <Pill t={t} state={state} />
-                    <Pressable onPress={() => markServiced(item)} hitSlop={8}
-                      accessibilityRole="button" accessibilityLabel={`Record service for ${item.name}`}
-                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Serviced</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
-            </Section>
-            <Rule />
-          </>
-        ) : null}
 
         <Section>
-          <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
+          <SectionHead title={loaded && list.length ? `All Kit · ${list.length}` : 'All Kit'} />
           {failed ? (
-            <View>
+            <View style={{ marginBottom: loaded && list.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
-                The register could not be read. This is not a list of your kit — it is nothing at
-                all. Check your connection and read it again.
+                {loaded
+                  ? 'The register could not be read again just now. The kit below is the last read that came back, not a fresh one.'
+                  : 'The register could not be read. This is not a list of your kit. It is nothing at all. Check your connection and read it again.'}
               </Flag>
               {/* The control the two failure messages point at. Without it both
                   of them told an owner to try again and gave them nothing to
@@ -357,13 +506,17 @@ export default function OwnerEquipment() {
                 <Ghost label="Try Again" onPress={() => { void load(); }} />
               </View>
             </View>
-          ) : !loaded ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
+          ) : null}
+          {!loaded ? (
+            failed ? null : <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
+            // "Nothing recorded yet" is a claim about a read that succeeded.
+            failed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing recorded yet. Add a treadmill, a rack, a set of bikes — anything you would
+              Nothing recorded yet. Add a treadmill, a rack, a set of bikes: anything you would
               notice missing.
             </Text>
+            )
           ) : list.map((e, i) => {
             const st = serviceState(e, today);
             const retired = e.status === 'retired';
@@ -374,7 +527,7 @@ export default function OwnerEquipment() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: retired ? 0.5 : 1 }}>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{e.name}</Text>
                       {e.identifier ? <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>{e.identifier}</Text> : null}
                     </View>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -420,51 +573,85 @@ export default function OwnerEquipment() {
         </Section>
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Add Equipment" wide onPress={() => setAddOpen(true)} />
+          {/* Off unless we know which gym the kit would be added TO.
+              `commitAdd` opens `if (!n || !tenant?.id) return;`, so without
+              this an owner filled in four fields, pressed Add, and the sheet
+              closed on a write that never happened. Disabled with the reason
+              under it beats a button that answers nothing. */}
+          <Cta label="Add Equipment" wide disabled={!gymKnown} onPress={() => setAddOpen(true)} />
+          {!gymKnown ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {noGym
+                ? 'This account is not attached to a gym, so there is nowhere to file a piece of kit.'
+                : tenantStatus === 'error'
+                  ? 'Your gym could not be read, so kit added now could not be filed against it. Pull down to try again.'
+                  : 'Finding your gym…'}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
 
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add Equipment</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              One row per kind of kit. Use quantity for identical units.
-            </Text>
-
-            <Text style={lab}>Name</Text>
-            <TextInput value={name} onChangeText={setName} autoFocus placeholder="e.g. Concept2 rower"
-              placeholderTextColor={t.ink3} returnKeyType="next" style={inp} accessibilityLabel="Equipment name" />
-
-            <Text style={{ ...lab, marginTop: sp.md }}>Category</Text>
-            <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio — used by the class capacity check"
-              placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Category" />
-
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Quantity</Text>
-                <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Service every (days)</Text>
-                <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
-                  placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
-                  onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
-              </View>
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
-              Leave the interval blank for kit that needs no schedule. That is recorded as a
-              decision, not as a missing service.
-            </Text>
-
-            <Pressable disabled={!name.trim() || busy} onPress={commitAdd}
-              style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
-                {busy ? 'Adding…' : 'Add to the register'}
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* Four fields, two paragraphs and two buttons with nothing scrolling, so
+                with the keyboard up over Name the "Add to the register" button is
+                below the window. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Add Equipment</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                One row per kind of kit. Use quantity for identical units.
               </Text>
-            </Pressable>
-            <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+
+              <Text style={lab}>Name</Text>
+              <TextInput value={name} onChangeText={setName} autoFocus placeholder="e.g. Concept2 rower"
+                placeholderTextColor={t.ink3} returnKeyType="next" style={inp} accessibilityLabel="Equipment name" />
+
+              <Text style={{ ...lab, marginTop: sp.md }}>Category</Text>
+              <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio (used by the class capacity check)"
+                placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Category" />
+
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Quantity</Text>
+                  <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Service Every (Days)</Text>
+                  <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
+                    placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
+                    onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+                Leave the interval blank for kit that needs no schedule. That is recorded as a
+                decision, not as a missing service.
+              </Text>
+
+              {/* The refusal was drawn and never said. This control's only
+                  statement that it will not act is a grey fill, and a grey fill
+                  is exactly what a screen reader does not have: VoiceOver read
+                  "Add to the register" identically whether the name field was
+                  filled in or empty, and a double-tap did nothing with no
+                  explanation. `accessibilityState.disabled` is the announcement
+                  — src/lib/a11y.ts and the `Cta` in src/ui/kit.tsx, which has
+                  carried it since it was written. The hint says WHY, because
+                  "dimmed" on its own is a fact about the button rather than
+                  about what the person has to do. */}
+              <Pressable disabled={!name.trim() || busy} onPress={commitAdd}
+                accessibilityRole="button"
+                accessibilityLabel="Add this item to the equipment register"
+                accessibilityState={{ disabled: !name.trim() || busy, busy }}
+                accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
+                style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, ...font('600'), color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
+                  {busy ? 'Adding…' : 'Add to the Register'}
+                </Text>
+              </Pressable>
+              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

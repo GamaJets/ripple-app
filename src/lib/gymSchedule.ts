@@ -9,6 +9,7 @@
 // in as an argument so neither front end owns this.
 
 import { assertWhole, capLimit, readAll } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import { startOfWeekUTC } from './weekStart';
 
@@ -627,14 +628,30 @@ export async function restoreClass(sb: Queryable, classId: string): Promise<void
 /**
  * Call off every occurrence of a series from `fromISO` onward.
  *
- * The count comes back so the screen can say "nine cancelled" rather than
- * "done" — a bulk write whose scale is not reported is one nobody can check.
- * Classes already cancelled are skipped rather than restamped, for the same
- * reason `cancelClass` guards: the first reason is the true one.
+ * The IDS come back so the screen can say "nine cancelled" rather than "done" —
+ * a bulk write whose scale is not reported is one nobody can check. Classes
+ * already cancelled are skipped rather than restamped, for the same reason
+ * `cancelClass` guards: the first reason is the true one.
+ *
+ * ── Why the ids and not the count ────────────────────────────────────────
+ *
+ * This returned `data.length` and threw the ids away, which was enough while
+ * the only consumer was a sentence. It is not enough to TELL anybody: the
+ * people who have to hear about a called-off class are the ones holding a
+ * `class_bookings` row against these specific occurrences, and a number cannot
+ * be joined to. `.select('id')` was already there, so what changes here is only
+ * that the answer survives the return; the caller's count is `.length`, which
+ * is the same figure it printed before, now measured off the same list it
+ * notified from rather than off a separate one.
+ *
+ * The list is also the guard against telling somebody twice. A second tap
+ * matches no rows — `.neq('status', 'cancelled')` — so it comes back empty and
+ * there is nobody to notify, rather than a second round of banners about a
+ * cancellation that already happened.
  */
 export async function cancelSeriesFrom(
   sb: Queryable, seriesId: string, fromISO: string, reason: string,
-): Promise<number> {
+): Promise<string[]> {
   const why = (reason ?? '').trim();
   if (!why) throw new Error('Say why the series is off. A cancelled class with no reason tells the next reader nothing.');
   const { data, error } = await sb
@@ -645,7 +662,7 @@ export async function cancelSeriesFrom(
     .neq('status', 'cancelled')
     .select('id');
   if (error) throw error;
-  return (data ?? []).length;
+  return (data ?? []).map((r: { id?: unknown }) => String(r?.id ?? '')).filter(Boolean);
 }
 
 /**
@@ -704,14 +721,25 @@ export async function fetchRoster(sb: Queryable, classId: string): Promise<Roste
   // the right number of people and each renders unnamed. A failed count would
   // cost a FIGURE — 0 booked reads as a fact about the class. Losing a name is
   // visible to whoever is looking at it; losing a count is not.
-  // no-error-ok: an unreadable name leaves the shift labelled by id; the shift itself is unaffected
-  const { data: profs } = await sb.from('profiles').select('id, full_name').in('id', ids);
-  // Typed explicitly. `assertWhole` now hands back `any[]` rather than `any`,
-  // which is stricter and better — and it made TypeScript infer this Map's
-  // value as `{}`, so `names.get(...)` no longer satisfied `name: string | null`.
-  const names = new Map<string, string>(
-    (profs ?? []).map((p: any) => [String(p.id), (p.full_name || '').trim()] as [string, string]),
-  );
+  //
+  // And chunked, which is what makes that trade-off honest rather than a way of
+  // hiding this particular failure. The bookings read above is `capLimit()`, so
+  // `ids` can be a thousand uuids and a thousand uuids is a 39KB request line —
+  // the proxy answers 414 somewhere past two hundred, supabase-js reports it as
+  // `data: null`, and the `no-error-ok` below swallows it for EVERY name at
+  // once. Losing one name to RLS is the case that reasoning was written for;
+  // losing all of them to a request that was never sent is not, and a register
+  // of two hundred unnamed people is not a register anyone can tick.
+  const names = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable name leaves the attendee labelled by id; the booking itself is unaffected
+    const { data: profs } = await sb.from('profiles').select('id, full_name').in('id', chunk);
+    // `String(p.id)` and an explicit `any[]`: `assertWhole` hands back `any[]`
+    // rather than `any`, which is stricter and better — and it once made
+    // TypeScript infer this map's value as `{}`, so `names.get(...)` stopped
+    // satisfying `name: string | null`.
+    for (const p of ((profs ?? []) as any[])) names.set(String(p.id), (p.full_name || '').trim());
+  }
 
   const entries: RosterEntry[] = rows.map((r: any) => ({
     bookingId: r.id,
@@ -968,6 +996,14 @@ export function weeklyAttendance(
   for (let i = weeks - 1; i >= 0; i--) {
     const d = new Date(`${thisWeekOpened}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - i * 7);
+    // utc-day-ok: this is the key of a week `weekOpenedOn` opened, and that
+    // function opens weeks with `startOfWeekUTC`. The two have to agree or the
+    // seeding loop here and the bucketing below index the same week under two
+    // different strings, and every class falls into a week the series never
+    // created — a trend chart of twelve empty weeks over a gym that ran two
+    // hundred classes. Which DAY opens a week is src/lib/weekStart.ts's
+    // decision either way; this only has to use the same calendar as the line
+    // that seeded it.
     const weekOf = d.toISOString().slice(0, 10);
     const w: AttendanceWeek = {
       weekOf, classes: 0, capacity: 0, booked: 0, attended: 0,

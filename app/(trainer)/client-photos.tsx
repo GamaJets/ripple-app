@@ -59,12 +59,31 @@
 //     empties this list for a reason that is nothing to do with the client.
 //
 // 3 · SAYING SOMETHING ABOUT THE BODY IN THE PICTURE. There is none of that
-//     here, deliberately: no before/after pairing the client did not ask for,
-//     no derived body-composition reading off an image, no commentary, no
-//     progress verdict. What was sent, when it was taken, when it was sent.
-//     The coach is a person who can look at a photograph and think for
-//     themselves; the app's job is to not put words in their mouth about
+//     here, deliberately: no derived body-composition reading off an image, no
+//     commentary, no progress verdict. What was sent, when it was taken, when
+//     it was sent. The coach is a person who can look at a photograph and think
+//     for themselves; the app's job is to not put words in their mouth about
 //     somebody else's body.
+//
+//     THE SIDE-BY-SIDE IS NOT AN EXCEPTION TO THAT, and the distinction is
+//     worth stating because this paragraph used to rule out pairing outright.
+//     What it ruled out was the APP choosing a before and an after — picking
+//     two photographs out of somebody's record and captioning them as a
+//     transformation is a claim about a body, and it is still refused: nothing
+//     here pairs anything on its own, there is no "first and latest" default,
+//     and no pair is ever suggested. What a coach can now do is tap two
+//     pictures they can already open one at a time and see them next to each
+//     other, captioned with the number of days between the two dates and
+//     nothing else. That adds no access — both rows are already on this screen
+//     under the same grant — and it derives nothing: src/lib/photoTimeline.ts
+//     contains no code path that turns a photograph into a number, which is
+//     the same guarantee src/lib/photoCompare.ts makes on the member's side.
+//     The one thing the ordering does assert is which of the two came first,
+//     and it takes that from the day each was TAKEN rather than from the order
+//     the coach tapped or the order they were sent — a client who sends
+//     January's photo after March's would otherwise get a pair captioned
+//     backwards, which is the only way a side-by-side can lie without saying
+//     anything at all.
 //
 // ── TWO DATES, NEVER ONE ───────────────────────────────────────────────────
 //
@@ -80,19 +99,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
+import { isWhole } from '../../src/ui/loadStatus';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { fetchSharedInbox, SHARED_URL_TTL_S } from '../../src/lib/photoShare';
 import {
   liveUrl, linkState, refreshEveryMs, inboxStale, unusableCount, stillShared,
   withdrawnNote, emptyReason, inboxNote, checkedNote, gapNote, stamp,
   type Inbox, type InboxPhoto,
 } from '../../src/lib/photoInbox';
+// Ordering and pairing, on rows that are already here. Nothing in this module
+// reaches a photograph or widens a grant — see its header — and the two things
+// the screen's own header refuses stay refused: the app pairs nothing on its
+// own, and nothing anywhere derives a reading off an image.
+import {
+  timeline, spanNote, undatedCount, pairOf, pairNote,
+} from '../../src/lib/photoTimeline';
 
 /** How often the screen wakes up. It re-renders the tiles (so a link that has
  *  just lapsed stops being drawn the moment it lapses rather than at the next
@@ -122,6 +151,20 @@ export default function ClientPhotos() {
   const [open, setOpen] = useState<string | null>(null);
   const [withdrawn, setWithdrawn] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Two views of one set of rows, and never two sets of rows. 'sent' is the
+  // inbox order this screen has always drawn — newest send first, because the
+  // send is the act addressed to the coach. 'timeline' is the same photographs
+  // ordered by the day the picture is OF, which is a different order whenever
+  // somebody empties a camera roll in one go, and the case `gapNote` already
+  // exists for.
+  const [view, setView] = useState<'sent' | 'timeline'>('sent');
+  // The two photographs a coach has asked to see beside each other. A LIST the
+  // coach builds by tapping, never a pair this screen chooses: the app picking
+  // somebody's before and after is the thing the header above refuses, and a
+  // coach putting two pictures they can already open side by side is not that.
+  // Ids only — the rows themselves are re-looked-up on every render, so a photo
+  // withdrawn between two reads leaves the comparison by itself.
+  const [pair, setPair] = useState<string[]>([]);
 
   // Read inside the loader and inside the timer, neither of which may be
   // rebuilt when these change: a new loader identity restarts the refresh
@@ -139,17 +182,26 @@ export default function ClientPhotos() {
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const firstName = client ? client.name.split(' ')[0] : 'They';
+  /** Whether the server may be asked about this person at all. `handAdded`
+   *  undefined is "the roster has not said yet", which goes on asking; only an
+   *  explicit true withholds. See src/lib/clientRecord.ts. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
 
-  const load = useCallback(async (clientId: string) => {
+  const load = useCallback(async (clientId: string, canAsk: boolean) => {
     if (!USE_SUPABASE) {
       setInbox(null);
       setErr('This build is not talking to a server, so there is nothing to read.');
       return;
     }
     // A client the coach added by hand has no account, so no photo of theirs
-    // exists to be sent. Asking anyway means a uuid parse error on the server
-    // and a coach reading a database message.
-    if (!isQueryableId(clientId)) {
+    // exists to be sent.
+    //
+    // This was `isQueryableId(clientId)`, which stopped telling the two apart
+    // the moment `coach_clients.id` turned out to be uuid DEFAULT
+    // gen_random_uuid(): the guard passed, the read ran, it came back empty
+    // with no error, and the screen said they had sent nothing. The roster is
+    // what knows which table the row came from — src/lib/clientRecord.ts.
+    if (!canAsk) {
       setInbox(null);
       setErr(null);
       return;
@@ -196,16 +248,37 @@ export default function ClientPhotos() {
     setErr(null);
     setOpen(null);
     setWithdrawn(null);
-    if (picked) void load(picked);
-  }, [picked, load]);
+    // A comparison is two photographs of one person. Carrying the selection
+    // across a change of client would hold one body's picture open while the
+    // other side of the pair filled in from somebody else's record — the exact
+    // failure `subjectChange` exists for two screens away.
+    setPair([]);
+    if (picked) void load(picked, askable);
+  }, [picked, askable, load]);
 
   // Coming back to the screen is the moment a coach is most likely to act on
   // what it says, so anything that has been sitting is re-read rather than
   // trusted from before. A list read seconds ago is left alone: the point is
   // freshness, not traffic.
   useFocusEffect(useCallback(() => {
-    if (picked && inboxStale(inboxRef.current, Date.now(), SHARED_URL_TTL_S)) void load(picked);
-  }, [picked, load]));
+    if (picked && inboxStale(inboxRef.current, Date.now(), SHARED_URL_TTL_S)) void load(picked, askable);
+  }, [picked, askable, load]));
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * UNCONDITIONAL, unlike the focus effect above. That one skips a list read
+   * seconds ago on purpose — it fires on every return to the screen and the
+   * point there is freshness rather than traffic. This one is a person
+   * deliberately asking, and "I already looked recently" is not an answer to
+   * somebody who pulled the screen down: the whole gesture is somebody saying
+   * the screen is not what they expect.
+   *
+   * A client shares a photo from their own phone, so nothing on this inbox
+   * moves because of anything the coach did. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, picked, askable, load]));
 
   useEffect(() => {
     if (!picked) return;
@@ -217,11 +290,11 @@ export default function ClientPhotos() {
       setNow(at);
       if (inboxStale(inboxRef.current, at, SHARED_URL_TTL_S)
           && at - lastTryRef.current >= refreshEveryMs(SHARED_URL_TTL_S)) {
-        void load(picked);
+        void load(picked, askable);
       }
     }, TICK_MS);
     return () => clearInterval(id);
-  }, [picked, load]);
+  }, [picked, askable, load]);
 
   const opened = useMemo(
     () => (open && inbox ? inbox.photos.find((p) => p.id === open) ?? null : null),
@@ -229,6 +302,36 @@ export default function ClientPhotos() {
   );
   const reason = emptyReason(inbox);
   const stale = unusableCount(inbox, now);
+
+  /* ── the timeline, and the pair ────────────────────────────────────────────
+   *
+   * Both derived from `inbox.photos` on every render rather than held in state,
+   * which is what makes the revocation guard cover them for free: a photograph
+   * that leaves the list between two reads leaves the timeline and leaves the
+   * comparison in the same frame, without a second mechanism that could be
+   * forgotten. The selection is filtered the same way — an id whose row has
+   * gone is not a selection, it is a photograph the client took back. */
+  const rows = useMemo(() => timeline(inbox?.photos ?? []), [inbox]);
+  const span = useMemo(() => spanNote(inbox?.photos ?? []), [inbox]);
+  const undated = useMemo(() => undatedCount(inbox?.photos ?? []), [inbox]);
+  const chosen = useMemo(
+    () => pair.filter((id) => (inbox?.photos ?? []).some((p) => p.id === id)),
+    [pair, inbox],
+  );
+  const compare = useMemo(
+    () => (chosen.length === 2 ? pairOf(inbox?.photos ?? [], chosen[0], chosen[1]) : null),
+    [chosen, inbox],
+  );
+
+  /** Tapping a photograph's compare control. Two at a time: a third selection
+   *  replaces the OLDER of the two choices, so the gesture is "and now this
+   *  one" rather than "clear everything and start again". */
+  const toggleCompare = (id: string) => {
+    setPair((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      return prev.length < 2 ? [...prev, id] : [prev[1], id];
+    });
+  };
 
   /** One tile's two dates and, when there is one, the gap between them. */
   const dates = (p: InboxPhoto) => ({
@@ -247,6 +350,40 @@ export default function ClientPhotos() {
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
   });
+
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill client-body.tsx draws
+   *  its range bar with, so every record page reads one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
+
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the photographs once somebody is, because
+   * the board opens a record page on the client and not on a list of names.
+   * The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is nobody to compare photos for" />
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
 
   /** The picture, or the reason there isn't one. An expired signature and a
    *  file that would not sign are different states with different futures, so
@@ -270,43 +407,22 @@ export default function ClientPhotos() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Sent to you</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Progress Photos</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          You see a photo here because the client sent you that photo. Being their coach shows you
-          none of the others, and they can take any of these back at any time.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Progress Photos" subtitle={client?.name || undefined} />
 
         {r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed below because the list did not come back — not because your book is empty. Open this again once you are connected." />
+              note="Nobody is listed below because the list did not come back, not because your book is empty. Open this again once you are connected." />
           </Section>
         ) : null}
 
-        <Section>
-          <SectionHead title="Client" />
-          {r.roster.length === 0 && r.status !== 'error' ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>Nobody is on your book yet.</Text>
-          ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {r.roster.map((c) => (
-                <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                  accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                  <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </Section>
+        {!picked ? picker : null}
 
         {picked ? (
           <View>
@@ -322,9 +438,9 @@ export default function ClientPhotos() {
               ) : null}
 
               {err ? (
-                <Notice tone={t.warn} kicker="Not loaded" title="Their photos could not be read"
-                  note={`${err} That is not the same as ${firstName} having sent none — nothing came back, so this screen cannot say either way.`} />
-              ) : !isQueryableId(picked) ? (
+                <Notice tone={t.warn} kicker="Not Loaded" title="Their photos could not be read"
+                  note={`${err} That is not the same as ${firstName} having sent none. Nothing came back, so this screen cannot say either way.`} />
+              ) : !askable ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   You added {firstName} to your book yourself, so they have no Repple account and no
                   photos to send from one.
@@ -342,11 +458,136 @@ export default function ClientPhotos() {
                 </Text>
               ) : reason === 'none' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
-                  {firstName} has not sent you any progress photos. There is nothing to turn on —
+                  {firstName} has not sent you any progress photos. There is nothing to turn on:
                   a photo reaches you only when they send that photo.
                 </Text>
               ) : inbox ? (
                 <View>
+                  {/* ── two orders, one set ────────────────────────────────
+                      Only offered when there is more than one photograph: a
+                      switch between two orderings of a single row is a control
+                      that does nothing, and this screen has enough to read
+                      already. */}
+                  {inbox.photos.length > 1 ? (
+                    <View accessibilityRole="tablist"
+                      style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.md }}>
+                      {([['sent', 'As Sent'], ['timeline', 'Timeline']] as const).map(([key, label]) => {
+                        const on = view === key;
+                        return (
+                          <Pressable key={key} onPress={() => setView(key)}
+                            accessibilityRole="tab" accessibilityState={{ selected: on }}
+                            accessibilityLabel={key === 'sent'
+                              ? 'Order by when each photo was sent to you'
+                              : 'Order by when each photo was taken'}
+                            style={seg(on)}>
+                            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+
+                  {view === 'timeline' && span ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                      {span} Ordered by the day each was taken, which is not the order they arrived in.
+                    </Text>
+                  ) : null}
+
+                  {/* ── the pair, when a coach has chosen one ──────────────
+                      Above the list, because it is the thing they just asked
+                      for. Both pictures are already open to them one at a time
+                      on this screen; putting them beside each other adds no
+                      access and says nothing about either body — the caption is
+                      the number of days between two dates and that is the whole
+                      of it. */}
+                  {compare ? (
+                    <View style={{ marginBottom: sp.lg }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Side by Side</Text>
+                      <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                        {[compare.earlier, compare.later].map((p) => (
+                          <View key={p.id} style={{ flex: 1 }}>
+                            {frame(p)}
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: 5 }}>Taken {dates(p).taken}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>Sent {dates(p).sent}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{pairNote(compare)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                        The earlier photograph is on the left, decided by the day each was taken rather
+                        than by the order you picked them. Nothing here is a reading of either picture.
+                      </Text>
+                      <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                        <Ghost label="Clear Comparison" onPress={() => setPair([])} />
+                      </View>
+                    </View>
+                  ) : chosen.length === 1 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                      One chosen. Pick a second to see them beside each other.
+                    </Text>
+                  ) : null}
+
+                  {view === 'timeline' ? (
+                    <View>
+                      {rows.map(({ photo: p, dayKey, sincePrevDays }) => {
+                        const d = dates(p);
+                        const on = chosen.includes(p.id);
+                        return (
+                          <View key={p.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
+                            <Pressable onPress={() => { setWithdrawn(null); setOpen(p.id); }}
+                              accessibilityRole="button" accessibilityLabel={`Open larger. ${spoken(p)}`}
+                              style={{ flexBasis: '38%', maxWidth: '38%' }}>
+                              {frame(p)}
+                            </Pressable>
+                            <View style={{ flex: 1 }}>
+                              {/* The interval is the whole reason this is a
+                                  timeline and not a grid: four photographs over
+                                  three years and four over three weeks are the
+                                  same tiles otherwise. Null is not zero — a
+                                  photograph whose date will not read says so
+                                  rather than sitting in the sequence as though
+                                  it belonged where it was drawn. */}
+                              <Text style={{ ...ty.micro, color: t.ink3 }}>
+                                {dayKey == null
+                                  ? 'Undated'
+                                  : sincePrevDays == null
+                                    ? 'First on record'
+                                    : sincePrevDays === 0
+                                      ? 'Same day as the one before'
+                                      : sincePrevDays === 1
+                                        ? 'One day later'
+                                        : sincePrevDays < 21
+                                          ? `${sincePrevDays} days later`
+                                          : `${Math.round(sincePrevDays / 7)} weeks later`}
+                              </Text>
+                              <Text style={{ ...ty.body, color: t.ink, marginTop: 3 }}>Taken {d.taken}</Text>
+                              <Text style={{ ...ty.caption, color: t.ink3 }}>Sent {d.sent}</Text>
+                              {d.gap ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{d.gap}</Text> : null}
+                              <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
+                                <Pressable onPress={() => toggleCompare(p.id)}
+                                  accessibilityRole="button" accessibilityState={{ selected: on }}
+                                  accessibilityLabel={on
+                                    ? `Remove the photo taken ${d.taken} from the comparison`
+                                    : `Compare the photo taken ${d.taken} with another`}
+                                  style={chip(on)}>
+                                  <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink2 }}>
+                                    {on ? 'Chosen' : 'Compare'}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      {undated ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                          {undated === 1
+                            ? 'One of these carries a date this screen cannot read, so it sits at the end rather than in the sequence.'
+                            : `${undated} of these carry dates this screen cannot read, so they sit at the end rather than in the sequence.`}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
                     {inbox.photos.map((p) => {
                       const d = dates(p);
@@ -365,6 +606,7 @@ export default function ClientPhotos() {
                       );
                     })}
                   </View>
+                  )}
 
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     {checkedNote(inbox, now)}{loading ? ' · checking again' : ''}. Links stop working after{' '}
@@ -382,13 +624,22 @@ export default function ClientPhotos() {
                   ) : null}
 
                   <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                    <Ghost label={loading ? 'Checking…' : 'Check Again Now'} onPress={() => { if (picked) void load(picked); }} />
+                    <Ghost label={loading ? 'Checking…' : 'Check Again Now'} onPress={() => { if (picked) void load(picked, askable); }} />
                   </View>
                 </View>
               ) : null}
             </Section>
           </View>
         ) : null}
+
+        {picked ? picker : null}
+
+        {/* What this page is, said once and below the photographs: the board
+            opens on the record, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          You see a photo here because the client sent you that photo. Being their coach shows you
+          none of the others, and they can take any of these back at any time.
+        </Text>
       </ScrollView>
 
       {/* ── one photo, larger ────────────────────────────────────────────────
@@ -400,17 +651,12 @@ export default function ClientPhotos() {
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
           {opened ? (
             <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <Ghost icon="back" a11yLabel="Close photo" onPress={() => setOpen(null)} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Sent by {firstName}</Text>
-                  <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>
-                    Taken {dates(opened).taken}
-                  </Text>
-                </View>
-              </View>
+              {/* The same head as the page under it. The back control closes
+                  the photo, and says so. */}
+              <PageHead title={`Taken ${dates(opened).taken}`} subtitle={`Sent by ${firstName}`}
+                backLabel="Close photo" onBack={() => setOpen(null)} />
 
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
                 {liveUrl(opened.link, now) ? (
                   <Image source={{ uri: liveUrl(opened.link, now) as string }}
                     accessible accessibilityLabel={spoken(opened)} resizeMode="contain"

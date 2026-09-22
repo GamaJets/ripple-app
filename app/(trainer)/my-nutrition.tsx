@@ -54,15 +54,17 @@
 // would fork them. And it never invents a calorie target: `macrosFor` needs a
 // measured weight and body fat, and a target built on figures nobody measured
 // is the placeholder body this codebase has spent a long time removing.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, Ring, Meter, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useAuthRevision } from '../../src/ui/authRevision';
@@ -72,6 +74,15 @@ import { useWearables } from '../../src/ui/wearables';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor } from '../../src/lib/nutrition';
+import { PROVIDERS } from '../../src/lib/wearables/registry';
+// The three answers the target is built from — the coach's own, not a client
+// provider's defaults. See src/lib/coachMacros.ts.
+import { useMyMacroInputs } from '../../src/ui/coachOwnMacros';
+import {
+  ACTIVITY_LEVELS, activityLevelOf, builtFromLine, macroGate,
+  GOAL_WORD, DIET_WORD,
+} from '../../src/lib/coachMacros';
+import type { Diet, Goal } from '../../src/lib/types';
 import { readFoodEdit } from '../../src/lib/entryEdit';
 import { searchCommonFoods, type CommonFood } from '../../src/lib/foods';
 import { num } from '../../src/lib/format';
@@ -101,9 +112,11 @@ import { num } from '../../src/lib/format';
  */
 type FoodLogHome = 'checking' | 'stores' | 'no-record' | 'unknown';
 
-function useFoodLogHome(): FoodLogHome {
+function useFoodLogHome(): { home: FoodLogHome; reload: () => void } {
   const rev = useAuthRevision();
   const [home, setHome] = useState<FoodLogHome>(USE_SUPABASE ? 'checking' : 'stores');
+  // Bumped by `reload`, beside `rev` below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     // Backend off: the provider's in-memory store IS the record, and it takes
@@ -112,13 +125,22 @@ function useFoodLogHome(): FoodLogHome {
     let cancelled = false;
     (async () => {
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        /* `signedInUid`, and not a bare getSession whose result is destructured
+         * for its data alone.
+         *
+         * The line that stood here discarded `error`, and getSession resolves with
+         * `{ data: { session: null }, error }` when the stored session cannot be
+         * read at all — so "nobody is signed in" and "we could not find out"
+         * arrived as the same missing session. Both land on 'unknown' here, and
+         * that is the right answer for both: it is the only one of the four that
+         * neither tells a coach their logging is broken nor promises them it
+         * works. What changes is that the outage is now REPORTED, and that the
+         * discrimination lives in src/lib/authedUid.ts rather than in a
+         * truthiness test on this line. */
+        const me = await signedInUid('myNutrition.foodLogHome');
         if (cancelled) return;
-        // Signed out. Nothing is readable and nothing is writable, and saying
-        // "your account has no profile" to nobody in particular would be
-        // a claim about an account we have not identified.
-        if (!sess?.session) { setHome('unknown'); return; }
-        const uid = sess.session.user.id;
+        if (me.uid === null) { setHome('unknown'); return; }
+        const uid = me.uid;
         const { data, error } = await supabase.from('profiles').select('id').eq('id', uid).maybeSingle();
         if (cancelled) return;
         if (error) { reportError('myNutrition.foodLogHome', error); setHome('unknown'); return; }
@@ -129,9 +151,17 @@ function useFoodLogHome(): FoodLogHome {
       }
     })();
     return () => { cancelled = true; };
-  }, [rev]);
+  }, [rev, nonce]);
 
-  return home;
+  // 'unknown' is a refused read, not an account without a profile, and until
+  // now it stuck for the session — the form above it stays held for as long
+  // as it does.
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setHome('checking');
+    setNonce((n) => n + 1);
+  }, []);
+
+  return { home, reload };
 }
 
 /** How many search hits fit above the fold without pushing the form off it. */
@@ -142,8 +172,31 @@ export default function MyNutrition() {
   const router = useRouter();
   const fl = useFoodLog();
   const cd = useClientData();
-  const wToday = useWearables().today;
-  const home = useFoodLogHome();
+  const wearables = useWearables();
+  const wToday = wearables.today;
+  const { home, reload: reloadHome } = useFoodLogHome();
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * A trainer tracks their own eating on the client hooks, so this screen
+   * reads what the client app reads: the food log, the profile and scans
+   * behind the targets, whether this account has a row to store a meal on at
+   * all, and the wearable that supplies the day's burn.
+   *
+   * All of them, because a target is the profile's figures and the log's
+   * total set against each other — refreshing one half would print a
+   * remaining-for-today built out of two different moments. */
+  // Declared above the pull, which refreshes it: the three answers a target is
+  // built from are as much a read as the log and the profile are.
+  const own = useMyMacroInputs();
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(fl.reload()), Promise.resolve(cd.reload()),
+    Promise.resolve(reloadHome()), wearables.syncAll(),
+    // The three answers the target is built from. Under a failed read the
+    // screen says so and offers no questions — this is the gesture that makes
+    // it ask again, and without it that state has no way out.
+    Promise.resolve(own.reload()),
+  ]), [fl, cd, reloadHome, wearables, own]));
 
   // An empty log under 'error' means "we could not read it", which is a
   // different sentence from "you have not eaten". Under 'partial' the rows are
@@ -159,15 +212,93 @@ export default function MyNutrition() {
   // live, so `useClientData` hands back nulls and constructed defaults and
   // reports 'error' for the read that never found a row. Feeding those to
   // macrosFor would produce a day's calories belonging to nobody.
+  /* ── the three answers, and whose they are ───────────────────────────────
+   *
+   * `cd.goal`, `cd.diet` and `cd.activity` used to be the last three arguments
+   * here, and none of them is the coach's. `useClientData` reads `clients`, a
+   * table a coach has no row in, so those three were its constructed defaults
+   * for EVERY coach in the product: 'muscle', 'meat' and a literal 1.5. Through
+   * src/lib/nutrition.ts that is a twelve per cent surplus, protein at 2.0 g
+   * per kg of lean mass and fat at 27% — so a coach who is cutting was handed a
+   * bulking target, headed "Calories Remaining", and counted the day down
+   * against it. The rest of this screen is scrupulous; the three inputs that
+   * decide the number were the three nobody had ever been asked for.
+   *
+   * They are now the coach's own answers, on `coach_prefs`
+   * (supabase/parts/1020), and `macroGate` is the one place that decides
+   * whether there is enough to build anything at all. */
+  const measured = cd.profileStatus === 'ready' && cd.weightKg != null && cd.bodyFatPct != null;
+  const gate = useMemo(
+    () => macroGate({ status: own.status, inputs: own.inputs, measured }),
+    [own.status, own.inputs, measured],
+  );
   const target = useMemo(() => {
-    if (cd.profileStatus !== 'ready') return null;
+    if (!gate.ok) return null;
     if (cd.weightKg == null || cd.bodyFatPct == null) return null;
     // No coach adjustment layered on: `coach_nutrition` is a coach's note to a
     // CLIENT, and nobody is coaching the coach.
-    return macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
-  }, [cd.profileStatus, cd.weightKg, cd.bodyFatPct, cd.activity, cd.goal, cd.diet]);
+    return macrosFor({
+      weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct,
+      activity: gate.activity, goal: gate.goal, diet: gate.diet,
+    });
+  }, [gate, cd.weightKg, cd.bodyFatPct]);
+
+  /**
+   * Store one of the three, and say so when the server refused.
+   *
+   * Never optimistic: `useMyMacroInputs` moves its own state only on a
+   * confirmed write, so a refused answer cannot become a target. A silent
+   * failure here would be a coach eating against a number built from an answer
+   * that is not on their account.
+   */
+  const saveOwn = async (patch: { goal?: Goal; diet?: Diet; activity?: number }) => {
+    if (!(await own.save(patch))) {
+      Alert.alert('Not Saved',
+        'That answer did not reach your account, so nothing has changed and no target has been worked out from it. Try again in a moment.');
+    }
+  };
+  /** The chip for one of the two picker rows. */
+  const ownChip = (on: boolean) => ({
+    paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
+    backgroundColor: on ? t.brand : t.surface2,
+    borderWidth: hairline, borderColor: on ? t.brand : t.ring,
+  });
 
   const burn = target ? dayBurn(target, wToday) : null;
+
+  /* ── the coach's door to Apple Health ───────────────────────────────────
+   *
+   * `WearablesProvider` is mounted in app/_layout.tsx, so all three variants
+   * hold it, and this screen already reads `wearables.today` and calls
+   * `syncAll()` on a pull. What the coach app had no way to do was CONNECT:
+   * there is no app/(trainer)/devices.tsx and no route to the client's, so a
+   * coach's Apple Health was permanently unasked — HealthKit compiled into the
+   * build with no door in front of it.
+   *
+   * It belongs here rather than on a new screen because here is where the
+   * absence costs something. `dayBurn` returns null with no device, and
+   * `caloriesLeft` is then handed `burned: 0` — so "calories remaining" quietly
+   * ignores everything the coach burned today, which is the direction that
+   * makes them eat less than they should. The house rule is that a figure
+   * computed without one of its parts says so; this says so, and offers the
+   * one control that fixes it.
+   *
+   * Same flow as app/(client)/devices.tsx:306, deliberately: ask the provider
+   * whether it can run at all before asking the person for permission, so a
+   * build without HealthKit says why instead of opening nothing. Trainers
+   * self-track on the client hooks, and this is that. */
+  const applePv = PROVIDERS.find((pv) => pv.meta.id === 'apple') ?? null;
+  const appleState = applePv ? wearables.states[applePv.meta.id] ?? 'disconnected' : 'disconnected';
+  const appleReason = applePv ? applePv.unavailableReason() : null;
+  const onConnectApple = useCallback(async () => {
+    if (!applePv) return;
+    if (!applePv.isAvailable() && appleReason) { Alert.alert(applePv.meta.name, appleReason); return; }
+    try {
+      await wearables.connect(applePv.meta.id);
+    } catch (e: any) {
+      Alert.alert(applePv.meta.name, e?.message || 'Could not connect.');
+    }
+  }, [applePv, appleReason, wearables]);
   // The same function the client's two nutrition screens call, so a coach and
   // a client cannot be shown two different answers to "how many left".
   const left = target && whole
@@ -217,30 +348,68 @@ export default function MyNutrition() {
    * which matters here for the same reason it matters there: a "0" that was
    * really a mistyped letter is a meal that silently stops counting.
    *
-   * Awaited, and believed only when the row is on the server. `addFood` puts
+   * Awaited, and believed only when the row is on the server. `logFood` puts
    * the entry into today's totals optimistically, so a refused insert leaves a
    * meal on screen that is counting toward a day it is not part of — the coach
    * is told exactly that rather than being shown "Logged".
+   *
+   * ── why this is `logFood` and not `addFood` ─────────────────────────────
+   *
+   * `addFood` is `(await logFood(f)) === 'stored'` (src/ui/foodLog.tsx), and
+   * the two answers it flattens into `false` are opposites:
+   *
+   *   · 'unsent'  — nobody answered. The meal IS kept: it is in `entries`, it
+   *                 is counted in `consumed` and in the day's remaining, it is
+   *                 written to the per-account cache so it survives the app
+   *                 being killed, and `flushQueue` sends it on the next launch,
+   *                 reconnect or foreground.
+   *   · 'refused' — the server read it and declined. `logFood` takes it back
+   *                 out of `entries` and out of the cache, so the day's total
+   *                 no longer counts it, and offering it again as it stands
+   *                 will be refused again.
+   *
+   * Told apart because the sentence for one is a lie about the other. A coach
+   * who logged lunch on gym wifi that dropped was told the meal "will be gone
+   * when you next open the app" and left holding a full form — so the honest
+   * thing to do was type it again, and the queue then delivered both. Two
+   * lunches is a day's calories the coach then eats against.
+   *
+   * Every client screen that writes a meal already branches this way —
+   * app/(client)/nutrition.tsx, app/(client)/foodlog.tsx,
+   * app/(client)/restaurant.tsx all call `logFood`. This write was the odd one
+   * out, on the one screen where the person eating against the figure is the
+   * coach.
    */
   const logMeal = async () => {
     setProblem(null);
     const read = readFoodEdit({ name, kcal: kcalIn, protein, carbs, fat });
     if (!read.ok) { setProblem(read.reason); return; }
     setBusy(true);
-    const saved = await fl.addFood({ ...read.value, via });
+    const out = await fl.logFood({ ...read.value, via });
     setBusy(false);
-    if (saved) {
+    if (out === 'stored') {
       notifySuccess();
       clearForm();
-      Alert.alert('Logged', `${read.value.name} — ${num(read.value.kcal)} kcal — is on your own food log for today.`);
+      Alert.alert('Logged', `${read.value.name} (${num(read.value.kcal)} kcal) is on your own food log for today.`);
       return;
     }
-    // The boxes are deliberately NOT cleared. What was typed is the only copy
-    // of it, and emptying the form would take that away on the one path where
-    // the coach may want to try again.
+    if (out === 'unsent') {
+      // Kept, and already counted in the figures above — it simply has not
+      // reached the server yet. Cleared for the same reason 'stored' is: the
+      // meal exists, and leaving it in the boxes as well invites a second one
+      // against the same day.
+      clearForm();
+      Alert.alert('Saved on This Phone',
+        `No connection, so ${read.value.name} has not reached your food log yet. Nothing is lost. It is saved here, it is already counted in today's total above, and it goes up on its own the next time you have signal.`);
+      return;
+    }
+    // 'refused'. The boxes are deliberately NOT cleared. What was typed is now
+    // the only copy of it — `logFood` has already taken the meal back out of
+    // today's total — and this is the one path where the coach may want to try
+    // again.
     setProblem(home === 'no-record'
-      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it — see the note at the top of this screen.'
-      : 'Not saved — we could not reach your food log. This meal is counting toward today on this phone only and will be gone when you next open the app.');
+      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it. See the note at the top of this screen. It is not counting toward today.'
+      : 'Not saved. Your food log rejected this meal, so it has not been recorded, it is not counting toward today, and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /**
@@ -252,11 +421,11 @@ export default function MyNutrition() {
    * with the day's total quietly different again.
    */
   const remove = (e: FoodEntry) => {
-    Alert.alert('Remove this meal?', `${e.name} — ${num(e.kcal)} kcal — comes off your own log for today, and today's totals go back down by it.`, [
+    Alert.alert('Remove This Meal?', `${e.name} (${num(e.kcal)} kcal) comes off your own log for today, and today's totals go back down by it.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         if (!(await fl.removeFood(e.id))) {
-          Alert.alert('Not removed', `${e.name} is still on your log — we could not reach the server to take it out, so it is still counting toward today.`);
+          Alert.alert('Not Removed', `${e.name} is still on your log. We could not reach the server to take it out, so it is still counting toward today.`);
         }
       } },
     ]);
@@ -281,50 +450,54 @@ export default function MyNutrition() {
         : 'Your food log could not be read, so today is unknown rather than empty.')
     : left
       ? caloriesNote(left)
-      : `${num(fl.consumed.kcal)} kcal logged today · no target, because nothing here has measured you`;
+      // "nothing here has measured you" is true of one of the four reasons
+      // there is no target and false of the other three — including the one
+      // that is now the common case, which is three questions nobody has
+      // answered. `macroGate` already knows which; the hero says the short
+      // version and the Macros section below carries the sentence and the
+      // controls.
+      : `${num(fl.consumed.kcal)} kcal logged today · ${
+        !gate.ok && gate.reason === 'unasked' ? 'no target until you answer the three questions below'
+        : !gate.ok && gate.reason === 'unread' ? 'no target, because what it is built from could not be read'
+        : !gate.ok && gate.reason === 'reading' ? 'no target yet, still reading'
+        : 'no target, because nothing here has measured you'}`;
 
-  const macroRow = (label: string, eaten: number, tg: number | null) => {
-    const pct = tg ? Math.max(0, Math.min(100, Math.round((eaten / tg) * 100))) : 0;
+  /**
+   * One macro as the kit's <Meter>, in the hue the whole app gives it: protein
+   * blue, carbs orange, fat purple. The words at the trailing edge are the ones
+   * this row always printed (eaten, target, and what is left or over) and they
+   * are what is spoken.
+   *
+   * No fill unless the day's log was read whole AND there is a target: a bar
+   * needs something to be a share of, and a day that was not counted draws the
+   * dash rather than an empty bar that would say nothing was eaten. Over target
+   * the bar turns red and the note says "over" beside it.
+   */
+  const macroRow = (label: string, tone: Tone, eaten: number, tg: number | null) => {
     const rem = tg == null ? null : tg - eaten;
+    const words = `${whole ? num(eaten) : num(null)}${tg == null ? ' g' : ` / ${num(tg)} g`}`
+      + (rem != null && whole ? (rem >= 0 ? ` · ${num(rem)} g left` : ` · ${num(-rem)} g over`) : '');
     return (
-      <View key={label} style={{ marginTop: sp.md }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-            {whole ? num(eaten) : num(null)}{tg == null ? ' g' : ` / ${num(tg)} g`}
-            {rem != null && whole ? (rem >= 0 ? ` · ${num(rem)} g left` : ` · ${num(-rem)} g over`) : ''}
-          </Text>
-        </View>
-        <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-          <View style={{ height: 3, borderRadius: 2, width: `${whole && tg ? pct : 0}%`, backgroundColor: rem != null && rem < 0 ? t.crit : t.brand }} />
-        </View>
-      </View>
+      <Meter key={label} label={label} tone={rem != null && rem < 0 && whole ? 'red' : tone}
+        val={whole && tg ? eaten : null} target={tg ?? 1} note={words} />
     );
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-          {/* ── header. Whose day this is, said before anything else ──────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon="back" onPress={() => router.back()} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your own meals, not a client&rsquo;s</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Nutrition</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-            Everything on this screen is food you logged for yourself, under your own account. No
-            client&rsquo;s meals appear here, and nothing you log here reaches a client&rsquo;s record.
-          </Text>
+          {/* ── header. Whose day this is, said before anything else ────────
+              The board's pushed-page head; the subtitle is the one line that
+              keeps this screen from being mistaken for a client's. */}
+          <PageHead title="My Nutrition" subtitle="Your own meals, not a client’s" />
 
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {fl.status === 'error' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Your food log" title="We couldn’t read your food log"
-                note="Your own meals are safe — this screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none." />
+              <Notice tone={t.warn} kicker="Your Food Log" title="We Couldn’t Read Your Food Log"
+                note="Your own meals are safe. This screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none." />
             </Section>
           ) : fl.status === 'partial' ? (
             <Section>
@@ -335,7 +508,7 @@ export default function MyNutrition() {
           {/* ── can anything typed below actually be stored? ──────────────── */}
           {home === 'no-record' ? (
             <Section>
-              <Notice tone={t.crit} kicker="Nowhere to store it" title="This account cannot keep a food log yet"
+              <Notice tone={t.crit} kicker="Nowhere to Store It" title="This Account Cannot Keep a Food Log Yet"
                 note="Meals are stored against your profile, and we could not find one for this account. Anything you type below would be refused by the server, so the form is closed rather than throwing what you enter away. Signing out and back in usually rebuilds it; if it does not, your account needs looking at.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Log My Training Instead" icon="dumbbell" onPress={() => router.push('/(trainer)/my-training')} />
@@ -344,33 +517,138 @@ export default function MyNutrition() {
             </Section>
           ) : home === 'unknown' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Not checked" title="We couldn’t check whether meals will save"
+              <Notice tone={t.warn} kicker="Not Checked" title="We Couldn’t Check Whether Meals Will Save"
                 note="You can still try. If the meal does not reach the server you will be told so, and it will not be counted as logged." />
             </Section>
           ) : null}
 
-          <Rule />
 
-          {/* ── the day ──────────────────────────────────────────────────── */}
-          <Hero
-            label={heroLabel}
-            figure={heroFigure}
-            unit="kcal"
-            note={heroNote}
-            arc={whole && target && target.kcal ? fl.consumed.kcal / target.kcal : undefined}
-            arcLabel="of today’s calories eaten"
-            tone={left && left.net < 0 ? t.crit : undefined}
-          />
+          {/* ── the day ──────────────────────────────────────────────────────
+              The ring card the client's Meals tab draws, so coach and client
+              read one figure the same way: what has been eaten inside the
+              ring, the target under it, and what is left as the sentence
+              beneath. The withholding is the old Hero's: under an unread or
+              truncated log every figure is a dash and the ring is an empty
+              track — never a zero, which on this screen would read as "you
+              have eaten nothing today". No arc without a target: an empty
+              ring drawn for a target we do not have is a figure invented to
+              fill a slot. */}
+          <Section>
+            <SectionHead title="Nutrition Today" />
+            {/* The kit's <Ring>, the one the client's own Meals screen draws.
+                `null` while the day is not whole or there is no target: the
+                track and a dash, never an empty arc round a full allowance.
+                Calories are orange everywhere in the app; over the target the
+                arc is red, and the line under the ring says "over" in words. */}
+            <View style={{ alignItems: 'center', marginTop: sp.md }}>
+              <Ring size={156} tone={left && left.net < 0 ? 'red' : 'orange'}
+                value={whole && target && target.kcal ? fl.consumed.kcal / target.kcal : null}
+                figure={whole ? num(fl.consumed.kcal) : null}
+                sub={target ? `of ${num(target.kcal)} kcal` : 'kcal eaten'}
+                spoken={whole
+                  ? `${num(fl.consumed.kcal)} calories eaten today${target ? ` of ${num(target.kcal)}` : ''}. ${heroLabel}, ${heroFigure} kcal. ${heroNote}`
+                  : `Today’s calories could not be counted. ${heroNote}`} />
+            </View>
+            <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
+              {!whole ? 'Calories Not Counted' : left ? `${heroFigure} kcal ${left.net >= 0 ? 'left' : 'over'}` : `${heroFigure} kcal Eaten`}
+            </Text>
+            {/* Over is said in the ring's colour and in the word; crit as
+                caption ink is under AA on the light palettes, so the sentence
+                stays in its own ink. */}
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>{heroNote}</Text>
+          </Section>
 
-          <Rule />
+          {/* Only when it is actually costing something: there is a target to
+              spend against, and no burn came back to spend it on. Connected and
+              simply quiet is a different situation and says nothing here — the
+              provider's own status carries that. */}
+          {target && !burn ? (
+            <Notice
+              tone={t.warn}
+              kicker={appleState === 'connected' ? 'Nothing Read Today' : 'Not Connected'}
+              title={appleState === 'connected'
+                ? 'No activity has come back from Apple Health today'
+                : 'Apple Health is not connected'}
+              note={appleState === 'connected'
+                ? 'The figure above counts what you have eaten and nothing you have burned, so it is lower than the truth. Pull down to read Apple Health again.'
+                : 'The figure above counts what you have eaten and nothing you have burned. Connect Apple Health and it will include the day’s activity. Your Apple Watch needs nothing of its own, because it syncs into the iPhone’s Health app and Repple reads it from there.'}>
+              {appleState === 'connected' ? null : (
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta label="Connect Apple Health" wide onPress={onConnectApple} />
+                </View>
+              )}
+            </Notice>
+          ) : null}
+
 
           {/* ── macros ───────────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Today’s Macros" note={target ? 'against your target' : undefined} />
-            {macroRow('Protein', fl.consumed.protein, target ? target.protein : null)}
-            {macroRow('Carbs', fl.consumed.carbs, target ? target.carbs : null)}
-            {macroRow('Fat', fl.consumed.fat, target ? target.fat : null)}
-            {!target ? (
+            <SectionHead title="Today’s Macros" note={target ? 'Against Your Target' : undefined} />
+            {macroRow('Protein', 'blue', fl.consumed.protein, target ? target.protein : null)}
+            {macroRow('Carbs', 'orange', fl.consumed.carbs, target ? target.carbs : null)}
+            {macroRow('Fat', 'purple', fl.consumed.fat, target ? target.fat : null)}
+            {target ? (
+              /* What the number was built from, said beside it. A target a
+                 person eats against all day should carry its own assumptions —
+                 and this screen's used to be three defaults nobody could see,
+                 let alone disagree with. */
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                {builtFromLine(gate.ok ? gate.goal : 'muscle', gate.ok ? gate.diet : 'meat', gate.ok ? gate.activity : 1.55)}
+              </Text>
+            ) : null}
+            {!target && gate.ok === false && (gate.reason === 'unasked' || gate.reason === 'unread' || gate.reason === 'reading') ? (
+              /* The three questions, and the sentence saying why there is no
+                 number until they are answered. `macroGate` decides which of
+                 the four situations this is — a failed read is never reported
+                 as an unanswered question, because answering again is how a
+                 target quietly moves. */
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.caption, color: gate.reason === 'unread' ? t.ink2 : t.ink3 }}>{gate.why}</Text>
+                {gate.reason === 'unasked' ? (
+                  <>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What Are You Training For?</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                      {(['fatloss', 'tone', 'muscle'] as Goal[]).map((g) => (
+                        <Pressable key={g} onPress={() => { void saveOwn({ goal: g }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: own.inputs.goal === g }}
+                          style={ownChip(own.inputs.goal === g)}>
+                          <Text style={{ ...ty.label, color: own.inputs.goal === g ? t.brandInk : t.ink2 }}>{GOAL_WORD[g]}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How Do You Eat?</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                      {(['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] as Diet[]).map((d) => (
+                        <Pressable key={d} onPress={() => { void saveOwn({ diet: d }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: own.inputs.diet === d }}
+                          style={ownChip(own.inputs.diet === d)}>
+                          <Text style={{ ...ty.label, color: own.inputs.diet === d ? t.brandInk : t.ink2 }}>{DIET_WORD[d]}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {/* A named level and never a decimal in a box: 1.55 is the
+                        largest single input to a maintenance figure and it is
+                        not a number anybody can calibrate themselves against. */}
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How Active Is Your Week?</Text>
+                    {ACTIVITY_LEVELS.map((a) => {
+                      const on = activityLevelOf(own.inputs.activity) === a.id;
+                      return (
+                        <Pressable key={a.id} onPress={() => { void saveOwn({ activity: a.factor }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: on }}
+                          accessibilityLabel={`${a.label}. ${a.note}`}
+                          style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandText : t.ink }}>{a.label}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{a.note}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+            {!target && (!gate.ok && gate.reason === 'unmeasured') ? (
               // Not a target of zero, and not a target guessed from a default
               // body. The reason is named, because "no target" with no reason
               // reads as a bug rather than as a missing measurement.
@@ -402,6 +680,17 @@ export default function MyNutrition() {
                     scan one: adding a scan does not clear a profile that could
                     not be read, and a button that cannot do what the sentence
                     above it needs is worse than no button. */}
+                {/*
+                  * whole-ok: 'partial' on the scans read is right to let through. Nothing
+                  * on this branch is a count or a total over the scan list — `measured`,
+                  * three lines up at the top of the screen, is computed from
+                  * `cd.profileStatus` and the weight and body-fat figures on the profile,
+                  * not from the scans at all. A scan history truncated at the ceiling
+                  * still has a profile that either carries those two numbers or does not,
+                  * and the button does exactly what the sentence above it promises: it
+                  * opens My Progress so one can be added. Withholding it under 'partial'
+                  * would take away a working control and gain no truth.
+                  */}
                 {cd.profileStatus !== 'error' && cd.scansStatus !== 'loading' && cd.scansStatus !== 'error' ? (
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Add My Body Scan" icon="scale" onPress={() => router.push('/(trainer)/my-progress')} />
@@ -411,7 +700,6 @@ export default function MyNutrition() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── what the target itself is, when there is one ─────────────── */}
           <Section>
@@ -425,27 +713,43 @@ export default function MyNutrition() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                 Built from your own weight and body fat with Katch–McArdle, the same way the client app
                 builds one. Burn from a watch is shown beside the day, never added to the allowance.
-                {/* Said, not hidden. `macrosFor` shifts calories by GOAL_ADJ and
-                    the fat split by diet, and a coach account carries neither —
-                    a goal and a diet live on a member record. What it uses are
-                    the app's starting values, so the figure is a maintenance-led
-                    muscle-gain target rather than one built on answers this
-                    coach gave. A number whose assumptions are unstated is a
-                    number nobody can check. */}
-                {' '}It assumes a muscle-gain goal and no dietary restriction — a coach account holds
-                neither, so those are the app&rsquo;s starting values rather than answers you gave.
+                {/* The paragraph that stood here said the target "assumes a
+                    muscle-gain goal and no dietary restriction — a coach
+                    account holds neither". That was true of the screen it was
+                    written for and has not been true since part 1020. It
+                    described `useClientData`'s constructed defaults — 'muscle',
+                    'meat', 1.5 — which were what `macrosFor` was fed back when
+                    the three inputs were read from `clients`, a table a coach
+                    has no row in.
+
+                    A coach now answers all three on `coach_prefs`, and this
+                    block cannot render unless they have: `target` is null
+                    unless `gate.ok`, and `macroGate` only says ok once goal,
+                    diet AND activity are all non-null. The Macros section
+                    above prints those three answers back by name through
+                    `builtFromLine` — "Built from your own answers: losing fat,
+                    vegan, moderately active." So the old sentence told a vegan
+                    coach who is cutting that their target assumed the opposite
+                    of both, four inches under the line naming them.
+
+                    What is worth saying instead is what the number does NOT
+                    carry, which is the one assumption still standing: no coach
+                    adjustment is layered on, because `coach_nutrition` is a
+                    coach's note to a client and nobody is coaching the coach. */}
+                {' '}Your goal, how you eat and how active your week is are your own answers, named above
+                the macros. Change any of them and this moves. Nothing is layered on top of them: a
+                coach&rsquo;s nutrition adjustment is a note to a client, and there is nobody coaching you.
               </Text>
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── log a meal ───────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Log a Meal" note={home === 'no-record' ? 'closed' : undefined} />
+            <SectionHead title="Log a Meal" note={home === 'no-record' ? 'Closed' : undefined} />
             {home === 'no-record' ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Closed until this account has somewhere to store a meal — see the note above. Nothing
+                Closed until this account has somewhere to store a meal. See the note above. Nothing
                 you typed here would be kept, so there is nothing to type.
               </Text>
             ) : (<>
@@ -453,7 +757,7 @@ export default function MyNutrition() {
                 Search the common-foods table for the figures, or fill them in yourself. Goes onto your
                 own log, dated today.
               </Text>
-              <TextInput value={query} onChangeText={setQuery} placeholder="Search foods — “chicken breast”"
+              <TextInput value={query} onChangeText={setQuery} placeholder="Search foods, e.g. “chicken breast”"
                 placeholderTextColor={t.ink3} accessibilityLabel="Search common foods"
                 style={[inp, { marginBottom: sp.sm }]} />
               {hits.length ? (
@@ -498,12 +802,11 @@ export default function MyNutrition() {
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 Leave a macro empty for none. A box that is not a number is refused rather than read as
-                a zero — a mistyped figure that quietly becomes nothing is a meal that stops counting.
+                a zero: a mistyped figure that quietly becomes nothing is a meal that stops counting.
               </Text>
             </>)}
           </Section>
 
-          <Rule />
 
           {/* ── today's entries ──────────────────────────────────────────── */}
           <Section>
@@ -512,7 +815,7 @@ export default function MyNutrition() {
               fl.entries.map((e) => (
                 <View key={e.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.name}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {num(e.kcal)} kcal · {num(e.protein)}p {num(e.carbs)}c {num(e.fat)}f
                     </Text>
@@ -532,7 +835,7 @@ export default function MyNutrition() {
               // coach's own day that a failed read gives nobody the standing to
               // make.
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Whether you logged anything today is not known — your food log could not be read.
+                Whether you logged anything today is not known. Your food log could not be read.
               </Text>
             ) : (
               // The empty state names whose log is empty, for the same reason
@@ -546,18 +849,17 @@ export default function MyNutrition() {
             )}
           </Section>
 
-          <Rule />
 
           {/* ── where a CLIENT's nutrition goes instead ──────────────────── */}
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               Adjusting a client&rsquo;s calories or macros? That goes on their record, from their card
-              on the Clients tab — not here.
+              on the Clients tab, not here.
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />
               <Pressable onPress={() => router.push('/(trainer)/dashboard')} hitSlop={8} accessibilityRole="button">
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Go to Clients</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Go to Clients</Text>
               </Pressable>
             </View>
           </Section>

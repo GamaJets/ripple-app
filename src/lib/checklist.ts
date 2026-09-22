@@ -46,9 +46,12 @@
 // rather than its index in an array — an index reattaches yesterday's tick to
 // whichever item happens to have slid into that slot.
 import type { ProgramDay } from './programs';
+import { num } from './format';
+import { plain } from './units';
+import { titleCaseName } from './exerciseName';
 
 /** Where a line came from, so a screen can say so without guessing. */
-export type ChecklistSource = 'targets' | 'plan' | 'coach';
+export type ChecklistSource = 'targets' | 'plan' | 'coach' | 'own';
 
 export interface ChecklistItem {
   id: string;
@@ -86,6 +89,8 @@ export interface ChecklistInput {
    *  scheduledFocus. */
   todaysTrainingFocus: string | null;
   coachItems: readonly CoachChecklistItem[];
+  /** Habits the member switched on for themselves, as `OWN_HABITS` ids. */
+  ownHabits?: readonly string[];
 }
 
 export interface Checklist { items: ChecklistItem[]; gaps: ChecklistGap[] }
@@ -96,18 +101,58 @@ export const COACH_ID_PREFIX = 'coach:';
 
 export function coachHabitId(rowId: string): string { return COACH_ID_PREFIX + rowId; }
 
-// Thousands separators without toLocaleString. The label is compared in tests
-// and rendered on devices in every locale the app ships to; a separator that
-// changes underneath both is a difference nobody asked for.
-function thousands(n: number): string {
-  const s = String(Math.round(Math.abs(n)));
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 === 0) out += ',';
-    out += s[i];
-  }
-  return (n < 0 ? '-' : '') + out;
+/**
+ * Habits a member adds for themselves: nothing reads a target for these, so
+ * they are a plain daily tick, stored like every other tick as a `habit_logs`
+ * row under the id below. The board shows Meditate and Read beside water and
+ * steps; the member chooses which of these appear. The coach's adherence
+ * figures count only the coach's own items per habit, so these never move a
+ * coach's numbers beyond showing the day as one the member was active.
+ */
+export const OWN_HABIT_PREFIX = 'own:';
+export const OWN_HABITS: readonly { id: string; label: string; icon: string }[] = [
+  { id: 'own:meditate', label: 'Meditate', icon: '🧘' },
+  { id: 'own:read', label: 'Read', icon: '📖' },
+  { id: 'own:stretch', label: 'Stretch', icon: '🤸' },
+  { id: 'own:journal', label: 'Journal', icon: '✍️' },
+];
+
+/** Where one member's chosen habits live on this phone. Null for nobody signed
+ *  in, so an unknown account never writes a shared key. */
+export const OWN_HABITS_PREFIX = 'repple.ownHabits:';
+export function ownHabitsKey(uid: string | null | undefined): string | null {
+  const id = String(uid ?? '').trim();
+  return id && id !== 'unknown' ? OWN_HABITS_PREFIX + id : null;
 }
+
+/** The stored list, keeping only ids the catalogue still has, in catalogue order. */
+export function parseOwnHabits(raw: string | null | undefined): string[] {
+  let v: unknown = null;
+  try { v = raw ? JSON.parse(raw) : null; } catch { return []; }
+  if (!Array.isArray(v)) return [];
+  const want = new Set(v.map(String));
+  return OWN_HABITS.filter((h) => want.has(h.id)).map((h) => h.id);
+}
+
+// These labels go through the app's own formatters, and the reason the private
+// one below them was removed is the reason this file now imports two.
+//
+// `thousands` hand-rolled an ASCII comma every three digits — "Walk 8,000
+// steps" — and argued for it on the grounds that the label is compared in
+// tests and a separator that changes underneath the test is a difference
+// nobody asked for. The trouble is what that comma MEANS to the person holding
+// the phone: in German and Spanish a comma is the DECIMAL separator, so "Walk
+// 8,000 steps" is a target of eight steps and "Eat to your 2,140 kcal target"
+// is a diet of two. That is `num()`'s founding bug, written down in
+// src/lib/locale.ts, reproduced here by hand. A test asserting an exact string
+// is fixed by stating the locale it asserts in, which checklist.test.ts now
+// does — the same thing units.test.ts does, and for the same reason.
+//
+// `plain` for the sleep goal rather than `num1`, because a whole-hour goal must
+// read "Sleep 8h+" and not "Sleep 8.0h+": `plain` caps the decimal places
+// instead of padding to them. It is also the function the sleep BOX is filled
+// from, so the goal a member sets and the goal they read back are spelled the
+// same way.
 
 // A number that came out of a division, a null column or a half-finished form
 // is not a target. Anything non-finite or non-positive means "not set", which
@@ -184,30 +229,31 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   const gaps: ChecklistGap[] = [];
 
   const focus = (input.todaysTrainingFocus || '').trim();
-  if (focus) items.push({ id: 'train', label: `Train — ${focus}`, icon: '🏋️', source: 'plan' });
+  // A plan day can arrive in capitals ("LEGS"); the row reads in Title Case.
+  if (focus) items.push({ id: 'train', label: `Train · ${titleCaseName(focus)}`, icon: '🏋️', source: 'plan' });
 
   const kcal = target(input.kcalTarget);
-  if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${thousands(kcal)} kcal target`, icon: '🔥', source: 'targets' });
+  if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${num(kcal)} kcal target`, icon: '🔥', source: 'targets' });
 
   const protein = target(input.proteinTargetG);
-  if (protein != null) items.push({ id: 'protein', label: `Hit ${thousands(protein)} g protein`, icon: '🍗', source: 'targets' });
+  if (protein != null) items.push({ id: 'protein', label: `Hit ${num(protein)} g protein`, icon: '🍗', source: 'targets' });
 
   // Both come out of the same calculation, so they are missing together and one
   // note covers them. Worth saying because the client CAN fix it: weight and
   // body fat are on their profile, and a scan fills both in.
   if (kcal == null && protein == null) {
-    gaps.push({ id: 'macros', note: 'Add your weight and body fat — your calorie and protein targets are worked out from them.' });
+    gaps.push({ id: 'macros', note: 'Add your weight and body fat. Your calorie and protein targets are worked out from them.' });
   }
 
   const water = target(input.waterGoalGlasses);
-  if (water != null) items.push({ id: 'water', label: `Drink ${thousands(water)} glasses of water`, icon: '💧', source: 'targets' });
+  if (water != null) items.push({ id: 'water', label: `Drink ${num(water)} glasses of water`, icon: '💧', source: 'targets' });
   // Its own note, for the same reason steps and sleep have separate ones: the
   // three are set independently, and the client can set this one on the screen
   // that shows the note.
   else gaps.push({ id: 'water', note: 'Set a water goal below and your glasses count towards it.' });
 
   const steps = target(input.stepGoal);
-  if (steps != null) items.push({ id: 'steps', label: `Walk ${thousands(steps)} steps`, icon: '👟', source: 'targets' });
+  if (steps != null) items.push({ id: 'steps', label: `Walk ${num(steps)} steps`, icon: '👟', source: 'targets' });
   // Separate notes, not one covering both, because they are set independently:
   // telling somebody who has a step goal that they need a step goal is the sort
   // of thing that teaches people to stop reading these.
@@ -215,10 +261,19 @@ export function buildChecklist(input: ChecklistInput): Checklist {
 
   const sleep = target(input.sleepGoalHours);
   // One decimal at most, and no trailing '.0' — "Sleep 7.5h+" and "Sleep 8h+".
-  if (sleep != null) items.push({ id: 'sleep', label: `Sleep ${(Math.round(sleep * 10) / 10)}h+`, icon: '😴', source: 'targets' });
+  // Through `plain`, so the half hour is written with the reader's own decimal
+  // separator: `Math.round(sleep * 10) / 10` interpolated bare put an English
+  // full stop in a row that sits directly under the step and calorie rows.
+  if (sleep != null) items.push({ id: 'sleep', label: `Sleep ${plain(sleep, 1)}h+`, icon: '😴', source: 'targets' });
   else gaps.push({ id: 'sleep', note: 'Set a sleep goal below to track it here.' });
 
   const seen = new Set(items.map((i) => i.id));
+  for (const id of input.ownHabits ?? []) {
+    const h = OWN_HABITS.find((x) => x.id === id);
+    if (!h || seen.has(h.id)) continue;
+    seen.add(h.id);
+    items.push({ id: h.id, label: h.label, icon: h.icon, source: 'own' });
+  }
   for (const c of input.coachItems) {
     const label = String(c.label || '').trim();
     const id = coachHabitId(String(c.id || '').trim());
@@ -246,5 +301,26 @@ export function donePercent(doneCount: number, total: number): number | null {
   if (!Number.isFinite(total) || total <= 0) return null;
   const pct = (doneCount / total) * 100;
   if (!Number.isFinite(pct)) return null;
-  return Math.round(Math.max(0, Math.min(100, pct)));
+  const rounded = Math.round(Math.max(0, Math.min(100, pct)));
+  // ── The endpoints, held to the same rule as src/lib/sharePercent.ts ──────
+  //
+  // A rounded percentage may print 0 ONLY when nothing is ticked, and 100 ONLY
+  // when everything is. `Math.round` does not know that: at 201 items one tick
+  // rounds to 0, and at 200 items one item outstanding rounds to 100 — so the
+  // hero would read "0%" over a day the client had started, or "100%" over a
+  // list with a box still open, in the same breath as the count beside it
+  // saying otherwise. That is the sentence sharePercent.ts was written for,
+  // seen on the coach's Schedule screen: "Booked · 1 session … 0% of your slots
+  // are filled".
+  //
+  // It is not currently reachable here — it needs about two hundred habits in
+  // one day, and a real list is three targets and a handful of coach items —
+  // which is exactly why it is worth closing now rather than after somebody
+  // ships a habit library. The clamp is to 1 and 99 rather than to a string
+  // because the caller draws an ARC from this number as well as printing it
+  // (app/(client)/habits.tsx), and one percentage point of arc is invisible
+  // where a wrong endpoint is not.
+  if (rounded === 0 && doneCount > 0) return 1;
+  if (rounded === 100 && doneCount < total) return 99;
+  return rounded;
 }

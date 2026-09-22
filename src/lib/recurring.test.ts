@@ -16,10 +16,11 @@
 import {
   DOW_NAMES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE, RECURRING_END_RULE,
   SERIES_HORIZON_DAYS, cancelOptions, clashLine, clockLabel, createdLine,
-  occurrenceDetail, seriesDates, seriesDetail, seriesLabel, shapeSeries,
+  occurrenceDetail, seriesDates, seriesDetail, seriesLabel, memberSeriesLabel, shapeSeries,
   seriesOccurrencesIn, zonedSlot,
   type RawSeries,
 } from './recurring';
+import { fmtClock, weekdayName } from './format';
 import type { CancellationPolicy } from './booking';
 
 const errors: string[] = [];
@@ -248,6 +249,21 @@ eq(clockLabel(18, 45), '6:45 pm', 'quarter to seven in the evening');
 eq(clockLabel(0, 0), '12:00 am', 'midnight is twelve, not zero');
 eq(clockLabel(12, 30), '12:30 pm', 'and half past noon is pm');
 eq(seriesLabel({ dow: 2, hour: 7, minute: 0 }), 'Every Tuesday at 7:00 am', 'the whole arrangement in one line');
+
+// The member's version of the same line, which reads in THEIR language and
+// clock. Asserted structurally rather than against an English literal: the
+// whole point is that the words come from the reader's locale, so pinning
+// "Tuesday" here would pin the defect.
+{
+  const m = memberSeriesLabel({ dow: 2, hour: 7, minute: 0 });
+  ok(m.includes(weekdayName(2)), 'it names the day the way the reader writes it');
+  ok(m.includes(fmtClock(7, 0)), 'and the time the way the reader writes it');
+  // The hour is the SERIES' wall clock and is never converted into the
+  // reader's zone — that is what makes `fmtClock`'s numeric signature the right
+  // one to build this from.
+  ok(memberSeriesLabel({ dow: 2, hour: 18, minute: 45 }).includes(fmtClock(18, 45)),
+    'quarter to seven in the evening is still quarter to seven in the evening');
+}
 eq(DOW_NAMES[0], 'Sunday', 'Sunday-first, matching Date.getDay() and extract(dow)');
 eq(DOW_NAMES.length, 7, 'seven days');
 
@@ -323,6 +339,34 @@ ok(/next session stays booked/i.test(seriesDetail(3, inWindow)),
 // the empty string is what they pass.
 ok(!/stays booked/i.test(pick(cancelOptions({ startsAt: '', policy: policy(), upcoming: 0, now: NOW }), 'series').detail),
   'and the option built for a series with no next occurrence carries no such promise either');
+
+/* ── a session that does not exist is not priced and not offered ──────────
+ *
+ * `insideNoticeWindow` answers false for an unparseable instant by design, so
+ * an empty `startsAt` produced an 'in-time' verdict and the sheet printed
+ * "Frees this one only … This is more than 24 hours away, so no fee applies"
+ * plus "Affects 1 booked session" — a specific claim about the member's money
+ * over an hour with no date.
+ */
+for (const missing of ['', '   ', 'not-a-date'] as const) {
+  const opts = cancelOptions({ startsAt: missing, policy: policy(), upcoming: 4, now: NOW });
+  ok(!opts.some((o) => o.scope === 'occurrence'),
+    `no occurrence option is offered for a startsAt of ${JSON.stringify(missing)}`);
+  ok(opts.some((o) => o.scope === 'series'), 'ending the arrangement is still offered');
+  ok(opts.length === 1, 'and it is the only thing on the sheet');
+  for (const o of opts) {
+    ok(!/no fee applies/i.test(o.detail), 'nothing quotes a fee verdict about a session with no date');
+    ok(!/Frees this one/i.test(o.detail), 'and nothing says "this one" about it');
+    ok(o.charges === false, 'and nothing on the sheet charges');
+  }
+}
+// A real next occurrence is unaffected: both options, priced as before.
+{
+  const opts = cancelOptions({ startsAt: farOff, policy: policy(), upcoming: 4, now: NOW });
+  ok(opts.length === 2, 'a real next session still gets both options');
+  ok(/no fee applies/i.test(pick(opts, 'occurrence').detail), 'and is still priced');
+  ok(pick(opts, 'occurrence').affects === 1, 'and still affects exactly the one session');
+}
 
 
 /* ── which booked sessions a pause is actually about ────────────────────────

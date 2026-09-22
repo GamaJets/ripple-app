@@ -27,7 +27,7 @@
 -- just as part 71 does. Anybody skimming headings would have concluded that
 -- re-running this file renames catalogue rows — and src/lib/machines.ts,
 -- src/lib/focus.ts and `buildProgram()` all resolve exercises BY NAME, so that
--- belief is the one that gets a programme silently repointed.
+-- belief is the one that gets a program silently repointed.
 --
 -- Part 71 refused to update name or muscle_group, because programs and logs
 -- reference a row by the name it has. That still holds for OUR original rows.

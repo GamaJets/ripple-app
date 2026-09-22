@@ -29,13 +29,73 @@
 // must not be one: the tick belongs to the client, in `habit_logs`, under their
 // own policy. A coach marking their own client's habit complete would be a
 // second answer to a question only one person can answer.
+//
+// ── Every read here is paged, and none of them used to be ──────────────────
+//
+// All four reads below were bare `select()`s with no `.limit()` and no page
+// loop, so PostgREST answered each of them with at most a thousand rows and
+// said nothing about it. Each one truncates into a different wrong sentence,
+// and none of them looks broken:
+//
+//   · `clients` is what the picker is built from, so a coach past a thousand
+//     clients simply cannot select the ones off the end — they are not on the
+//     screen and there is nothing to say they are missing.
+//   · the `profiles` lookup was a bare `.in()` over those ids. Past a thousand
+//     it truncates to dashes, and long before that the query string 414s —
+//     src/lib/idLookup.ts is the write-up.
+//   · `coach_checklist_items` is one coach × one client and is small today,
+//     but it is the denominator of every adherence figure on this screen: an
+//     item that falls off the read is a line the coach set, still on the
+//     client's phone, that this screen does not know exists.
+//   · `habit_logs` is the worst of the four, and it is the one the roadmap
+//     named. It is the client's ticks, and a truncated tick list does not make
+//     a rate smaller — it makes it FALSE. Every day whose rows fell off the end
+//     reads as a day the client did nothing, on a screen a coach uses to judge
+//     whether somebody is engaging. The window bounds it, but a client ticking
+//     six habits a day over a 28-day window against a cap that is shared with
+//     nothing is a bound, not a guarantee.
+//
+// `readAll` and `readByIds` are the house answer (src/lib/rowCap.ts,
+// src/lib/idLookup.ts): both check `error` on every page and THROW on a
+// truncation, so a read that could not be finished arrives here as a failure —
+// which every one of these already renders honestly as null-not-empty — rather
+// than as a short set wearing the whole set's clothes.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
 import { Shell } from '@/components/Shell';
 import {
   recentWindow, summariseAdherence, setItemLine, dayLabel,
   type DayWindow, type TickRow, type AdherenceSummary,
 } from '@lib/adherence';
+import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
+// ── The freshness stamp, and the half of it this screen deliberately omits ──
+//
+// This route was one of four in the console with no `<Fetched>`, left off with
+// the rest on the grounds that a stamp is noise on a form and a background
+// re-read would fight it. Checked on 4 September 2026, and the second half of
+// that does not hold here: nothing typed on this page is repopulated by a read
+// — `draft` and `icon` are the coach's own and `loadItems` never touches them —
+// so a re-read would wipe nothing.
+//
+// What a re-read WOULD do is worse and less obvious. Every write on this page
+// is optimistic-after-confirmation: `setItems` is applied from the row the
+// server returned, and the reorder writes two rows in parallel and patches both
+// locally. A read fired by `visibilitychange` in the middle of that lands a
+// server snapshot on top of a half-applied local one, and the coach sees an
+// order that neither browser nor database holds.
+//
+// And the figures below genuinely age: the adherence fractions are the CLIENT'S
+// ticks over 28 days, written from their phone while this tab sits open, which
+// is exactly the "somebody else is writing into this book" case /costs cites
+// for its own stamp.
+//
+// So the stamp is here and `useFetched` is not. `Fetched` is a presentational
+// component — it takes `at`, `busy` and an optional `onRefresh` — and using it
+// on its own gives the coach the age and a deliberate "Read again" with no
+// timer and no visibility hook to race a write.
+import { Fetched, oldestFetch } from '@/components/Fetched';
 
 /** One row of coach_checklist_items, as this screen holds it. */
 interface Item {
@@ -66,7 +126,23 @@ const LABEL_MAX = 80;
 
 export default function CoachChecklists() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
 
   const [clients, setClients] = useState<Client[] | null>(null);
   const [clientsErr, setClientsErr] = useState<string | null>(null);
@@ -76,6 +152,15 @@ export default function CoachChecklists() {
 
   const [items, setItems] = useState<Item[] | null>(null);
   const [itemsErr, setItemsErr] = useState<string | null>(null);
+  /** ms of the last read of each that came back WHOLE, or null. Of the last
+   *  success, never the last attempt: a refresh that failed leaves the figures
+   *  from the earlier read on screen, and re-dating them would be the same
+   *  untruth one layer up. */
+  const [itemsAt, setItemsAt] = useState<number | null>(null);
+  const [ticksAt, setTicksAt] = useState<number | null>(null);
+  /** A manual re-read is running. Only the manual one — nothing on this screen
+   *  reads on a timer or on coming back to the tab. */
+  const [rereading, setRereading] = useState(false);
 
   const [draft, setDraft] = useState('');
   const [icon, setIcon] = useState('');
@@ -96,6 +181,10 @@ export default function CoachChecklists() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) return;
       const { data, error } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
@@ -104,6 +193,7 @@ export default function CoachChecklists() {
       // than discarded, and an unread name stays null instead of being asserted
       // as absent.
       if (live) setGymName(error ? null : (data as { name?: string } | null)?.name ?? null);
+      if (live) setGymNameUnread(!!error);
     })();
     return () => { live = false; };
   }, []);
@@ -111,43 +201,77 @@ export default function CoachChecklists() {
   // The coach's book. Scoped in the query, not filtered after it lands.
   const loadClients = useCallback(async (coachId: string) => {
     setClientsErr(null);
-    const { data, error } = await supabase.from('clients').select('id').eq('trainer_id', coachId);
-    if (error) {
+    let ids: string[];
+    try {
+      // Ordered by the primary key, which `readAll` requires and which
+      // `clients.id` satisfies — it IS the primary key (parts/01-schema.sql:49)
+      // and so cannot tie. The book is what the picker is made of, so a cut
+      // here does not shorten a column; it removes people from the screen.
+      const rows = await readAll<{ id: string }>(
+        (from, to) => supabase.from('clients').select('id')
+          .eq('trainer_id', coachId)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'your client records',
+      );
+      ids = rows.map((r) => r.id).filter(Boolean);
+    } catch (e) {
       // Null, not []. An empty list here reads as "you have no clients", which
       // is a statement about this coach's book rather than about the read.
       setClients(null);
-      setClientsErr(error.message);
+      setClientsErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
       return;
     }
-    const ids = (data ?? []).map((r) => (r as { id: string }).id);
     if (!ids.length) { setClients([]); return; }
 
-    const { data: profs, error: pErr } = await supabase
-      .from('profiles').select('id, full_name').in('id', ids);
+    // Chunked and paged rather than one `.in()`: see the header. A failure is
+    // caught here and NOT allowed to blank the book — the ids came back, the
+    // people are real, and only their names are unknown.
+    let nameBy = new Map<string, string>();
+    let named = true;
+    try {
+      const profs = await readByIds<{ id: string; full_name: string | null }>(
+        ids,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'your clients’ names',
+      );
+      nameBy = new Map(profs.map((r) => [r.id, (r.full_name ?? '').trim()]));
+    } catch {
+      named = false;
+    }
     // A name that cannot be read is a dash, never a substitute. The client is
     // still on the book and still needs a checklist.
-    setNamesKnown(!pErr);
-    const nameBy = new Map(
-      (profs ?? []).map((p) => {
-        const r = p as { id: string; full_name: string | null };
-        return [r.id, (r.full_name ?? '').trim()];
-      }),
-    );
+    setNamesKnown(named);
     setClients(ids.map((id) => ({ id, name: nameBy.get(id) || null })));
   }, []);
 
   const loadItems = useCallback(async (coachId: string, clientId: string) => {
     setItemsErr(null);
     setWriteErr(null);
-    const { data, error } = await supabase
-      .from('coach_checklist_items')
-      .select(COLS)
-      .eq('coach_id', coachId)
-      .eq('client_id', clientId)
-      .order('sort', { ascending: true })
-      .order('created_at', { ascending: true });
-    if (error) { setItems(null); setItemsErr(error.message); return; }
-    setItems((data ?? []) as unknown as Item[]);
+    try {
+      // The display order is kept and `id` is appended to make it TOTAL:
+      // `sort` is a coach-set integer that ties freely — two lines added in the
+      // same second share a `sort` and a `created_at` — and a tied order across
+      // separate paged requests drops rows silently.
+      const rows = await readAll<Item>(
+        (from, to) => supabase
+          .from('coach_checklist_items')
+          .select(COLS)
+          .eq('coach_id', coachId)
+          .eq('client_id', clientId)
+          .order('sort', { ascending: true })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to),
+        'this client’s checklist',
+      );
+      setItems(rows);
+      setItemsAt(Date.now());
+    } catch (e) {
+      setItems(null);
+      setItemsErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
+    }
   }, []);
 
   /**
@@ -161,33 +285,64 @@ export default function CoachChecklists() {
   const loadTicks = useCallback(async (clientId: string) => {
     setTicksErr(null);
     const w = recentWindow();
-    const { data, error } = await supabase
-      .from('habit_logs')
-      .select('habit, done_on')
-      .eq('user_id', clientId)
-      .gte('done_on', w.start)
-      .lte('done_on', w.end)
-      .order('done_on', { ascending: false });
-    if (error) {
+    try {
+      // Ordered by the primary key, not by `done_on`. `done_on` is a DATE, so
+      // every tick a client made on the same day ties — which is most of them —
+      // and `summariseAdherence` reads the rows into sets and sorts what it
+      // needs, so nothing downstream wanted the descending order this used to
+      // ask for.
+      const rows = await readAll<TickRow>(
+        (from, to) => supabase
+          .from('habit_logs')
+          .select('habit, done_on')
+          .eq('user_id', clientId)
+          .gte('done_on', w.start)
+          .lte('done_on', w.end)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'this client’s ticks',
+      );
+      setTicks({ window: w, rows });
+      setTicksAt(Date.now());
+    } catch (e) {
       // Null, never []. An empty tick list reads as "they did none of it",
       // which is the single most damaging thing this screen could say wrongly.
       setTicks(null);
-      setTicksErr(error.message);
-      return;
+      setTicksErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
     }
-    setTicks({ window: w, rows: (data ?? []) as unknown as TickRow[] });
   }, []);
 
   useEffect(() => { if (me?.id) void loadClients(me.id); }, [me?.id, loadClients]);
   useEffect(() => {
+    // Cleared before the read, not after it. A stamp left standing from the
+    // PREVIOUS client would date this client's list to a read that was never
+    // made of them — which is the one thing a freshness line must never do.
+    setItemsAt(null);
     if (me?.id && picked) void loadItems(me.id, picked);
     else setItems(null);
   }, [me?.id, picked, loadItems]);
 
   useEffect(() => {
+    setTicksAt(null);
     if (picked) void loadTicks(picked);
     else { setTicks(null); setTicksErr(null); }
   }, [picked, loadTicks]);
+
+  /**
+   * Ask for both again, because the coach pressed the link.
+   *
+   * The two reads are one claim on this screen — `adherence` is only computed
+   * when both landed — so they are refreshed together and the stamp is the age
+   * of the OLDER of them. `oldestFetch` is the console's rule for that, and a
+   * stamp that quoted the newer read would say a screen is four minutes old
+   * while half of it is an hour old.
+   */
+  const reread = useCallback(() => {
+    if (!me?.id || !picked || rereading) return;
+    setRereading(true);
+    void Promise.all([loadItems(me.id, picked), loadTicks(picked)])
+      .finally(() => setRereading(false));
+  }, [me?.id, picked, rereading, loadItems, loadTicks]);
 
   // Only computed when BOTH reads landed. A summary over a full tick list and a
   // short item list would put confident fractions against some of a coach's
@@ -227,9 +382,24 @@ export default function CoachChecklists() {
   const setActive = async (it: Item, active: boolean) => {
     if (busy) return;
     setBusy(true); setWriteErr(null);
-    const { data, error } = await supabase
-      .from('coach_checklist_items').update({ active }).eq('id', it.id)
-      .select(COLS);
+    // In a try: the ceiling in lib/supabase.ts made this `await` able to throw,
+    // and it had nothing around it — so a hung request left the row busy for
+    // ever with an unhandled rejection behind it.
+    let data: unknown[] | null = null;
+    let error: { message?: string | null } | null = null;
+    try {
+      ({ data, error } = await supabase
+        .from('coach_checklist_items').update({ active }).eq('id', it.id)
+        .select(COLS));
+    } catch (e) {
+      setBusy(false);
+      setWriteErr(writeFailedText(e, {
+        what: 'That change',
+        unchanged: 'their list is unchanged',
+        howToCheck: 'Reload this page: the list below is drawn from whatever is actually stored.',
+      }));
+      return;
+    }
     setBusy(false);
     // Counting the rows is the point. An update matching nothing is not an
     // error in PostgREST — it succeeds having changed nothing at all.
@@ -290,12 +460,34 @@ export default function CoachChecklists() {
     [clients, picked],
   );
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
+
+  // The fourth screen. /coach, /coach/roster and /coach/earnings each carry this
+  // branch and each carries a comment saying they "were the only ones in the
+  // console without it" — the sweep that added them stopped at three. Without
+  // it a refused `profiles` read arrives as `role: null`, falls through to the
+  // refusal below, and tells a working coach their account is not a coaching
+  // account: a claim about them, made out of a query that failed.
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not being a coach. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
 
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/checklists">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
         <h1>This screen is for coaches</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: 560 }}>
           Checklists sets the daily lines a coach puts on one client&rsquo;s list. Your account is
@@ -312,7 +504,7 @@ export default function CoachChecklists() {
   };
 
   return (
-    <Shell me={me} gymName={gymName} current="/coach/checklists">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
       <h1>Checklists</h1>
       <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: 620 }}>
         Lines you add here appear on that client&rsquo;s daily list, marked as set by you, beside
@@ -359,6 +551,12 @@ export default function CoachChecklists() {
             {client?.name ?? <span className="dash">Name unavailable</span>}
           </h2>
 
+          {/* One sentence for both reads, aged to the older of them. Named as
+              their list and their ticks rather than "this screen", because the
+              two are the only things on the page a stamp could be about. */}
+          <Fetched at={oldestFetch(itemsAt, ticksAt)} busy={rereading} onRefresh={reread}
+                   what="their list and their ticks" />
+
           {itemsErr ? (
             <p className="dash" style={{ marginTop: 12 }}>
               Could not read their list: {itemsErr}. Nothing is shown below because nothing was
@@ -366,8 +564,14 @@ export default function CoachChecklists() {
             </p>
           ) : null}
 
+          {/* ANNOUNCED. This is the only page file in the console that imports
+              no Banner at all, so every refusal on it — "Not saved, so it is
+              not on their list", "it is still on their list" — was a silent
+              colour change. A coach presses Add, hears nothing, and cannot
+              tell it from having worked. */}
           {writeErr ? (
-            <p style={{ marginTop: 12, color: 'var(--warn)' }}>{writeErr}</p>
+            <p role="alert" aria-live="assertive" aria-atomic="true"
+               style={{ marginTop: 12, color: 'var(--warn)' }}>{writeErr}</p>
           ) : null}
 
           {shown && shown.length === 0 && !itemsErr ? (

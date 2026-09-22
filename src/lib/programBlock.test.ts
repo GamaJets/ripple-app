@@ -1,4 +1,4 @@
-// Multi-week programmes, and the invariant that keeps a client's phone and
+// Multi-week programs, and the invariant that keeps a client's phone and
 // their coach's screen showing the same session. Compile with tsc, run with node.
 //
 // The bug every assertion here is aimed at: `Program.days` is what the SHIPPED
@@ -23,24 +23,24 @@ const day = (name: string, exercise: string, sets = 3): ProgramDay => ({
   exercises: [{ key: 'k', name: exercise, group: 'Chest', sets, reps: '8-10', alternatives: [] }],
 });
 
-/** A programme exactly as every row in `program_templates` and
+/** A program exactly as every row in `program_templates` and
  *  `assigned_programs` holds one today: one week, no `weeks` key at all. */
 const oneWeek: Program = { title: 'Push Pull Legs', focus: [], note: '', days: [day('Mon', 'Bench Press')] };
 
 /* ── absent means exactly what it meant before ──────────────────────────── */
 
-// THE assertion of this file. Every programme in all three stores has no
-// `weeks`, and each of them is a genuine one-week programme rather than a
+// THE assertion of this file. Every program in all three stores has no
+// `weeks`, and each of them is a genuine one-week program rather than a
 // broken block. Nothing may render a week number for one.
-eq(weekCount(oneWeek), 1, 'a programme with no weeks is one week long, which is what it is');
+eq(weekCount(oneWeek), 1, 'a program with no weeks is one week long, which is what it is');
 eq(programWeeks(oneWeek).length, 1, 'and resolves to a single week');
 eq(programWeeks(oneWeek)[0].days, oneWeek.days, 'built from `days`, which is week one');
 ok(!isBlock(oneWeek), 'it is not a block, so no screen draws a week strip for it');
-// A null programme has NO weeks rather than one empty one. Zero is the honest
-// answer — there is no programme — and the screens that need a denominator
+// A null program has NO weeks rather than one empty one. Zero is the honest
+// answer — there is no program — and the screens that need a denominator
 // (`blockPosition` in src/lib/programStart.ts) floor it at one themselves so a
 // block cannot read as finished on the day it started.
-eq(weekCount(null), 0, 'a null programme has no weeks rather than one imaginary one');
+eq(weekCount(null), 0, 'a null program has no weeks rather than one imaginary one');
 eq(programWeeks(null), [], 'though it has no weeks to list');
 ok(!weeksDisagree(oneWeek), 'and there is nothing for it to disagree with');
 
@@ -74,9 +74,9 @@ for (let i = 1; i < MAX_WEEKS; i++) long = addWeek(long);
 eq(weekCount(long), MAX_WEEKS, 'a block grows to the ceiling');
 ok(!canAddWeek(long), 'and then the control is hidden');
 eq(weekCount(addWeek(long)), MAX_WEEKS, 'a stray second tap is a no-op rather than a thirteenth week');
-ok(canAddWeek(oneWeek), 'a one-week programme can always gain one');
+ok(canAddWeek(oneWeek), 'a one-week program can always gain one');
 
-// Belt behind that brace: a programme arriving from a future build with thirty
+// Belt behind that brace: a program arriving from a future build with thirty
 // weeks in it renders as twelve rather than as a screen that will not open.
 const many = withWeeks(oneWeek, Array.from({ length: 30 }, () => ({ days: [day('Mon', 'Row')] })));
 eq(weekCount(many), MAX_WEEKS, 'more weeks than the ceiling are truncated, not refused');
@@ -86,11 +86,11 @@ eq(weekCount(many), MAX_WEEKS, 'more weeks than the ceiling are truncated, not r
 const backToOne = removeWeek(two, 1);
 eq(weekCount(backToOne), 1, 'removing the second week leaves one');
 eq('weeks' in backToOne, false,
-  'and drops the `weeks` key entirely, so the result is byte-identical to a programme that never had one');
+  'and drops the `weeks` key entirely, so the result is byte-identical to a program that never had one');
 eq(backToOne.days, two.days, 'with week one still week one');
 
 eq(weekCount(removeWeek(oneWeek, 0)), 1,
-  'the last remaining week is not removable — a programme of no weeks is a Train tab with nothing on it');
+  'the last remaining week is not removable — a program of no weeks is a Train tab with nothing on it');
 eq(weekCount(removeWeek(two, 9)), 2, 'and an index off the end removes nothing');
 
 // Removing week ONE is allowed and it moves what the client trains. That is a
@@ -102,7 +102,7 @@ eq(dropFirst.days[0].exercises[0].name, 'Incline Press',
 
 /* ── an empty block is refused rather than written ──────────────────────── */
 
-eq(withWeeks(two, []), two, 'a block of no weeks is not a lighter programme and is refused');
+eq(withWeeks(two, []), two, 'a block of no weeks is not a lighter program and is refused');
 
 /* ── labels: the coach’s words, or the position, which is always true ───── */
 
@@ -122,7 +122,7 @@ ok(programWeeks(addWeek(flagged))[2].deload !== true,
 ok(!programWeeks(addWeek(patchWeek(two, 1, { label: 'Peak' })))[2].label,
   'nor does it copy the label, which would name a week something the coach never typed');
 
-eq(blockLine(oneWeek), 'One week.', 'a one-week programme says so');
+eq(blockLine(oneWeek), 'One week.', 'a one-week program says so');
 eq(blockLine(two), '2 weeks.', 'a block says how many');
 eq(blockLine(flagged), '2 weeks, one of them a deload.', 'and names the deloads it carries');
 
@@ -135,12 +135,12 @@ eq(blockLine(flagged), '2 weeks, one of them a deload.', 'and names the deloads 
 const sig = (days: ProgramDay[]) =>
   days.map((d) => `${d.day}:${d.exercises.map((e) => e.name).join('+')}`).join(',');
 
-// THE reason `weeksSignaturePart` returns null for a one-week programme. Every
+// THE reason `weeksSignaturePart` returns null for a one-week program. Every
 // group's plan and every client's assignment is one week today; a signature
 // that changed shape for all of them would have reported every member of every
 // group as 'diverged' on the morning this shipped.
 eq(weeksSignaturePart(oneWeek, sig), null,
-  'a one-week programme adds NOTHING to its fingerprint, so it fingerprints exactly as it did before this file existed');
+  'a one-week program adds NOTHING to its fingerprint, so it fingerprints exactly as it did before this file existed');
 ok(weeksSignaturePart(two, sig) != null, 'a block adds its later weeks');
 ok(weeksSignaturePart(two, sig) !== weeksSignaturePart(edited, sig),
   'and two blocks that differ only in week two do not fingerprint the same');
@@ -161,4 +161,4 @@ eq(programWeeks(inconsistent)[0].days[0].exercises[0].name, 'Bench Press',
 ok(weeksDisagree(inconsistent), 'and the disagreement is reportable rather than silently preferred');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('programBlock: ok — `days` is week one, the copy is deep, and a one-week programme is unchanged in every respect');
+console.log('programBlock: ok — `days` is week one, the copy is deep, and a one-week program is unchanged in every respect');

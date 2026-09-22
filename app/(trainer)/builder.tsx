@@ -24,24 +24,25 @@
 //
 // This screen consumed four providers and read one of their statuses. The one
 // that mattered was `useAssignedPrograms`: `getProgram` returns null both for a
-// client with no coach-assigned programme and for a client whose row could not
+// client with no coach-assigned program and for a client whose row could not
 // be read, and the builder answered that null by loading the generic auto plan
 // and presenting it as what the client is on. Assign then wrote it over the
-// bespoke programme the screen had never seen — no undo, no history row, and
+// bespoke program the screen had never seen — no undo, no history row, and
 // nothing that tells the client their next session changed.
 //
 // A banner would not have stopped that, because the banner is not what the
-// thumb lands on. So until the current programme has actually been read the
+// thumb lands on. So until the current program has actually been read the
 // builder stays empty, says why, and the Assign control is held. See
 // src/lib/overwriteGuard.ts.
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { MIN_TARGET } from '../../src/lib/a11y';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
 import { applyMove, shifts as dragShifts, targetIndex } from '../../src/lib/dragReorder';
 import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor, otherMethodsHint } from '../../src/lib/setMethods';
@@ -49,24 +50,55 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ListRow, PageHead, ChipGrid, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, HeroCard, HeroRing, type Segment, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, font, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { deleteRefusedLine } from '../../src/lib/templateLibrary';
+import { templateUsage } from '../../src/lib/templateUsage';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { canonicalExerciseName } from '../../src/lib/exerciseName';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
+import { MuscleGroupPicker, MUSCLE_GROUP_WHY } from '../../src/ui/MuscleGroupPicker';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
+// The coach's own standing cue for a movement, written once and carried into
+// every program. A cue PREFILLS an empty note and NEVER touches a written
+// one — src/lib/coachCues.ts holds that rule and is the only place it is
+// implemented, so no call site on this screen can get it subtly wrong.
+import {
+  cueFor, cueRowFor, prefillNote, prefillDays, wouldPrefill, cueRefusal,
+  fetchMyCues, saveCue, deleteCue,
+  CUE_MAX, CUES_UNAVAILABLE_NOTE, NO_CUE_YET_NOTE, CUE_NEVER_OVERWRITES, USE_CUE_HINT,
+  type CueRead,
+} from '../../src/lib/coachCues';
 import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
-// A programme can now be more than one week. `programWeeks` is the ONE reader
+// The other half of "build a program": the one the client has nothing to build
+// it with. `buildProgram` above writes bars, stacks and machines out of its own
+// source and has no version with the kit taken out, so a no-equipment week is
+// drawn from the catalogue instead — and reports, by name, the muscle groups it
+// could not cover. See src/lib/noKitProgram.ts.
+import { noKitProgram, noKitCoverageNote } from '../../src/lib/noKitProgram';
+// Build From Muscles: the member's Build a Workout generator and its picker,
+// here so a coach can start a client's week (or their own) from target muscles.
+import { targetedProgram, targetedCoverageNote, type Target } from '../../src/lib/targetedWorkout';
+import { MusclePicker } from '../../src/ui/MusclePicker';
+// A program can now be more than one week. `programWeeks` is the ONE reader
 // that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
 // is what the shipped client app renders — in step with week one. Neither this
 // screen nor any other builds the pair by hand; see src/lib/programBlock.ts.
-import { canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
+import { MAX_WEEKS, canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
+// The two week edits this screen could not make, and the block as one readable
+// list. Pure, and tested where an off-by-one in the index that comes back can
+// be asserted rather than discovered by a coach typing into a week they are not
+// looking at. See src/lib/blockPlan.ts.
+import { blockOverview, blockWarnings, duplicateWeek, moveWeek, weekEditWarning, type WeekEdit } from '../../src/lib/blockPlan';
 // Effort, share of a max and rep speed — three columns a coach was writing into
 // a free-text note because there was nowhere else for them. src/lib/setIntensity.ts
 // owns every parse and every bound, and now also the words the CLIENT reads
@@ -80,18 +112,24 @@ import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
 import { alreadyAt, progressionOffer, loadTapLabel } from '../../src/lib/builderProgression';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
+import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` meant "signed out, or we could not ask". See
+// src/lib/authReadFate.ts.
+import { signedInUid } from '../../src/lib/signedInUid';
+
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
-import { CHECKS, NOT_CHECKED, checksLine, reviewProgram, type Finding } from '../../src/lib/programReview';
+import { CHECKS, NOT_CHECKED, checksLine, coverageLine, reviewProgram, type Finding } from '../../src/lib/programReview';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { dayLabel } from '../../src/lib/adherence';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { isQueryableId } from '../../src/lib/clientDrift';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { rowToEntry, WORKOUT_COLS, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useProgramGroups } from '../../src/ui/groupProgram';
@@ -101,17 +139,31 @@ import {
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
 import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
-import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
+import { foldsAfterRemoval, foldsForNewProgram } from '../../src/lib/foldedDays';
+import {
+  LEGACY_BUILDER_DRAFT_KEY, builderDraftKey, draftHasContent, draftStepFor,
+  readBuilderDraft, restoreDraftDecision, writeBuilderDraft,
+} from '../../src/lib/builderDraft';
+import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
-import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { WEEK_DAYS, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
+import { ProgramBuilderFlow, ProgramWorkflowFooter, DAY_TYPE_TONE, dayTypeOf, groupTone, toneFill, toneOnFill, type DayType } from '../../src/ui/coach/ProgramBuilderFlow';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { useBackTo } from '../../src/ui/backTo';
+import { backDestination } from '../../src/lib/backTo';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
+import { DateSheet } from '../../src/ui/DateSheet';
 
 /** The week, in the order src/lib/weekStart.ts draws one. This is the order a
  *  new day is offered in and the order Cycle Day walks, so the builder and the
  *  client's own week strip read the same way round. */
 const DAYS = WEEK_DAYS;
+/** How many named programs the shortcut row draws before it hands over to
+ *  the library. A row is a shortcut while it is shorter than the list. */
+const SHORTCUT_CAP = 12;
 /** One week of a block, as this screen edits it. The mirror of `ProgramWeek`
  *  in src/lib/programs.ts over the builder's own `BDay`, which carries a draft
- *  key and a unit the coach typed in that no stored programme needs. */
+ *  key and a unit the coach typed in that no stored program needs. */
 type BWeek = { days: BDay[]; label?: string; deload?: boolean };
 /** 's' unless there is exactly one of them. Four counts on this screen said
  *  "1 exercises" — the Assign button, the Training Days head, the template rows
@@ -134,8 +186,58 @@ const LIB: { name: string; group: string }[] = [
  *  screen does not have. Never prefilled into the coach's note to a client. */
 const GENERATED_NOTE = /latest InBody scan/i;
 
+/* ── what the client has to train with ────────────────────────────────────
+   Asked for twice, the second time as the shape it had to take: "there needs
+   to be a way to select no equipment available as an option in order to build
+   a work out program". So it is two words a coach taps, on the screen where
+   they are already standing when they start one — not a filter hidden in the
+   exercise picker and not a preference on another page.
+
+   Two options and not eleven. The catalogue's `equipment` column would support
+   a chip per kit — dumbbell, bands, a pull-up bar — and that is the shape this
+   wants to grow into. It is deliberately not built yet: "no equipment" is the
+   thing that was asked for and the thing that has to work end to end first. */
+const KIT_OPTIONS: readonly Segment<'any' | 'none'>[] = [
+  { key: 'any', label: 'Any Equipment' },
+  { key: 'none', label: 'No Equipment', a11yLabel: 'No equipment available' },
+];
+
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
+
+/**
+ * A copy of one week that shares nothing with the week it came from.
+ *
+ * FRESH KEYS, and that is the whole of why this exists rather than a spread.
+ * `key` is what every list, every drag handler and every per-row draft on this
+ * screen matches on, so two weeks sharing one would make typing into week
+ * five's bench press edit week four's as well — silently, in a program
+ * somebody is about to be sold.
+ *
+ * And written out here rather than routed through `addWeek` in
+ * src/lib/programBlock.ts, which works on a stored `Program`: this list holds
+ * the builder's own `BEx`, with its draft key and the unit the coach typed in,
+ * and round-tripping through `composeProgram` to copy a week would apply every
+ * one of its rewritings to a week the coach had not touched.
+ *
+ * Hoisted out of Add Week because Duplicate This Week needs the identical copy
+ * and a second spelling of it is the one that would drift.
+ */
+const cloneWeek = (w: BWeek | undefined): BWeek => ({
+  // The DAYS only. Neither the coach's own label nor the deload mark comes
+  // across: two weeks in the strip called the same thing cannot be told apart,
+  // and a week added after a deload is a new hard week far more often than it
+  // is a second light one. Duplicate This Week re-applies the deload mark
+  // itself, because there the coach asked for another one of THAT week.
+  days: (w?.days ?? []).map((d) => ({
+    ...d,
+    exercises: d.exercises.map((e) => ({
+      ...e,
+      key: nextKey(),
+      setRows: e.setRows ? e.setRows.map((r) => ({ ...r })) : e.setRows,
+    })),
+  })),
+});
 
 /**
  * A stored week as this screen edits it.
@@ -178,7 +280,7 @@ type BEx = {
    * What the coach wants said about THIS movement — "keep the elbows tucked",
    * "3-1-1 tempo", "the machine by the window, seat on 4".
    *
-   * Not the programme's `note`, which is the letter at the top of the week.
+   * Not the program's `note`, which is the letter at the top of the week.
    * That one is read once on the way in; this one is read at the machine by
    * somebody who has already forgotten it. See ProgramExercise.note in
    * src/lib/programs.ts for why the two are not collapsed into one field.
@@ -194,7 +296,7 @@ type BEx = {
    *
    * `ProgramExercise.restSec` arrived while this screen was being rewritten. It
    * has no control in the builder yet, and this field exists so that a
-   * programme LOADED into the builder and assigned back out keeps whatever rest
+   * program LOADED into the builder and assigned back out keeps whatever rest
    * a coach set elsewhere — the exact loss `loadKg` and `note` suffered, where
    * `loadFrom` and `composeProgram` enumerate fields by hand and a new one
    * dropped out of both. Whoever adds the control writes to this field and the
@@ -213,7 +315,7 @@ type BEx = {
   /**
    * The prescribed effort on the RPE scale, the prescribed share of a one-rep
    * max, and the prescribed rep speed. Absent on every exercise of every
-   * programme ever written, and absent is what round-trips.
+   * program ever written, and absent is what round-trips.
    *
    * NOT `feel`. `feel` is the client's own report after the set, recorded by
    * the person who did it, and it is evidence; `rpe` is an instruction written
@@ -255,7 +357,7 @@ type BEx = {
 };
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
-// ── The goal that generates a programme is now allowed to be unknown ───────
+// ── The goal that generates a program is now allowed to be unknown ───────
 //
 // This screen carried its own goalToEnum: lowercase the roster's goal string,
 // return 'muscle' if it contained "muscle", 'tone' if it contained "tone", and
@@ -265,7 +367,7 @@ type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 // the string it was reached by most often is 'General' — which is precisely
 // what the roster puts where a client's goal could NOT be read. So a client
 // whose goal row was refused, or empty, or written by a newer build, had a
-// fat-loss programme generated for them, the builder presented it as their
+// fat-loss program generated for them, the builder presented it as their
 // plan, and the Assign button underneath offered to send it. Nothing on screen
 // said the goal had been guessed. The substring test was wrong too: it asks
 // about muscle before tone, so the phrase "muscle tone" resolved to muscle.
@@ -276,7 +378,7 @@ type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 //
 // Withholding the generated plan, and not the whole screen: the danger is the
 // auto plan specifically, because that is the artefact whose content is chosen
-// by the goal and which looks identical to work a human did. A programme the
+// by the goal and which looks identical to work a human did. A program the
 // coach types out themselves is theirs whatever the roster knows about the
 // goal, so Assign stays available for it — see the notice in the Program
 // section, which asks the coach to set the goal rather than guessing it for
@@ -290,7 +392,7 @@ export default function Builder() {
   // a client who has never been assigned anything and for a client whose row
   // could not be read, and this screen answered that null by loading the
   // generic auto-generated plan and presenting it as what they are on. The
-  // Assign button underneath then wrote that plan over the bespoke programme
+  // Assign button underneath then wrote that plan over the bespoke program
   // the screen had never seen — no undo, no history, and no notice to the
   // client, who simply found a different session waiting for them. That is the
   // meal-plan-chip bug in the most expensive place it can happen, which is
@@ -306,12 +408,84 @@ export default function Builder() {
   // one BY NAME. "8 of 12 saved" tells a coach something is wrong and nothing
   // about which four or what to do — see src/lib/bulkActions.ts, which is where
   // that arithmetic already lives and is not re-implemented here.
-  const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus } = useAssignedPrograms();
-  const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
+  const { programs, getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
+  /**
+   * The coach's OWN saved templates, which is what "3 saved" claims to count.
+   *
+   * `templates` is never only theirs: src/ui/programTemplates.tsx seeds three
+   * built-in starters and composes the coach's rows in front of them. The
+   * status gate on the header was added and the arithmetic was not, so a coach
+   * who has saved nothing read "3 saved" and one who had saved two read five.
+   * That label is where they look to find out whether an evening's work is
+   * still there, and it would have said yes either way.
+   */
+  const savedCount = templates.filter((tpl) => !isStarter(tpl.id)).length;
+  /**
+   * The coach's named programs, in the order the shortcut row draws them.
+   *
+   * MOST USED first when that can be said — `templateUsage` counts who is
+   * training each one off reads this screen already holds, and refuses to
+   * produce a number under anything but a whole read of `assigned_programs`.
+   * When it refuses, the order is the library's own, which is newest first
+   * (src/lib/templateLibrary.ts), and the row's heading says which of the two
+   * it is: an order with no stated rule reads as random.
+   *
+   * The coach's OWN only. The three built-in starters are in the sheet behind
+   * the Templates row; a shortcut row that led with programs the coach never
+   * wrote would be the app's library, not theirs.
+   */
+  const usage = useMemo(() => templateUsage(templates, programs, programStatus), [templates, programs, programStatus]);
+  const shortcuts = useMemo(() => {
+    const own = templates.filter((tpl) => !isStarter(tpl.id));
+    if (usage.withheld) return own;
+    const used = (id: string) => (usage.byId[id]?.on.length ?? 0) + (usage.byId[id]?.from.length ?? 0);
+    // Stable: equally used programs keep the library's newest-first order.
+    return own.map((tpl, i) => ({ tpl, i })).sort((a, b) => used(b.tpl.id) - used(a.tpl.id) || a.i - b.i).map((x) => x.tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates, usage]);
   const router = useRouter();
 
   const params = useLocalSearchParams();
-  const [clientId, setClientId] = useState((params.clientId as string) || roster[0]?.id || '');
+  // ── Why the Back arrow is conditional here and not on every other screen ──
+  //
+  // This screen is two things. It is the Programs TAB — tapped from the tab
+  // bar, where there is nothing behind it and an arrow would be a lie — and it
+  // is also where five other screens send a coach: a client's Training, a
+  // client's record, a group, the template library's Edit, and the Clients
+  // hub's Programs tile. Arriving that way, the tab bar lights up on Programs
+  // and the coach is stranded: the screen they were reading is gone and no
+  // control on this page returns to it.
+  //
+  // So the arrow follows the carried origin rather than the tab history. The
+  // history is no use — see src/lib/backTo.ts: a tab navigator's history holds
+  // one entry per route, so by the time a coach has opened two clients it no
+  // longer says where they just were. `from` is written by the screen that did
+  // the sending, and an unknown value resolves to null, which draws no arrow
+  // rather than sending somebody nowhere.
+  const from = typeof params.from === 'string' ? params.from : undefined;
+  const cameFrom = backDestination(from) !== null;
+  const goBack = useBackTo(from);
+  /**
+   * Who this is for — and nobody, unless the coach said so.
+   *
+   * This used to fall back to `roster[0]?.id`. That is not a choice, it is an
+   * alphabetical accident, and which name it lands on depends on whether the
+   * roster provider happened to be warm on the first render — so the same tap
+   * did different things on a cold launch and a warm one. What followed was
+   * worse than the arbitrariness: the effect below ticks the selected client as
+   * the recipient of an assign this file itself documents as irreversible, and
+   * the seeding effect loads that person's live block over the screen. A coach
+   * who opened Programs to sketch a week had the first person on their book
+   * already ticked and their program already open, so the first thing they
+   * typed was an edit to somebody's live plan.
+   *
+   * Empty is a state the rest of the screen already handles: `seedDecision`
+   * answers "the builder is the coach's own scratch space and nothing is being
+   * claimed about anybody", and the assign control has nobody ticked until a
+   * name is chosen.
+   */
+  const [clientId, setClientId] = useState((params.clientId as string) || '');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   /**
@@ -344,14 +518,14 @@ export default function Builder() {
   const [blockWeeks, setBlockWeeks] = useState<BWeek[]>([{ days: [] }]);
   /** Which week is on screen. Always a valid index into `blockWeeks` — every
    *  path that shortens the block clamps it, because a week index past the end
-   *  renders an empty builder over a programme that is not empty. */
+   *  renders an empty builder over a program that is not empty. */
   const [weekIdx, setWeekIdx] = useState(0);
   /**
    * The day the coach says this block begins, `YYYY-MM-DD`, or '' because they
    * have not said — which stays the default, because "assign it now" is what
    * this control has always meant and every assignment ever made is that.
    *
-   * IT DOES NOT HOLD THE PROGRAMME BACK. The client's Train tab renders
+   * IT DOES NOT HOLD THE PROGRAM BACK. The client's Train tab renders
    * whatever is on their row the moment it is written, and
    * `CLIENT_STARTS_NOW` is printed under the field saying so. That sentence is
    * the whole safety argument: a coach who believes the date is enforced, and
@@ -366,13 +540,21 @@ export default function Builder() {
    * resolved to a week somebody can train today.
    */
   const [startsOn, setStartsOn] = useState('');
+  /** Whether the month sheet over that field is open. Reported from the floor
+   *  twice: "is there a way that when you click on the space of the date the
+   *  whole calendar option pops up for selection?", then "when you tap the date
+   *  the keyboard pops up and blocks what you are typing" — src/ui/DateSheet.tsx.
+   *  The field is now a button and nothing on this screen raises a keyboard for
+   *  a date; typing lives inside the sheet, so coaches who paste dates out of
+   *  their own messages still have a way in. */
+  const [startPick, setStartPick] = useState(false);
   const days: BDay[] = blockWeeks[weekIdx]?.days ?? [];
   const setDays: React.Dispatch<React.SetStateAction<BDay[]>> = (updater) =>
     setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx
       ? { ...w, days: typeof updater === 'function' ? (updater as (d: BDay[]) => BDay[])(w.days) : updater }
       : w)));
   /**
-   * ── Why a programme in progress is written to the phone ───────────────────
+   * ── Why a program in progress is written to the phone ───────────────────
    *
    * The whole builder lived in React state and nowhere else. A coach who
    * locked the screen, took a call, or let the phone sleep while laying out a
@@ -386,6 +568,13 @@ export default function Builder() {
    * it starts from, straight over the draft it is about to read.
    */
   const [draftLoaded, setDraftLoaded] = useState(false);
+  /** The draft read has ANSWERED — restored, refused, failed or not attempted.
+   *  `draftLoaded` cannot stand in for this: it stays false for ever after a
+   *  failed read, on purpose, so that the autosave never writes over bytes
+   *  nobody saw. What waits on this is the template a coach tapped in the
+   *  library, which must not land before the draft it might replace has had
+   *  the chance to arrive — see `startFromTemplate`. */
+  const [draftSettled, setDraftSettled] = useState(false);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const coachEx = useCoachExercises();
   /**
@@ -408,7 +597,23 @@ export default function Builder() {
   // search rather than the megabyte behind them. The detail screen fetches the
   // one row a coach actually opens.
   const cat = useExerciseCatalogue();
+  // The PICKER below already reads in the coach's own language — every row it
+  // lists carries `.display` from useExerciseCatalogue. The program it
+  // BUILDS did not: `e.name` is the English name frozen into the template
+  // JSON when the movement was added, and it is what every lookup on this
+  // screen is keyed on, so it stays. `movement()` is the same name to read.
+  const { textOf: movement } = useMovementName();
   const [custom, setCustom] = useState('');
+  /**
+   * The muscle group for a movement the catalogue has never heard of.
+   *
+   * No default. A pre-selected chip is a group nobody chose, and a group
+   * nobody chose is what put four rows into the catalogue with no muscle group
+   * at all — which is invisible in a list and missing from the body map, the
+   * day's chips and Muscle Focus. Null until the coach taps one, and Add is
+   * held until then. Cleared with the box, below.
+   */
+  const [customGroup, setCustomGroup] = useState<string | null>(null);
   // Drawn in pages. Six hundred rows mounted inside a bottom sheet is a visibly
   // janky scroll on an older phone, and nobody reads past the first screenful
   // of an alphabetical list anyway.
@@ -421,20 +626,30 @@ export default function Builder() {
   const [previewing, setPreviewing] = useState(false);
   useFocusEffect(useCallback(() => { setPreviewing(false); }, []));
   const [tplPick, setTplPick] = useState(false);
+  /** What the client has to train with. 'any' is the default and is what every
+   *  program before now assumed; it is NOT a claim that they own a rack, it is
+   *  the absence of the restriction. Nothing is generated off it. */
+  const [kit, setKit] = useState<'any' | 'none'>('any');
+  /** Whether the picked muscles share one session or take a day each. The
+   *  coach can still move movements between days in the builder below; this is
+   *  what the generator hands them to start from. */
+  const [muscleSplit, setMuscleSplit] = useState<'together' | 'split'>('split');
+  /** Muscles picked under Build From Muscles, as `kind:name` keys. */
+  const [targets, setTargets] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [tplName, setTplName] = useState('');
   /**
-   * ── Who this programme is being assigned TO ───────────────────────────────
+   * ── Who this program is being assigned TO ───────────────────────────────
    *
    * Reported as "need to save all built templates and be able to choose which
    * client(s) they are assigned to". It used to be one `clientId`, which was
-   * both the person whose programme seeded the builder AND the only person it
+   * both the person whose program seeded the builder AND the only person it
    * could be sent to — so a coach who writes one week for four clients had to
    * build it four times, and a coach who picked the wrong chip overwrote the
    * wrong person's training with nothing on screen counting them.
    *
    * The two jobs are separated: `clientId` above is the client the builder is
-   * LOOKING AT (their current programme seeds it, their disclosures are shown),
+   * LOOKING AT (their current program seeds it, their disclosures are shown),
    * and this is the set it is being SENT to. They start the same, because the
    * ordinary case is one client and making the coach tick their own subject
    * would be ceremony.
@@ -442,7 +657,7 @@ export default function Builder() {
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState(false);
   /**
-   * The client whose current programme the builder's contents were loaded FROM,
+   * The client whose current program the builder's contents were loaded FROM,
    * or null when they are the coach's own composition.
    *
    * The whole reason this exists is in src/lib/assignPicker.ts: the builder used
@@ -480,9 +695,13 @@ export default function Builder() {
   }, [rosterStatus, rosterIds, clientId]);
 
   const client = roster.find((c) => c.id === clientId);
+  /** Whether the server may be asked about this person at all. `handAdded`
+   *  undefined is "the roster has not said yet", which goes on asking; only an
+   *  explicit true withholds. See src/lib/clientRecord.ts. */
+  const clientAskable = clientIsQueryable(clientId, client?.handAdded);
   // Only a whole read of `assigned_programs` can tell us this. Under any other
   // status a null from getProgram means "we did not find out", so saying "on
-  // their auto-generated program" — and offering a Revert for a programme we
+  // their auto-generated program" — and offering a Revert for a program we
   // cannot see — would both be assertions this screen has no basis for.
   const assignedNow = programStatus === 'ready' && !!getProgram(clientId);
   // The goal the auto plan would be built from, or null when the roster does
@@ -496,36 +715,52 @@ export default function Builder() {
   const goalSplit = !!client && goalsDisagree(client.goal, client.coachGoal);
   const planGuard = guardOverwrite(
     programStatus,
-    client ? `the programme ${client.name.split(' ')[0]} is currently on` : "this client's current programme",
+    client ? `the program ${client.name.split(' ')[0]} is currently on` : "this client's current program",
   );
-  // A programme is built AROUND what a client cannot do, so the coach reads
+  // A program is built AROUND what a client cannot do, so the coach reads
   // the disclosures before writing the sessions. Two guards rather than one
   // because they withhold the button for unrelated reasons and each has its
   // own sentence; see src/lib/injuryGate.ts.
   const acks = useInjuryAcks();
-  const clientInjuries: Injury[] = (client?.injuries ?? []).map((i, n) => ({
-    id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-    status: 'active', note: i.note, at: '',
-  }));
-  // How the read of the DISCLOSURES themselves went, which is a different
-  // question from how the read of the acknowledgements went and was the one
-  // nobody asked. `client?.injuries ?? []` is an empty list under a roster that
-  // failed exactly as it is under a client who has nothing wrong with them, and
-  // the gate opened on both — so an outage handed the coach a clean Assign
-  // button for somebody with a severe shoulder. This is the injuries half of
-  // the same discipline the rest of the screen already applies to `roster`.
   //
-  // A client we DID find is trustworthy under 'partial': that status means the
-  // roster was truncated, not that this row came back half-read, and their
-  // injuries travelled on the row. Under 'error' the `clients` read is the one
-  // that failed and anybody still in the list came from the manual half, so
-  // even a client we can see is a client whose disclosures we did not read.
-  const disclosureStatus: LoadStatus =
-    !clientId ? 'ready'
-    : rosterStatus === 'error' ? 'error'
-    : client ? 'ready'
-    : rosterStatus === 'loading' ? 'loading'
-    : 'error';
+  // How the read of the DISCLOSURES themselves went is a different question
+  // from how the read of the acknowledgements went, and was the one nobody
+  // asked. `client?.injuries ?? []` is an empty list under a roster that failed
+  // exactly as it is under a client who has nothing wrong with them, and the
+  // gate opened on both — so an outage handed the coach a clean Assign button
+  // for somebody with a severe shoulder.
+  //
+  // The status was not enough on its own, and the same `?? []` hid a second
+  // person behind it. A HAND-ADDED client — a `coach_clients` row the coach
+  // typed in, no account, no app — IS in the roster, so `client` was truthy and
+  // the status read 'ready'; their `injuries` is `undefined`, which
+  // src/ui/roster.tsx leaves undefined deliberately because undefined is
+  // "nobody has ever asked this person" and `[]` is "they were asked and said
+  // none"; and `?? []` turned the first into the second. `guardInjuries`
+  // returns ALLOWED on an empty list, so the client with the least known about
+  // them opened the program gate as though they had been asked and had
+  // answered that there was nothing wrong.
+  //
+  // Both are now decided in src/lib/disclosureFact.ts, which keeps four answers
+  // apart — asked and disclosed something, asked and disclosed nothing, never
+  // asked, and a row that came back with no injury list at all — and hands this
+  // screen the status the gate needs together with the sentence the coach
+  // needs. The assign is NOT withheld for a hand-added client; it is no longer
+  // made in silence. `fact.note` is drawn on their row in Assign To and again
+  // in the sentence the coach confirms, and a caller that takes `gateStatus`
+  // without drawing `note` has put the defect back.
+  //
+  // Null when there is no client focused at all, which is neither a state of a
+  // person nor a failed read: this screen writes templates with nobody picked,
+  // and holding the gate over an unread nobody would be a wall across the
+  // ordinary use of it.
+  const clientFact: DisclosureFact | null = clientId
+    ? disclosureFact(rosterStatus, client, clientId, client?.name.split(' ')[0] ?? 'This client')
+    : null;
+  // Non-empty only where somebody actually disclosed something — never under an
+  // absence, and never the flattened `?? []` again.
+  const clientInjuries: Injury[] = clientFact ? clientFact.injuries : [];
+  const disclosureStatus: LoadStatus = clientFact ? clientFact.gateStatus : 'ready';
   const injuryGate = guardInjuries(
     disclosureStatus,
     acks.status,
@@ -535,7 +770,7 @@ export default function Builder() {
   );
 
   /* ── What this client has actually been doing ───────────────────────────
-     One of the seven programme checks compares the volume a coach has just
+     One of the seven program checks compares the volume a coach has just
      written against what this client has really logged for the same movement,
      and it cannot be done from anything already on this screen. The read is
      the same one app/(trainer)/client-training.tsx makes — same columns, same
@@ -548,6 +783,8 @@ export default function Builder() {
      different answer from an empty array, which would be a client who has
      logged nothing, and src/lib/programReview.ts reads the two differently:
      one stands the check down, the other runs it and finds nothing. */
+  /** Bumped by the pull below, so the log is re-read with everything else. */
+  const [reviewLogNonce, setReviewLogNonce] = useState(0);
   const [reviewLog, setReviewLog] = useState<WorkoutEntry[] | null>(null);
   const [reviewLogStatus, setReviewLogStatus] = useState<LoadStatus>('ready');
   /* The client whose answer is allowed to land. Tapping down a book starts a
@@ -559,16 +796,22 @@ export default function Builder() {
   useEffect(() => {
     wantedLog.current = clientId ?? null;
     if (!clientId || !USE_SUPABASE) { setReviewLog(null); setReviewLogStatus('ready'); return; }
-    // A client the coach typed in by hand has no user account, so their id is
-    // not a uuid and Postgres refuses the whole statement rather than skipping
-    // the value. There is nothing to read and nothing failed: the check stands
+    // A client the coach typed in by hand has a `coach_clients` row and no user
+    // account. There is nothing to read and nothing failed: the check stands
     // down rather than reporting a client who never trains.
-    if (!isQueryableId(clientId)) { setReviewLog(null); setReviewLogStatus('ready'); return; }
+    //
+    // This was `isQueryableId(clientId)`, which stopped separating the two the
+    // moment `coach_clients.id` turned out to be uuid DEFAULT
+    // gen_random_uuid(): the guard passed, the read ran, it came back empty
+    // with no error, and the volume check compared a whole block against a
+    // training history that had never been asked for. The roster is what knows
+    // which table the row came from — src/lib/clientRecord.ts.
+    if (!clientAskable) { setReviewLog(null); setReviewLogStatus('ready'); return; }
     let live = true;
     setReviewLog(null); setReviewLogStatus('loading');
     void (async () => {
       const { data, error } = await supabase.from('workouts')
-        .select('id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at')
+        .select(WORKOUT_COLS)
         .eq('user_id', clientId)
         .order('performed_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit());
@@ -586,14 +829,27 @@ export default function Builder() {
       // 'partial' rather than 'ready' at the cap, and the check declines to run
       // on it: a prefix of somebody's sessions can hold none of their heavy
       // ones, and "more than she has ever done" measured against half a record
-      // is a finding about the read rather than about the programme.
+      // is a finding about the read rather than about the program.
       setReviewLogStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [clientId]);
+  }, [clientId, clientAskable, reviewLogNonce]);
+  // ── the eighth read, which the refresh did not count ──────────────────────
+  //
+  // The comment under `pull` below opens "Seven reads sit behind this screen"
+  // and this was not one of them: the log effect closed on `[clientId,
+  // clientAskable]` with no nonce and no focus effect, so it ran once per
+  // client and never again. The builder is opened straight after a session more
+  // often than at any other moment, and the session that just happened is
+  // precisely what is missing — the coach pulls down out of habit, watches the
+  // spinner, and prescribes 42.5 kg against a log with no Tuesday in it.
+  //
+  // It feeds the program review and the load suggestion the coach taps, so a
+  // stale copy is not a stale list, it is a number written into somebody's week.
+
   // ── This builder edits ONE person's copy ─────────────────────────────────
   //
-  // A programme sent to a group is a fan-out: each member gets their own
+  // A program sent to a group is a fan-out: each member gets their own
   // `assigned_programs` row, so a client who turns up with a shoulder is
   // changed here without touching the other seven. That is the whole reason
   // groups own the list and not the plan (app/(trainer)/group.tsx), and it is
@@ -606,11 +862,40 @@ export default function Builder() {
   const clientGroups = useProgramGroups();
   const inGroups = clientId && clientGroups.status === 'ready' ? clientGroups.groupsForClient(clientId) : [];
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Eight reads sit behind this screen and the builder crosses them on every
+   * decision it makes: the book, what each client is already assigned (the
+   * overwrite confirmation is counted off that), the template library, the
+   * coach's saved movement names, the movement catalogue, the group
+   * membership line, the injury acknowledgements the primary button is gated
+   * on, and what this client has actually trained — which drives the program
+   * review and the load suggestion, and was the one this list used to omit.
+   *
+   * The injury read is the reason this gesture belongs here at all. The
+   * button says "Injuries Could Not Be Read" and refuses — correctly — and
+   * until now the only way to make it ask again was to leave the screen,
+   * which takes the half-built program with it.
+   *
+   * NOTHING here touches the draft. Every one of these is a read; the week
+   * the coach has laid out is untouched, which is the only reason a refresh
+   * gesture is safe on a screen that is mostly an editor. */
+  const pull = usePullToRefresh(useCallback(() => {
+    // The eighth: what this client has actually trained. See the note beside
+    // the effect that reads it.
+    setReviewLogNonce((n) => n + 1);
+    return Promise.all([
+      refreshRoster(), Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
+      Promise.resolve(coachEx.reload()), cat.reload(),
+      Promise.resolve(clientGroups.refresh()), acks.refresh(),
+    ]);
+  }, [refreshRoster, reloadPrograms, reloadTemplates, coachEx, cat, clientGroups, acks]));
+
   /**
    * ── The retry the injury gate never had ───────────────────────────────────
    *
    * The user photographed this screen with its primary button reading
-   * "Injuries Could Not Be Read". The guard is right and stays — a programme
+   * "Injuries Could Not Be Read". The guard is right and stays — a program
    * built around a disclosure nobody read is exactly what it exists to stop —
    * but it was a wall with no door. `injury_acknowledgements` is read once per
    * session, on `authRev` and on nothing else, so one bad connection latched
@@ -647,14 +932,43 @@ export default function Builder() {
   };
 
   /**
-   * Fill the builder from a programme.
+   * ── Whether what is in the builder exists anywhere else ───────────────────
+   *
+   * `pristine` is the builder as it stood the last time its contents were
+   * somewhere durable: just loaded from a client's program or a template,
+   * just saved as a template, just assigned to everybody it was sent to. A
+   * builder that still matches it can be replaced on one tap, because nothing
+   * is lost. One that does not is the coach's unsaved work, and the one-tap
+   * program shortcuts ask before loading over it.
+   *
+   * A snapshot and not `programSignature`: the signature deliberately ignores
+   * weights and notes, and a coach who loaded a template and spent ten minutes
+   * typing loads into it has work the signature cannot see.
+   *
+   * A restored draft is never pristine — it is by definition work that is
+   * nowhere but this phone — so the restore does not bump the nonce, and the
+   * snapshot it is compared against is the empty builder the screen mounted
+   * with.
+   *
+   * Taken in an effect keyed on a NONCE rather than on the state itself: the
+   * setters in `loadFrom` land together on the next render, which is the first
+   * moment the loaded program can be read back in the builder's own shape,
+   * and a load that happened to change nothing would never fire an effect
+   * keyed on the values.
+   */
+  const pristine = useRef<string | null>(null);
+  const [savedNonce, setSavedNonce] = useState(0);
+  const markSaved = () => setSavedNonce((n) => n + 1);
+
+  /**
+   * Fill the builder from a program.
    *
    * `loadKg` and `note` are carried across, and were not. Both are written per
    * exercise and both were dropped here, so opening a saved template — or the
-   * programme a client is already on — silently emptied every weight the coach
+   * program a client is already on — silently emptied every weight the coach
    * had typed and every cue they had written, and the builder then presented
    * that stripped copy as the thing they had built. Re-assigning it wrote the
-   * loss back over the client's real programme.
+   * loss back over the client's real program.
    *
    * `setGroupId` and `method` were dropped in exactly the same way and by the
    * same mechanism — this list and `composeProgram`'s enumerate their fields by
@@ -672,35 +986,152 @@ export default function Builder() {
     setTitle(p.title);
     setNote(p.note && !GENERATED_NOTE.test(p.note) ? p.note : '');
     // `programWeeks` is the ONE reader of the block, and it answers a single
-    // week built from `days` for every programme that has none — which is every
-    // programme in `program_templates`, on every assignment and in every draft.
-    // So a one-week programme loads exactly as it always did, into week one,
+    // week built from `days` for every program that has none — which is every
+    // program in `program_templates`, on every assignment and in every draft.
+    // So a one-week program loads exactly as it always did, into week one,
     // with no week strip drawn for it.
     setBlockWeeks(programWeeks(p).map((w) => ({
       days: toBuilderDays(w.days), label: w.label, deload: w.deload,
     })));
     // Back to week one on every load. A coach who was editing week five of one
     // client's block and taps another client must not land on week five of a
-    // programme that may have two weeks in it.
+    // program that may have two weeks in it.
     setWeekIdx(0);
     setSeededFor(from);
-    // Every day is a different day now, so an index that was folded names
+    // Every day is a different day now, so an index that was opened names
     // somebody else's Wednesday. Same reasoning as `removeDay`.
-    setFoldedDays(foldsForNewProgramme());
+    setOpenDays(foldsForNewProgram());
+    setOpenEx(null);
+    // A program with a week in it opens AS that week — its day rows, every
+    // one of them shut. With the editor left folded a coach who tapped a
+    // client saw seven circles and three rows and had to find the week; with
+    // every day open they saw forty exercises. The rows are the middle.
+    if (programWeeks(p).some((w) => w.days.length > 0)) setEditorOpen(true);
+    markSaved();
   };
-  const clearBuilder = () => { setTitle(''); setNote(''); setBlockWeeks([{ days: [] }]); setWeekIdx(0); setSeededFor(null); setFoldedDays(foldsForNewProgramme()); };
+  const clearBuilder = () => { setTitle(''); setNote(''); setBlockWeeks([{ days: [] }]); setWeekIdx(0); setSeededFor(null); setOpenDays(foldsForNewProgram()); setOpenEx(null); markSaved(); };
 
   // Load the client's current program (assigned if any, else their auto plan)
   // whenever the selected client changes — but only once we actually know what
   // they are on.
   //
-  // Filling the builder from an unread record is how the wrong programme gets
+  // Filling the builder from an unread record is how the wrong program gets
   // written. The days below would show the auto plan, the section head would
   // count its exercises, and nothing on the page would distinguish that from
   // the coach's own work — so the coach tweaks it and assigns it, over the top
   // of whatever was really there. Blank is the honest state for "we do not
   // know yet", and the Program section says so in words.
-  const hasDraft = !!days.length || !!title.trim() || !!note.trim();
+  //
+  // ── and it has to be the WHOLE block, for the same reason ────────────────
+  //
+  // This read `days`, which is `blockWeeks[weekIdx].days` — ONE week. So a
+  // coach with a finished twelve-week block sitting on an empty week five had
+  // `hasDraft` false, the seed fired, and twelve weeks of programming were
+  // replaced by the selected client's assignment. Silent, total, no undo.
+  //
+  // `blockExercises` sixty lines below is the identical mistake, found and
+  // fixed for the Assign gate, with a comment ending "what decides whether
+  // there is anything to send has to be every week too". This is the second
+  // caller of the same idea and it was left behind — which is the argument for
+  // asking the block rather than the week wherever the question is "is there
+  // work here", not just where somebody happened to look.
+  const hasDraft = blockWeeks.some((w) => w.days.length > 0) || !!title.trim() || !!note.trim();
+  useEffect(() => {
+    pristine.current = JSON.stringify({ title, note, blockWeeks });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedNonce]);
+  /** Work in the builder that is nowhere else. Asked at the moment of a tap
+   *  and not on every render: it serialises the whole block. */
+  const builderDirty = () => hasDraft && JSON.stringify({ title, note, blockWeeks }) !== pristine.current;
+  /**
+   * Load one of the coach's saved programs into the builder — the one-tap
+   * shortcut, the Start From a Template sheet, and the library's own rows all
+   * land here.
+   *
+   * Asked for as "create shortcuts to named programs you have created so you
+   * don't have to scroll through". One tap is the point, so it IS one tap
+   * whenever the builder holds nothing that would be lost. When it holds
+   * unsaved work the tap asks first, names what is about to be replaced, and
+   * says where the way to keep it is. It used to replace without asking from
+   * all three doors, on the one screen where the standing fear is losing work.
+   *
+   * `from` nobody: a template is the coach's own, not a client's program,
+   * which is what makes the notice under Program tell the truth when a
+   * client is then picked.
+   */
+  const startFromTemplate = (tpl: { name: string; program: Program }) => {
+    const land = () => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); };
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `“${tpl.name}” loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
+  /**
+   * A week drawn only from movements that need nothing at all.
+   *
+   * Computed the moment the coach picks No equipment, BEFORE they tap Build,
+   * so the sentence about what it could not cover is read as part of the
+   * decision rather than found afterwards underneath a finished week.
+   *
+   * 'ready' only. Under 'partial' the catalogue held is a prefix, so which
+   * groups have no no-kit movement is a subtotal and printing it would state a
+   * gap in the catalogue out of a gap in the read; under 'loading' and 'error'
+   * there is nothing to count at all. Each says so on screen instead.
+   */
+  const noKit = useMemo(
+    () => (kit === 'none' && cat.status === 'ready' ? noKitProgram(cat.rows) : null),
+    [kit, cat.status, cat.rows],
+  );
+
+  /** Load that week over what is in the builder, asking first when the coach
+   *  has unsaved work — the same guard, and the same words, as the template
+   *  shortcut above, because it is the same loss. */
+  const buildNoKitWeek = () => {
+    if (!noKit?.program.days.length) return;
+    const land = () => loadFrom(noKit.program, null);
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `A no-equipment week loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
+  /** A week built from the picked muscles, one day per target, over the same
+   *  equipment answer as above. Whole catalogue reads only, as with no-kit. */
+  const byMuscle = useMemo(() => {
+    if (!targets.length || cat.status !== 'ready') return null;
+    const parsed = targets.map((k): Target => ({
+      kind: k.slice(0, k.indexOf(':')) as Target['kind'], name: k.slice(k.indexOf(':') + 1),
+    }));
+    return targetedProgram(cat.rows, parsed, {
+      noKit: kit === 'none', together: muscleSplit === 'together' && targets.length > 1,
+    });
+  }, [targets, cat.status, cat.rows, kit, muscleSplit]);
+
+  const buildFromMuscles = () => {
+    if (!byMuscle?.program.days.length) return;
+    const land = () => loadFrom(byMuscle.program, null);
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `A week built from these muscles loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
   /**
    * Whether the builder may fill itself from the selected client, and what to
    * say when it may not. The rule, and the twenty minutes of lost work behind
@@ -716,11 +1147,11 @@ export default function Builder() {
   /** Load what the selected client is really on, over whatever is in the
    *  builder. Only ever run from the control the coach taps — never on its
    *  own, which is what it used to do. */
-  const loadTheirProgramme = () => {
+  const loadTheirProgram = () => {
     if (!clientId || programStatus !== 'ready') return;
     const existing = getProgram(clientId);
     if (existing) { loadFrom(existing, clientId); return; }
-    // No coach-assigned programme, so the builder would normally open on the
+    // No coach-assigned program, so the builder would normally open on the
     // client's auto plan — but the auto plan's whole content is chosen by the
     // goal, and we do not have one. Generating from a guess and drawing it here
     // is indistinguishable from drawing the real thing, which is the same trap
@@ -731,7 +1162,7 @@ export default function Builder() {
     loadFrom(buildProgram(autoGoal, 25), clientId);
   };
   useEffect(() => {
-    if (seed.action === 'seed') loadTheirProgramme();
+    if (seed.action === 'seed') loadTheirProgram();
     else if (seed.action === 'clear') clearBuilder();
     // 'hold' is the whole point and does nothing: what is in the builder is the
     // coach's, and it is not taken from them by a tap on somebody's name.
@@ -742,26 +1173,204 @@ export default function Builder() {
   const loadedTplRef = useRef<string | null>(null);
   useEffect(() => {
     const tid = params.templateId as string;
-    if (!tid || loadedTplRef.current === tid) return;
+    // Keyed on the tap as well as the template — see `openInBuilder` in
+    // app/(trainer)/templates.tsx. A link with no `at` (every older caller)
+    // behaves exactly as before: once per template.
+    const ask = tid ? `${tid}:${typeof params.at === 'string' ? params.at : ''}` : '';
+    if (!tid || loadedTplRef.current === ask) return;
+    // Not before the stored draft has answered. This used to load on mount,
+    // ahead of the async draft read — so the restore found a builder "in use",
+    // refused, and the autosave then wrote the template over the coach's
+    // stored draft. The template waits, and then asks like every other door.
+    if (!draftSettled) return;
     const tpl = templates.find((x) => x.id === tid);
-    // A template is the coach's own work, not a client's programme, so it is
-    // seeded `from` nobody — which is what makes the notice below tell the
-    // truth when a client is then picked.
-    if (tpl) { loadedTplRef.current = tid; loadFrom(tpl.program, null); setTplName(tpl.name); }
+    // A template is the coach's own work, not a client's program, so it is
+    // seeded `from` nobody — see `startFromTemplate`. Marked as handled
+    // whatever the coach answers: "Keep What I Have" is an answer, and asking
+    // again on every render is not respecting it.
+    if (tpl) { loadedTplRef.current = ask; startFromTemplate(tpl); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.templateId, templates.length]);
+  }, [params.templateId, params.at, templates.length, draftSettled]);
+
+  /* ── the coach's saved cues ───────────────────────────────────────────────
+   *
+   * Three states and they are three different facts, so they are three
+   * different values rather than one nullable list:
+   *
+   *   null            not read yet. Nothing is prefilled and no cue control is
+   *                   drawn, because "this movement has no cue" is not
+   *                   something we know yet.
+   *   {status:'read'} the table answered. An empty `cues` here really does mean
+   *                   this coach has written none.
+   *   {status:'absent'} supabase/parts/3150 has not been applied. See below.
+   *
+   * And `cueFailed` is the fourth, kept apart from all three: a read that fell
+   * over is not a coach with no cues, and the section says so rather than
+   * quietly offering nothing.
+   *
+   * ── WHY THIS READ CANNOT TAKE THE SCREEN DOWN ───────────────────────────
+   *
+   * Part 3150 is not applied to any database as this ships. PostgREST answers
+   * a select naming a table it has never heard of with PGRST205 — measured
+   * against this project's own REST endpoint, not assumed — and a screen that
+   * let that through would leave a coach unable to write a program because
+   * of a feature they have never used. `fetchMyCues` converts exactly that
+   * code (and 42P01, its Postgres form) into 'absent' and throws everything
+   * else, so the builder degrades to precisely what it was before this
+   * feature existed: notes typed by hand, nothing prefilled, no control
+   * offered, and one sentence saying why.
+   */
+  const [cues, setCues] = useState<CueRead | null>(null);
+  const [cueFailed, setCueFailed] = useState(false);
+  const cuesLive = useRef(true);
+  useEffect(() => () => { cuesLive.current = false; }, []);
+  const loadCues = useCallback(async () => {
+    // With no server there are no saved cues and nothing to look up. 'absent'
+    // is the honest pair: the feature genuinely does not apply here, rather
+    // than having failed to be read.
+    if (!USE_SUPABASE) { setCues({ status: 'absent' }); setCueFailed(false); return; }
+    try {
+      const r = await fetchMyCues(supabase);
+      if (cuesLive.current) { setCues(r); setCueFailed(false); }
+    } catch (e) {
+      // Reported and SAID, never swallowed into an empty list. A coach whose
+      // cues did not come back must not be told they have none.
+      reportError('builder.cues', e);
+      if (cuesLive.current) { setCues(null); setCueFailed(true); }
+    }
+  }, []);
+  useEffect(() => { void loadCues(); }, [loadCues]);
+  /** The cue for a movement, or null — including while the read is still out,
+   *  which is why every caller of this is a prefill or a caption and never a
+   *  sentence claiming the coach wrote none. */
+  const cueFo = useCallback((name: string) => (cues ? cueFor(cues, name) : null), [cues]);
+
+  /** Which exercise's cue editor is open, and what is in the box. */
+  const [cueEditFor, setCueEditFor] = useState<{ name: string } | null>(null);
+  const [cueDraft, setCueDraft] = useState('');
+  const [cueBusy, setCueBusy] = useState(false);
+  const [cueSaid, setCueSaid] = useState<string | null>(null);
+  /** How many empty notes the last "fill from my cues" tap filled. Null until
+   *  it is tapped — a count of 0 is a real answer and is said out loud. */
+  const [cuesFilled, setCuesFilled] = useState<number | null>(null);
+
+  /**
+   * Save (or replace) this coach's cue for a movement.
+   *
+   * Replacing a cue is the coach changing their own default and is not the
+   * erasure this feature is careful about: not one note in not one client's
+   * program is touched by it. Notes already prefilled from the old cue were
+   * written into their own rows the moment they were prefilled, and they stay
+   * exactly as they are — which is right, because those are what the coach
+   * actually told those people.
+   */
+  const commitCue = async (name: string) => {
+    if (cueBusy) return;
+    const refusal = cueRefusal(cueDraft, name);
+    if (refusal) { setCueSaid(refusal); return; }
+    setCueBusy(true); setCueSaid(null);
+    const r = await saveCue(supabase, name, cueDraft);
+    setCueBusy(false);
+    // Counted, not inferred. `saveCue` returns the row the server wrote back,
+    // and a write that came back with no row is a write that did not happen.
+    if (!r.ok) { setCueSaid(r.said); return; }
+    setCues((prev) => {
+      const base = prev && prev.status === 'read' ? prev.cues : [];
+      const rest = base.filter((c) => c.exerciseId !== r.cue.exerciseId);
+      return { status: 'read', cues: [...rest, r.cue] };
+    });
+    setCueEditFor(null); setCueDraft('');
+  };
+  /** Remove the cue. Nothing already written into a program moves. */
+  const dropCue = async (name: string) => {
+    if (cueBusy) return;
+    setCueBusy(true); setCueSaid(null);
+    const r = await deleteCue(supabase, name);
+    setCueBusy(false);
+    if (!r.ok) { setCueSaid(r.said); return; }
+    const key = exerciseSlug(name);
+    setCues((prev) => (prev && prev.status === 'read'
+      ? { status: 'read', cues: prev.cues.filter((c) => c.exerciseId !== key) }
+      : prev));
+    setCueEditFor(null); setCueDraft('');
+  };
 
   const setDayFocus = (di: number, focus: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, focus } : d)));
-  const addExercise = (di: number, name: string, group: string) =>
-    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, { key: nextKey(), name, group, sets: 3, reps: '10-12' }] } : d)));
+  /**
+   * The conditioning line attached to a day.
+   *
+   * `cardio` was round-tripped through both mappers and rendered nowhere: the
+   * generated plans set it (`src/lib/programs.ts` writes "15 min incline walk"),
+   * the client is told to do it, and the coach could not see that it existed.
+   * So a block written for a runner and re-assigned to somebody rehabbing a
+   * knee carried the incline walk with it, silently, and the only person who
+   * ever read the prescription was the person doing it.
+   *
+   * An empty box clears the field rather than storing a blank string, so a day
+   * with no conditioning is a day with none and not a day prescribing "".
+   */
+  const setDayCardio = (di: number, cardio: string) =>
+    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, cardio: cardio.trim() ? cardio : undefined } : d)));
+  /**
+   * Add a movement to a day, carrying this coach's saved cue into its note.
+   *
+   * This is the moment the cue is FOR: a movement that has just this instant
+   * been added has no note by construction, so `prefillNote` fills it and
+   * there is nothing it could be overwriting. It still goes through
+   * `prefillNote` rather than assigning `cue` straight to `note`, because a
+   * second path that writes a note without asking that function is exactly how
+   * the never-overwrite rule stops being true.
+   *
+   * `undefined` and never '' when there is no cue — an empty string stored as
+   * a note draws an empty bubble under the movement in the client's app.
+   */
+  const addExercise = (di: number, name: string, group: string) => {
+    // Minted out here so the new row can be opened by it: a movement arrives
+    // as 3 × 10-12 with no weight, which is a placeholder and not a
+    // prescription, and the next thing a coach does is write the real one.
+    const key = nextKey();
+    setOpenEx(key);
+    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, {
+      key, name, group, sets: 3, reps: '10-12',
+      note: prefillNote(undefined, cueFo(name)),
+    }] } : d)));
+  };
+  /**
+   * Fill every EMPTY note in this week from the saved cues, and say how many.
+   *
+   * Offered as a tap rather than run on load, for two reasons and the second
+   * is the one that matters. The first is timing: a program can be loaded
+   * into the builder before the cue read comes back, so an automatic pass
+   * would fire for some coaches and not others with nothing on screen to say
+   * which. The second is that a coach opening a client's existing week should
+   * see exactly what that client is on — nothing should change under them
+   * without a tap and without a count.
+   *
+   * `prefillDays` is the same `prefillNote` applied across the week: a note
+   * with anything in it is returned by identity and is not considered, so this
+   * button cannot lose a word of what the coach wrote for this client. The
+   * count is of notes that were EMPTY and now are not, and it is reported even
+   * when it is zero — a silent no-op reads as a broken button.
+   */
+  const fillFromCues = () => {
+    if (!cues || cues.status !== 'read') return;
+    const before = days;
+    const after = prefillDays(before, cues);
+    let filled = 0;
+    after.forEach((d, di) => d.exercises.forEach((e, ei) => {
+      if (e !== before[di].exercises[ei]) filled += 1;
+    }));
+    if (filled) setDays(() => after);
+    setCuesFilled(filled);
+  };
   const removeExercise = (di: number, key: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.filter((e) => e.key !== key) } : d)));
 
   /**
    * Move one exercise up or down within its day.
    *
-   * Order is not decoration in a programme — it is the order somebody trains
+   * Order is not decoration in a program — it is the order somebody trains
    * in, and a compound put after an isolation is a different session. Until
    * this, the only way to fix a movement in the wrong place was to delete it
    * and add it again at the end, which also threw away the sets, reps and
@@ -939,72 +1548,202 @@ export default function Builder() {
 
 
   /**
-   * Days the coach has folded away, by index.
+   * Days the coach has OPENED, by index. Everything else is shut.
    *
-   * A five-day programme is fifteen or twenty exercises, each with its own
+   * A five-day program is fifteen or twenty exercises, each with its own
    * sets, reps and weight row — so reaching Friday means scrolling past all of
-   * Monday to Thursday. Folding is per day rather than an accordion that opens
+   * Monday to Thursday. Opening is per day rather than an accordion that opens
    * one at a time: a coach comparing Push against Pull wants both open, and a
    * screen that closes the thing you were reading because you opened another is
    * its own annoyance.
    *
+   * ── why the map turned over ──────────────────────────────────────────────
+   * This was `foldedDays`, true meaning SHUT, so a missing key meant open and
+   * every program loaded with every day of it spread down the page. Reported
+   * from a coach's phone against exactly that: "When going onto a clients
+   * program, all of the exercises are displayed so it can feel cluttered when
+   * you first open it up." The week now opens as its day rows — the day, its
+   * focus, "N exercises · M sets" — and a day is read by opening it. Nothing is
+   * remembered between programs on purpose: a map keyed by position names a
+   * different Wednesday in every program, so the only default that cannot
+   * open the wrong day is shut.
+   *
    * Keyed by INDEX, so the map has to be re-keyed by every edit that MOVES a
    * day and thrown away by every edit that replaces the list. Both are in
-   * src/lib/foldedDays.ts and both are called: `removeDay` shifts the folds
+   * src/lib/foldedDays.ts and both are called: `removeDay` shifts the entries
    * past the deletion, and `loadFrom`, `clearBuilder` and the draft restore
-   * start over. This comment used to say the map was reset on removal and
-   * nothing did it — the visible cost was that deleting a day above a folded
-   * one collapsed the wrong day.
+   * start over. That module was written for the folded sense and is used here
+   * unchanged, because what it does is sense-free: it re-keys the TRUE entries
+   * of a sparse index map and drops the rest, and its empty map is "nothing
+   * marked" — which used to be every day open and is now every day shut.
    */
-  const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
-  const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
+  const [openDays, setOpenDays] = useState<Record<number, boolean>>({});
+  // The advanced day/exercise editor opens only when asked for — from the
+  // Exercises row or a day circle — as the implementation brief asks. The
+  // rows above it carry truthful counts, so a coach can see the block's shape
+  // without the four-thousand-line editor under it.
+  const [editorOpen, setEditorOpen] = useState(false);
+  const toggleDay = (di: number) => setOpenDays((p) => ({ ...p, [di]: !p[di] }));
+  /**
+   * The ONE exercise whose prescription is open, by key, or null.
+   *
+   * An open day used to draw every movement in it at full height — sets, reps,
+   * weight, effort, tempo, rest, set type, note and cue, six times over — so
+   * editing one exercise meant reading past the editors of all the others. A
+   * row is now the movement, its picture and one line of what is prescribed;
+   * the editor belongs to whichever row the coach opened, and opening another
+   * closes it. One at a time HERE, unlike the days above, because nobody
+   * compares two weight boxes side by side and everybody loses their place in
+   * a day that is four screens tall.
+   *
+   * By key and not by index: the rows reorder, and an index would hand the
+   * open editor to whatever movement was dragged into its slot.
+   */
+  const [openEx, setOpenEx] = useState<string | null>(null);
+  /** Exercises whose less-used fields — effort, share of a max, tempo, set
+   *  type, the saved cue — are showing. Absent means "decide from the data":
+   *  an exercise that already CARRIES one of them opens with them visible, so
+   *  a prescription is never hidden behind a control the coach has to guess
+   *  is there. See `advancedShown`. */
+  const [advOpen, setAdvOpen] = useState<Record<string, boolean>>({});
+  /** A day circle tapped while that day is in the week: open the editor at
+   *  it, or — once the editor is up — open and shut it, which is what the
+   *  day row's own control does. Never a removal: this is the one screen
+   *  where the standing fear is losing work, and a circle that empties a day
+   *  on a single tap is that fear made into a control. Taking a day out stays
+   *  where it is confirmed, in the editor. */
+  const openDay = (di: number) => {
+    if (!editorOpen) { setEditorOpen(true); if (!openDays[di]) toggleDay(di); } else toggleDay(di);
+  };
 
-  const DRAFT_KEY = 'repple.builder.draft.v1';
+  /**
+   * ── Whose draft this is ───────────────────────────────────────────────────
+   *
+   * It used to be nobody's. The key was the literal `'repple.builder.draft.v1'`
+   * with no account in it, the read had `[]` dependencies, and nothing on the
+   * sign-out path removed it — so on a shared gym handset coach B signed in,
+   * opened Programs, and coach A's entire block was restored into their builder
+   * with `seededFor` set to null, which is this screen saying "this is your own
+   * work". The Assign control below then sends it to B's clients under B's
+   * name, with A's loads and A's notes about A's clients on it.
+   *
+   * The account is in the key now. src/lib/builderDraft.ts holds the key
+   * composition, the restore decision and — at length — why the old unqualified
+   * key is DELETED UNREAD rather than migrated: the blob names no coach, so
+   * reading it into whoever is signed in is a guess, and the cost of guessing
+   * wrong is the defect above performed once deliberately.
+   */
+  const { user: draftUser } = useAuth();
+  const draftUid = draftUser?.id ?? null;
+  const draftKey = builderDraftKey(draftUid);
+  /** The account the builder's React state belongs to. A ref, because it is
+   *  written from inside the effect that reads it and must not schedule a
+   *  render of its own. */
+  const draftFor = useRef<string | null>(null);
+  /** `draftLoaded` again, readable from inside the effect without being a
+   *  dependency of it. The two are set together and never apart. */
+  const draftArmed = useRef(false);
+  /** Whether the builder is holding work RIGHT NOW, for the restore decision.
+   *  Refreshed every render so the async read below tests what is on screen
+   *  when it lands rather than what was there when it started. */
+  const builderHasWork = useRef(false);
+  builderHasWork.current = draftHasContent<BDay>({
+    title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
+  });
 
   useEffect(() => {
+    const step = draftStepFor({
+      uid: draftUid, onScreenKey: draftFor.current, onScreenSaved: draftArmed.current,
+    });
+    // Cleared BEFORE the read, and before anything else in this effect — never
+    // left at whatever the LAST key's read set it to. A flag that survived the
+    // key changing would let an account switch whose read then FAILED write
+    // this coach's empty builder straight over the other coach's stored
+    // program, which is the one way to lose a block rather than merely show
+    // the wrong one. src/ui/exerciseVideos.ts and src/ui/clientData.tsx carry
+    // the same note; it is the same trap here.
+    draftArmed.current = false;
+    setDraftLoaded(false);
+    setDraftSettled(false);
+    // No account and nothing of this account's on the device: hold. A null uid
+    // is not a sign-out — auth-js emits a null session when a token refresh
+    // fails on a basement wifi and restores the coach on the next tick — and
+    // blanking a builder full of unsaved work on that is worse than the bug
+    // this effect fixes. Read nothing, write nothing, leave it alone.
+    if (step.do === 'hold') { setDraftSettled(true); return; }
+    // The account is gone and the device already has what is on screen. Take it
+    // off the screen: this is a TAB, expo-router keeps tab screens mounted, and
+    // an `href: null` screen mounts once and is never torn down — so a
+    // screen-local `useState` outlives a sign-out with no storage read involved
+    // at all. The STORED bytes stay: they are the departing coach's work under
+    // the departing coach's key, unreadable to whoever signs in next.
+    if (step.do === 'forget') { draftFor.current = null; clearBuilder(); setDraftSettled(true); return; }
+    // A different coach. Wiped before the read lands rather than left for the
+    // restore to overwrite, because the restore is allowed to REFUSE — and a
+    // refusal that left the previous coach's program sitting in this coach's
+    // builder is the defect wearing a fix.
+    const wiped = step.forget;
+    if (wiped) clearBuilder();
+    draftFor.current = step.key;
     let live = true;
     (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(DRAFT_KEY);
-        if (!live || !raw) return;
-        const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[]; weeks?: BWeek[] };
-        // Only restore a draft with something IN it. An empty one is not worth
-        // resurrecting over whatever the screen has already been given.
-        if ((Array.isArray(d.days) && d.days.length) || (typeof d.title === 'string' && d.title.trim())) {
-          setTitle(typeof d.title === 'string' ? d.title : '');
-          setNote(typeof d.note === 'string' ? d.note : '');
-          // Whole `BDay[]`, so every field on the exercise comes back with it —
-          // the weight, the unit the coach typed it in, and the note they wrote
-          // on the movement. A draft that silently dropped one of those would
-          // be worse than one that dropped everything: the coach would come
-          // back to what looks like their week with the cues gone.
-          // `weeks` when the draft has one, and `days` — which is week one —
-          // when it does not. Every draft written before blocks existed is the
-          // second case, and restoring it as a one-week block is what it is.
-          // The two are written together below for the same reason
-          // `Program.days` and `Program.weeks` are: a draft carrying only
-          // `weeks` would come back empty on a build that had been rolled back.
-          setBlockWeeks(Array.isArray(d.weeks) && d.weeks.length
-            ? d.weeks.map((w) => ({ days: Array.isArray(w?.days) ? w.days : [], label: w?.label, deload: w?.deload }))
-            : [{ days: Array.isArray(d.days) ? d.days : [] }]);
-          setWeekIdx(0);
-          // The draft carries the days; it does not carry which of them were
-          // folded, so nothing may claim to know. Reset rather than left at
-          // whatever the empty builder happened to be holding.
-          setFoldedDays(foldsForNewProgramme());
-          // A restored draft is the coach's OWN work, whoever happens to be
-          // selected — so it is seeded from nobody, and the builder says so
-          // rather than presenting it as somebody's current programme.
-          setSeededFor(null);
-        }
-      } catch { /* a draft that cannot be parsed is not a draft */ }
-      finally { if (live) setDraftLoaded(true); }
+      let raw: string | null;
+      try { raw = await AsyncStorage.getItem(step.key); } catch {
+        // Learning nothing is not learning that there is nothing. `draftArmed`
+        // stays false, so the autosave never writes over bytes we failed to
+        // read. The coach's typing is unaffected on screen; it is simply not
+        // kept, and the next launch reads the real bytes again.
+        if (live) setDraftSettled(true);
+        return;
+      }
+      if (!live) return;
+      const { draft } = readBuilderDraft<BDay>(raw);
+      const decided = restoreDraftDecision<BDay>({
+        stored: draft, builderHasContent: wiped ? false : builderHasWork.current,
+      });
+      if (decided.restore) {
+        setTitle(decided.restore.title);
+        setNote(decided.restore.note);
+        // Whole `BDay[]`, so every field on the exercise comes back with it —
+        // the weight, the unit the coach typed it in, and the note they wrote
+        // on the movement. A draft that silently dropped one of those would be
+        // worse than one that dropped everything: the coach would come back to
+        // what looks like their week with the cues gone.
+        setBlockWeeks(decided.restore.weeks);
+        setWeekIdx(0);
+        // As its day rows, the way a loaded program opens — see `loadFrom`.
+        if (decided.restore.weeks.some((w) => w.days.length > 0)) setEditorOpen(true);
+        // The draft carries the days; it does not carry which of them were
+        // folded, so nothing may claim to know. Reset rather than left at
+        // whatever the empty builder happened to be holding.
+        setOpenDays(foldsForNewProgram());
+        // A restored draft is the coach's OWN work, whoever happens to be
+        // selected — so it is seeded from nobody, and the builder says so
+        // rather than presenting it as somebody's current program.
+        setSeededFor(null);
+      }
+      draftArmed.current = true;
+      setDraftLoaded(true);
+      setDraftSettled(true);
     })();
     return () => { live = false; };
-  }, []);
+    // `draftUid` as well as the key it composes to: two different non-accounts
+    // — null and the 'unknown' literal — share the single key `null`, and the
+    // step is the thing that must see the difference in what the screen holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, draftUid]);
+
+  // The unqualified key this replaces, removed rather than migrated, and never
+  // parsed on the way out. Nothing on the device distinguishes a single-owner
+  // handset's own old draft from the previous coach's on a shared one, and an
+  // unsaved draft is one evening's typing its author still remembers — where
+  // restoring it to the wrong coach is that coach assigning somebody else's
+  // program to their own clients under their own name. The cheap loss is the
+  // one taken on purpose. See the header of src/lib/builderDraft.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_BUILDER_DRAFT_KEY).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (!draftLoaded) return;
+    if (!draftLoaded || !draftKey) return;
     // An EMPTY builder does not clear the stored draft, and that asymmetry is
     // the whole point.
     //
@@ -1013,7 +1752,7 @@ export default function Builder() {
     // a remount — a coach tapping a client's name and coming back — starts with
     // empty state, and if the read is slow, fails, or returns a draft with no
     // days, `draftLoaded` flips true with nothing in state and this effect
-    // wipes the one copy of their work. A guard against losing a programme must
+    // wipes the one copy of their work. A guard against losing a program must
     // not be the thing that loses it.
     //
     // So autosave only ever WRITES. The draft is cleared deliberately, at the
@@ -1028,32 +1767,79 @@ export default function Builder() {
     // `days` is still written, and it is still week one. A build rolled back to
     // before blocks existed reads that key and finds a whole week, rather than
     // finding nothing and presenting a coach with an empty builder.
-    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
+    AsyncStorage.setItem(draftKey, writeBuilderDraft<BDay>({
       title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
     })).catch(() => {});
-  }, [title, note, blockWeeks, draftLoaded]);
+  }, [title, note, blockWeeks, draftLoaded, draftKey]);
 
   /** Called once the work is somewhere durable, and only then — a saved
    *  template that the server counted, or an assignment that landed on every
    *  client it was sent to. Never on a partial one: the draft is the only copy
-   *  of anything that did not make it. */
-  const clearDraft = () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); };
+   *  of anything that did not make it.
+   *
+   *  Scoped, so it clears THIS coach's draft and cannot reach another's. With
+   *  no account there is no key and nothing to clear, which is the same answer
+   *  as "nothing was ever written". */
+  const clearDraft = () => { if (draftKey) AsyncStorage.removeItem(draftKey).catch(() => {}); };
+  /** Save Draft, the explicit form of the autosave above: the same write, to
+   *  the same key, awaited so the confirmation is only said once it landed.
+   *  It is the phone's copy and nothing else, which is why it is labelled
+   *  apart from Save as Template (the coach's library) and Assign (a client's
+   *  plan). There is no "Save Program" beside them: a program exists in this
+   *  app only as a template or as an assignment, and a third button writing
+   *  one of those two under a new name would be two labels for one write. */
+  const saveDraftNow = async () => {
+    // Before the stored draft has been read, a write here would overwrite it
+    // with whatever is on screen, which is the loss the autosave guards against.
+    if (!draftLoaded || !draftKey) {
+      Alert.alert('Draft Not Saved', 'This phone is still reading your last draft, or you are signed out. Try again in a moment.');
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(draftKey, writeBuilderDraft<BDay>({
+        title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
+      }));
+      Alert.alert('Draft Saved on This Phone', 'It is kept on this phone only and reaches nobody. Save as Template to reuse it, or Assign to send it to a client.');
+    } catch {
+      Alert.alert('Draft Not Saved', 'This phone could not store the draft. It is still on screen, so do not leave the builder yet.');
+    }
+  };
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
-  const addDay = () => setDays((ds) => {
-    const used = new Set(ds.map((d) => d.day));
-    const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
-    return [...ds, { day: free, focus: 'Training', exercises: [] }];
-  });
+  const addDay = () => {
+    // Open, for the reason `addDayOn` below gives: days are shut unless the
+    // coach opened them, and the one they have just asked for is the one they
+    // are about to write.
+    setOpenDays((p) => ({ ...p, [days.length]: true }));
+    setDays((ds) => {
+      const used = new Set(ds.map((d) => d.day));
+      const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
+      return [...ds, { day: free, focus: 'Training', exercises: [] }];
+    });
+  };
+  /** The board's day circle, tapped while that day is NOT in the week: add a
+   *  session on exactly that weekday and open the editor at it. `addDay`
+   *  above picks the first free weekday for the editor's own Add Training Day
+   *  control; this one is told which day the coach pointed at. The new day
+   *  lands at the end of the list and is marked open by index before it
+   *  renders: the coach pointed at this day in order to write it, and a new
+   *  day arriving shut would read as the tap having done nothing. */
+  const addDayOn = (day: string) => {
+    const at = days.length;
+    setDays((ds) => [...ds, { day, focus: 'Training', exercises: [] }]);
+    setOpenDays((p) => ({ ...p, [at]: true }));
+    setEditorOpen(true);
+  };
   const cycleDay = (di: number) => setDays((ds) => ds.map((d, i) => {
     if (i !== di) return d;
     const idx = DAYS.indexOf(d.day);
     return { ...d, day: DAYS[(idx + 1) % 7] };
   }));
-  // The fold map is re-keyed with the list, not left behind. `foldedDays` is
-  // keyed by POSITION, and a `filter` shifts every day after the removed one
-  // down by an index — so deleting Monday while Tuesday was folded left index 1
+  // The open-day map is re-keyed with the list, not left behind. `openDays`
+  // (it was `foldedDays` when this was found, and the fault is the same in
+  // either sense) is keyed by POSITION, and a `filter` shifts every day after
+  // the removed one down by an index — so deleting Monday while Tuesday was folded left index 1
   // marked folded and Wednesday sitting at index 1, collapsed, with Tuesday
   // open. On the one screen in this app where the standing fear is losing work,
   // a day that has shut itself reads as a day whose exercises are gone. The
@@ -1061,48 +1847,107 @@ export default function Builder() {
   // this is the code that does it. See src/lib/foldedDays.ts for the re-key.
   const removeDay = (di: number) => {
     setDays((ds) => ds.filter((_, i) => i !== di));
-    setFoldedDays((p) => foldsAfterRemoval(p, di));
+    setOpenDays((p) => foldsAfterRemoval(p, di));
+  };
+
+  /** Exercises in the WEEK ON SCREEN. Used only where the sentence is about
+   *  that week — the Training Days heading, and nothing else. */
+  /**
+   * Land a week edit from src/lib/blockPlan.ts, or say nothing happened.
+   *
+   * Null in means the edit would have changed nothing — a move to the same
+   * position, an index off the end — and the honest response to that is
+   * silence, not a redraw of the strip and a re-fold of every day.
+   *
+   * The one edit that is confirmed first is the one that reaches somebody else.
+   * `days` is week one and week one is what a client's phone renders, so moving
+   * a week into or out of position one changes what they will be given the next
+   * time this is assigned. Reordering weeks five and six changes a stored plan
+   * and nothing anybody can see, and asking about that would train a coach to
+   * dismiss the dialog that matters. Remove This Week below draws exactly the
+   * same distinction, in the same voice.
+   */
+  const applyWeekEdit = (edit: WeekEdit<BWeek> | null) => {
+    if (!edit) return;
+    const land = () => {
+      setBlockWeeks(edit.weeks);
+      setWeekIdx(edit.index);
+      // The fold map is keyed by day POSITION inside the week on screen, and
+      // the week on screen is about to be a different one — see
+      // src/lib/foldedDays.ts for why a stale map is not a stale list.
+      setOpenDays(foldsForNewProgram());
+    };
+    const warn = weekEditWarning(edit);
+    if (!warn) { land(); return; }
+    Alert.alert('This Changes Week One', warn, [
+      { text: 'Leave It', style: 'cancel' },
+      { text: 'Move It', onPress: land },
+    ]);
   };
 
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
+  /**
+   * Exercises in the WHOLE BLOCK, which is what every gate is about.
+   *
+   * `totalExercises` was doing both jobs, and on a block it was the wrong
+   * number for the second: a coach on a deload week five with an empty screen
+   * was told to add an exercise and had Assign taken away over six weeks of
+   * finished programming. What leaves this screen is `composeProgram()`, which
+   * is every week, so what decides whether there is anything to send has to be
+   * every week too.
+   */
+  const blockExercises = blockWeeks.reduce(
+    (a, w) => a + w.days.reduce((b, d) => b + d.exercises.length, 0), 0);
+  /** Days across the block that actually carry work — for the template sheet,
+   *  which saves the block and not the week in front of the coach. */
+  const blockDays = blockWeeks.reduce(
+    (a, w) => a + w.days.filter((d) => d.exercises.length).length, 0);
   /* ── who this is going to ───────────────────────────────────────────────── */
 
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
   // The client the coach is looking at starts ticked, because the ordinary case
   // is one client and making them tick the name already selected above would be
   // ceremony. Only while nothing is ticked: once the coach has chosen a set,
-  // switching whose programme they are reading must not quietly add somebody to
+  // switching whose program they are reading must not quietly add somebody to
   // the write.
   useEffect(() => {
     if (!clientId) return;
     setPicked((p) => (Object.keys(p).some((k) => p[k]) ? p : { [clientId]: true }));
   }, [clientId]);
 
-  /** One client's disclosures, as both guards need to see them. */
-  const injuriesOf = (id: string): Injury[] => {
+  /** What this screen knows about ONE RECIPIENT's injuries — the same four
+   *  answers, from the same module, as the focused client above. The fan-out
+   *  carried its own copy of the flattening `?? []` and its own copy of the
+   *  status ladder, so a hand-added client ticked in this list opened the gate
+   *  even after the client at the top of the screen had stopped doing so. One
+   *  module, so the two cannot drift apart again. */
+  const factFor = (id: string): DisclosureFact => {
     const c = roster.find((r) => r.id === id);
-    return (c?.injuries ?? []).map((i, n) => ({
-      id: `${id}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-      status: 'active', note: i.note, at: '',
-    }));
+    return disclosureFact(rosterStatus, c, id, c?.name.split(' ')[0] ?? 'This client');
   };
-  /** How the read of THIS person's own disclosures went — a different question
-   *  from how the acknowledgement read went, and the one nobody asked. A client
-   *  the roster never produced has an empty injury list for exactly the same
-   *  reason a healthy client does. */
-  const disclosuresOf = (id: string): LoadStatus =>
-    rosterStatus === 'error' ? 'error'
-    : roster.some((r) => r.id === id) ? 'ready'
-    : rosterStatus === 'loading' ? 'loading'
-    : 'error';
-  const asMember = (id: string): FanOutMember => ({
-    clientId: id,
-    name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
-    disclosures: disclosuresOf(id),
-    ackStatus: acks.status,
-    injuries: injuriesOf(id),
-    acknowledged: acks.acknowledged(id),
-  });
+  /** One client's disclosed injuries, as both guards need to see them. Empty
+   *  under every absence, and empty for a different reason than it used to
+   *  be. */
+  const injuriesOf = (id: string): Injury[] => factFor(id).injuries;
+  const asMember = (id: string): FanOutMember => {
+    const fact = factFor(id);
+    return {
+      clientId: id,
+      name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
+      disclosures: fact.gateStatus,
+      ackStatus: acks.status,
+      injuries: fact.injuries,
+      acknowledged: acks.acknowledged(id),
+    };
+  };
+  /** First names of the people this assign WOULD write to who have never been
+   *  asked about injuries. Read off `plan.send` rather than off the ticks: a
+   *  client the gate is already holding is a different sentence, said by the
+   *  gate on their own row, and naming them twice teaches a coach to skip
+   *  both. */
+  const neverAskedNames = (ids: readonly string[]): string[] =>
+    ids.filter((id) => factFor(id).kind === 'never-asked')
+      .map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client');
   // The same fan-out plan the Groups screen and the template library use, so
   // the injury gate is consulted ONCE PER RECIPIENT and the ones it holds are
   // named rather than silently dropped. Not re-implemented here: a second
@@ -1113,32 +1958,56 @@ export default function Builder() {
   // the coach just made with their own thumb, and there is no read of it that
   // could have come back short. The roster it was ticked FROM carries its own
   // banner above.
-  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), totalExercises > 0, fanOutSubject(pickedIds.length));
+  //
+  // 'written' and not the default 'chosen': this screen is where the program
+  // is being WRITTEN. With the default, an empty draft here rendered "HELD —
+  // Pick a Program First — This group has no program yet. Choose one from
+  // your library…" — seen on a device, over a screen with no group on it,
+  // telling a coach mid-build to go and pick something instead.
+  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), blockExercises > 0, fanOutSubject(pickedIds.length), 'written');
   // What the sweeping gesture is allowed to claim, given how the roster read
   // went — "Select All" over a roster that came back at its row limit ticks a
   // thousand people and calls it everybody. See src/lib/bulkActions.ts.
   const selAll = selectAllOffer(rosterStatus, roster.length);
 
-  /** Every movement in this programme that loads something a RECIPIENT has
-   *  disclosed, grouped by who. The old version asked this about the subject
-   *  only, so a programme fanned out to four people was checked against one of
-   *  them. */
+  /**
+   * Every movement in this program that loads something a RECIPIENT has
+   * disclosed, grouped by who.
+   *
+   * Two things it used to miss, both of them the same mistake — asking about
+   * less than what is actually being sent. It asked about the SUBJECT only, so
+   * a program fanned out to four people was checked against one of them. And
+   * it read `days`, the week on screen, so a squat written into week four for a
+   * client with a disclosed knee was assigned with no warning and no
+   * acknowledgement recorded — which is the entire point of
+   * src/lib/injuryGate.ts. `assign` sends `composeProgram()`, every week of it,
+   * so this walks every week of it.
+   *
+   * `week` is the 1-based position, or null on a one-week program, where a
+   * week number would be a count of something that does not exist. It is in the
+   * acknowledgement record as well as in the confirmation, because "you were
+   * told about the back squat" is a weaker record than "you were told about the
+   * back squat in week four".
+   */
   const injuryLoads = pickedIds.map((id) => {
     const inj = injuriesOf(id);
-    const movements = days.flatMap((d) => d.exercises)
+    const multi = blockWeeks.length > 1;
+    const movements = blockWeeks.flatMap((w, wi) => w.days.flatMap((d) => d.exercises
       .map((e) => {
         const f = injuryFlag(e.name, e.group || '', inj);
-        return f ? { exercise: e.name, area: f.injury.area, severity: f.injury.severity } : null;
-      })
-      .filter(Boolean) as { exercise: string; area: string; severity: string }[];
+        return f
+          ? { exercise: e.name, area: f.injury.area, severity: f.injury.severity, week: multi ? wi + 1 : null }
+          : null;
+      })))
+      .filter(Boolean) as { exercise: string; area: string; severity: string; week: number | null }[];
     return { clientId: id, name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client', movements };
   }).filter((x) => x.movements.length);
 
-  const canAssign = pickedIds.length > 0 && totalExercises > 0 && plan.allowed;
+  const canAssign = pickedIds.length > 0 && blockExercises > 0 && plan.allowed;
   /** The ticked clients who are actually ON something to be taken off.
    *
    *  Only off a whole read: under any other status a null from `getProgram`
-   *  means "we did not find out", and offering to remove a programme this
+   *  means "we did not find out", and offering to remove a program this
    *  screen has not seen is the mirror of writing over one. */
   const unassignable = programStatus === 'ready'
     ? pickedIds.filter((id) => !!getProgram(id))
@@ -1170,7 +2039,13 @@ export default function Builder() {
   // is a coach assigning one lift and their client being shown another.
   const ownSlugs = useMemo(() => new Set(ownList.map((x) => exerciseSlug(x.name))), [ownList]);
   const catShownList = cat.rows.filter(
-    (e) => !ownSlugs.has(e.id) && (pickTerm === '' || e.name.toLowerCase().includes(pickTerm)),
+    // Searched on BOTH names, and on the catalogue's synonyms. Most
+    // German-speaking coaches learned these movements in English and type
+    // "bench"; their German-speaking clients read "Bankdrücken". Matching only
+    // one of the two hides half the catalogue from whoever is holding the
+    // phone, and matching neither the synonyms hides Heel Flicks from every
+    // coach who calls the movement "butt kicks".
+    (e) => !ownSlugs.has(e.id) && matchesSearch(pickTerm, e.name, e.display, e.synonyms),
   );
 
   // A picture for every movement on this screen: the ones already in the days
@@ -1186,12 +2061,62 @@ export default function Builder() {
     return m;
   }, [cat.rows]);
   const rowFor = (name: string) => catByName.get(exerciseSlug(name)) ?? null;
+  /**
+   * What the Add button in the picker would write, and whether it may yet.
+   *
+   * Two rules, both asked for directly by the owner.
+   *
+   * The NAME is the catalogue's own spelling whenever the typed text resolves
+   * to a row — by slug, or by an exact synonym, and never by a near-miss (see
+   * `canonicalExerciseName`). A coach typing "Shoulder press" was putting that
+   * string into a program while 615 rows and every join spelled it "Shoulder
+   * Press", so the same movement read two ways depending on who added it. Only
+   * a movement nothing resolves goes in as typed, and then in Title Case.
+   *
+   * The GROUP must exist before the movement can be added. It comes free from
+   * the catalogue row when there is one; the picker is shown, and Add is held,
+   * only when there is nothing to take it from. That includes a catalogue row
+   * whose own `muscle_group` is blank — four such rows reached this builder,
+   * and a program row with no group is dropped by `groupsOf`, which is how a
+   * day holding an overhead press printed no Shoulders chip. The coach's
+   * answer fills the PROGRAM row; it deliberately does not rewrite the
+   * catalogue's row, which is the library's to correct.
+   */
+  const customAdd = (() => {
+    const typed = custom.trim();
+    const name = canonicalExerciseName(typed, cat.rows);
+    const group = (rowFor(name)?.group || '').trim() || (customGroup ?? '').trim();
+    return { name, group, needsGroup: !!typed && !group, can: !!typed && !!group };
+  })();
+  // Sets per muscle group over the week being edited — the Weekly Volume card.
+  // See the card for why this is a plain sum and not `muscleBoard`.
+  const weekVolume = useMemo(() => {
+    const by = new Map<string, number>();
+    let ungrouped = 0;
+    for (const d of days) for (const e of d.exercises) {
+      const n = setCount(e);
+      if (n <= 0) continue;
+      const g = (e.group || catByName.get(exerciseSlug(e.name))?.group || '').trim();
+      if (g) by.set(g, (by.get(g) ?? 0) + n); else ungrouped += n;
+    }
+    const groups = [...by].map(([group, sets]) => ({ group, sets }))
+      .sort((x, y) => y.sets - x.sets || x.group.localeCompare(y.group));
+    return { groups, ungrouped };
+  }, [days, catByName]);
+  // A day type's colour as a FILL, and what is written on it. See Workout Days.
+  const typeFill = (tone: Tone) => toneFill(t, tone);
+  const typeOn = (tone: Tone) => toneOnFill(t, tone);
+  const typesPresent = (Object.keys(DAY_TYPE_TONE) as DayType[]).filter((k) => days.some((d) => dayTypeOf(d) === k));
   const thumbRows = useMemo(() => {
     const inDays = days.flatMap((d) => d.exercises.map((e) => rowFor(e.name))).filter(Boolean);
     const inPicker = catShownList.slice(0, catShown);
-    return [...inDays, ...inPicker] as { thumbPath: string | null; source?: string | null }[];
+    // The coach's own names too: most of them ARE catalogue movements the
+    // coach has used before, and they were the one list in the picker with no
+    // picture beside any of them.
+    const inOwn = ownShown.map((x) => rowFor(x.name)).filter(Boolean);
+    return [...inDays, ...inOwn, ...inPicker] as { thumbPath: string | null; source?: string | null }[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, catByName, catShownList, catShown]);
+  }, [days, catByName, catShownList, catShown, ownShown.length, pickTerm]);
   const thumbFor = useCatalogueThumbs(thumbRows);
 
   // A fresh search starts at the top of the catalogue rather than 300 rows into
@@ -1257,7 +2182,7 @@ export default function Builder() {
         // needs to find.
         setRows: e.setRows && e.setRows.length ? e.setRows : undefined,
         // The two numbers are one fact — see setRows.ts. Recomputed here rather
-        // than trusted, because this is the last gate before the programme
+        // than trusted, because this is the last gate before the program
         // leaves the screen and a client counting "2 of 3 sets" against a table
         // of four is the failure it would produce.
         sets: setCount(e),
@@ -1265,12 +2190,12 @@ export default function Builder() {
     }));
 
   /**
-   * The programme as it leaves this screen.
+   * The program as it leaves this screen.
    *
    * `withWeeks` is the ONE writer of the block and it keeps `Program.days` —
    * which is what the shipped client app renders — equal to week one. It also
-   * DROPS `weeks` entirely for a one-week programme, so a coach who never
-   * touched the week strip produces a programme byte-identical to one written
+   * DROPS `weeks` entirely for a one-week program, so a coach who never
+   * touched the week strip produces a program byte-identical to one written
    * before blocks existed. That is not tidiness: `programSignature` decides
    * which members of a group are on the group's plan, and a `weeks: [...]`
    * meaning nothing would have to be reasoned about there too.
@@ -1292,7 +2217,7 @@ export default function Builder() {
    *  they open when they want to know why something is NOT in the list. */
   const [checksOpen, setChecksOpen] = useState(false);
 
-  /* ── Programme checks ───────────────────────────────────────────────────
+  /* ── Program checks ───────────────────────────────────────────────────
      Seven rules over the draft, run on what would ACTUALLY be assigned rather
      than on the editing state behind it — `composeProgram` is where reps
      default, blank notes are dropped and `sets` is recomputed from the rows,
@@ -1316,7 +2241,7 @@ export default function Builder() {
       // Null, not an empty list, when there is no client on this screen — a
       // template being written for nobody in particular. An empty list would
       // run the injury check against nobody's disclosures and report a clean
-      // programme, which is a check appearing to have passed. `null` stands it
+      // program, which is a check appearing to have passed. `null` stands it
       // down and says why. Same shape as `log` on the line below.
       injuries: clientId ? clientInjuries : null,
       injuryStatus: disclosureStatus,
@@ -1328,6 +2253,10 @@ export default function Builder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [blockWeeks, title, note, clientId, clientInjuries, disclosureStatus, reviewLog, reviewLogStatus, autoGoal],
   );
+
+  /** What the checks covered, on a block. Null on a one-week program, where
+   *  a coverage sentence would be furniture. */
+  const coverage = coverageLine(review.counted);
 
   /**
    * The figures behind a volume finding, in the coach's own unit.
@@ -1366,43 +2295,58 @@ export default function Builder() {
   // was said for every cause alike — including the one the coach can act on,
   // which was the app not yet knowing who they were signed in as.
   const doSaveTemplate = async () => {
-    if (totalExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
+    if (blockExercises === 0) { Alert.alert('Nothing to Save', 'Add at least one exercise first.'); return; }
     const nm = tplName.trim() || title.trim() || 'Untitled template';
     const saved = await saveTemplateTo(nm, composeProgram());
     setSaveOpen(false); setTplName('');
     // The work is on the server now, so the on-device draft has nothing left
     // to protect. Only on a counted save — see clearDraft.
-    if (saved.ok) clearDraft();
-    setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder — try saving it again.`);
+    if (saved.ok) { clearDraft(); markSaved(); }
+    setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder. Try saving it again.`);
     Alert.alert(
-      saved.ok ? 'Template saved' : 'Not saved',
+      saved.ok ? 'Template Saved' : 'Not Saved',
       saved.ok
-        ? 'It is in your Program Templates and will be there when you reopen the app — assign it to as many clients as you like.'
-        : `“${nm}” was not saved. ${saved.why ?? 'The server did not say why.'} What you built is still in the builder, so nothing has been lost — try again once you have signal.`,
+        ? 'It is in your Program Templates and will be there when you reopen the app. Assign it to as many clients as you like.'
+        : `“${nm}” was not saved. ${saved.why ?? 'The server did not say why.'} What you built is still in the builder, so nothing has been lost. Try again once you have signal.`,
     );
   };
   /**
    * Record that the coach chose to load a disclosure, for ONE recipient.
    *
-   * Recorded BEFORE that person's programme is written, and their write is
+   * Recorded BEFORE that person's program is written, and their write is
    * abandoned if it cannot be. The point of the acknowledgement is that it
-   * exists; a programme that went out while the record of the coach's decision
+   * exists; a program that went out while the record of the coach's decision
    * did not is the one outcome that makes this worse than having no record at
    * all — it would look, afterwards, exactly like a coach who never knew.
    *
    * Per recipient rather than per tap, and that is the change a fan-out forces:
-   * this used to be written once, for the subject, and a programme sent to four
+   * this used to be written once, for the subject, and a program sent to four
    * people left a record against one of them.
    */
   const recordInjuryChoice = async (
     forClient: string,
-    movements: { exercise: string; area: string; severity: string }[],
+    movements: { exercise: string; area: string; severity: string; week: number | null }[],
   ): Promise<boolean> => {
     if (!movements.length) return true;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return false;
+      // Both fates return false, and that is the ANSWER rather than a
+      // fallback. `false` here means the acknowledgement was not recorded, and
+      // the caller turns that into this client's program not being sent —
+      // which is the order this function's doc comment argues for at length: a
+      // program that went out while the record of the coach's decision did
+      // not is worse than no record at all. Refusing on an outage is the
+      // correct refusal, and nothing is written under a missing trainer id.
+      //
+      // What was wrong was only that the two could not be told apart
+      // afterwards. A `false` returned because the auth host was down looked,
+      // in the logs, exactly like a coach who was not signed in; `signedInUid`
+      // reports the first under this context and stays quiet about the second.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('builder.injuryChoice');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
+
       // The row is counted, not merely un-errored. This record is the only
       // thing that will ever say the coach knew, and "no error" is not the same
       // sentence as "it is there" — a manually-added client has no `profiles`
@@ -1428,7 +2372,7 @@ export default function Builder() {
    * Assigning REPLACES what somebody is currently training, with no undo, no
    * record of what was there and nothing telling the client their next session
    * changed. So the write is preceded by a sentence that states how many of the
-   * ticked clients are on a programme now and NAMES them — `overwriteBrief`, in
+   * ticked clients are on a program now and NAMES them — `overwriteBrief`, in
    * src/lib/bulkActions.ts. The names are the part that works: a coach does not
    * recognise "3 of 4", and does recognise the person they spent an hour
    * programming on Tuesday.
@@ -1460,11 +2404,19 @@ export default function Builder() {
       // Only sayable because `planFanOut` has already passed the overwrite
       // guard: under any status but a whole read a null from getProgram means
       // "we did not find out", and this sentence would be counting silence.
-      onProgramme: !!getProgram(id),
+      onProgram: !!getProgram(id),
     }));
-    const brief = overwriteBrief(targets, title.trim() || 'this programme');
+    const brief = overwriteBrief(targets, title.trim() || 'this program');
+    // The moment of decision, so the third fact is said here too and not only
+    // on a row the coach may have scrolled past. `overwriteBrief` says what is
+    // being replaced; this says what is NOT known about the people it is being
+    // replaced for, and names them rather than counting them. Appended rather
+    // than woven in, because the two are separate facts and
+    // src/lib/bulkActions.ts owns the first.
+    const askedNote = neverAskedBrief(neverAskedNames(plan.send));
+    const body = [brief.body, askedNote].filter(Boolean).join('\n\n');
     const go = await new Promise<boolean>((resolve) => {
-      Alert.alert(brief.title, brief.body, [
+      Alert.alert(brief.title, body, [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         // Destructive only when something is actually being destroyed. A red
         // button on every assign is a red button nobody reads.
@@ -1481,19 +2433,22 @@ export default function Builder() {
     const sending = injuryLoads.filter((x) => plan.send.includes(x.clientId));
     if (sending.length) {
       const lines = sending.flatMap((x) =>
-        x.movements.slice(0, 4).map((m) => `· ${x.name} — ${m.exercise}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
+        // The week is named where there is one. On a twelve-week block the same
+        // movement can appear in every week, and four identical lines tell a
+        // coach nothing about which week to go and change.
+        x.movements.slice(0, 4).map((m) => `· ${x.name}: ${m.exercise}${m.week ? ` in week ${m.week}` : ''}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
       );
       const shown = lines.slice(0, 8);
       const more = sending.reduce((a, x) => a + x.movements.length, 0) - shown.length;
       const okd = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'These load what they disclosed',
+          'These Load What They Disclosed',
           `${shown.join('\n')}${more > 0 ? `\n· and ${num(more)} more` : ''}\n\n` +
-            'You can absolutely programme these on purpose. Confirming records that you chose to, with the date — ' +
+            'You can absolutely program these on purpose. Confirming records that you chose to, with the date. ' +
             `${listNames(sending.map((x) => x.name))} can see that record too.`,
           [
-            { text: 'Change the Programme', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'I Know — Assign', style: 'destructive', onPress: () => resolve(true) },
+            { text: 'Change the Program', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'I Know, Assign', style: 'destructive', onPress: () => resolve(true) },
           ],
           { cancelable: true, onDismiss: () => resolve(false) },
         );
@@ -1513,7 +2468,7 @@ export default function Builder() {
         if (!recorded) {
           return {
             clientId: tg.clientId, name: tg.name, ok: false,
-            why: 'your acknowledgement could not be saved, so the programme was not sent either — it would have left no sign you knew.',
+            why: 'your acknowledgement could not be saved, so the program was not sent either. It would have left no sign you knew.',
           };
         }
       }
@@ -1536,16 +2491,16 @@ export default function Builder() {
     const outstanding = [...report.retry, ...plan.blocked.map((b) => b.clientId)];
     setPicked(Object.fromEntries(outstanding.map((id) => [id, true])));
     // Everybody it was sent to has it, and nobody is being held — so the
-    // programme is durable somewhere other than this phone and the draft has
+    // program is durable somewhere other than this phone and the draft has
     // nothing left to protect. Kept on any partial outcome, because the draft
     // is then the only copy of what did not land.
-    if (!outstanding.length) clearDraft();
+    if (!outstanding.length) { clearDraft(); markSaved(); }
 
     const parts = [report.body];
     // Named, never silently dropped. A coach who believes four people got a
-    // programme when three did is worse off than one who was refused.
+    // program when three did is worse off than one who was refused.
     if (plan.blocked.length) {
-      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all. They have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
     }
     Alert.alert(report.title, parts.join('\n\n'));
   };
@@ -1563,8 +2518,8 @@ export default function Builder() {
    * side: under anything but a whole read of `assigned_programs` this screen
    * cannot tell a client who is on nothing from one whose row did not come
    * back, so the count in the confirmation would be counting silence. The
-   * injury gate is NOT asked, and deliberately: it exists to stop a programme
-   * being BUILT around a disclosure nobody read, and removing a programme is
+   * injury gate is NOT asked, and deliberately: it exists to stop a program
+   * being BUILT around a disclosure nobody read, and removing a program is
    * the one action that cannot do that.
    */
   const unassign = async () => {
@@ -1575,7 +2530,7 @@ export default function Builder() {
     const targets: AssignTarget[] = pickedIds.map((id) => ({
       clientId: id,
       name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
-      onProgramme: !!getProgram(id),
+      onProgram: !!getProgram(id),
     }));
     const brief = unassignBrief(targets);
     if (!brief.replacing.length) { Alert.alert(brief.title, brief.body); return; }
@@ -1603,13 +2558,13 @@ export default function Builder() {
 
   // `clearProgram` resolves false when the delete never reached the server, and
   // the old version announced the revert regardless. A client left on a
-  // programme their coach believes they took away is the same lie as one moved
-  // off a programme the coach believes they still have — so the builder is only
+  // program their coach believes they took away is the same lie as one moved
+  // off a program the coach believes they still have — so the builder is only
   // put back on the auto plan when the server confirmed the removal.
   const revert = async () => {
     const cleared = await clearProgram(clientId);
     if (!cleared) {
-      Alert.alert('Not reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program — the removal did not reach the server. Reopen this screen once you have signal and try again.`);
+      Alert.alert('Not Reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program. The removal did not reach the server. Reopen this screen once you have signal and try again.`);
       return;
     }
     // The removal is what reverts them — the client's own Train tab generates
@@ -1618,7 +2573,7 @@ export default function Builder() {
     // rather than filling it with a fat-loss plan nobody chose.
     if (autoGoal) loadFrom(buildProgram(autoGoal, 25), clientId);
     else clearBuilder();
-    Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
+    Alert.alert('Reverted to Auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
 
   /**
@@ -1634,20 +2589,62 @@ export default function Builder() {
    * key in the database points at `program_templates` at all. That is said in
    * the confirmation rather than left for the coach to worry about.
    */
-  const [tplDelFailed, setTplDelFailed] = useState<string | null>(null);
+  /**
+   * The template whose delete was refused, and the sentence saying why.
+   *
+   * Keyed by id, and said in an alert as well, for the reason
+   * app/(trainer)/templates.tsx carries at length: this used to be one line
+   * drawn ABOVE the list, inside a scrolling picker. A coach who had scrolled
+   * to a template half-way down their library got the explanation off the top
+   * of the sheet, which is indistinguishable from the button doing nothing —
+   * and "the button does nothing" is what was reported.
+   */
+  const [tplDelFailed, setTplDelFailed] = useState<{ id: string; why: string } | null>(null);
   const deleteTemplate = (id: string, name: string) => {
     Alert.alert(
       'Delete This Template?',
-      `“${name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+      `“${name}” is removed from your library for good. There is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
       [
         { text: 'Keep', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           const gone = await removeTemplateFrom(id);
-          setTplDelFailed(gone.ok ? null : `“${name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+          if (gone.ok) { setTplDelFailed((p) => (p && p.id === id ? null : p)); return; }
+          const why = deleteRefusedLine(name, gone.why);
+          setTplDelFailed({ id, why });
+          Alert.alert('That Template Was Not Deleted', why);
         } },
       ],
     );
   };
+
+  /* ── what the footer says ────────────────────────────────────────────────
+     Composed here, off the same values the sections act on, and handed to the
+     footer as sentences. WHO is the recipients when anybody is ticked, because
+     that is who the button writes to; before that it is whoever the builder is
+     looking at, said as exactly that. First names, and a count past three: the
+     bar is one line on a phone. */
+  const [footH, setFootH] = useState(112);
+  // At the large text sizes the pinned footer is drawn at the end of the page
+  // instead: pinned, it grew to half the screen (see ProgramWorkflowFooter).
+  const footInline = fontScale >= 1.35;
+  const footWho = (() => {
+    const names = pickedIds.map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0]).filter((n): n is string => !!n);
+    if (pickedIds.length) return names.length === pickedIds.length && names.length <= 3 ? `For ${listNames(names)}` : `For ${num(pickedIds.length)} clients`;
+    return client ? `Looking at ${client.name.split(' ')[0]} · nobody ticked to receive it` : 'Your own draft · nobody chosen yet';
+  })();
+  const footWhere = (() => {
+    const week = blockWeeks.length > 1 ? `${weekLabel(blockWeeks[weekIdx], weekIdx + 1)} of ${num(blockWeeks.length)}` : null;
+    const day = days.find((d) => d.exercises.some((x) => x.key === openEx));
+    const ex = day?.exercises.find((x) => x.key === openEx);
+    const editing = day && ex ? `${WEEK_DAY_NAMES[DAYS.indexOf(day.day)] ?? day.day} · ${movement(ex.name)}` : null;
+    return [week, editing].filter(Boolean).join(' · ') || null;
+  })();
+  // A count only once there is something to count: over an empty builder the
+  // button's own label already says what is missing.
+  const footOutstanding = blockExercises === 0 ? null
+    : !injuryGate.allowed && injuryGate.outstanding.length ? 'Injuries to read before this can go'
+    : review.findings.length ? `${num(review.findings.length)} check${s(review.findings.length)} to read`
+    : 'No listed findings';
 
   // One field treatment for the whole screen: surface2 fill, no border.
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
@@ -1655,34 +2652,342 @@ export default function Builder() {
   const scrim = { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' };
   const G = layout.gutter;
 
+  const workflowFooter = (inline: boolean) => (
+  <ProgramWorkflowFooter inline={inline}
+      who={footWho}
+      where={footWhere}
+      outstanding={footOutstanding}
+      draftNote={draftLoaded && draftKey && hasDraft ? 'Draft kept on this phone' : null}
+      primaryLabel={assignCtaLabel({
+        busy: assignBusy,
+        picked: pickedIds.length,
+        exercises: blockExercises,
+        planLabel: plan.label,
+        soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+      })}
+      onPrimary={assign}
+      primaryEnabled={canAssign && !assignBusy}
+      secondaryLabel="Save as Template"
+      onSecondary={() => { setTplName(tplName || title); setSaveOpen(true); }}
+      onHeight={inline ? undefined : setFootH}
+    />
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       {/* Scrolling is off while a row is held. Without this the ScrollView and
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: (footInline ? 0 : footH) + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Programs</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Builder</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan, save it as a template, and assign it to as many clients as you like.</Text>
+        {/* ── header: the board's compact opening ──────────────────────────
+            The kit's `PageHead` — a round back control at the leading edge,
+            the title centred, a round Templates control at the trailing edge,
+            the way board page 5 draws it. It was built by hand here while the
+            kit had no centred form; it has one now, and this is it. The
+            leading slot is passed `null` rather than left to default when
+            there is nothing to go back to (this is the Programs tab's own
+            root), which draws a blank of the control's width so the title is
+            centred on the page and not on whatever is left of it.
+
+            The line under the title is the review's first requirement — who
+            this is for, said before anything else and again in the footer
+            that stays on screen. */}
+        {/* The trailing control was Templates and is now Search, for the same
+            reason every other tab root's is: this is one of six roots, and the
+            coach app's only search (app/(trainer)/explore.tsx, over
+            TRAINER_NAV) was reachable from exactly one of them. Templates did
+            not lose its way in — it is the first chip in the row directly
+            below, beside the other two things Programs now owns. */}
+        <PageHead title="Build Program"
+          subtitle={client ? `Building for ${client.name}` : 'Your own draft, nobody chosen yet'}
+          leading={cameFrom ? undefined : null} onBack={goBack}
+          trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
+
+        {/* ── the hero: the program on the bench, and who is on one ───────
+            The words are the builder's own state, so they are always true.
+            The ring is a READ: coach-assigned programs over the roster. It is
+            a figure only when both reads are whole; under 'partial' the roster
+            is the page that came back and the count would be a share of a
+            guess, so the ring shows a dash and the line under says why. The
+            one action is the next thing that keeps work: save a draft that has
+            exercises, or start from a template when the builder is empty. */}
+        {(() => {
+          const whole = rosterStatus === 'ready' && programStatus === 'ready';
+          const reading = rosterStatus === 'loading' || programStatus === 'loading';
+          const onCount = whole ? roster.filter((c) => !!getProgram(c.id)).length : null;
+          const ringFor = whole && roster.length > 0;
+          const readLine = whole
+            ? (roster.length ? null : 'No clients on your book yet, so nobody is on a program.')
+            : reading
+              ? 'Reading who is on a program…'
+              : 'Who is on a program could not be read, so no count is shown.';
+          return (
+            <HeroCard
+              eyebrow="PROGRAM BUILDER"
+              title={title.trim() || (hasDraft ? 'Untitled Program' : 'New Program')}
+              meta={blockExercises
+                ? `${num(blockWeeks.length)} week${s(blockWeeks.length)} · ${num(blockExercises)} exercise${s(blockExercises)}${client ? ` · for ${client.name.split(' ')[0]}` : ''}`
+                : 'Nothing in the builder yet'}
+              ring={ringFor || !whole ? (
+                <HeroRing
+                  value={ringFor && onCount != null ? onCount / roster.length : null}
+                  // "0/1" over one word, as the Home board's "3/5 · this week":
+                  // "of 1 on a program" did not fit the ring and was cut off.
+                  figure={ringFor && onCount != null ? `${num(onCount)}/${num(roster.length)}` : null}
+                  sub={ringFor ? 'assigned' : reading ? 'reading' : 'not read'}
+                  spoken={ringFor && onCount != null
+                    ? `${num(onCount)} of ${num(roster.length)} clients on a program you assigned`
+                    : reading ? 'Reading who is on a program' : 'Who is on a program could not be read'} />
+              ) : undefined}
+              /* Save Draft here, Save as Template and Assign in the footer:
+                 three writes, three places, three names. This was a second
+                 Save as Template, the same button twice on one screen. */
+              cta={blockExercises
+                ? { label: 'Save Draft', onPress: () => { void saveDraftNow(); } }
+                : { label: 'Start From a Template', onPress: () => setTplPick(true) }}>
+              {readLine ? (
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>{readLine}</Text>
+              ) : null}
+            </HeroCard>
+          );
+        })()}
+
+        {/* ── everything else that is "building" ───────────────────────────
+            Programs led to three destinations while Videos held a whole tab
+            for two, so Videos gave up its tab (app/(trainer)/_layout.tsx says
+            why) and the four screens a coach builds with now sit together:
+            this builder, the templates it saves to, the catalogue it picks
+            movements from, and the clips those movements are demonstrated by.
+
+            A chip row rather than a section of rows: this screen's job is the
+            form under it, and four one-tap destinations should cost one line,
+            not four. Keys are routes so no two can collide. */}
+        <Section style={{ paddingBottom: 0 }}>
+          <ChipGrid
+            tone={t.brand}
+            items={[
+              { icon: 'grid', label: 'Templates', key: '/(trainer)/templates', onPress: () => router.push('/(trainer)/templates') },
+              { icon: 'dumbbell', label: 'Exercise Library', key: '/(trainer)/library', onPress: () => router.push('/(trainer)/library') },
+              { icon: 'video', label: 'Videos', key: '/(trainer)/videos', onPress: () => router.push('/(trainer)/videos') },
+            ]}
+          />
+        </Section>
+
+        {/* The program's name, first — it is the template's name and the
+            name every client sees over their week. */}
+        <Section>
+        <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Program Name</Text>
+        <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
+          accessibilityLabel="Program Name" style={inp} />
+
+        {/* ── the week as seven circles, the board's way ───────────────────
+            Always the whole week, in the order src/lib/weekStart.ts draws one,
+            so an empty program still reads as a week with nothing ticked
+            rather than as a blank. A day that is in the week is filled (in the
+            colour of its type, below); a tap on it opens the editor there (`openDay`), and a tap on
+            an empty one adds a session on that day (`addDayOn`). The plus that
+            used to sit beside the circles is gone: every day it could add is
+            now a circle, and the one thing it could do that a circle cannot —
+            a second session on a weekday already in use — is the editor's Add
+            Training Day plus its Change Day control, which is where a two-a-day
+            belongs.
+
+            `findIndex`, so a weekday with two sessions answers with its first:
+            the circle is a way in, not a count, and the spoken label says how
+            many sessions there are so the second is not a surprise.
+
+            A day in the week is filled in the colour of its TYPE — upper,
+            lower, full body, conditioning — read off the day's focus and its
+            exercises' groups by `dayTypeOf`, because a program stores no
+            type. The week reads as a split at a glance: two blues, two
+            purples and an orange is an upper/lower with a full-body day. The
+            colour never stands alone: the legend under the circles names
+            every type that is present, and the spoken label says it.
+
+            Why the fill is the hue's ink step and not its mark is written
+            over `toneFill` in src/ui/coach/ProgramBuilderFlow.tsx. */}
+        <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginTop: sp.lg, marginBottom: sp.sm }}>Workout Days</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: sp.sm }}>
+          {DAYS.map((abbr, i) => {
+            const di = days.findIndex((d) => d.day === abbr);
+            const selected = di >= 0;
+            const sessions = days.filter((d) => d.day === abbr);
+            const exercises = sessions.reduce((a, d) => a + d.exercises.length, 0);
+            const open = selected && editorOpen && !!openDays[di];
+            const kind = selected ? dayTypeOf(days[di]) : null;
+            const spoken = selected
+              ? `${WEEK_DAY_NAMES[i]}, ${kind}, in the week${sessions.length > 1 ? `, ${num(sessions.length)} sessions` : ''}, ${exercises === 1 ? '1 exercise' : `${num(exercises)} exercises`}`
+              : `${WEEK_DAY_NAMES[i]}, not in the week`;
+            return (
+              <Pressable key={abbr}
+                onPress={() => (selected ? openDay(di) : addDayOn(abbr))}
+                accessibilityRole="button"
+                accessibilityState={{ selected, expanded: selected ? open : undefined }}
+                accessibilityLabel={spoken}
+                accessibilityHint={selected ? (open ? 'Folds this day in the editor' : 'Opens this day in the editor') : 'Adds a training day'}
+                style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+                         backgroundColor: kind ? typeFill(DAY_TYPE_TONE[kind]) : t.surface2 }}>
+                <Text style={{ ...ty.label, ...font('700'), color: kind ? typeOn(DAY_TYPE_TONE[kind]) : t.ink2 }}>{abbr.slice(0, 1)}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+        {/* The legend: only the types this week actually has, in one fixed
+            order so the line does not reshuffle as a coach edits. */}
+        {typesPresent.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: sp.md, rowGap: 2, marginTop: sp.md }}>
+            {typesPresent.map((k) => (
+              <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: typeFill(DAY_TYPE_TONE[k]) }} />
+                <Text style={{ ...ty.micro, ...font('500'), color: t.ink2 }}>{k}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        </Section>
+
+        {/* ── Weekly Volume: sets per muscle group, as bars ────────────────
+            The evidence under the week. Every figure is a sum over the
+            builder's own state — `setCount`, the number `composeDays` sends —
+            so nothing here is read and nothing can be unknown. The group is
+            the one the exercise carries, and the catalogue's when it carries
+            none.
+
+            Not `muscleBoard` from src/lib/muscleVolume.ts, though this is its
+            picture: that is a join over a DATED LOG of performed sets, and
+            feeding it a prescription would mean inventing a timestamp and a
+            rep count for every set to get past its filters.
+
+            The bars are each group against the week's largest, so the longest
+            bar is the group this week trains most and the rest read as a
+            share of it. A movement with no group is work this cannot file, and
+            is said as one line rather than left out of a card that would then
+            look complete. */}
+        <Section>
+          <SectionHead title="Weekly Volume"
+            note={totalExercises ? `${num(totalExercises)} Exercise${s(totalExercises)}` : undefined} />
+          {weekVolume.groups.length === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {totalExercises ? 'No sets on a named muscle group yet' : 'Add exercises to see sets per muscle group'}
+            </Text>
+          ) : weekVolume.groups.map((g) => (
+            <Meter key={g.group} label={g.group} val={g.sets} target={weekVolume.groups[0].sets}
+              tone={groupTone(g.group)} note={`${num(g.sets)} set${s(g.sets)}`} />
+          ))}
+          {weekVolume.ungrouped ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {`${num(weekVolume.ungrouped)} set${s(weekVolume.ungrouped)} not counted (no muscle group on the movement)`}
+            </Text>
+          ) : null}
+        </Section>
+
+
+        {/* ── the coach's named programs, one tap each ───────────────────
+            Reported from a coach's phone: "Is there a way again to create
+            shortcuts to named programs you have created so you don't have
+            to scroll through." The library was three taps and a scroll away —
+            the Templates section, Start From a Template, then the sheet — for
+            the thing a working coach does most: start from the block they
+            always start from.
+
+            Nothing is drawn for a coach who has saved nothing, so a first
+            session still opens the way the board draws it. Capped, with the
+            whole library as the last chip, because this is a shortcut row and
+            a row of forty is the scroll it was asked to replace.
+
+            Under the week and its volume now, which is where the approved
+            mockup's flow puts a tool: the name and the week are the state, the
+            volume is the evidence, and this row is a way to replace both. It
+            is still above the fold on an empty builder, where it matters —
+            an empty Weekly Volume card is two lines tall. */}
+        {shortcuts.length ? (
+          <View style={{ marginTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programs</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              // Room under the chips for the card shadow, which a horizontal
+              // ScrollView otherwise clips at its own bottom edge.
+              contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg, paddingBottom: sp.sm, paddingHorizontal: 2 }}>
+              {shortcuts.slice(0, SHORTCUT_CAP).map((tpl) => {
+                const dc = tpl.program.days.length;
+                const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
+                const weeks = programWeeks(tpl.program).length;
+                const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
+                const shape = `${weeks > 1 ? `${num(weeks)} weeks · ` : ''}${num(dc)} day${s(dc)} · ${num(ec)} exercise${s(ec)}`;
+                return (
+                  <Pressable key={tpl.id} onPress={() => startFromTemplate(tpl)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Load ${tpl.name} into the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
+                    style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
+                             paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                             borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, ...font('600'), color: t.ink }}>{tpl.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {shape}{on ? ` · ${num(on)} training it` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {shortcuts.length > SHORTCUT_CAP ? (
+                <Pressable onPress={() => router.push('/(trainer)/templates')}
+                  accessibilityRole="button" accessibilityLabel={`All ${num(shortcuts.length)} of your programs, in the template library`}
+                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                           borderRadius: radius.md, backgroundColor: t.surface2 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{`All ${num(shortcuts.length)}`}</Text>
+                </Pressable>
+              ) : null}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {/* Three rows with truthful counts, and the editor behind the first.
+            Supersets are counted the way the editor badges them — a set-group
+            of two or more, see src/lib/setGroups.ts. */}
+        <Section>
+          <ListRow icon="dumbbell" tone="brand" title="Exercises"
+            note={blockExercises === 0 ? 'None yet. Open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
+            onPress={() => setEditorOpen((o) => !o)} />
+          <ListRow icon="swap" tone="blue" title="Supersets"
+            note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
+            onPress={() => setEditorOpen(true)} />
+          {/* A START SOURCE, which is what the review asks a template to be on
+              this screen: the row opens the sheet that loads one into the
+              builder. It used to push the library — a second screen with its
+              own assign flow, which is a parallel editor by another name. The
+              library is still one tap away, from the head and from the sheet. */}
+          <ListRow icon="grid" tone="amber" title="Templates"
+            note={tplStatus === 'ready' && savedCount ? `Start from one of your ${num(savedCount)}, or a starter` : 'Start from one you saved, or a starter'}
+            onPress={() => setTplPick(true)} />
+        </Section>
+
+        {/* ── the block at a glance, under the rows ────────────────────────
+            Weeks, days and exercises off the builder's own state — nothing
+            here is read, so nothing here can be unknown. It was a KpiRow at
+            the top of the page; the board opens with the name and the week,
+            so the figures moved under the rows they describe, as one line.
+            `blockExercises` rather than `totalExercises`, because the assign
+            gate below counts the block and this line must agree with it. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, paddingHorizontal: sp.xs }}>
+          {`${num(blockWeeks.length)} week${s(blockWeeks.length)} · ${num(days.length)} day${s(days.length)}${blockWeeks.length > 1 ? ' this week' : ''} · ${num(blockExercises)} exercise${s(blockExercises)} in the block`}
+        </Text>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
         <Section>
           {/* The roster count is a count, so it waits for a whole read. Under
               'partial' `roster.length` is the size of the page that came back,
               not the size of the book. */}
-          <SectionHead title="Building For" note={rosterStatus === 'ready' && roster.length ? `${num(roster.length)} in roster` : undefined} />
+          <SectionHead title="Building For" note={rosterStatus === 'ready' && roster.length ? `${num(roster.length)} in Roster` : undefined} />
           {/* Two different questions, and they used to be one control. This one
-              is whose current programme and disclosures the builder shows; who
+              is whose current program and disclosures the builder shows; who
               it gets SENT to is the tick-list further down, and it can be
               several people. Saying so here is what stops a coach reading this
               row as the recipient. */}
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-            Whose current programme and injuries to work from. Who it goes to is further down, and can be more than one person.
+            Whose current program and injuries to work from. Who it goes to is further down, and can be more than one person.
           </Text>
 
           {/* An unread roster is not an empty one. Without this a coach with a
@@ -1691,8 +2996,8 @@ export default function Builder() {
               they do not have. The empty state below is therefore said only
               under a WHOLE read. */}
           {rosterStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed below because the roster did not come back — it does not mean you have no clients, and nothing you have built here is affected.">
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
+              note="Nobody is listed below because the roster did not come back. It does not mean you have no clients, and nothing you have built here is affected.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label={retryBusy ? 'Trying Again…' : 'Try Reading Again'} onPress={retryReads} />
               </View>
@@ -1702,20 +3007,29 @@ export default function Builder() {
           ) : null}
 
           {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clients yet — add a client from your dashboard and they'll appear here to build for.
-            </Text>
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet. Add a client from your dashboard and they'll appear here to build for.
+              </Text>
+              {/* "from your dashboard" was the whole instruction and made the
+                  coach change tabs from memory. Same control and destination as
+                  src/ui/EmptyRoster.tsx. */}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
           ) : roster.length === 0 && rosterStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : roster.length === 0 ? null : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: sp.lg }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
               {roster.map((c) => {
                 const on = c.id === clientId;
                 return (
                   <Pressable key={c.id} onPress={() => setClientId(on ? '' : c.id)}
                     accessibilityRole="button" accessibilityLabel={on ? `Stop building for ${c.name}` : `Build for ${c.name}`}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
                   </Pressable>
                 );
               })}
@@ -1758,7 +3072,20 @@ export default function Builder() {
           ) : null}
         </Section>
 
-        <Rule />
+        {/* Where the coach is in the build — Build, Review, Assign — stated
+            once, off the same figures the sections below act on. The Assign
+            step reads "current" when its prerequisites are met and never
+            "complete": an untouched draft must not look delivered before the
+            real Assign button below has been pressed. */}
+        <ProgramBuilderFlow
+          subject={client?.name.split(' ')[0] ?? null}
+          dayCount={days.length}
+          exerciseCount={blockExercises}
+          findingCount={review.findings.length}
+          recipientCount={pickedIds.length}
+          readyToAssign={canAssign}
+        />
+
 
         {/* ── templates ──────────────────────────────────────────────────── */}
         {/* Save as Template used to be the `note` on the SectionHead: small,
@@ -1771,39 +3098,137 @@ export default function Builder() {
             The count waits for a whole read, because under 'partial' or
             'error' `templates.length` is the size of what arrived plus three
             built-in starters, which is not the size of the library. */}
+        {/* ── what they have to train with ────────────────────────────────
+            The requirement, in the owner's own words: "there needs to be a way
+            to select no equipment available as an option in order to build a
+            work out program." So it is a control, above the two ways a program
+            is started, and the honest part is what sits under it — a coach
+            picking No equipment is told what the catalogue CANNOT give them
+            before they build, not after. */}
         <Section>
-          <SectionHead title="Templates" note={tplStatus === 'ready' && templates.length ? `${num(templates.length)} saved` : undefined} />
+          <SectionHead title="Equipment" />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            What is available where this client trains. Pick No equipment and the whole week is drawn from movements that need nothing at all: no bar, no bands, no bench.
+          </Text>
+          <Segmented options={KIT_OPTIONS} value={kit} onChange={setKit} />
+
+          {kit !== 'none' ? null
+            : cat.status === 'loading' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Reading the movement catalogue…
+              </Text>
+            ) : cat.status === 'error' ? (
+              /* Not "there are no bodyweight movements". The read failed; the
+                 catalogue is untouched and says what it always said. */
+              <Notice tone={t.warn} kicker="Catalogue" title="The Movement Catalogue Could Not Be Read"
+                note="Nothing can be built from a list that did not come back, and this is not a statement that no movement needs no equipment. Reopen this screen once you have signal." />
+            ) : cat.status === 'partial' ? (
+              <View style={{ marginTop: sp.md }}>
+                <PartialRead what="catalogue movements" shown={cat.rows.length} />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  Only part of the catalogue came back, so which muscle groups a no-equipment week could not cover is not known, and a week generated from a prefix would leave out groups without being able to say which. Nothing is built from a partial list.
+                </Text>
+              </View>
+            ) : !noKit?.program.days.length ? (
+              <Notice tone={t.warn} kicker="Equipment" title="There Is No No-Equipment Week to Build"
+                note={noKit ? (noKitCoverageNote(noKit.coverage) ?? '') : ''} />
+            ) : (
+              <View style={{ marginTop: sp.md }}>
+                {/* The sentence the owner asked for, named group by group. It
+                    is shown BEFORE the button, and it is the same sentence the
+                    program itself carries into the client's note. */}
+                <Notice tone={t.ink3} kicker="Equipment"
+                  title={`${num(noKit.coverage.poolSize)} Movements Need Nothing at All`}
+                  note={noKitCoverageNote(noKit.coverage)
+                    ?? 'Every muscle group the catalogue names has a movement that needs no equipment.'} />
+                <View style={{ height: sp.md }} />
+                <Cta label="Build a No-Equipment Week" onPress={buildNoKitWeek} wide
+                  a11yLabel={`Build a ${noKit.program.days.length}-day week from movements that need no equipment. It loads into the builder below, over what is there.`} />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  It loads into the builder below, where you can change any of it before assigning.
+                </Text>
+              </View>
+            )}
+        </Section>
+
+
+        {/* ── build from muscles ──────────────────────────────────────────
+            Owner feedback: the coach wanted the member's body picker when
+            building for a client or themselves. Same picker, same generator;
+            the week loads into the builder below to edit before assigning. */}
+        <Section>
+          <SectionHead title="Build From Muscles"
+            note={targets.length ? `${targets.length} Picked` : undefined} />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+            Tap the body or pick muscles below, built from the catalogue and the equipment answer above.
+            Two or more can share one session or take a day each.
+          </Text>
+          <MusclePicker chosen={targets} onChange={setTargets} />
+          {targets.length > 1 ? (
+            <View style={{ marginTop: sp.md }}>
+              <Segmented
+                options={[
+                  { key: 'together', label: 'One Session' },
+                  { key: 'split', label: 'A Day Each' },
+                ] as const}
+                value={muscleSplit}
+                onChange={setMuscleSplit}
+              />
+            </View>
+          ) : null}
+          {targets.length && cat.status !== 'ready' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {cat.status === 'loading' ? 'Reading the movement catalogue…'
+                : 'The whole movement catalogue has not come back, so nothing is built from it yet. Reopen this screen once you have signal.'}
+            </Text>
+          ) : null}
+          {byMuscle && targetedCoverageNote(byMuscle.coverage) ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{targetedCoverageNote(byMuscle.coverage)}</Flag>
+          ) : null}
+          <View style={{ height: sp.md }} />
+          <Cta label="Build From These Muscles" onPress={buildFromMuscles} wide
+            disabled={!byMuscle?.program.days.length}
+            a11yLabel={byMuscle?.program.days.length
+              ? `Build a ${byMuscle.program.days.length}-day week from the picked muscles. It loads into the builder below, over what is there.`
+              : 'Build from these muscles. Pick at least one muscle first'} />
+        </Section>
+
+        <Section>
+          <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} Saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-            Save this week to reuse it with anybody, or start from one you have already built.
+            Start from one you have already built. To keep this week for reuse, Save as Template is beside Assign at the foot of the screen. It goes to your library and reaches nobody.
           </Text>
 
           {/* The starters are the problem, not the consolation. Three of them
-              are always present, so a coach whose saved programmes did not come
-              back sees a working library with somebody else's programmes in it
+              are always present, so a coach whose saved programs did not come
+              back sees a working library with somebody else's programs in it
               and concludes their work is gone. */}
           {tplStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Library" title="Your saved templates could not be read"
-              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programmes are on the server and did not come back. Reopen this screen once you have signal." />
+            <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing. Your own programs are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
 
           {tplSaveFailed ? (
-            <Notice tone={t.crit} kicker="Template" title="That template was not saved" note={tplSaveFailed} />
+            <Notice tone={t.crit} kicker="Template" title="That Template Was Not Saved" note={tplSaveFailed} />
           ) : null}
 
-          <Cta wide label="Save as Template" onPress={() => { setTplName(tplName || title); setSaveOpen(true); }} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Start From a Template" icon="grid" onPress={() => setTplPick(true)} />
+          {/* Save as Template left this section for the footer. It was a
+              second full-width green button half-way down a page whose one
+              primary action is Assign — two writes drawn as the same kind of
+              thing — and it still scrolled away. In the footer it is always
+              in reach, which is what "it gets lost" was asking for, and it is
+              a different kind of button from the one that reaches a client. */}
+          <Ghost label="Start from a Template" icon="grid" onPress={() => setTplPick(true)} />
           <View style={{ height: sp.sm }} />
           {/* The library was reachable from inside the picker sheet above and
               from the Explore list, and from nowhere a coach standing on this
-              screen would look. It is where the twelve programmes they have
+              screen would look. It is where the twelve programs they have
               built actually live. */}
           <Ghost label="Open Template Library" icon="grid" onPress={() => router.push('/(trainer)/templates')} />
         </Section>
 
-        <Rule />
 
         {/* ── the program itself ─────────────────────────────────────────── */}
         <Section>
@@ -1814,8 +3239,8 @@ export default function Builder() {
               the same trap by a different door: the work is real, the save at
               the bottom is what has to be held. */}
           {!planGuard.allowed && !hasDraft ? (
-            <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programme'}
-              title={programStatus === 'loading' ? 'Reading their current programme' : 'What they are on could not be read'}
+            <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Program'}
+              title={programStatus === 'loading' ? 'Reading Their Current Program' : 'What They Are on Could Not Be Read'}
               note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
           ) : null}
 
@@ -1831,39 +3256,125 @@ export default function Builder() {
               the rest of this screen guards, so when the two disagree it says
               so and offers the replacement as something the coach taps. */}
           {seed.note ? (
-            <Notice tone={t.ink3} kicker="Builder" title="This is your own draft" note={seed.note}>
+            <Notice tone={t.ink3} kicker="Builder" title="This Is Your Own Draft" note={seed.note}>
               {seed.replaceLabel ? (
                 <View style={{ marginTop: sp.md }}>
-                  <Ghost label={seed.replaceLabel} onPress={loadTheirProgramme} />
+                  <Ghost label={seed.replaceLabel} onPress={loadTheirProgram} />
                 </View>
               ) : null}
             </Notice>
           ) : null}
 
-          {/* An unreadable goal used to be answered with a fat-loss programme.
+          {/* An unreadable goal used to be answered with a fat-loss program.
               The builder is empty instead, and this says whose goal is missing
               and what to do about it — the coach or the client sets one, and
               nobody here guesses. It is only shown once we know there is no
-              coach-assigned programme to display, because that case has a plan
+              coach-assigned program to display, because that case has a plan
               to show and needs no goal at all. */}
           {client && planGuard.allowed && !assignedNow && !autoGoal ? (
-            <Notice tone={t.ink3} kicker="Goal" title="No goal on record"
-              note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` — their roster row reads “${client.goal}”` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
+            <Notice tone={t.ink3} kicker="Goal" title="No Goal on Record"
+              note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` (their roster row reads “${client.goal}”)` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
           ) : null}
 
           {inGroups.length ? (
             <Flag tone={t.brand} style={{ marginBottom: sp.lg }}>
-              {`${client?.name.split(' ')[0] ?? 'This client'} is in ${listNames(inGroups.map((g) => g.name))}. Assigning here changes only their copy — nobody else in ${inGroups.length === 1 ? 'the group' : 'those groups'} is touched.`}
+              {`${client?.name.split(' ')[0] ?? 'This client'} is in ${listNames(inGroups.map((g) => g.name))}. Assigning here changes only their copy. Nobody else in ${inGroups.length === 1 ? 'the group' : 'those groups'} is touched.`}
             </Flag>
           ) : null}
 
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
-          <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
-            style={[inp, { marginBottom: sp.lg }]} />
+
+          {/* ── the day the block begins ──────────────────────────────────
+              Coaches sit on their phone on a Sunday night and tap Assign at the
+              right moment, because an assignment IS a start: the write lands and
+              the client's Train tab reads the row on its next render.
+
+              This field records the day the coach chose. It does NOT hold the
+              program back, and the sentence under it says so — because a
+              coach who believes it does, and assigns a block "starting Monday"
+              on a Thursday, has replaced their client's Friday session while
+              believing they did not. That is strictly worse than the alarm.
+
+              Left blank is the ordinary case and the default: "assign it now"
+              is what this control has always meant.
+
+              ── why it is HERE, beside the name, and not in the assign panel ──
+              It used to sit at the foot of the screen, directly above the
+              Assign button. That put it after the roster — a scrolling list —
+              so on a phone a coach met it last, having already scrolled past
+              every decision it belongs to, and one of them read a disabled
+              Assign button as a complaint about the date.
+
+              A coach decides when a block starts BEFORE they lay out its
+              weeks, not after: the start day is what makes "week one" mean
+              anything. So it belongs with the block's other two facts — its
+              name and its note — and above the Weeks section that reads week
+              numbers off it. Nothing about the write changed: `startsOn` is
+              still the same state, still optional, and still passed to
+              `assignProgramTo` only when `isStartDate` can read it. */}
+          <View style={{ marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Starts On</Text>
+            {/* ── the field IS the button ─────────────────────────────────
+                This was a `TextInput` with a small calendar button beside it,
+                and it was reported: "when you tap the date the keyboard pops up
+                and blocks what you are typing". The soft keyboard comes up over
+                the bottom of the window, so on a phone tapping the field to fill
+                it in is the gesture that hides it — and the calendar was
+                reachable only from a 44pt target off to one side, which is not
+                where anybody taps when they want to set a date.
+
+                So the whole box opens the month sheet and nothing here raises a
+                keyboard. Typing has NOT been dropped — coaches paste dates out
+                of a client's message and out of their own notes — it moved
+                inside `DateSheet`, behind its own "Type a Date", so a date is
+                entered in one place by either route. The same shape as the
+                assign panel in app/(trainer)/templates.tsx, deliberately: two
+                controls for one value is what produced the bug.
+
+                Not `@react-native-community/datetimepicker`. That is a native
+                module, a native module is a new binary, and this has to reach
+                coaches over the air on the build they are already running. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+              <Pressable onPress={() => setStartPick(true)}
+                accessibilityRole="button"
+                accessibilityLabel={startsOn
+                  ? 'The day this block begins. Currently ' + startsOn + '. Opens a calendar.'
+                  : 'The day this block begins. No day set, so it starts now. Opens a calendar.'}
+                style={{
+                  flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                  minHeight: MIN_TARGET, paddingHorizontal: 12,
+                  backgroundColor: t.surface2, borderRadius: radius.sm,
+                }}>
+                <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
+                  {startsOn || 'YYYY-MM-DD'}
+                </Text>
+                <Icon name="calendar" size={18} color={t.ink2} />
+              </Pressable>
+              {startsOn ? (
+                <Ghost label="Clear" onPress={() => setStartsOn('')} />
+              ) : null}
+            </View>
+            {/* Refused rather than corrected. Kept even though the sheet only
+                ever hands back a `YYYY-MM-DD`: `assignProgramTo` below drops an
+                unreadable date silently, and the one thing a coach must never be
+                is told "Assigned" for a block whose start date went nowhere. A
+                stored value that will not parse puts every screen reading it
+                into "unreadable" for ever, over a plan the coach believes
+                carries a date — so it is not stored at all. */}
+            {startsOn && !isStartDate(startsOn) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                Write the date as year, month and day: 2026-09-07. Anything else is not saved, and the
+                program goes out with no start date rather than one nothing can read back.
+              </Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{CLIENT_STARTS_NOW}</Text>
+            )}
+          </View>
+
+
           {/* The letter at the top of the week. Cues about ONE movement go on
               that movement — a tempo note is useless attached to a Tuesday —
               which is what the Notes field under each exercise below is for. */}
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Note to client (optional)</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Note to Client (Optional)</Text>
           <TextInput value={note} onChangeText={setNote} placeholder="Why this block, what to watch for overall…" placeholderTextColor={t.ink3}
             multiline style={[inp, { minHeight: 72, textAlignVertical: 'top' }]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
@@ -1871,18 +3382,17 @@ export default function Builder() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── the block ──────────────────────────────────────────────────
             Drawn ONLY once there is more than one week, plus the one control
             that makes a second. A coach writing a single week must see exactly
-            the screen they saw before — a week strip over a one-week programme
+            the screen they saw before — a week strip over a one-week program
             is a decoration that implies a structure that is not there. */}
         <Section>
           <SectionHead title="Weeks" note={isBlock(composeProgram()) ? `${blockWeeks.length}` : undefined} />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             A block is the six, eight or twelve weeks you actually sell. Week one is what the client trains
-            now — the later weeks are stored with the programme and are yours to edit before you send them.
+            now. The later weeks are stored with the program and are yours to edit before you send them.
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
             {blockWeeks.map((w, wi) => (
@@ -1903,29 +3413,12 @@ export default function Builder() {
                   // `addSetRow` copies a set: nobody adds week five in order to
                   // leave it empty, and a blank week would send the coach back
                   // to retyping the session — which is the thing they do today.
-                  setBlockWeeks((ws) => {
-                    // Written out here rather than through `addWeek`, because that
-                    // works on a stored `Program` and this list holds the
-                    // builder's own `BEx` — with its draft keys and the unit
-                    // the coach typed in. Round-tripping through `composeProgram`
-                    // to add a week would silently apply every one of its
-                    // rewritings to the week being copied.
-                    const last = ws[ws.length - 1];
-                    const copied: BWeek = {
-                      days: (last?.days ?? []).map((d) => ({
-                        ...d,
-                        // Fresh keys, and this is the whole of why the copy is
-                        // written out rather than spread. `key` is what every
-                        // list, drag handler and per-row draft on this screen
-                        // matches on; two weeks sharing one would make typing
-                        // into week five's bench press edit week four's as well.
-                        exercises: d.exercises.map((e) => ({ ...e, key: nextKey(), setRows: e.setRows ? e.setRows.map((r) => ({ ...r })) : e.setRows })),
-                      })),
-                    };
-                    return [...ws, copied];
-                  });
+                  // `cloneWeek` is the one copy on this screen — see its own
+                  // note for why it is written out rather than routed through
+                  // `addWeek`, and why every exercise in it gets a fresh key.
+                  setBlockWeeks((ws) => [...ws, cloneWeek(ws[ws.length - 1])]);
                   setWeekIdx(blockWeeks.length);
-                  setFoldedDays(foldsForNewProgramme());
+                  setOpenDays(foldsForNewProgram());
                 }}
                 accessibilityRole="button" accessibilityLabel="Add another week to this block"
                 style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
@@ -1937,6 +3430,51 @@ export default function Builder() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md, alignItems: 'center' }}>
               <Ghost label={blockWeeks[weekIdx]?.deload ? 'Not a Deload' : 'Mark as Deload'}
                 onPress={() => setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx ? { ...w, deload: !w.deload } : w)))} />
+              {/* ── the copy Add Week could not make ──────────────────────
+                  Add Week copies THE LAST week, which is right when a coach is
+                  writing a block front to back and useless the moment they are
+                  not. A twelve-week block sold as three rounds of heavy, heavy,
+                  deload was four weeks of retyping: to make week four be week
+                  one again, the coach added a week — getting a copy of week
+                  three, the deload — and then rewrote every day of it by hand.
+                  The copy lands directly after the week it came from, because
+                  duplicating week two to make week three is a statement about
+                  order; appending it to the end of an eight-week block would be
+                  a different edit the coach would then undo six times. */}
+              <Ghost label="Duplicate This Week" onPress={() => {
+                // The deload mark comes across on a DUPLICATE and not on Add
+                // Week — see `cloneWeek`. A coach duplicating the light week
+                // asked for another light week.
+                const edit = duplicateWeek(
+                  blockWeeks, weekIdx,
+                  (w: BWeek) => ({ ...cloneWeek(w), deload: w.deload }),
+                  MAX_WEEKS,
+                );
+                if (!edit) {
+                  // Never a dead control and never a silent one. The ceiling is
+                  // real — every week is stored in full inside one jsonb value
+                  // that is re-encoded on every keystroke — and a coach who
+                  // taps and sees nothing concludes the button is broken.
+                  Alert.alert(
+                    'No Room for Another Week',
+                    `A block holds ${MAX_WEEKS} weeks. Remove one you are not using, or write the rest as a second block, which is how a longer plan is periodised anyway.`,
+                  );
+                  return;
+                }
+                applyWeekEdit(edit);
+              }} />
+              {/* ── where the light week falls ────────────────────────────
+                  Periodisation is decided by the order of the weeks, and the
+                  strip was positional with no drag, no cut and no paste: a
+                  coach who wanted the deload at four rather than three had to
+                  retype two weeks into each other. Absent at the ends rather
+                  than disabled — there is nothing earlier than week one. */}
+              {weekIdx > 0 ? (
+                <Ghost label="Move Earlier" onPress={() => applyWeekEdit(moveWeek(blockWeeks, weekIdx, weekIdx - 1))} />
+              ) : null}
+              {weekIdx < blockWeeks.length - 1 ? (
+                <Ghost label="Move Later" onPress={() => applyWeekEdit(moveWeek(blockWeeks, weekIdx, weekIdx + 1))} />
+              ) : null}
               <Ghost label="Remove This Week" onPress={() => {
                 // Removing WEEK ONE moves what the client trains, immediately,
                 // because week two becomes week one and `days` follows it. The
@@ -1944,7 +3482,7 @@ export default function Builder() {
                 // both being one silent button.
                 const first = weekIdx === 0;
                 Alert.alert(
-                  first ? 'Remove week one?' : `Remove ${weekLabel(blockWeeks[weekIdx], weekIdx + 1).toLowerCase()}?`,
+                  first ? 'Remove Week One?' : `Remove ${weekLabel(blockWeeks[weekIdx], weekIdx + 1).toLowerCase()}?`,
                   first
                     ? 'Week one is the week the client is training. Removing it promotes week two in its place, and that is what they will see the next time you assign this.'
                     : 'The later weeks move up. Nothing the client is training changes until you assign this again.',
@@ -1953,28 +3491,127 @@ export default function Builder() {
                     { text: 'Remove', style: 'destructive', onPress: () => {
                       setBlockWeeks((ws) => (ws.length <= 1 ? ws : ws.filter((_, i) => i !== weekIdx)));
                       // Clamped, because a week index past the end renders an
-                      // empty builder over a programme that is not empty.
+                      // empty builder over a program that is not empty.
                       setWeekIdx((i) => Math.max(0, Math.min(i, blockWeeks.length - 2)));
-                      setFoldedDays(foldsForNewProgramme());
+                      setOpenDays(foldsForNewProgram());
                     } },
                   ],
                 );
               }} />
             </View>
           ) : null}
+
+          {/* ── THE BLOCK, WITHOUT OPENING TWELVE WEEKS ───────────────────
+              The strip above says how many weeks there are and nothing about
+              what is in any of them. To find out whether week seven was ever
+              written, a coach tapped week seven and scrolled — twelve times, on
+              a block they were about to sell.
+
+              Two things here are only visible from a list. A week with NO
+              TRAINING DAYS in it, which reaches a client as a week of nothing
+              and is what a coach gets by adding weeks onto an empty week one.
+              And a week IDENTICAL to the one before it, which is not a fault —
+              Add Week copies the previous week on purpose — but is exactly what
+              a coach who meant to edit week seven and did not has, four times
+              over, with nothing on the screen saying so.
+
+              Each row jumps to its week: this is a table of contents for the
+              thing underneath it, so it is also the way in. */}
+          {blockWeeks.length > 1 ? (
+            <View style={{ marginTop: sp.lg }}>
+              {blockWarnings(blockWeeks).map((w, i) => (
+                <Flag key={i} style={{ marginBottom: sp.sm }}>{w}</Flag>
+              ))}
+              {blockOverview(blockWeeks).map((row) => (
+                <Pressable
+                  key={row.n}
+                  onPress={() => { setWeekIdx(row.n - 1); setOpenDays(foldsForNewProgram()); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: row.n - 1 === weekIdx }}
+                  accessibilityLabel={`${row.label}. ${row.detail}.${row.sameAsPrevious ? ' The same as the week before it.' : ''} Opens it.`}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                    minHeight: MIN_TARGET, paddingHorizontal: sp.md,
+                    borderRadius: radius.sm,
+                    backgroundColor: row.n - 1 === weekIdx ? t.surface2 : 'transparent',
+                  }}>
+                  <Text style={{ ...ty.label, color: row.empty ? t.ink3 : t.ink, flex: 1 }} numberOfLines={1}>
+                    {row.label}
+                  </Text>
+                  {/* The repeat is a WORD, never a tint. Colour is not the only
+                      channel carrying meaning anywhere in this app, and this
+                      one is read by somebody scanning twelve rows. */}
+                  {row.sameAsPrevious ? (
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>same as the week before</Text>
+                  ) : null}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{row.detail}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── days ───────────────────────────────────────────────────────── */}
+        {editorOpen ? (<>
         <Section>
           <SectionHead title={blockWeeks.length > 1 ? weekLabel(blockWeeks[weekIdx], weekIdx + 1) : 'Training Days'}
-            note={days.length ? `${days.length} day${s(days.length)} · ${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
+            note={days.length ? `${days.length} Day${s(days.length)} · ${num(totalExercises)} Exercise${s(totalExercises)}` : undefined} />
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No training days yet — add one to start building.
+              No training days yet. Add one to start building.
             </Text>
+          ) : null}
+
+          {/* ── saved cues, said once ──────────────────────────────────────
+              Three different facts and three different sentences. A read that
+              FAILED is not a coach with no cues, and a database that has never
+              had supabase/parts/3150 applied is not either — so neither is
+              allowed to render as silence, and neither claims anything about
+              what this coach has written. */}
+          {cueFailed ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.crit}>
+                Your saved cues could not be read, so nothing has been prefilled and no cue is shown below. This is not
+                a record that you have none. Every note here is exactly as you left it.
+              </Flag>
+              <Pressable onPress={() => { setCueFailed(false); void loadCues(); }}
+                accessibilityRole="button" accessibilityLabel="Try reading your saved cues again"
+                hitSlop={hitSlopFor(MIN_TARGET)}
+                style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', justifyContent: 'center',
+                         paddingHorizontal: sp.lg, marginTop: sp.sm,
+                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.caption, color: t.ink }}>Try Again</Text>
+              </Pressable>
+            </View>
+          ) : cues && cues.status === 'absent' ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.ink3}>{CUES_UNAVAILABLE_NOTE}</Flag>
+            </View>
+          ) : cues && cues.status === 'read' && cues.cues.length && days.length ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{CUE_NEVER_OVERWRITES}</Text>
+              <Pressable onPress={fillFromCues}
+                accessibilityRole="button"
+                accessibilityLabel="Fill the empty notes in this week from your saved cues"
+                accessibilityHint="Notes you have already written are not changed."
+                hitSlop={hitSlopFor(MIN_TARGET)}
+                style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', justifyContent: 'center',
+                         paddingHorizontal: sp.lg, marginTop: sp.sm,
+                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.caption, color: t.ink }}>Fill Empty Notes from My Cues</Text>
+              </Pressable>
+              {/* Said even when it is zero. A button that appears to do nothing
+                  is a button a coach taps four more times. */}
+              {cuesFilled !== null ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  {cuesFilled === 0
+                    ? 'Nothing to fill. Every note in this week already has something in it, and none of them were changed.'
+                    : `${num(cuesFilled)} empty note${s(cuesFilled)} filled from your cues. Nothing you had already written was touched.`}
+                </Text>
+              ) : null}
+            </View>
           ) : null}
 
           {/* Said once, at the top, and only when the coach has actually
@@ -1998,57 +3635,117 @@ export default function Builder() {
 
           {days.map((d, di) => (
             <View key={di} style={{
-              marginTop: di === 0 ? 0 : sp.xl, paddingTop: di === 0 ? 0 : sp.xl,
+              marginTop: di === 0 ? 0 : sp.md, paddingTop: di === 0 ? 0 : sp.md,
               borderTopWidth: di === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              {/* ── the day, as one row ─────────────────────────────────────
+                  What a week looks like when it is opened: the day, what it is
+                  for, and how much is in it — "7 exercises · 21 sets" — with
+                  the exercises behind the row. It used to be the editing
+                  controls themselves (a change-day button, the focus field, a
+                  count pill and a remove ×) over every exercise of the day,
+                  always open, which is the screen a coach photographed as
+                  cluttered. The controls are still here, under the row, for
+                  the day that is open.
+
+                  The SETS figure is `setCount`, the same number
+                  `composeDays` sends, so a day that says 21 sets is a day
+                  whose client will count 21.
+
+                  One Pressable, so the whole row is the target and the pill
+                  at its trailing edge is drawing rather than a second button
+                  inside the first. */}
+              {(() => {
+                const open = !!openDays[di];
+                const dayName = WEEK_DAY_NAMES[DAYS.indexOf(d.day)] ?? d.day;
+                const daySets = d.exercises.reduce((acc, x) => acc + setCount(x), 0);
+                const counts = `${num(d.exercises.length)} exercise${s(d.exercises.length)} · ${num(daySets)} set${s(daySets)}`;
+                const focus = d.focus.trim();
+                const cardio = (d.cardio ?? '').trim();
+                const kind = dayTypeOf(d);
+                return (
+                  <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
+                    accessibilityState={{ expanded: open }}
+                    accessibilityLabel={`${dayName}, ${kind}${focus ? `, ${focus}` : ''}. ${counts}${cardio ? ', and conditioning' : ''}.`}
+                    accessibilityHint={open ? 'Shuts this day' : 'Opens this day to read and edit its exercises'}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: MIN_TARGET + sp.sm }}>
+                    {/* The day's type as a bar down the row's leading edge, in
+                        the colour its circle has at the top of the page, so a
+                        week of shut rows reads as the same split the circles
+                        drew. The type is also the first word of the line under
+                        the name — the bar is never the only place it is said. */}
+                    <View style={{ width: 5, alignSelf: 'stretch', minHeight: 40, borderRadius: 3, backgroundColor: typeFill(DAY_TYPE_TONE[kind]) }} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ ...ty.head, color: t.ink }}>{dayName}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {[focus && focus.toLowerCase() !== kind.toLowerCase() ? `${kind} · ${focus}` : kind, counts, cardio ? 'conditioning' : null].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+                                   paddingHorizontal: sp.md, paddingVertical: 7,
+                                   borderRadius: radius.pill, borderWidth: hairline,
+                                   borderColor: t.ring, backgroundColor: t.surface2 }}>
+                      {/* Sized up and given an edge, on the report that "the 5 and
+                          down arrow next to the day should be a little bigger so we
+                          know what to do with it."
+
+                          That is the real complaint under it: two faint grey
+                          characters at caption size read as a LABEL — a count and a
+                          decoration — not as something to press. Bigger type alone
+                          would have made a bigger label. What says "press me" is the
+                          pill: a border, a filled ground, and the word for what
+                          happens, so the control announces itself instead of
+                          relying on somebody guessing that a triangle is a button.
+
+                          The count moved out of the pill and into the line under
+                          the day's name, where it is said in words — "7 exercises ·
+                          21 sets" — because it is the thing worth knowing about a
+                          day that is shut. */}
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{open ? 'Hide' : 'Show'}</Text>
+                      {/* A triangle rather than an Icon: the set has no chevron up
+                          or down, and `app/(client)/workouts.tsx` already uses
+                          exactly these two characters for the same gesture. */}
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{open ? '▴' : '▾'}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })()}
+
+              {/* Naming and moving the day, for the day that is open. These
+                  were the row itself; they are what a coach does to a day
+                  once, and reading the week is what they do every time. */}
+              {!openDays[di] ? null : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                 <Pressable onPress={() => cycleDay(di)} accessibilityRole="button" accessibilityLabel={`Change day, currently ${d.day}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{d.day}</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{d.day}</Text>
                   <Icon name="swap" size={13} color={t.ink3} />
                 </Pressable>
                 <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
+                  accessibilityLabel={`Focus for ${d.day}`}
                   style={[inp, { flex: 1 }]} />
-                {/* Fold. The count travels with it, so a folded day still says
-                    how much is in it — a row that collapses to just "Wed" makes
-                    a coach open it again to find out whether it is the empty
-                    one. */}
-                <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
-                  accessibilityState={{ expanded: !foldedDays[di] }}
-                  accessibilityLabel={`${foldedDays[di] ? 'Show' : 'Hide'} the ${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'} on ${d.day}`}
-                  hitSlop={10}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
-                           paddingHorizontal: sp.md, paddingVertical: 7,
-                           borderRadius: radius.pill, borderWidth: hairline,
-                           borderColor: t.ring, backgroundColor: t.surface2 }}>
-                  {/* Sized up and given an edge, on the report that "the 5 and
-                      down arrow next to the day should be a little bigger so we
-                      know what to do with it."
-
-                      That is the real complaint under it: two faint grey
-                      characters at caption size read as a LABEL — a count and a
-                      decoration — not as something to press. Bigger type alone
-                      would have made a bigger label. What says "press me" is the
-                      pill: a border, a filled ground, and the word for what
-                      happens, so the control announces itself instead of
-                      relying on somebody guessing that a triangle is a button.
-
-                      The count stays, because it is the thing worth knowing
-                      about a day that is folded shut. */}
-                  <Text style={{ ...ty.label, color: t.ink2, fontWeight: '600' }}>{d.exercises.length}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{foldedDays[di] ? 'Show' : 'Hide'}</Text>
-                  {/* A triangle rather than an Icon: the set has no chevron up
-                      or down, and `app/(client)/workouts.tsx` already uses
-                      exactly these two characters for the same gesture. */}
-                  <Text style={{ ...ty.label, color: t.ink2 }}>{foldedDays[di] ? '▾' : '▴'}</Text>
-                </Pressable>
                 <Pressable onPress={() => removeDay(di)} accessibilityRole="button" accessibilityLabel="Remove day" hitSlop={8}
                   style={{ paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
                   <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
                 </Pressable>
               </View>
+              )}
 
-              {foldedDays[di] ? null : (() => {
+              {/* The conditioning on this day, which used to travel through
+                  this screen invisibly. Under the header rather than in it: it
+                  is part of the day's prescription and not part of naming it,
+                  and a day that is shut does not need to show it. */}
+              {!openDays[di] ? null : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Conditioning</Text>
+                  <TextInput value={d.cardio ?? ''} onChangeText={(v) => setDayCardio(di, v)}
+                    placeholder="e.g. 15 min incline walk (leave empty for none)" placeholderTextColor={t.ink3}
+                    accessibilityLabel={`Conditioning on ${d.day}, sent to the client alongside the exercises`}
+                    style={[inp, { flex: 1 }]} />
+                </View>
+              )}
+
+              {!openDays[di] ? null : (() => {
                 // Computed ONCE per day rather than per row: the badge for any
                 // exercise depends on its neighbours, so a per-row call would
                 // walk the whole day for every exercise in it.
@@ -2059,6 +3756,30 @@ export default function Builder() {
                 // says whether the coach has opened a per-set table on this
                 // movement; `list` is what to render either way.
                 const rows = { tabled: hasSetRows(e), list: expandSets(e) };
+                const isOpen = openEx === e.key;
+                const catRow = rowFor(e.name);
+                const rowInjury = injuryFlag(e.name, e.group || '', clientInjuries);
+                // The one line a shut row carries. "Vary" is said in words when
+                // the table's sets are not all alike: quoting the first row
+                // would be a prescription nobody wrote for the other three.
+                const allSame = <T,>(xs: T[]) => xs.every((x) => x === xs[0]);
+                const repsList = rows.list.map((r) => r.reps.trim());
+                const loadList = rows.list.map((r) => r.loadKg);
+                const summary = [
+                  `${num(setCount(e))} × ${allSame(repsList) ? (repsList[0] || '8-12') : 'reps vary'}`,
+                  allSame(loadList)
+                    ? liftLabel(loadList[0] ?? null, e.loadUnit ?? defaultUnit)
+                    : 'weight varies',
+                  e.rpe != null ? `RPE ${e.rpe}` : null,
+                  e.pct1rm != null ? `${e.pct1rm}% of 1RM` : null,
+                  e.restSec != null ? `rest ${restClock(e.restSec)}` : null,
+                  e.note && e.note.trim() ? 'note' : null,
+                ].filter(Boolean).join(' · ');
+                // Shown without asking when the exercise already carries one of
+                // them: a field with a value in it is never behind a control
+                // the coach has to guess is there.
+                const advancedShown = advOpen[e.key]
+                  ?? (e.rpe != null || e.pct1rm != null || !!e.tempo || !!badgeFor(e.method));
                 // A run reads as one block: the rule between two exercises in
                 // the same group is dropped, because the line is what says
                 // "these are separate". The group's own tinted rail down the
@@ -2080,28 +3801,55 @@ export default function Builder() {
                   paddingTop: sp.md,
                   borderTopWidth: joinedAbove ? 0 : hairline,
                   borderTopColor: t.ring,
-                  ...(gb ? { borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: -sp.md } : null),
+                  ...(gb ? { borderStartWidth: 2, borderStartColor: t.brand, paddingStart: sp.md, marginStart: -sp.md } : null),
                   ...(isDragging ? {
                     // Lifted: it must read as picked up, or a coach cannot tell
                     // a drag from a list that has started scrolling.
                     zIndex: 10, elevation: 6, opacity: 0.96,
-                    backgroundColor: t.surface, borderRadius: radius.md,
+                    backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring,
                     shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
                   } : null),
                   transform: [{ translateY: isDragging ? dragY : (shift as number) }],
                 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {/* The whole name and picture open the movement, so a coach
-                        can check what they have written down without hunting
-                        for a control. What opens is the same screen the client
-                        gets, which is the point — and it carries Record a clip
-                        for the movements this coach wants in their own words. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                    {/* The picture opens the movement, so a coach can check
+                        what they have written down without hunting for a
+                        control. What opens is the same screen the client gets,
+                        which is the point — and it carries Record a clip for
+                        the movements this coach wants in their own words. The
+                        NAME used to open it too; the name now opens this
+                        row's own prescription, because that is what a coach
+                        reading a day reaches for, and one target cannot do
+                        both.
+
+                        The still is RepDB's, signed in one batch by
+                        `useCatalogueThumbs`. A movement with none — a coach's
+                        own, or one the catalogue has no artwork for — draws
+                        `ExerciseThumb`'s marked tile and never somebody
+                        else's picture. */}
                     <Pressable onPress={() => previewExercise(e.name)} accessibilityRole="button"
-                      accessibilityLabel={`What ${e.name} is`}
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                      accessibilityLabel={`What ${movement(e.name)} is`}>
+                      <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} size={44} />
+                    </Pressable>
+                    <Pressable onPress={() => setOpenEx(isOpen ? null : e.key)} accessibilityRole="button"
+                      accessibilityState={{ expanded: isOpen }}
+                      // Everything the row draws, because a label on a Pressable
+                      // REPLACES the lines under it: without the last two a
+                      // coach listening to this day would never hear that a
+                      // movement is half of a superset, or that it loads a knee
+                      // their client disclosed.
+                      accessibilityLabel={[
+                        movement(e.name),
+                        e.group || null,
+                        gb ? `${gb.label}, ${gb.position} of ${gb.size}` : null,
+                        badgeFor(e.method)?.label ?? null,
+                        summary,
+                        rowInjury ? `Loads their ${areaLabel(rowInjury.injury.area).toLowerCase()}, ${rowInjury.injury.severity}` : null,
+                      ].filter(Boolean).join('. ')}
+                      accessibilityHint={isOpen ? 'Shuts its sets, weight and notes' : 'Opens its sets, weight and notes'}
+                      style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: sp.sm, minHeight: MIN_TARGET }}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{movement(e.name)}</Text>
                         {/* The muscle group, and — separately — the set group.
                             Two different meanings of the word "group" that
                             happened to collide in this file, kept apart on
@@ -2111,7 +3859,7 @@ export default function Builder() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, flexWrap: 'wrap', marginTop: 2 }}>
                           {e.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{e.group}</Text> : null}
                           {gb ? (
-                            <Text style={{ ...ty.caption, color: t.brand, fontWeight: '600' }}>
+                            <Text style={{ ...ty.caption, color: t.brand, ...font('600') }}>
                               {e.group ? '· ' : ''}{gb.label} · {gb.position} of {gb.size}
                             </Text>
                           ) : null}
@@ -2125,10 +3873,16 @@ export default function Builder() {
                             );
                           })()}
                         </View>
+                        {/* What is prescribed, in one line, so a shut row still
+                            says what the client will be asked to do. Built
+                            from `expandSets` — the rows as they will be drawn
+                            for the client — so a table whose sets differ says
+                            that they differ rather than quoting set one. */}
+                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{summary}</Text>
                         {/* The gate makes a coach READ what a client cannot do.
                             It did nothing to help them act on it: they could
                             acknowledge a moderate knee, then put squats, lunges
-                            and leg press in the programme and assign it, with
+                            and leg press in the program and assign it, with
                             this screen silent throughout — and the client's own
                             app would quietly flag or swap those movements
                             afterwards. The coach is the one making the decision,
@@ -2147,12 +3901,21 @@ export default function Builder() {
                           );
                         })()}
                       </View>
+                      {/* Where the movement lands on the body, as the library's
+                          rows draw it. Decorative, and absent when the
+                          catalogue names no drawable muscle or the type has
+                          grown enough that the name needs the width more. */}
+                      {catRow && fontScale < 1.35 ? (
+                        <ExerciseMuscles compact primary={catRow.primaryMuscles} secondary={catRow.secondaryMuscles} status="ready" />
+                      ) : null}
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{isOpen ? '▴' : '▾'}</Text>
                     </Pressable>
                     {/* ── The grip: press and hold here, then drag ────────
                         A dedicated handle rather than the whole row, because
-                        the row's name and picture already open the movement
-                        and a long-press that stole that tap would cost a coach
-                        the thing they use most. The grip says what it is by
+                        the row's picture already opens the movement and its
+                        name opens the prescription, and a long-press that
+                        stole either tap would cost a coach the two things they
+                        use most. The grip says what it is by
                         looking like one.
 
                         Raw responder props rather than a PanResponder: these
@@ -2162,7 +3925,12 @@ export default function Builder() {
                       <View
                         accessible
                         accessibilityRole="adjustable"
-                        accessibilityLabel={`Reorder ${e.name}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or use the arrows.`}
+                        accessibilityLabel={`Reorder ${movement(e.name)}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or swipe up or down to move it one place.`}
+                        // The arrows that did this by tap now live inside the open row,
+                        // so the grip answers a screen reader's own adjust gesture —
+                        // an `adjustable` that adjusts nothing is a label, not a control.
+                        accessibilityActions={[{ name: 'increment', label: 'Move Later' }, { name: 'decrement', label: 'Move Earlier' }]}
+                        onAccessibilityAction={(ev) => moveExercise(di, e.key, ev.nativeEvent.actionName === 'increment' ? 1 : -1)}
                         onStartShouldSetResponder={() => true}
                         onMoveShouldSetResponder={() => true}
                         onResponderGrant={(ev) => beginDrag(di, ei, ev.nativeEvent.pageY)}
@@ -2171,64 +3939,17 @@ export default function Builder() {
                         onResponderTerminate={endDrag}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginRight: 6, backgroundColor: isDragging ? t.brand : t.surface2,
+                                 backgroundColor: isDragging ? t.brand : t.surface2,
                                  borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3, lineHeight: 18 }}>≡</Text>
+                        <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3 }}>≡</Text>
                       </View>
                     ) : null}
 
-                    {/* ── Three controls, one of them destructive ──────────
-                        Reported as "the up and down arrows and the x need to be
-                        bigger and more spaced apart so you don't tap the wrong
-                        icon". They were ~24pt of tappable area sitting a few
-                        points apart, and the neighbour of the down arrow
-                        DELETES the exercise along with its sets, reps, weight,
-                        rest and notes.
-
-                        So the fix is not only size. Each is now a 40pt round
-                        target — above the 44pt-with-hitSlop mark and the size
-                        the rest of this app uses for a real button — and the ×
-                        is pushed away from the pair with a gap wide enough that
-                        a thumb aiming at "down" cannot reach it. It is also
-                        tinted as a destructive control rather than sharing the
-                        arrows' grey, because the one that cannot be undone
-                        should not look like the two that can.
-
-                        Hidden at the ends rather than disabled: a control that
-                        cannot do anything is still something to aim at. */}
-                    {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
-                      <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} earlier in ${d.day}`} hitSlop={6}
-                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
-                      </Pressable>
-                    ) : null}
-                    {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
-                      <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={6}
-                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginLeft: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
-                      accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={6}
-                      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                               marginLeft: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
-                      {/* The critical tone is the BORDER, not the glyph. As ink
-                          it measures 3.03–4.05:1 across the ten palettes, under
-                          the 4.5:1 text needs, and check:contrast is right to
-                          refuse it — a status colour is tuned for a mark. The
-                          ring carries the warning, the × stays readable, and
-                          the accessibility label says "Remove" in words, so
-                          colour is never the only channel saying so. */}
-                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
-                    </Pressable>
                   </View>
+                  {isOpen ? (<>
                   {/* ── the sets, one at a time or all at once ─────────────
                       An exercise is EITHER a count and one spec — three sets
-                      of 8-10 at 42.5, which is what every programme in the
+                      of 8-10 at 42.5, which is what every program in the
                       database says today — OR a table of rows that can each
                       differ. Both are on screen here, never together: two
                       places to type the weight of set one, disagreeing, is
@@ -2237,7 +3958,7 @@ export default function Builder() {
                       The single spec is still the default, and the table is
                       opened by adding a set. That control is the only thing in
                       the app that writes `setRows`, which is what keeps every
-                      programme nobody has edited exactly as it was. */}
+                      program nobody has edited exactly as it was. */}
                   {rows.tabled ? (
                     <View style={{ marginTop: sp.md }}>
                       {/* Column heads. ty.micro renders uppercase, so this is
@@ -2261,7 +3982,7 @@ export default function Builder() {
                             <TextInput value={row.reps}
                               onChangeText={(v) => patchRows(di, e.key, (x) => patchSetRow(x, ri, { reps: v }))}
                               placeholder="8-10" placeholderTextColor={t.ink3}
-                              accessibilityLabel={`Reps in set ${row.n} of ${e.name}`}
+                              accessibilityLabel={`Reps in set ${row.n} of ${movement(e.name)}`}
                               style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
                             {/* The same text-draft as the single Weight field
                                 below, and for the same reason: re-deriving the
@@ -2279,7 +4000,7 @@ export default function Builder() {
                               }}
                               onBlur={() => setLoadDraft((prev) => { const n = { ...prev }; delete n[rk]; return n; })}
                               keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
-                              accessibilityLabel={`Weight for set ${row.n} of ${e.name}, in ${u === 'kg' ? 'kilograms' : 'pounds'}`}
+                              accessibilityLabel={`Weight for set ${row.n} of ${movement(e.name)}, in ${u === 'kg' ? 'kilograms' : 'pounds'}`}
                               style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
                             {/* How THIS set is performed — the thing the
                                 per-exercise field could only say once. A
@@ -2288,16 +4009,16 @@ export default function Builder() {
                                 marker is what fits; the full label is what is
                                 read out, because "RP" is not a word. */}
                             <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: ri })} accessibilityRole="button"
-                              accessibilityLabel={`How set ${row.n} of ${e.name} is performed — currently ${rm.label}`}
+                              accessibilityLabel={`How set ${row.n} of ${movement(e.name)} is performed, currently ${rm.label}`}
                               style={{ minWidth: 34, alignItems: 'center', paddingHorizontal: sp.sm, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                              <Text style={{ ...ty.caption, fontWeight: '600', color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
+                              <Text style={{ ...ty.caption, ...font('600'), color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
                             </Pressable>
                             {/* Hidden on the last row rather than disabled: an
                                 exercise of no sets is not a lighter exercise,
                                 and removing the movement has its own control. */}
                             {rows.list.length > 1 ? (
                               <Pressable onPress={() => patchRows(di, e.key, (x) => removeSetRow(x, ri))} accessibilityRole="button"
-                                accessibilityLabel={`Remove set ${row.n} of ${e.name}`} hitSlop={8}
+                                accessibilityLabel={`Remove set ${row.n} of ${movement(e.name)}`} hitSlop={8}
                                 style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
                                 <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
                               </Pressable>
@@ -2307,7 +4028,7 @@ export default function Builder() {
                       })}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                         <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
-                          accessibilityLabel={`Add a set to ${e.name}`}
+                          accessibilityLabel={`Add a set to ${movement(e.name)}`}
                           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                           <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
                         </Pressable>
@@ -2319,7 +4040,7 @@ export default function Builder() {
                           accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
                           onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
                           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
+                          <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                         </Pressable>
                       </View>
                     </View>
@@ -2327,16 +4048,25 @@ export default function Builder() {
                   <>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>Sets</Text>
+                    {/* 30pt round, against MIN_TARGET's 44, and they sit a
+                        gap apart — so the slop is what stops a thumb landing
+                        on "one set fewer" while reaching for "one set more".
+                        This is somebody's program, not a volume control:
+                        the mis-tap is silent, it is saved, and the client
+                        trains the wrong session. The × on the set rows above
+                        already carries slop for the same reason. */}
                     <Pressable onPress={() => patchEx(di, e.key, { sets: Math.max(1, e.sets - 1) })} accessibilityRole="button" accessibilityLabel="One set fewer"
+                      hitSlop={hitSlopFor(30)}
                       style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="minus" size={14} color={t.ink2} />
                     </Pressable>
                     <Text style={{ ...value(16), color: t.ink, minWidth: 16, textAlign: 'center' }}>{e.sets}</Text>
                     <Pressable onPress={() => patchEx(di, e.key, { sets: Math.min(8, e.sets + 1) })} accessibilityRole="button" accessibilityLabel="One set more"
+                      hitSlop={hitSlopFor(30)}
                       style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="plus" size={14} color={t.ink2} />
                     </Pressable>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Reps</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>Reps</Text>
                     <TextInput value={e.reps} onChangeText={(v) => patchEx(di, e.key, { reps: v })} placeholder="8-10" placeholderTextColor={t.ink3}
                       style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
                   </View>
@@ -2372,7 +4102,7 @@ export default function Builder() {
                       accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
                       onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                     </Pressable>
                   </View>
 
@@ -2380,10 +4110,10 @@ export default function Builder() {
                       src/lib/progression.ts has been able to answer this since
                       it was written and its three importers were all in the
                       CLIENT app: the client's phone told them to add 2.5 kg
-                      while the coach writing next week's programme for that
+                      while the coach writing next week's program for that
                       same person had an empty box and no help at all.
                       No new read. `reviewLog` is already the client's own
-                      `workouts` rows, held for the programme checks.
+                      `workouts` rows, held for the program checks.
                       Withheld — with a reason — rather than guessed whenever
                       the log has not established an answer, because "they have
                       not logged this movement" is a claim about a person and
@@ -2416,7 +4146,7 @@ export default function Builder() {
                         <Text style={{ ...ty.caption, color: t.ink3 }}>{offer.reason}</Text>
                         {label && !same ? (
                           <Pressable onPress={() => patchEx(di, e.key, { loadKg: offer.weightKg, loadUnit: u })}
-                            accessibilityRole="button" accessibilityLabel={`${label} for ${e.name}`}
+                            accessibilityRole="button" accessibilityLabel={`${label} for ${movement(e.name)}`}
                             style={{ alignSelf: 'flex-start', marginTop: sp.xs, paddingHorizontal: sp.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
                             <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
                           </Pressable>
@@ -2431,17 +4161,84 @@ export default function Builder() {
                       no numbers on it. */}
                   <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
                     <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
-                      accessibilityLabel={`Write out the sets of ${e.name} one by one, so each can have its own weight`}
+                      accessibilityLabel={`Write out the sets of ${movement(e.name)} one by one, so each can have its own weight`}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                       <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
                     </Pressable>
                   </View>
                   </>
                   )}
+                  {/* ── Rest and grouping ─────────────────────────────────
+                      Both answers to "how is this performed" rather than "what
+                      is it". Set type used to sit on the end of this row too,
+                      which is exactly why nobody tapped it: a bare `Normal`
+                      after "sec · default 1:30" reads as a property of the REST
+                      timer. It has its own labelled control below. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                    {/* The rest between sets, in SECONDS. The client's guided
+                        runner already had a timer — hardcoded to the same
+                        default for every exercise in every program, which is
+                        right for accessory work and wrong for a heavy triple.
+                        Blank is a real answer and the common one: the client
+                        falls back to the app default and their rest card says
+                        so, rather than presenting a number nobody chose as the
+                        coach's instruction. */}
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Rest</Text>
+                    <TextInput
+                      value={restDraft[e.key] ?? (e.restSec == null ? '' : String(e.restSec))}
+                      onChangeText={(v) => {
+                        setRestDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { restSec: null }); return; }
+                        const r = readRestSeconds(v);
+                        // A number not yet valid ("9" on the way to "90")
+                        // leaves the last good value alone rather than
+                        // clearing it. The refusal is said on blur, not on
+                        // every keystroke.
+                        if (r.ok && r.seconds != null) patchEx(di, e.key, { restSec: r.seconds });
+                      }}
+                      onBlur={() => {
+                        const typed = restDraft[e.key];
+                        setRestDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readRestSeconds(typed);
+                        // Said, not swallowed. A rest that silently stayed at
+                        // its old value while the coach believes they changed
+                        // it is a program that does not say what they think.
+                        if (!r.ok) Alert.alert('Check That Rest', r.reason);
+                      }}
+                      keyboardType="number-pad"
+                      placeholder={String(DEFAULT_REST_SEC)}
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Rest between sets of ${movement(e.name)}, in seconds`}
+                      style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
+                    </Text>
+
+                    {/* Grouping is an act on a PAIR, so the control lives on
+                        the upper exercise and names the lower one. Hidden
+                        rather than disabled where there is nothing below to
+                        join, and where the two are already in one run. */}
+                    {canJoinNext(d.exercises, ei) ? (
+                      <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Perform ${movement(e.name)} back to back with ${movement(d.exercises[ei + 1]?.name)}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Group with Next</Text>
+                      </Pressable>
+                    ) : null}
+                    {isGrouped(d.exercises, ei) ? (
+                      <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Take ${movement(e.name)} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
                   {/* ── the coach's own words, on this movement ──────────────
                       Asked for as "trainer notes attached in the exercise.
                       then they are saved for future reference". The builder
-                      had one note for the whole programme, which is the wrong
+                      had one note for the whole program, which is the wrong
                       grain for what coaches actually write down: "keep the
                       elbows tucked", "3-1-1 tempo", "stop two reps short",
                       "the machine by the window, seat on 4". Those are about
@@ -2452,6 +4249,36 @@ export default function Builder() {
                       assignment, and carried in the on-device draft — and the
                       client reads it at the machine, attributed to the coach
                       who wrote it. */}
+                  <View style={{ marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for This Exercise</Text>
+                    <TextInput
+                      value={e.note ?? ''}
+                      onChangeText={(v) => patchEx(di, e.key, { note: v })}
+                      placeholder="Cue, tempo, setup. They see this at the machine…"
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Your notes on ${movement(e.name)}`}
+                      multiline
+                      style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                  </View>
+                  {/* ── the fields most exercises never use ────────────────
+                      Effort, share of a max, tempo, set type and the saved cue
+                      are real and are what a careful coach reaches for — on
+                      one movement in five. Drawn on every row they were five
+                      more controls between a coach and the next exercise. They
+                      are one tap away, they open on their own for any exercise
+                      that already carries one, and nothing about what they
+                      write has changed. */}
+                  <Pressable onPress={() => setAdvOpen((p) => ({ ...p, [e.key]: !advancedShown }))}
+                    accessibilityRole="button" accessibilityState={{ expanded: advancedShown }}
+                    accessibilityLabel={`${advancedShown ? 'Fewer' : 'More'} options for ${movement(e.name)}: effort, percentage of a one rep max, tempo, set type and your saved cue`}
+                    hitSlop={hitSlopFor(MIN_TARGET)}
+                    style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                             paddingHorizontal: sp.lg, marginTop: sp.md,
+                             borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                    <Text style={{ ...ty.caption, color: t.ink }}>{advancedShown ? 'Fewer Options' : 'More Options'}</Text>
+                    <Text style={{ ...ty.label, color: t.ink2 }}>{advancedShown ? '▴' : '▾'}</Text>
+                  </Pressable>
+                  {advancedShown ? (<>
                   {/* ── effort, share of a max, and rep speed ──────────────
                       Three things a coach had nowhere to write and put in the
                       exercise NOTE instead — "@8", "@75%", "3-1-1" — where they
@@ -2486,11 +4313,25 @@ export default function Builder() {
                         const r = readRpe(v);
                         if (r.ok) patchEx(di, e.key, { rpe: r.rpe });
                       }}
-                      onBlur={() => setRpeDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        // Said, not swallowed — the same rule the Rest box in
+                        // this row has always kept. The coach typed @8.3, the
+                        // box showed @8.3 while they were in it, and on blur it
+                        // snapped back to whatever was there before with nothing
+                        // said. The reasonable reading is that the app is slow,
+                        // and the block goes out carrying last week's target.
+                        // `r.why` already exists and says exactly what is wrong
+                        // ("RPE is written in halves — 8 or 8.5, not 8.3").
+                        const typed = rpeDraft[e.key];
+                        setRpeDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readRpe(typed);
+                        if (!r.ok) Alert.alert('Check That Effort Target', r.why);
+                      }}
                       keyboardType="decimal-pad" placeholder="8.5" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed effort for ${e.name}, on the RPE scale`}
+                      accessibilityLabel={`Prescribed effort for ${movement(e.name)}, on the RPE scale`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>% of 1RM</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>% of 1RM</Text>
                     <TextInput
                       value={pctDraft[e.key] ?? (e.pct1rm == null ? '' : String(e.pct1rm))}
                       onChangeText={(v) => {
@@ -2499,11 +4340,17 @@ export default function Builder() {
                         const r = readPercent1RM(v);
                         if (r.ok) patchEx(di, e.key, { pct1rm: r.pct });
                       }}
-                      onBlur={() => setPctDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        const typed = pctDraft[e.key];
+                        setPctDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readPercent1RM(typed);
+                        if (!r.ok) Alert.alert('Check That Percentage', r.why);
+                      }}
                       keyboardType="number-pad" placeholder="75" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed share of a one-rep max for ${e.name}, as a whole percentage`}
+                      accessibilityLabel={`Prescribed share of a one-rep max for ${movement(e.name)}, as a whole percentage`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Tempo</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>Tempo</Text>
                     <TextInput
                       value={tempoDraft[e.key] ?? (e.tempo ?? '')}
                       onChangeText={(v) => {
@@ -2512,10 +4359,16 @@ export default function Builder() {
                         const r = readTempo(v);
                         if (r.ok) patchEx(di, e.key, { tempo: r.tempo });
                       }}
-                      onBlur={() => setTempoDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        const typed = tempoDraft[e.key];
+                        setTempoDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readTempo(typed);
+                        if (!r.ok) Alert.alert('Check That Tempo', r.why);
+                      }}
                       autoCapitalize="characters" autoCorrect={false}
                       placeholder="3-1-1-0" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed rep speed for ${e.name}, as down, pause, up and pause`}
+                      accessibilityLabel={`Prescribed rep speed for ${movement(e.name)}, as down, pause, up and pause`}
                       style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
                   </View>
                   {/* The tempo IN WORDS, under the box, while they type. The
@@ -2528,73 +4381,6 @@ export default function Builder() {
                   {e.tempo && tempoMeaning(e.tempo) ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tempoMeaning(e.tempo)}</Text>
                   ) : null}
-
-                  {/* ── Rest and grouping ─────────────────────────────────
-                      Both answers to "how is this performed" rather than "what
-                      is it". Set type used to sit on the end of this row too,
-                      which is exactly why nobody tapped it: a bare `Normal`
-                      after "sec · default 1:30" reads as a property of the REST
-                      timer. It has its own labelled control below. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
-                    {/* The rest between sets, in SECONDS. The client's guided
-                        runner already had a timer — hardcoded to the same
-                        default for every exercise in every programme, which is
-                        right for accessory work and wrong for a heavy triple.
-                        Blank is a real answer and the common one: the client
-                        falls back to the app default and their rest card says
-                        so, rather than presenting a number nobody chose as the
-                        coach's instruction. */}
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>Rest</Text>
-                    <TextInput
-                      value={restDraft[e.key] ?? (e.restSec == null ? '' : String(e.restSec))}
-                      onChangeText={(v) => {
-                        setRestDraft((prev) => ({ ...prev, [e.key]: v }));
-                        if (!v.trim()) { patchEx(di, e.key, { restSec: null }); return; }
-                        const r = readRestSeconds(v);
-                        // A number not yet valid ("9" on the way to "90")
-                        // leaves the last good value alone rather than
-                        // clearing it. The refusal is said on blur, not on
-                        // every keystroke.
-                        if (r.ok && r.seconds != null) patchEx(di, e.key, { restSec: r.seconds });
-                      }}
-                      onBlur={() => {
-                        const typed = restDraft[e.key];
-                        setRestDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
-                        if (typed == null || !typed.trim()) return;
-                        const r = readRestSeconds(typed);
-                        // Said, not swallowed. A rest that silently stayed at
-                        // its old value while the coach believes they changed
-                        // it is a programme that does not say what they think.
-                        if (!r.ok) Alert.alert('Check that rest', r.reason);
-                      }}
-                      keyboardType="number-pad"
-                      placeholder={String(DEFAULT_REST_SEC)}
-                      placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Rest between sets of ${e.name}, in seconds`}
-                      style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>
-                      {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
-                    </Text>
-
-                    {/* Grouping is an act on a PAIR, so the control lives on
-                        the upper exercise and names the lower one. Hidden
-                        rather than disabled where there is nothing below to
-                        join, and where the two are already in one run. */}
-                    {canJoinNext(d.exercises, ei) ? (
-                      <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Perform ${e.name} back to back with ${d.exercises[ei + 1]?.name}`}
-                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>Group with next</Text>
-                      </Pressable>
-                    ) : null}
-                    {isGrouped(d.exercises, ei) ? (
-                      <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Take ${e.name} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
-                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
 
                   {/* ── Set type ──────────────────────────────────────────
                       `Normal` on its own was a value with no field beside it.
@@ -2615,15 +4401,15 @@ export default function Builder() {
                     return (
                       <View style={{ marginTop: sp.md }}>
                         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>
-                          {rows.tabled ? 'Set type · every set unless a row says otherwise' : 'Set type'}
+                          {rows.tabled ? 'Set Type · every set unless a row says otherwise' : 'Set Type'}
                         </Text>
                         <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
-                          accessibilityLabel={`Set type for ${e.name}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''} — currently ${m.label}. ${m.blurb} Opens the list of set types.`}
+                          accessibilityLabel={`Set type for ${movement(e.name)}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''}. Currently ${m.label}. ${m.blurb} Opens the list of set types.`}
                           style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: sp.sm,
                                    minHeight: MIN_TARGET, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                                    borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
                           <Text style={{ ...ty.body, color: t.ink }}>{m.label}</Text>
-                          <Icon name="chevron" size={16} color={t.ink3} />
+                          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                         </Pressable>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                           {m.blurb} {otherMethodsHint(e.method)}
@@ -2631,26 +4417,203 @@ export default function Builder() {
                       </View>
                     );
                   })()}
+                  <View>
+                    {/* ── the coach's saved cue for this movement ────────────
+                        The note above is about THIS client on THIS day. The
+                        cue below is about the movement, is the same for
+                        everyone the coach trains, and is what fills the box
+                        above the next time they add this exercise to anybody.
 
-                  <View style={{ marginTop: sp.sm }}>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for this exercise</Text>
-                    <TextInput
-                      value={e.note ?? ''}
-                      onChangeText={(v) => patchEx(di, e.key, { note: v })}
-                      placeholder="Cue, tempo, setup — they see this at the machine…"
-                      placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Your notes on ${e.name}`}
-                      multiline
-                      style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                        Nothing is drawn while the read is still out, and
+                        nothing is drawn on a database the part has not reached
+                        — the one sentence explaining that is said ONCE, in the
+                        Program section head, rather than forty times down a
+                        twelve-week block. `wouldPrefill` is what decides
+                        whether the Use control exists at all, so a note with
+                        anything in it never gets a button whose meaning is
+                        "replace what you wrote". */}
+                    {cues && cues.status === 'read' ? (() => {
+                      const saved = cueRowFor(cues, e.name);
+                      const editing = cueEditFor?.name === e.name;
+                      return (
+                        <View style={{ marginTop: sp.sm }}>
+                          {saved ? (
+                            <Text style={{ ...ty.caption, color: t.ink3 }}
+                              accessibilityLabel={`Your saved cue for ${movement(e.name)}: ${saved.cue}`}>
+                              Your Cue · {saved.cue}
+                            </Text>
+                          ) : (
+                            <Text style={{ ...ty.micro, color: t.ink3 }}>{NO_CUE_YET_NOTE}</Text>
+                          )}
+                          {editing ? (
+                            <View style={{ marginTop: sp.sm }}>
+                              <TextInput
+                                value={cueDraft}
+                                onChangeText={setCueDraft}
+                                placeholder={`What you say about ${movement(e.name)} every time…`}
+                                placeholderTextColor={t.ink3}
+                                accessibilityLabel={`Your saved cue for ${movement(e.name)}`}
+                                maxLength={CUE_MAX}
+                                multiline
+                                style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>{CUE_NEVER_OVERWRITES}</Text>
+                              {/* The refusal is a MARK plus ink, never red
+                                  words: a status colour is tuned to the 3:1 a
+                                  mark needs and not the 4.5:1 a sentence does,
+                                  and the sentence has to be readable by the
+                                  person whose cue was not saved. */}
+                              {cueSaid ? (
+                                <View style={{ marginTop: sp.xs }}>
+                                  <Flag tone={t.crit}>{cueSaid}</Flag>
+                                </View>
+                              ) : null}
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                                <Pressable onPress={() => void commitCue(e.name)} disabled={cueBusy}
+                                  accessibilityRole="button" accessibilityState={{ disabled: cueBusy }}
+                                  accessibilityLabel={`Save your cue for ${movement(e.name)}`}
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                           borderRadius: radius.pill, backgroundColor: t.surface2, opacity: cueBusy ? 0.5 : 1 }}>
+                                  <Text style={{ ...ty.caption, color: t.ink }}>{cueBusy ? 'Saving…' : 'Save Cue'}</Text>
+                                </Pressable>
+                                {saved ? (
+                                  <Pressable onPress={() => void dropCue(e.name)} disabled={cueBusy}
+                                    accessibilityRole="button" accessibilityState={{ disabled: cueBusy }}
+                                    accessibilityLabel={`Remove your saved cue for ${movement(e.name)}. Notes already written into programs are not changed.`}
+                                    hitSlop={hitSlopFor(MIN_TARGET)}
+                                    style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                             borderRadius: radius.pill, backgroundColor: t.surface2, opacity: cueBusy ? 0.5 : 1 }}>
+                                    <Text style={{ ...ty.caption, color: t.ink }}>Remove</Text>
+                                  </Pressable>
+                                ) : null}
+                                <Pressable onPress={() => { setCueEditFor(null); setCueSaid(null); }}
+                                  accessibilityRole="button" accessibilityLabel="Stop editing this cue"
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg }}>
+                                  <Text style={{ ...ty.caption, color: t.ink3 }}>Cancel</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          ) : (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
+                              {/* Offered ONLY over an empty note. This is the
+                                  never-overwrite rule expressed as a control
+                                  that does not exist rather than as one that
+                                  refuses. */}
+                              {wouldPrefill(e.note, saved?.cue) ? (
+                                <Pressable onPress={() => patchEx(di, e.key, { note: prefillNote(e.note, saved?.cue) })}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Use your saved cue as the note on ${movement(e.name)}`}
+                                  accessibilityHint={USE_CUE_HINT}
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                           borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                                  <Text style={{ ...ty.caption, color: t.ink }}>Use My Cue</Text>
+                                </Pressable>
+                              ) : null}
+                              <Pressable
+                                onPress={() => {
+                                  setCueSaid(null);
+                                  // The box opens on the SAVED cue, or on what
+                                  // is in the note when there is none — which
+                                  // is the ordinary way a coach discovers this
+                                  // exists: they have just typed the sentence
+                                  // they always type.
+                                  setCueDraft(saved ? saved.cue : (e.note ?? '').trim());
+                                  setCueEditFor({ name: e.name });
+                                }}
+                                accessibilityRole="button"
+                                accessibilityLabel={saved
+                                  ? `Edit your saved cue for ${movement(e.name)}`
+                                  : `Save a cue for ${movement(e.name)}, used on every client from now on`}
+                                hitSlop={hitSlopFor(MIN_TARGET)}
+                                style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                                <Text style={{ ...ty.caption, color: t.ink }}>{saved ? 'Edit Cue' : 'Save as My Cue'}</Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })() : null}
                   </View>
+                  </>) : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: sp.lg }}>
+                    {/* ── Three controls, one of them destructive ──────────
+                        Reported as "the up and down arrows and the x need to be
+                        bigger and more spaced apart so you don't tap the wrong
+                        icon". They were ~24pt of tappable area sitting a few
+                        points apart, and the neighbour of the down arrow
+                        DELETES the exercise along with its sets, reps, weight,
+                        rest and notes.
+
+                        So the fix is not only size. Each is now a 40pt round
+                        target — above the 44pt-with-hitSlop mark and the size
+                        the rest of this app uses for a real button — and the ×
+                        is pushed away from the pair with a gap wide enough that
+                        a thumb aiming at "down" cannot reach it. It is also
+                        tinted as a destructive control rather than sharing the
+                        arrows' grey, because the one that cannot be undone
+                        should not look like the two that can.
+
+                        Hidden at the ends rather than disabled: a control that
+                        cannot do anything is still something to aim at.
+
+                        They sat on the row itself, beside the grip, and took
+                        160pt of a 320pt row — which is why a movement's name
+                        wrapped to three lines beside them. They are at the
+                        foot of the OPEN row now: the row a coach is reading
+                        keeps its width for the name, and the destructive one
+                        is no longer under a thumb that is only scrolling. */}
+                    {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${movement(e.name)} earlier in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
+                      </Pressable>
+                    ) : null}
+                    {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${movement(e.name)} later in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 marginStart: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
+                      accessibilityLabel={`Remove ${movement(e.name)} from ${d.day}`} hitSlop={6}
+                      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                               marginStart: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
+                      {/* The critical tone is the BORDER, not the glyph. As ink
+                          it measures 3.03–4.05:1 across the ten palettes, under
+                          the 4.5:1 text needs, and check:contrast is right to
+                          refuse it — a status colour is tuned for a mark. The
+                          ring carries the warning, the × stays readable, and
+                          the accessibility label says "Remove" in words, so
+                          colour is never the only channel saying so. */}
+                      {/* grown(24) and not head's own grown(22): the extra two points
+                          sit the × on the centre of its circle. The circle stays
+                          pinned, so at a large text size the glyph spills past it
+                          rather than being cut in half by a 24pt line — a ring is
+                          decoration and the character is the control. */}
+                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
+                    </Pressable>
+                  </View>
+                  </>) : null}
                 </Animated.View>
                 );
               });
               })()}
 
+              {/* Only under a day that is open. Under a shut row it read as a
+                  control about the WEEK, and what it added went somewhere the
+                  coach could not see. */}
+              {openDays[di] ? (
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Add Exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
               </View>
+              ) : null}
             </View>
           ))}
 
@@ -2659,24 +4622,191 @@ export default function Builder() {
           </View>
         </Section>
 
-        <Rule />
 
-        {/* ── programme checks ───────────────────────────────────────────
+        </>) : null}
+
+        {/* ── assign ─────────────────────────────────────────────────────── */}
+        <Section>
+          {/* ── who gets this ──────────────────────────────────────────────
+              Asked for as "need to save all built templates and be able to
+              choose which client(s) they are assigned to". It used to be one
+              client, and that client was also whoever happened to be selected
+              at the top of the screen — so a coach writing one week for four
+              people built it four times, and a mis-tapped chip wrote over the
+              wrong person's training with nothing on screen counting them.
+
+              The fan-out, the confirmation and the report are all the ones the
+              template library already uses (src/lib/groupProgram.ts and
+              src/lib/bulkActions.ts). A second copy of any of them is how two
+              screens come to disagree about who a bulk assign wrote to. */}
+          <SectionHead title="Assign To" note={rosterStatus === 'ready' && pickedIds.length ? `${num(pickedIds.length)} of ${num(roster.length)}` : undefined} />
+
+          {/* ── the rows, back under their own heading ──────────────────────
+              These lived four sections further up, orphaned between the STARTS
+              ON help text and "Note to client (optional)", with nothing on
+              screen saying what ticking one did. Seen on an iPhone: a bare
+              checkbox beside "Tamer / Fat loss" and no heading anywhere near
+              it. Meanwhile this heading, its `N of M` count and Select All sat
+              down here with NO ROWS UNDER THEM AT ALL, and the promise at the
+              top of the screen — "Who it goes to is further down" — had quietly
+              become false, because it was further up.
+
+              A count and a Select All are controls over a list. They belong
+              against the list, and the list belongs under the words that say
+              what ticking a box does. */}
+
+          {/* "Select All" over a roster that came back at its row limit ticks a
+              page of people and calls it everybody. Nothing on screen is false
+              and the coach is still acting on a set they cannot see, so the
+              gesture is renamed to the number actually shown rather than
+              withheld or warned about. See src/lib/bulkActions.ts. */}
+          {selAll.note ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{selAll.note}</Text>
+          ) : null}
+          {roster.length ? (
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+              <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
+                <Ghost label={selAll.label} onPress={() => {
+                  if (!selAll.allowed) return;
+                  setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
+                }} />
+              </View>
+              {pickedIds.length ? (
+                <Ghost label="Clear Selection" onPress={() => setPicked({})} />
+              ) : null}
+            </View>
+          ) : null}
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
+              note="Nobody is listed here because the roster did not come back. It does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
+          ) : rosterStatus === 'partial' ? (
+            <PartialRead what="clients on your book" shown={roster.length} />
+          ) : null}
+
+          {roster.length === 0 && rosterStatus === 'ready' ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet. Add or invite a client and they will appear here to assign to.
+              </Text>
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
+          ) : roster.length === 0 && rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
+          ) : null}
+
+          {roster.map((c, i) => {
+            const on = !!picked[c.id];
+            // Only sayable off a whole read. Under any other status the absence
+            // of a program means nothing was found out, and marking somebody
+            // "no program yet" on that basis is how a coach comes to overwrite
+            // one without realising.
+            const replaces = programStatus === 'ready' && !!getProgram(c.id);
+            const held = plan.blocked.find((b) => b.clientId === c.id);
+            // What this screen knows about their injuries, as one of three
+            // facts rather than as an empty list. The gate speaks first where
+            // it has something to say — it knows whether the coach has read a
+            // disclosure and whether a read failed, and has better words for
+            // both. `fact.note` fills the two silences it leaves: a client who
+            // was asked and disclosed nothing, and a client nobody has ever
+            // asked.
+            //
+            // Drawn on every row for an absence and only on a TICKED row for a
+            // clearance. "They have never been asked" is a property of the
+            // person a coach wants while choosing; "they were asked and said
+            // none" is a reassurance that only matters at the point of
+            // decision, and twenty of them down a list is twenty lines nobody
+            // reads.
+            const fact = factFor(c.id);
+            const factLine = held ? held.reason : (on || fact.warn) ? fact.note : null;
+            // The one unread status src/lib/disclosureFact.ts writes a sentence for, and
+            // the only one drawn BESIDE the gate's refusal rather than instead of it. The
+            // gate says their injuries "could not be read", which of a row that actually
+            // arrived is not quite true, and "held until they load" is advice that will not
+            // help — the read landed and carried no list. Every other unread status has
+            // `note: null` precisely so this does not happen twice on one row.
+            const noListLine = held && fact.why === 'no-list' ? fact.note : null;
+            return (
+              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                accessibilityRole="button"
+                // The dot-and-ink argument below is about a coach who can SEE
+                // the row. A Pressable is one accessibility element, so a label
+                // on it replaces every line under it — and the two lines it was
+                // replacing are the warning that this assignment overwrites a
+                // live program and the reason a client is being held back.
+                accessibilityLabel={[
+                  `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
+                  c.goal,
+                  replaces ? 'This replaces the program they are on' : null,
+                  factLine,
+                  noListLine,
+                ].filter(Boolean).join('. ')}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.name}</Text>
+                  {/* The warning is a DOT, not the ink: warn as caption text
+                      measures under AA on the three light palettes, so the one
+                      sentence the coach most needs was the hardest to read.
+                      The words carry the meaning; the dot carries the tone. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                    </Text>
+                  </View>
+                  {/* Their own sentence, on their own row. A count of how many
+                      are held tells the coach nothing about whose knee it is —
+                      and an absence gets a sentence here too, because the row
+                      that says nothing at all is the one that reads as an
+                      all-clear. */}
+                  {factLine ? (
+                    <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: 4 }}>{factLine}</Flag>
+                  ) : null}
+                  {noListLine ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{noListLine}</Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </Section>
+
+
+        {/* ── program checks ───────────────────────────────────────────
             Named for what it is. Seven rules, no model, no score and no
             grade — see the header of src/lib/programReview.ts, and
             src/lib/finReview.ts for the screen this one was written not to
             be, back when it was called an AI review. Every line below is a finding that names the exercise, the
             day or the figure it came from, because a finding a coach cannot
             point at is an opinion and they stop reading at the first one
-            they disagree with. */}
-        <Section>
-          <SectionHead title="Programme Checks"
-            note={totalExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{checksLine()}</Text>
+            they disagree with.
 
-          {totalExercises === 0 ? (
+            ── where it sits ────────────────────────────────────────────────
+            Directly above the section that assigns, and outside the editor's
+            fold. It was inside it, so a coach who never opened the editor —
+            loaded a template, ticked four people, pressed Assign — was never
+            shown a finding at all. The review's order is checks, then the
+            disclosures, then the write, and that is now the order on the
+            page whatever is folded above it. */}
+        <Section>
+          <SectionHead title="Program Checks"
+            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to Read` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: coverage ? sp.xs : sp.lg }}>{checksLine()}</Text>
+          {/* Only on a block, and only because the sentence above used to be
+              true of week one and read as true of twelve. */}
+          {coverage ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{coverage}</Text>
+          ) : null}
+
+          {blockExercises === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing to check yet. The checks read the training days above as you write them.
+              Nothing to check yet. The checks read the training days above, every week of them, as you write them.
             </Text>
           ) : (
             <>
@@ -2690,13 +4820,13 @@ export default function Builder() {
                 <View key={`${f.id}-${i}`} style={{ marginBottom: sp.md }}>
                   <Flag tone={f.id === 'injury' ? t.crit : t.warn}>{f.detail}</Flag>
                   {figures ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 14, marginTop: 3 }}>{figures}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 14, marginTop: 3 }}>{figures}</Text>
                   ) : null}
                 </View>
                 );
               }) : (
                 <Text style={{ ...ty.label, color: t.ink2 }}>
-                  Nothing matched. That is not a verdict on the programme — it means none of these rules found
+                  Nothing matched. That is not a verdict on the program. It means none of these rules found
                   anything, and they are a short list.
                 </Text>
               )}
@@ -2739,98 +4869,6 @@ export default function Builder() {
           )}
         </Section>
 
-        <Rule />
-
-        {/* ── assign ─────────────────────────────────────────────────────── */}
-        <Section>
-          {/* ── who gets this ──────────────────────────────────────────────
-              Asked for as "need to save all built templates and be able to
-              choose which client(s) they are assigned to". It used to be one
-              client, and that client was also whoever happened to be selected
-              at the top of the screen — so a coach writing one week for four
-              people built it four times, and a mis-tapped chip wrote over the
-              wrong person's training with nothing on screen counting them.
-
-              The fan-out, the confirmation and the report are all the ones the
-              template library already uses (src/lib/groupProgram.ts and
-              src/lib/bulkActions.ts). A second copy of any of them is how two
-              screens come to disagree about who a bulk assign wrote to. */}
-          <SectionHead title="Assign To" note={rosterStatus === 'ready' && pickedIds.length ? `${num(pickedIds.length)} of ${num(roster.length)}` : undefined} />
-
-          {rosterStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
-          ) : rosterStatus === 'partial' ? (
-            <PartialRead what="clients on your book" shown={roster.length} />
-          ) : null}
-
-          {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No clients yet — add or invite a client and they will appear here to assign to.
-            </Text>
-          ) : roster.length === 0 && rosterStatus === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
-          ) : null}
-
-          {roster.map((c, i) => {
-            const on = !!picked[c.id];
-            // Only sayable off a whole read. Under any other status the absence
-            // of a programme means nothing was found out, and marking somebody
-            // "no program yet" on that basis is how a coach comes to overwrite
-            // one without realising.
-            const replaces = programStatus === 'ready' && !!getProgram(c.id);
-            const held = plan.blocked.find((b) => b.clientId === c.id);
-            return (
-              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
-                  {/* The warning is a DOT, not the ink: warn as caption text
-                      measures under AA on the three light palettes, so the one
-                      sentence the coach most needs was the hardest to read.
-                      The words carry the meaning; the dot carries the tone. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
-                    </Text>
-                  </View>
-                  {/* Their own sentence, on their own row. A count of how many
-                      are held tells the coach nothing about whose knee it is. */}
-                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
-                </View>
-              </Pressable>
-            );
-          })}
-
-          {/* "Select All" over a roster that came back at its row limit ticks a
-              page of people and calls it everybody. Nothing on screen is false
-              and the coach is still acting on a set they cannot see, so the
-              gesture is renamed to the number actually shown rather than
-              withheld or warned about. See src/lib/bulkActions.ts. */}
-          {selAll.note ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{selAll.note}</Text>
-          ) : null}
-          {roster.length ? (
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-              <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
-                <Ghost label={selAll.label} onPress={() => {
-                  if (!selAll.allowed) return;
-                  setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
-                }} />
-              </View>
-              {pickedIds.length ? (
-                <Ghost label="Clear Selection" onPress={() => setPicked({})} />
-              ) : null}
-            </View>
-          ) : null}
-        </Section>
-
-        <Rule />
 
         <Section>
           {/* The disclosures themselves, above the button that is being held.
@@ -2840,11 +4878,11 @@ export default function Builder() {
               with their own reason. */}
           {!injuryGate.allowed && injuryGate.outstanding.length ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This client'} has disclosed`} title="Injuries & Limitations">
+              <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This Client'} Has Disclosed`} title="Injuries & Limitations">
                 <View style={{ marginTop: sp.md, gap: sp.sm }}>
                   {injuryGate.outstanding.map((inj, i) => (
                     <View key={i}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {areaLabel(inj.area)} · {inj.severity}
                       </Text>
                       {inj.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{inj.note}</Text> : null}
@@ -2864,7 +4902,7 @@ export default function Builder() {
           ) : null}
 
           {/* ── a refusal the coach can act on ─────────────────────────────
-              The guard is right and stays: a programme built around an injury
+              The guard is right and stays: a program built around an injury
               nobody read is what it exists to stop. What it did not have was a
               way out. `injury_acknowledgements` is read once per session, on
               `authRev` and nothing else, so a read that failed on a bad
@@ -2872,9 +4910,15 @@ export default function Builder() {
               for as long as the app stayed open — a wall with no door, which
               the coach could only escape by force-quitting. This re-runs both
               reads the gate depends on. */}
-          {!plan.allowed && plan.reason ? (
+          {/* Not for the two holds this screen already states in its own,
+              better words directly above the button — an empty program and
+              nobody ticked. Those sentences carry things `planFanOut` cannot
+              know: that the start date is not what is blocking it, and that
+              one client is as valid as twenty. Two boxes saying the same thing
+              is how a coach learns to stop reading either. */}
+          {!plan.allowed && plan.reason && plan.code !== 'no-program' && plan.code !== 'nobody' ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Notice tone={t.warn} kicker="Held" title={plan.label ?? 'This cannot go out yet'} note={plan.reason}>
+              <Notice tone={t.warn} kicker="Held" title={plan.label ?? 'This Cannot Go Out Yet'} note={plan.reason}>
                 {readFailed ? (
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label={retryBusy ? 'Trying Again…' : 'Try Reading Again'} onPress={retryReads} />
@@ -2884,81 +4928,58 @@ export default function Builder() {
             </View>
           ) : null}
           {plan.allowed && plan.heldNote ? (
-            <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
+            <Notice tone={t.warn} kicker="Not Everybody" title="Some of These Are Held" note={plan.heldNote} />
           ) : null}
 
-          {/* Not a gate. A coach may have every reason to programme around a
+          {/* Not a gate. A coach may have every reason to program around a
               knee deliberately — that is their judgement and their client. It
               is only refusing to let them do it without noticing. Counted
-              across every recipient, because a programme fanned out to four
+              across every recipient, because a program fanned out to four
               people used to be checked against one of them. */}
           {injuryLoads.length ? (
             <View style={{ marginBottom: sp.md }}>
               <Flag tone={t.warn}>
                 {injuryLoads.map((x) => `${x.name}: ${num(x.movements.length)} movement${x.movements.length === 1 ? '' : 's'} (${[...new Set(x.movements.map((m) => areaLabel(m.area).toLowerCase()))].join(', ')})`).join(' · ')}
-                {' — '}this programme loads something they have disclosed. You will be asked to confirm.
+                {'. '}This program loads something they have disclosed. You will be asked to confirm.
               </Flag>
             </View>
           ) : null}
 
-          {/* ── the day the block begins ──────────────────────────────────
-              Coaches sit on their phone on a Sunday night and tap Assign at the
-              right moment, because an assignment IS a start: the write lands and
-              the client's Train tab reads the row on its next render.
+          {/* ── the reason, ABOVE the control it is about ───────────────────
+              This sentence used to sit under the button. Both of those places
+              carry the same words, so this is not a rewrite — it is a move, and
+              the move is the whole argument: a disabled control is discovered by
+              TAPPING it, and an explanation printed below the tap is read after
+              the frustration rather than instead of it. The coach who reported
+              the missing calendar had been staring at the date field
+              immediately above; reading downward from it they met a dead button
+              before they met the reason, and concluded the date was the
+              blocker. It reads in the right order now.
 
-              This field records the day the coach chose. It does NOT hold the
-              programme back, and the sentence under it says so — because a
-              coach who believes it does, and assigns a block "starting Monday"
-              on a Thursday, has replaced their client's Friday session while
-              believing they did not. That is strictly worse than the alarm.
-
-              Left blank is the ordinary case and the default: "assign it now"
-              is what this control has always meant. */}
-          <View style={{ marginBottom: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-              <TextInput value={startsOn} onChangeText={setStartsOn}
-                placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                autoCapitalize="none" autoCorrect={false}
-                accessibilityLabel="The day this block begins, as year, month and day"
-                style={[inp, { flex: 1, paddingVertical: 9, paddingHorizontal: 12 }]} />
-              {startsOn ? (
-                <Ghost label="Clear" onPress={() => setStartsOn('')} />
-              ) : null}
-            </View>
-            {/* Refused rather than corrected, and said while they type. A date
-                this app cannot read is not stored at all — a stored value that
-                will not parse puts every screen reading it into "unreadable"
-                for ever, over a plan the coach believes carries a date. */}
-            {startsOn && !isStartDate(startsOn) ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
-                programme goes out with no start date rather than one nothing can read back.
-              </Flag>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{CLIENT_STARTS_NOW}</Text>
-            )}
-          </View>
+              And when they HAVE typed a date into an empty program — the
+              exact state that was reported — the sentence says outright that
+              the date is not what is holding it. That is the misdiagnosis
+              itself, answered where it happens. */}
+          {blockExercises === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
+              Add at least one exercise to assign this program.
+              {startsOn ? ' The start date is not what is holding it. An empty program is.' : ''}
+            </Text>
+          ) : pickedIds.length === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
+              Tick everybody who should get this, one client or twenty.
+            </Text>
+          ) : null}
 
           <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
             <Cta wide label={assignCtaLabel({
               busy: assignBusy,
               picked: pickedIds.length,
-              exercises: totalExercises,
+              exercises: blockExercises,
               planLabel: plan.label,
               soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
             })} onPress={assign} />
           </View>
-
-          {totalExercises === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              Add at least one exercise to assign this program.
-            </Text>
-          ) : pickedIds.length === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              Tick everybody who should get this — one client or twenty.
-            </Text>
-          ) : null}
 
           {/* ── taking somebody off, without putting them on something else ──
               Un-assign was reachable only as the Revert below, which acts on
@@ -2966,17 +4987,17 @@ export default function Builder() {
               block for eight people had to open eight builders. This is the
               same fan-out over the ticks.
 
-              Independent of what is in the builder: removing a programme has
+              Independent of what is in the builder: removing a program has
               nothing to do with the week on screen, so it is offered whether or
               not there are exercises in it. */}
           {unassignable.length ? (
             <View style={{ marginTop: sp.lg }}>
               <Ghost label={assignBusy ? 'Working…' : unassignable.length === 1
-                ? `Take ${unassignable[0].name} Off Their Programme`
-                : `Take ${num(unassignable.length)} Off Their Programmes`} onPress={unassign} />
+                ? `Take ${unassignable[0].name} Off Their Program`
+                : `Take ${num(unassignable.length)} Off Their Programs`} onPress={unassign} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
                 They go back to an auto-generated plan. Every session they have logged stays exactly where it is, so
-                you can put the same programme back later and their history is still underneath it.
+                you can put the same program back later and their history is still underneath it.
               </Text>
             </View>
           ) : null}
@@ -2989,27 +5010,61 @@ export default function Builder() {
               same client is how a coach ends up unsure which one they pressed. */}
           {assignedNow && !unassignable.some((u) => u.clientId === clientId) ? (
             <View style={{ marginTop: sp.md }}>
-              <Ghost label="Revert to Auto-generated Program" onPress={revert} />
+              <Ghost label="Revert to Auto-Generated Program" onPress={revert} />
             </View>
           ) : null}
         </Section>
 
+        {footInline ? workflowFooter(true) : null}
       </ScrollView>
+
+      {/* ── the workflow footer, always in reach ─────────────────────────
+          The board keeps a Save Program button on screen. Here there are two
+          writes and the footer names both: Assign, which replaces what a
+          client trains and carries the same label, gate and handler as the
+          button at the foot of the page (which keeps its captions saying WHY
+          it is off), and Save as Template, which goes to the coach's library
+          and reaches nobody. Over them, who this is for, where in it the
+          coach is, and what is still outstanding — the review's acceptance
+          test, answerable without scrolling. The scroll pads by the bar's
+          measured height, so nothing on the page hides underneath at any
+          type size. See src/ui/coach/ProgramBuilderFlow.tsx. */}
+      {footInline ? null : workflowFooter(false)}
+
+      {/* ── the start day, as a month ─────────────────────────────────────
+          Dismissing it is a cancel and writes nothing: a picker that committed
+          whatever cell was under the highlight when it closed would put a start
+          date on a block the coach never chose, which is the same class of harm
+          `CLIENT_STARTS_NOW` is printed to prevent. */}
+      <DateSheet
+        visible={startPick}
+        value={startsOn}
+        heading="Starts On"
+        note="The day this block begins. Leave it unset to start now."
+        onCancel={() => setStartPick(false)}
+        onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
+      />
 
       {/* ── exercise picker ──────────────────────────────────────────────── */}
       <Modal visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={scrim} onPress={() => setPickerDay(null)} />
+        <Pressable style={scrim} onPress={() => setPickerDay(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[sheet, { maxHeight: '82%' }]}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-            <TextInput value={custom} onChangeText={setCustom} placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
+            {/* The chosen group is cleared with every keystroke on purpose: it
+                was an answer about the name that was in the box, and carrying
+                it onto a different movement is the same fact-nobody-stated
+                that the blank groups were. */}
+            <TextInput value={custom} onChangeText={(v) => { setCustom(v); setCustomGroup(null); }}
+              placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
               accessibilityLabel="Search the exercise catalogue, or type a name of your own"
               style={[inp, { flex: 1 }]} />
-            <Cta label="Add" onPress={() => {
-              if (custom.trim() && pickerDay !== null) {
-                const nm = custom.trim();
-                addExercise(pickerDay, nm, '');
+            <Cta label="Add" disabled={!customAdd.can} onPress={() => {
+              if (customAdd.can && pickerDay !== null) {
+                const { name: nm, group } = customAdd;
+                addExercise(pickerDay, nm, group);
                 // Deliberately not awaited. The exercise belongs to the program
                 // the moment it is typed; remembering it for next time is the
                 // convenience, and a failed write must not hold up the sheet or
@@ -3024,29 +5079,41 @@ export default function Builder() {
                 //
                 // Not awaited, for the same reason as remember() above: the
                 // exercise belongs to the program the moment it is typed.
-                void ensureCatalogueRow(nm);
-                setCustom('');
+                void ensureCatalogueRow(nm, { group });
+                setCustom(''); setCustomGroup(null);
                 setPickerDay(null);
               }
             }} />
           </View>
+
+          {/* ── the muscle group, when the movement needs one ───────────────
+              Only for a name the catalogue does not already answer to. A
+              movement it DOES hold arrives with its own `muscle_group` and
+              asking the coach to restate it would be asking them to disagree
+              with the library — see `customAdd`. */}
+          {customAdd.needsGroup ? (
+            <View style={{ marginTop: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.sm }}>{MUSCLE_GROUP_WHY}</Text>
+              <MuscleGroupPicker value={customGroup} onChange={setCustomGroup} />
+            </View>
+          ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
             Tap a movement to add it, or the arrow to read what it is first. Add puts whatever you
-            typed in as it stands — a movement we have never heard of is fine.
+            typed in as it stands. A movement we have never heard of is fine.
           </Text>
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {coachEx.status === 'error' ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
                 Your saved exercises could not be read, so only the built-in ones are listed. That is
-                not the same as having none saved — try again in a moment.
+                not the same as having none saved. Try again in a moment.
               </Text>
             ) : coachEx.status === 'partial' ? (
               // 'partial' arrived with the row-cap work and this branch was
               // written before it existed, so a short read of the coach's own
               // names fell through to silence.
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
-                Your saved exercises came back short — there are more of them than are listed here.
+                Your saved exercises came back short. There are more of them than are listed here.
               </Text>
             ) : null}
 
@@ -3061,16 +5128,38 @@ export default function Builder() {
                 flexDirection: 'row', alignItems: 'center',
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
-                <Pressable onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
+                {/* A name off the coach's OWN saved list, which is where the
+                    typed spellings of the last two years live. It goes into
+                    the program under the catalogue's name when it resolves
+                    to one, and takes that row's group when the saved entry has
+                    none — the catalogue is already in hand here, so a blank
+                    group is a lookup rather than a gap. */}
+                <Pressable onPress={() => { if (pickerDay !== null) {
+                  const nm = canonicalExerciseName(x.name, cat.rows);
+                  addExercise(pickerDay, nm, (x.group || '').trim() || (rowFor(nm)?.group ?? ''));
+                  setPickerDay(null);
+                } }}
                   accessibilityRole="button" accessibilityLabel={`Add ${x.name}`}
-                  style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
+                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  {/* The still, when this name resolves to a catalogue
+                      movement; the marked tile when it does not — a coach's
+                      own invention has no artwork and is not lent any. */}
+                  <ExerciseThumb uri={thumbFor(rowFor(x.name) ?? { thumbPath: null })} t={t} size={44} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{x.name}</Text>
+                    {x.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{x.group}</Text> : null}
+                  </View>
+                  {(() => {
+                    const r = rowFor(x.name);
+                    return r && fontScale < 1.35
+                      ? <ExerciseMuscles compact primary={r.primaryMuscles} secondary={r.secondaryMuscles} status="ready" />
+                      : null;
+                  })()}
                 </Pressable>
                 <Pressable onPress={() => previewExercise(x.name)} hitSlop={8}
                   accessibilityRole="button" accessibilityLabel={`What ${x.name} is`}
-                  style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
-                  <Icon name="chevron" size={15} color={t.ink3} />
+                  style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                 </Pressable>
               </View>
             ))}
@@ -3094,7 +5183,7 @@ export default function Builder() {
                 // catalogue, and says so.
                 <Text style={{ ...ty.caption, color: t.ink2 }}>
                   The catalogue could not be read, so only your own list is shown above. The movements
-                  are still there — your saved names and anything you type still work. Try again once
+                  are still there: your saved names and anything you type still work. Try again once
                   you have signal.
                 </Text>
               ) : catShownList.length === 0 ? (
@@ -3117,17 +5206,46 @@ export default function Builder() {
               ) : (
                 <>
                   {cat.status === 'partial' ? <PartialRead what="catalogue movements" shown={cat.rows.length} /> : null}
-                  {catShownList.slice(0, catShown).map((e, i) => (
+                  {catShownList.slice(0, catShown).map((e, i) => {
+                  // Which of the movement's other names the coach's search hit,
+                  // when its title holds none of what they typed. Null on every
+                  // row that matched by name — see matchedSynonym() in
+                  // src/lib/catalogueLocale.ts. A picker that offered Heel
+                  // Flicks for "butt kicks" without saying so would look like it
+                  // had ignored the search box, and this list is the one place
+                  // in the app where a wrong pick is written into a client's
+                  // week.
+                  const via = matchedSynonym(pickTerm, e.name, e.display, e.synonyms);
+                  return (
                     <View key={e.id} style={{
                       flexDirection: 'row', alignItems: 'center',
                       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                     }}>
                       <Pressable
+                        // `e.name` and NOT the translated name, deliberately. A
+                        // program stores an exercise name and every screen
+                        // resolves it through exerciseSlug(); writing
+                        // "Kniebeuge" in here would put a movement into a
+                        // client's week that resolves to nothing — no
+                        // illustration, no history, "not in our catalogue" on
+                        // tap. The identity is English; only the label moves.
                         onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, e.name, e.group || ''); setPickerDay(null); } }}
-                        accessibilityRole="button" accessibilityLabel={`Add ${e.name}`}
+                        // The matched synonym is spoken too. A coach who typed
+                        // "butt kicks" and hears only "Add Heel Flicks" has the
+                        // printed line's problem with nothing to read.
+                        accessibilityRole="button" accessibilityLabel={via ? `Add ${e.display.text}, matched ${via}` : `Add ${e.display.text}`}
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                        {/* Asked for as "pictures with the exercises on the
+                            coaching app". The signed still was already being
+                            fetched for every row on this page — `thumbRows`
+                            has carried the picker since it was written — and
+                            nothing drew it. Same 44pt tile as the day's rows,
+                            and the same marked tile for a movement with no
+                            artwork, so "no picture" never looks like "still
+                            loading". */}
+                        <ExerciseThumb uri={thumbFor(e)} t={t} size={44} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.display.text}</Text>
                           {/* Only what the row actually carries. A movement with
                               no muscle group shows no muscle group — never
                               "Uncategorised", which is a label we invented, and
@@ -3136,26 +5254,38 @@ export default function Builder() {
                               genuinely non-empty, because a coach who taps
                               expecting a picture and gets a sentence stops
                               trusting the marker on every other row. */}
-                          {e.group || e.hasDemo ? (
+                          {/* fallbackTag joins the same line: a coach picking a
+                              movement for a German-speaking client can see at a
+                              glance which names that client will read in
+                              English. It is null, and so absent, for a coach
+                              whose own device is in English. */}
+                          {e.group || e.hasDemo || fallbackTag(e.display) ? (
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {[e.group, e.hasDemo ? 'Illustrated' : null].filter(Boolean).join(' · ')}
+                              {[e.group, e.hasDemo ? 'Illustrated' : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
                             </Text>
                           ) : null}
+                          {via ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Matched “{via}”</Text>
+                          ) : null}
                         </View>
+                        {fontScale < 1.35 ? (
+                          <ExerciseMuscles compact primary={e.primaryMuscles} secondary={e.secondaryMuscles} status="ready" />
+                        ) : null}
                       </Pressable>
                       <Pressable onPress={() => previewExercise(e.name)} hitSlop={8}
-                        accessibilityRole="button" accessibilityLabel={`What ${e.name} is`}
-                        style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
-                        <Icon name="chevron" size={15} color={t.ink3} />
+                        accessibilityRole="button" accessibilityLabel={`What ${e.display.text} is`}
+                        style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
+                        <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                       </Pressable>
                     </View>
-                  ))}
+                  );
+                  })}
                   {catShownList.length > catShown ? (
                     <View style={{ marginTop: sp.md }}>
                       {/* A count, not a bare "Show more". The number is what a
                           coach scrolling an alphabetical list wants to know:
                           how much of it is still below. */}
-                      <Ghost label={`Show ${Math.min(30, catShownList.length - catShown)} more of ${catShownList.length - catShown}`}
+                      <Ghost label={`Show ${Math.min(30, catShownList.length - catShown)} More of ${catShownList.length - catShown}`}
                         onPress={() => setCatShown((n) => n + 30)} />
                     </View>
                   ) : null}
@@ -3169,11 +5299,12 @@ export default function Builder() {
 
       {/* ── start-from-template picker ───────────────────────────────────── */}
       <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
-        <Pressable style={scrim} onPress={() => setTplPick(false)} />
+        <Pressable style={scrim} onPress={() => setTplPick(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[sheet, { maxHeight: '80%' }]}>
-          <Text style={{ ...ty.title, color: t.ink }}>Start From a Template</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Start from a Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
+            Loads into the builder for {client?.name ?? 'this client'}. Tweak, then assign.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {/* The library is seeded with three built-in starters, so a failed
@@ -3187,36 +5318,29 @@ export default function Builder() {
               </Text>
             ) : tplStatus === 'partial' ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
-                Your library came back short — there are more saved templates than are listed here.
+                Your library came back short. There are more saved templates than are listed here.
               </Text>
             ) : null}
             {templates.length === 0 && tplStatus === 'ready' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
             ) : null}
-            {/* A refused delete leaves the row exactly where it was, which is
-                right and is also silent — so it says so here. */}
-            {tplDelFailed ? (
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{tplDelFailed}</Text>
-            ) : null}
             {templates.map((tpl, i) => {
               const dc = tpl.program.days.length;
               const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (
-                <View key={tpl.id} style={{
-                  flexDirection: 'row', alignItems: 'center',
-                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-                }}>
-                  <Pressable onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
+                <View key={tpl.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Pressable onPress={() => startFromTemplate(tpl)}
                     accessibilityRole="button" accessibilityLabel={`Start from ${tpl.name}`}
                     style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                     <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="grid" size={17} color={t.brand} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.name}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{num(dc)} day{s(dc)} · {num(ec)} exercise{s(ec)}{isStarter(tpl.id) ? ' · starter' : ''}</Text>
                     </View>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Use</Text>
                   </Pressable>
                   {/* Not offered on a starter. Those three are compiled into
                       the bundle, so "deleting" one hides it until the next
@@ -3225,10 +5349,17 @@ export default function Builder() {
                   {isStarter(tpl.id) ? null : (
                     <Pressable onPress={() => deleteTemplate(tpl.id, tpl.name)} hitSlop={8}
                       accessibilityRole="button" accessibilityLabel={`Delete ${tpl.name}`}
-                      style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
+                      style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
                       <Icon name="minus" size={17} color={t.ink3} />
                     </Pressable>
                   )}
+                </View>
+                {/* A refused delete leaves the row exactly where it was, which
+                    is right and is also silent — so it says so ON the row that
+                    stayed, where the coach is looking. */}
+                {tplDelFailed && tplDelFailed.id === tpl.id ? (
+                  <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{tplDelFailed.why}</Flag>
+                ) : null}
                 </View>
               );
             })}
@@ -3245,7 +5376,8 @@ export default function Builder() {
           each needs its sentence to be choosable at all. A coach who does not
           already know what "rest-pause" means cannot pick it from a label. */}
       <Modal visible={methodOpen !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
-        <Pressable style={scrim} onPress={() => setMethodOpenFor(null)} />
+        <Pressable style={scrim} onPress={() => setMethodOpenFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet}>
           {(() => {
             const cur = methodOpen ? days[methodOpen.di]?.exercises.find((x) => x.key === methodOpen.key) : undefined;
@@ -3257,11 +5389,11 @@ export default function Builder() {
                   marker and a coach who tapped the exercise's are looking at
                   the same twelve rows, and only one of those choices lands on
                   every set of the movement. */}
-              <Text style={{ ...ty.title, color: t.ink }}>{forRow ? `How is set ${n} performed?` : 'How is it performed?'}</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>{forRow ? `How Is Set ${n} Performed?` : 'How Is It Performed?'}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
                 {forRow
-                  ? 'This set only. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'
-                  : 'The default for every set of this exercise that has not been given its own. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'}
+                  ? 'This set only. It is carried to the client and read at the machine, and it drives their rest timer. A drop set runs straight through with no rest.'
+                  : 'The default for every set of this exercise that has not been given its own. It is carried to the client and read at the machine, and it drives their rest timer. A drop set runs straight through with no rest.'}
               </Text>
               <ScrollView style={{ maxHeight: 380 }}>
                 {SET_METHODS.map((m) => {
@@ -3279,7 +5411,7 @@ export default function Builder() {
                       onPress={() => {
                         // 'normal' is stored as null rather than as the string,
                         // so an ordinary set carries no field at all and a
-                        // programme written before methods existed reads back
+                        // program written before methods existed reads back
                         // identically. On a ROW that null is still an answer —
                         // "this set is ordinary" — which is how one set opts
                         // out of an exercise whose default is a drop set.
@@ -3293,10 +5425,10 @@ export default function Builder() {
                                borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                       <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
                                      backgroundColor: on ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.caption, fontWeight: '700', color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
+                        <Text style={{ ...ty.caption, ...font('700'), color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, color: t.ink, fontWeight: on ? '600' : '400' }}>{m.label}</Text>
+                        <Text style={{ ...ty.body, color: t.ink, ...font(on ? '600' : '400') }}>{m.label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{m.blurb}</Text>
                         {!m.countsToVolume ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Not counted as training volume.</Text>
@@ -3314,13 +5446,14 @@ export default function Builder() {
 
       <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
+        <Pressable style={scrim} onPress={() => setSaveOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Reuse this program with other clients — {num(totalExercises)} exercise{s(totalExercises)} across {num(days.filter((d) => d.exercises.length).length)} day{s(days.filter((d) => d.exercises.length).length)}.
+            Reuse this program with other clients: {num(blockExercises)} exercise{s(blockExercises)} across {num(blockDays)} day{s(blockDays)}{blockWeeks.length > 1 ? ` in ${num(blockWeeks.length)} weeks` : ''}.
           </Text>
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template Name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.xl }]} />
           <Cta label="Save Template" wide onPress={doSaveTemplate} />

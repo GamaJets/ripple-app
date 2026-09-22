@@ -5,26 +5,48 @@
 // This is Phase 1 of the roadmap, and deliberately a capture screen rather than
 // a dashboard: until a gym records what it sells and what it takes, there is
 // nothing for a chart to draw and nothing for a forecast to learn from.
-import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { supabase, writeFailedText, mayRetryAfter, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import {
   fetchPlans, createPlan, setPlanActive,
   fetchMemberships, createMembership, setMembershipStatus,
   setMembershipDates, setMembershipPlan,
   fetchPayments, recordPayment, reversePayment, reversalBlocker, reversedAgainst,
+  reattributePayment,
   summarise, money, PAYMENT_KIND_LABEL,
   type MembershipPlan, type Membership, type GymPayment,
   type PlanInterval, type PaymentMethod, type CorrectionKind,
 } from '@lib/gymRecord';
 import { isoDay } from '@lib/gymInvoices';
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
+import { parseGymZone, gymDay, NO_ZONE_NOTE } from '@lib/gymZone';
+// The one reader of a typed amount in this product, and the one writer back.
+// Every `* 100` and `/ 100` that used to be on this screen went through them.
+import { readMinorAmount, majorFromMinor } from '@lib/coachMoney';
 import {
   fetchPassTypes, createPassType, setPassTypeActive, passTypeBlocker,
   PASS_COVERS, PASS_COVERS_LABEL, type PassCovers,
   type PassType, type PassKind,
 } from '@lib/gymPasses';
+
+import { gymLink, noGymNote } from '@lib/gymLink';
+// A code on a payment row that this gym has no record of using. The mixed-
+// currency machinery downstream can already see that such a row exists — it
+// withholds the month's total and blocks the close over it — and could not say
+// WHICH row, on a screen where somebody could put it right.
+import { strayCurrencies, strayLines, STRAY_UNCHECKED_NOTE } from '@lib/strayCurrency';
+// Putting a payment against the right person without inventing a refund. The
+// only remedy this console had was `reversePayment`, which writes money going
+// back out of a till it never left.
+import { reattributeBlocker, reattributeRows, reattributedNote } from '@lib/reattribute';
 
 const DAY = 86400000;
 
@@ -45,12 +67,18 @@ const PAYMENT_WINDOWS: ReadonlyArray<{ days: number; label: string }> = [
 
 export default function Money() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
   // `tenants.currency`. The two tiles below are sums across the gym's payments
   // and plans, so they have no single row's currency to borrow — they inherit
   // the gym's, and print nothing when the gym has not set one.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   // Three independent reads, each carrying its own error. null means "not read
   // yet, or the read failed"; [] means "read, and the gym genuinely has none".
@@ -96,7 +124,7 @@ export default function Money() {
    * month with no income rather than as a query that never came back. A read
    * that failed stays null, and every figure drawn from it shows a dash.
    */
-  const load = useCallback(async (tenantId: string, windowDays: number) => {
+  const load = useCallback(async (tenantId: string, windowDays: number): Promise<boolean> => {
     const [pRes, mRes, payRes, ptRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
@@ -122,15 +150,46 @@ export default function Money() {
 
     if (ptRes.status === 'fulfilled') { setPassTypes(ptRes.value); setPassTypesErr(null); }
     else { setPassTypes(null); setPassTypesErr(why(ptRes.reason, 'Could not read the pass price book.')); }
+
+    // Whole means all four came back. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the payments leaves the stamp where it was and the
+    // section's own banner is what says which read is missing — counting what
+    // the server confirmed, not what was sent.
+    return settledLanded([pRes, mRes, payRes, ptRes]);
   }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * No poll: nothing here is written while somebody stands at the desk — that
+   * is /door and /orders. What this screen needed was the sentence, because
+   * every figure on it is money. "AED 4,120 taken" read at 09:00 and read at
+   * 16:00 were the same pixels, on the page an owner reconciles the till
+   * against, and a payment somebody else recorded at the front desk twenty
+   * minutes ago was simply not here.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId, windowDays) : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setPlans([]); setMembers([]); setPayments([]); setPassTypes([]); return; }
+      // Four reads filled with `[]`, which every table below reads as a query
+      // that ran and found nothing: "No payments recorded in the last 30 days"
+      // under a nil MRR, on the screen the desk records money ON. Nothing was
+      // ever asked. The rows stay null and the branch below the role gate is
+      // what renders — see src/lib/gymLink.ts, which this screen's sibling
+      // /accounting is named in.
+      const link = gymLink(who?.tenantId, 'plans, memberships or payments');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } on a database error rather
       // than rejecting, so the error has to be read off the result, not caught.
       // Destructuring only `data` turned an RLS refusal into t === null, and
@@ -138,27 +197,50 @@ export default function Money() {
       // account, when the account is demonstrably linked (this is the branch
       // where tenantId exists) and all that failed was the name lookup.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', link.tenantId).single();
       if (live) {
         setGymName(tErr ? null : ((t as any)?.name ?? null));
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymNameErr(tErr ? (tErr.message || 'Could not read the gym name.') : null);
+        // The gym's own wall clock, for the date this screen SEEDS rather than
+        // reads — see `startedOn` below.
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId, windowDays);
     })();
     return () => { live = false; };
-    // `windowDays` deliberately re-runs this: changing the window is a fresh
-    // READ, not a filter over rows already in hand. Filtering would show a
-    // longer window that is still only thirty days of rows, with nothing on
-    // screen to say the rest was never fetched.
-  }, [load, windowDays]);
+    // Identity and the gym record only. The rows are read by the effect below,
+    // through `refresh`, so that the first read stamps exactly like every later
+    // one — a read fired from here would put figures on screen with no date on
+    // them until somebody pressed the button.
+  }, []);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // The first read, and every re-read caused by moving the window.
+  //
+  // Keyed on the tenant id rather than fired at the end of the effect above:
+  // `useFetched` holds the reader in a ref assigned during RENDER, so calling
+  // `refresh()` in the same tick as `setMe(who)` would run the closure from the
+  // previous render — the one where `me` is still undefined — and the reader
+  // would answer `false` without having read anything.
+  //
+  // `windowDays` is in the deps for the reason the old comment here gave:
+  // changing the window is a fresh READ, not a filter over rows already in
+  // hand. Filtering would show a longer window that is still only thirty days
+  // of rows, with nothing on screen to say the rest was never fetched.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, windowDays]);
+
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/money">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -171,14 +253,29 @@ export default function Money() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/money">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>Money is owner-only.</p>
       </Shell>
     );
   }
 
-  const tenantId = me.tenantId!;
+  // This is what lets the line below read `me.tenantId` instead of asserting
+  // `me.tenantId!`. Every section on this screen WRITES — a plan, a membership,
+  // a payment, a correction — against that id, and the assertion was the only
+  // thing standing between a null tenant and four write forms pointed at it.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
+        <h1>Money</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('plans, memberships or payments')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   const sum = plans && members && payments ? summarise(payments, members, plans) : null;
   // The currency each SUM is actually in. A set with no rows states nothing, so
   // there is nothing to disagree with and the gym's own currency is the honest
@@ -186,7 +283,11 @@ export default function Money() {
   // is what makes `amount()` withhold the figure rather than pick a side.
   const takenCcy = sum == null || sum.payments === 0 ? ccy : sum.takenCurrency;
   const mrrCcy = sum == null || sum.mrrCents == null ? ccy : sum.mrrCurrency;
-  const refresh = () => load(tenantId, windowDays);
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId, windowDays)` handed to every section's `onChange`, so
+  // recording a payment re-read the screen WITHOUT moving the read stamp — the
+  // one moment on this page when the figures are provably current would have
+  // been the one where the line under them went on ageing.
 
   // summarise needs all three reads, so any one of them failing leaves every
   // figure above the tables unknown. Name the reads that did not arrive: a bare
@@ -199,12 +300,34 @@ export default function Money() {
   ].filter((s): s is string => s !== null);
   const unread = failed.length ? `could not read ${failed.join(', ')}` : undefined;
 
+  /**
+   * What money this gym is established to use — its own setting, plus every
+   * plan and pass it has ever priced.
+   *
+   * NULL, and never a short list, when any of the three reads behind it is
+   * missing. A book assembled from a failed price-book read would be `[GBP]` at
+   * a gym that also sells in dirhams, and every dirham payment in the ledger
+   * would be reported to its owner as an unknown currency — the null-is-zero
+   * mistake pointed at somebody's takings. `strayCurrencies` declines to judge
+   * a null rather than judging it empty.
+   *
+   * The rows on screen are deliberately NOT in here. A payment cannot be
+   * evidence that its own currency is one the gym uses; an import that went in
+   * wrong is a thousand rows vouching for each other.
+   */
+  const currencyBook = gymNameErr || plans === null || passTypes === null
+    ? null
+    : [ccy, ...plans.map((p) => p.currency), ...passTypes.map((t) => t.currency)];
+
   return (
-    <Shell me={me} gymName={gymName} current="/money">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
       <h1>Money</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What the gym sells, who holds a membership, and what has actually been paid.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym’s money" style={{ margin: '2px 0 16px' }} />
 
       {gymNameErr ? (
         <Banner tone="crit">
@@ -260,11 +383,11 @@ export default function Money() {
 
       <Plans plans={plans} readErr={plansErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
       <PassTypes types={passTypes} readErr={passTypesErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
-      <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} onChange={refresh} />
+      <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} zone={zone} onChange={refresh} />
       <Payments
         payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId}
-        me={me} ccy={ccy} onChange={refresh}
-        windowDays={windowDays} onWindow={setWindowDays}
+        me={me} ccy={ccy} zone={zone} onChange={refresh}
+        windowDays={windowDays} onWindow={setWindowDays} currencyBook={currencyBook}
       />
     </Shell>
   );
@@ -284,8 +407,7 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    const major = parseFloat(price);
-    if (!name.trim() || !isFinite(major)) return;
+    if (!name.trim()) return;
     // A price with no currency is not a price. `createPlan` used to stamp 'AED'
     // over whatever it was not told and `membership_plans.currency` is `not null
     // default 'AED'`, so a gym that never set one had its whole price book
@@ -296,10 +418,21 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
       setWriteErr(`That plan was not saved: ${NO_CURRENCY_NOTE}, so there is no currency to price it in. An owner sets it on the gym settings screen, and this form works the moment they have.`);
       return;
     }
+    // It was `parseFloat(price)` and `Math.round(major * 100)`. A plan is what
+    // every member on it is billed for ever, and the hundred is right for
+    // sterling and wrong for a third of the currencies this product supports: a
+    // Tokyo gym pricing a plan at ¥6,000 wrote 600,000 minor units and billed a
+    // hundredfold, a Kuwaiti gym a tenth, and neither reads as wrong on any
+    // screen afterwards. `readMinorAmount` takes the places from the gym's own
+    // currency, refuses a thousands separator rather than guessing which side
+    // of the Channel the typist grew up on, and refuses what it cannot read —
+    // the same reader /costs already uses one item along this rail.
+    const priced = readMinorAmount(price, ccy);
+    if (!priced.ok) { setWriteErr(`That plan was not saved: ${priced.reason}`); return; }
     setBusy(true); setWriteErr(null);
     try {
       await createPlan(supabase, tenantId, {
-        name: name.trim(), priceCents: Math.round(major * 100), interval, currency: ccy,
+        name: name.trim(), priceCents: priced.minorUnits, interval, currency: ccy,
       });
       setName(''); setPrice(''); onChange();
     } catch (e: any) {
@@ -309,7 +442,14 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
       // list that has not refreshed yet rather than as a write that did not
       // happen. The typed name and price are deliberately left in the form —
       // nothing was saved, so there is something to retry.
-      setWriteErr(`That plan was not saved: ${e?.message ?? 'the write was refused'}. Nothing has changed in the price book.`);
+      // Three states, not two — see lib/supabase.ts. "Nothing has changed in the
+      // price book" is true of a refusal and is a claim this console cannot make
+      // about a request nobody answered.
+      setWriteErr(writeFailedText(e, {
+        what: 'That plan',
+        unchanged: 'nothing has changed in the price book',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -328,8 +468,11 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
         <button
           onClick={() => setPlanActive(supabase, p.id, !p.active)
             .then(() => { setWriteErr(null); onChange(); })
-            .catch((e: any) => setWriteErr(
-              `Could not ${p.active ? 'retire' : 'reinstate'} ${p.name}: ${e?.message ?? 'the change was refused'}. It is still ${p.active ? 'on sale' : 'retired'}.`))}
+            .catch((e: any) => setWriteErr(writeFailedText(e, {
+              what: `${p.active ? 'Retiring' : 'Reinstating'} ${p.name}`,
+              unchanged: `it is still ${p.active ? 'on sale' : 'retired'}`,
+              howToCheck: 'Reload this page: the Status column carries whichever side of the price book it is actually on.',
+            })))}
           style={linkBtn}
         >
           {p.active ? 'Retire' : 'Reinstate'}
@@ -339,13 +482,21 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
 
   return (
     <Section title="Price book" sub="Retiring a plan keeps it on the memberships already sold on it.">
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Plan name" style={{ ...field, flex: 2 }} />
         {/* The placeholder names the currency the number will be STORED in.
             A bare "Price" is the gap that let a GBP gym type 50 into a field
             whose write said dirhams. */}
         <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder={ccy ? `Price (${ccy})` : 'Price'} inputMode="decimal" style={{ ...field, flex: 1 }} />
-        <select value={interval} onChange={(e) => setInterval(e.target.value as PlanInterval)} style={{ ...field, flex: 1 }}>
+        {/* Named, all seven on this page. A first <option> that reads like a
+            label ("Choose one…") is a VALUE, not a name: the moment somebody
+            chooses, the name is gone. */}
+        <select aria-label="How often the plan is billed" value={interval} onChange={(e) => setInterval(e.target.value as PlanInterval)} style={{ ...field, flex: 1 }}>
           <option value="month">per month</option>
           <option value="year">per year</option>
           <option value="once">one-off</option>
@@ -353,7 +504,7 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
         <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Add plan</button>
       </form>
       {ccy ? null : <Banner>Plans cannot be priced until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. Guessing one would write it into every price sold on it.</Banner>}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {plans === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -363,7 +514,7 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
           </Banner>
         ) : <Loading />
       ) : (
-        <DataTable rows={plans} columns={cols} rowKey={(p) => p.id}
+        <DataTable noun="membership plans" rows={plans} columns={cols} rowKey={(p) => p.id}
           empty="No plans yet. A gym cannot record a membership until it has something to sell." />
       )}
     </Section>
@@ -418,23 +569,36 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
 
   // The draft as the library will see it, so the sentence the owner reads before
   // pressing anything is the one `createPassType` would have thrown.
-  const major = parseFloat(price);
+  //
+  // It was `parseFloat(price)` and `Math.round(major * 100)`. A pass price is
+  // copied onto every pass sold on it at the moment of sale, so the hundredfold
+  // a yen gym got here is unreachable afterwards by any edit — there is no edit.
+  // `readMinorAmount` asks the gym's own currency how many places its money has.
+  const priced = readMinorAmount(price, ccy);
   const draft = {
     name,
     kind,
-    priceCents: Number.isFinite(major) ? Math.round(major * 100) : null,
+    priceCents: priced.ok ? priced.minorUnits : null,
     currency: ccy,
     uses: uses.trim() === '' ? 1 : parseInt(uses, 10),
     validDays: validDays.trim() === '' ? null : parseInt(validDays, 10),
     covers,
   };
-  // Only nag once there is something to nag about, and never about the currency
-  // before they have typed a price — the banner below already says that.
-  const blocker = (name.trim() || price.trim()) ? passTypeBlocker(draft) : null;
+  // Whose sentence to show. `passTypeBlocker` answers "there is no price here";
+  // `readMinorAmount` answers "there is something here and it is not an amount
+  // of this gym's money", which is the more useful of the two once somebody has
+  // typed into the box. The currency case stays with the blocker — it is not
+  // the typist's mistake — and nothing nags before there is anything to nag about.
+  const priceReason = (ccy && price.trim() && !priced.ok) ? priced.reason : null;
+  const stopFor = (): string | null => {
+    const s = passTypeBlocker(draft);
+    return s && priceReason && name.trim() ? priceReason : s;
+  };
+  const blocker = (name.trim() || price.trim()) ? stopFor() : null;
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    const stop = passTypeBlocker(draft);
+    const stop = stopFor();
     if (stop) { setWriteErr(stop); return; }
     setBusy(true); setWriteErr(null);
     try {
@@ -454,7 +618,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       setName(''); setPrice('');
       onChange();
     } catch (x: any) {
-      setWriteErr(`That pass was not added: ${x?.message ?? 'the write was refused'}. Nothing has changed at the desk.`);
+      setWriteErr(writeFailedText(x, {
+        what: 'That pass',
+        unchanged: 'nothing has changed at the desk',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -486,8 +654,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
         <button
           onClick={() => setPassTypeActive(supabase, t.id, !t.active)
             .then(() => { setWriteErr(null); onChange(); })
-            .catch((x: any) => setWriteErr(
-              `Could not ${t.active ? 'retire' : 'put back on sale'} ${t.name}: ${x?.message ?? 'the change was refused'}. It is still ${t.active ? 'on sale' : 'retired'} at the desk.`))}
+            .catch((x: any) => setWriteErr(writeFailedText(x, {
+              what: `${t.active ? 'Retiring' : 'Putting'} ${t.name}${t.active ? '' : ' back on sale'}`,
+              unchanged: `it is still ${t.active ? 'on sale' : 'retired'} at the desk`,
+              howToCheck: 'Reload this page: the Status column carries whichever side of the desk it is actually on.',
+            })))}
           style={linkBtn}
         >
           {t.active ? 'Retire' : 'Back on sale'}
@@ -500,9 +671,14 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       title="Pass price book"
       sub="Drop-ins, guest passes and packs — what the desk can sell on the Door screen. Retiring one keeps every pass already sold on it valid."
     >
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Pass name" style={{ ...field, flex: 2, minWidth: 140 }} />
-        <select value={kind} onChange={(e) => setKind(e.target.value as PassKind)} style={{ ...field, flex: 1, minWidth: 130 }}>
+        <select aria-label="Pass type" value={kind} onChange={(e) => setKind(e.target.value as PassKind)} style={{ ...field, flex: 1, minWidth: 130 }}>
           {(Object.keys(KIND_LABEL) as PassKind[]).map((k) => (
             <option key={k} value={k}>{KIND_LABEL[k]}</option>
           ))}
@@ -510,7 +686,7 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
         {/* Two different products that look identical on a receipt. A pass good
             for personal training is drawn down when a coach marks a session
             complete; one good for the door and classes never is. */}
-        <select value={covers} onChange={(e) => setCovers(e.target.value as PassCovers)} style={{ ...field, flex: 1, minWidth: 150 }}>
+        <select aria-label="What the pass covers" value={covers} onChange={(e) => setCovers(e.target.value as PassCovers)} style={{ ...field, flex: 1, minWidth: 150 }}>
           {PASS_COVERS.map((c) => (
             <option key={c} value={c}>{PASS_COVERS_LABEL[c]}</option>
           ))}
@@ -546,9 +722,9 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
         </Banner>
       )}
       {blocker && !writeErr ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p>
       ) : null}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {types === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -558,7 +734,7 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
           </Banner>
         ) : <Loading />
       ) : (
-        <DataTable rows={types} columns={cols} rowKey={(t) => t.id}
+        <DataTable noun="pass types" rows={types} columns={cols} rowKey={(t) => t.id}
           empty="No pass types yet. Until there is one, the Door screen's “issue a pass” list is empty and the desk cannot sell a drop-in." />
       )}
     </Section>
@@ -567,10 +743,14 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
 
 /* ── memberships ───────────────────────────────────────────────────────────── */
 
-function Members({ members, readErr, plans, tenantId, onChange }: {
+function Members({ members, readErr, plans, tenantId, zone, onChange }: {
   members: Membership[] | null; readErr: string | null;
-  plans: MembershipPlan[] | null; tenantId: string; onChange: () => void;
+  plans: MembershipPlan[] | null; tenantId: string; zone: string | null;
+  onChange: () => void;
 }) {
+  /** What THIS component last seeded the date box with, so a correction from a
+   *  late tenant read never overwrites a date somebody typed. */
+  const seeded = useRef<string>(new Date().toISOString().slice(0, 10));
   const [memberId, setMemberId] = useState('');
   const [planId, setPlanId] = useState('');
   // When this membership actually began, and when it ends. Both were absent
@@ -580,7 +760,20 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
   // cohort retention measures from a date nobody joined, and the ageing on
   // /accounting has no history to age. None of it is recoverable afterwards
   // without a write that offers the field.
+  // The GYM's today, not UTC's. It was `new Date().toISOString().slice(0, 10)`
+  // — the same expression members/page.tsx carries a comment naming as the
+  // thing it stopped doing. A membership opened at 5pm in Los Angeles was filed
+  // as starting TOMORROW, which is a tenure figure, a cohort and an ageing
+  // schedule all off by a day for that member for ever. Where the gym has set
+  // no zone, UTC's day is the only clock there is and it is used.
   const [startedOn, setStartedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  useEffect(() => {
+    // Corrected once the zone read lands, and only while the owner has not
+    // touched the field: `seeded` holds what this component put there, so a
+    // typed date is never overwritten by a slow tenant read.
+    const g = gymDay(Date.now(), zone);
+    if (g) setStartedOn((cur) => (cur === seeded.current ? (seeded.current = g) : cur));
+  }, [zone]);
   const [endsOn, setEndsOn] = useState('');
   const [busy, setBusy] = useState(false);
   // Covers every write in this section — adding a membership, changing its
@@ -614,15 +807,22 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
       });
       setMemberId(''); onChange();
     } catch (e: any) {
-      setWriteErr(e?.message ?? 'Could not add that membership.');
+      setWriteErr(writeFailedText(e, {
+        what: 'That membership',
+        unchanged: 'nobody has been put on a plan',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again — a membership added twice bills twice.',
+      }));
     } finally { setBusy(false); }
   };
 
   const savePlan = (m: Membership, next: string) => {
     setMembershipPlan(supabase, m.id, next || null)
       .then(() => { setWriteErr(null); onChange(); })
-      .catch((err: any) => setWriteErr(
-        `Could not move ${m.memberName || 'that membership'} onto another plan: ${err?.message ?? 'the change was refused'}. It is still on ${m.planName ?? 'no plan'}.`));
+      .catch((err: any) => setWriteErr(writeFailedText(err, {
+        what: `Moving ${m.memberName || 'that membership'} onto another plan`,
+        unchanged: `it is still on ${m.planName ?? 'no plan'}`,
+        howToCheck: 'Reload this page: the Plan column carries whichever plan is actually stored.',
+      })));
   };
 
   const cols: Column<Membership>[] = [
@@ -662,13 +862,17 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
         // misclicked or the database said no. Say which, and say what the
         // membership still is.
         <select
+          aria-label={`Membership status for ${m.memberName || 'this member'}`}
           value={m.status}
           onChange={(e) => {
             const next = e.target.value as any;
             setMembershipStatus(supabase, m.id, next)
               .then(() => { setWriteErr(null); onChange(); })
-              .catch((err: any) => setWriteErr(
-                `Could not set ${m.memberName || 'that membership'} to ${next}: ${err?.message ?? 'the change was refused'}. It is still ${m.status}.`));
+              .catch((err: any) => setWriteErr(writeFailedText(err, {
+                what: `Setting ${m.memberName || 'that membership'} to ${next}`,
+                unchanged: `it is still ${m.status}`,
+                howToCheck: 'Reload this page: the Status column carries whichever state is actually stored.',
+              })));
           }}
           style={{ ...field, padding: '4px 6px', fontSize: 12 }}
         >
@@ -682,10 +886,15 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
 
   return (
     <Section title="Memberships" sub="The member id is their Repple account id — the same person who signs into the app. Start and end dates are the gym's to state: a migrated roster whose every member starts today has no tenure and no cohort to measure.">
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={memberId} onChange={(e) => setMemberId(e.target.value)}
                placeholder="Member account id (uuid)" style={{ ...field, flex: 3, fontFamily: 'var(--mono)', fontSize: 12.5 }} />
-        <select value={planId} onChange={(e) => setPlanId(e.target.value)} style={{ ...field, flex: 2 }}>
+        <select aria-label="Which plan" value={planId} onChange={(e) => setPlanId(e.target.value)} style={{ ...field, flex: 2 }}>
           {/* A price book that would not read leaves this list with nothing in
               it, which is indistinguishable from a gym that sells nothing. The
               placeholder says which, so nobody sells a membership off-plan
@@ -707,15 +916,21 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
         </label>
         <button type="submit" disabled={busy || !!dateBlocker} style={primaryBtn}>Add membership</button>
       </form>
+      {zone ? null : (
+        <p style={{ margin: '0 14px 8px', fontSize: 12, color: 'var(--ink3)', maxWidth: '76ch' }}>
+          The start date above was filled in from UTC&rsquo;s calendar, because {NO_ZONE_NOTE}. Late in
+          the evening west of Greenwich that is tomorrow. Check it before adding the membership.
+        </p>
+      )}
       <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
         Leave the end date empty for a membership that runs until somebody cancels it — open-ended
         is a decision a gym makes and it is not the same as expired. Click a start date in the table
         to correct it.
       </p>
       {dateBlocker && !writeErr ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{dateBlocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>{dateBlocker}</p>
       ) : null}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {members === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -725,7 +940,7 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
           </Banner>
         ) : <Loading />
       ) : (
-        <DataTable rows={members} columns={cols} rowKey={(m) => m.id}
+        <DataTable noun="memberships" rows={members} columns={cols} rowKey={(m) => m.id}
           empty="No memberships recorded. This is the row that makes retention and revenue measurable." />
       )}
     </Section>
@@ -764,7 +979,11 @@ function MembershipDates({ m, onDone, onErr }: {
       // setMembershipDates checks the ROW COUNT, so a refusal by
       // `memberships_owner` arrives here rather than as a silent 204 that
       // leaves the old dates on screen looking saved.
-      onErr(`Those dates were NOT changed: ${e?.message ?? 'the write was refused'}. The membership still starts ${m.startedOn}.`);
+      onErr(writeFailedText(e, {
+        what: 'Those dates',
+        unchanged: `the membership still starts ${m.startedOn}`,
+        howToCheck: 'Reload this page: the Started and Ends columns carry whichever dates are actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -778,16 +997,24 @@ function MembershipDates({ m, onDone, onErr }: {
              aria-label="The day it ends, if it does" />
       <button style={linkBtn} disabled={busy || !!bad} onClick={save}>Save</button>
       <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={onDone}>Cancel</button>
-      {bad ? <span style={{ fontSize: 11.5, color: '#f0c04e' }}>{bad}</span> : null}
+      {bad ? <span style={{ fontSize: 11.5, color: 'var(--warn)' }}>{bad}</span> : null}
     </span>
   );
 }
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
-function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, windowDays, onWindow }: {
+function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChange, windowDays, onWindow, currencyBook }: {
   payments: GymPayment[] | null; readErr: string | null; members: Membership[] | null;
-  tenantId: string; me: Me; ccy: TenantCurrency; onChange: () => void;
+  tenantId: string; me: Me; ccy: TenantCurrency;
+  /** Every currency this gym is on record as using, or null when that could not
+   *  be established. See the note where it is built — null is the answer that
+   *  stops an unread price book accusing a whole ledger. */
+  currencyBook: Array<string | null> | null;
+  /** `tenants.timezone`. When a payment was taken is the gym's day, not the
+   *  reader's — and this table is what a correction is entered against. */
+  zone: string | null;
+  onChange: () => void;
   windowDays: number; onWindow: (days: number) => void;
 }) {
   const [amount, setAmount] = useState('');
@@ -812,13 +1039,38 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
   const [membershipId, setMembershipId] = useState('');
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);
+  /**
+   * The last attempt may have gone through, and the button is closed until
+   * somebody says they have looked.
+   *
+   * The behavioural half of the three-state wording. A refused payment leaves
+   * Record live, because pressing it again is exactly right; a payment nobody
+   * answered about leaves it closed, because pressing it again is how the gym
+   * takes the same money twice. `mayRetryAfter` is the same judgement
+   * `retryOnTimeout` makes about resending a write automatically, applied to
+   * the button that does it by hand.
+   */
+  const [unsure, setUnsure] = useState(false);
   /** The payment being corrected, or null. One at a time, deliberately. */
   const [correcting, setCorrecting] = useState<GymPayment | null>(null);
+  /** The payment being moved to a different member, or null. Also one at a
+   *  time, and never at the same time as a correction: they are two different
+   *  remedies for two different mistakes, and the whole point of this one is
+   *  that it is NOT the other. */
+  const [moving, setMoving] = useState<GymPayment | null>(null);
+  /**
+   * What the last write actually did, in the owner's words.
+   *
+   * Separate from `writeErr` and not folded into it: a re-attribution that
+   * moved a refund along with its payment changed two rows of somebody's money,
+   * and a screen that says nothing about the second one has under-reported what
+   * it did. It is set from the count the SERVER returned, never from the
+   * absence of an exception.
+   */
+  const [said, setSaid] = useState<string | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    const major = parseFloat(amount);
-    if (!isFinite(major)) return;
     if (takenOn && !isoDay(takenOn)) {
       setWriteErr('That payment was NOT recorded: the date it was taken is not a real date. Leave it empty to record it as now.');
       return;
@@ -832,11 +1084,25 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
       setWriteErr(`That payment was NOT recorded: ${NO_CURRENCY_NOTE}, so there is no currency to record it in and a guessed one would be stored permanently. Set the gym's currency and enter it again \u2014 the money is still not in the record.`);
       return;
     }
+    // This is the console's cash register, and it was `Math.round(parseFloat(
+    // amount) * 100)`. /accounting, /close, /tax and the export all read this
+    // row back as fact, so a payment taken at the desk in yen was filed at a
+    // hundred times the money that changed hands with nothing downstream able
+    // to notice. `readMinorAmount` reads it in the gym's own currency and
+    // refuses what it cannot read rather than storing a different number.
+    // NOT a charge, for the same reason as the desk on (owner)/members: this
+    // records money that has already changed hands. The plan and pass prices
+    // higher up this file ARE charges and keep the default.
+    const taken = readMinorAmount(amount, ccy, false);
+    if (!taken.ok) {
+      setWriteErr(`That payment was NOT recorded: ${taken.reason} Nothing was saved \u2014 the money is not in the gym record.`);
+      return;
+    }
     setBusy(true); setWriteErr(null);
     try {
       await recordPayment(supabase, tenantId, {
         memberId: memberId || null,
-        amountCents: Math.round(major * 100),
+        amountCents: taken.minorUnits,
         method,
         recordedBy: me.id,
         currency: ccy,
@@ -848,15 +1114,24 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
         note: note.trim() || null,
         membershipId: membershipId || null,
       });
-      setAmount(''); setNote(''); setMembershipId(''); onChange();
+      setAmount(''); setNote(''); setMembershipId(''); setUnsure(false); onChange();
     } catch (e: any) {
+      setUnsure(!mayRetryAfter(e));
       // recordPayment throws on a PostgREST error. With a try/finally and no
       // catch, a refused write looked exactly like a successful one whose list
       // had not refreshed yet — and this is money. An owner who believes a
       // payment is recorded and finds it missing will chase a member who has
       // already paid, or never chase one who has not. The amount stays in the
       // box on purpose: nothing was written, so the row is still owed.
-      setWriteErr(`That payment was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing was saved — the money is not in the gym record and has to be entered again.`);
+      // The most expensive sentence on this console, and it is why the three
+      // states exist. "Nothing was saved — enter it again" said about a request
+      // nobody answered is an instruction to take the same money twice, into a
+      // ledger /accounting, /close, /tax and the export all read back as fact.
+      setWriteErr(writeFailedText(e, {
+        what: 'That payment',
+        unchanged: 'the money is not in the gym record and has to be entered again',
+        howToCheck: 'Reload this page and look for it in the payment list below. Enter it again only if it is not there.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -864,7 +1139,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
 
   const cols: Column<GymPayment>[] = [
     { key: 'when', header: 'Taken', value: (p) => p.takenAt,
-      render: (p) => new Date(p.takenAt).toLocaleString() },
+      render: (p) => gymDateTimeText(p.takenAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'member', header: 'Member', value: (p) => p.memberName },
     { key: 'amount', header: 'Amount', value: (p) => p.amountCents, numeric: true,
       // A correction renders in the critical colour with its sign, because it
@@ -891,16 +1166,25 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           return (
             <span style={{ color: 'var(--ink3)', fontSize: 12 }}>
               {orig
-                ? `against ${new Date(orig.takenAt).toLocaleDateString()}`
+                ? `against ${gymDateText(orig.takenAt, zone) ?? 'a payment whose date could not be read'}`
                 : 'against a payment outside this window'}
             </span>
           );
         }
         const done = reversedAgainst(p.id, rows);
-        if (done >= p.amountCents) {
-          return <span style={{ color: 'var(--ink3)', fontSize: 12 }}>reversed in full</span>;
-        }
-        return <button style={linkBtn} onClick={() => { setWriteErr(null); setCorrecting(p); }}>Refund or correct</button>;
+        // Re-attribution stays offered on a payment that has been reversed in
+        // full, and that is deliberate: the reversal copied the wrong member
+        // onto the correction too, so a fully-undone mis-key is TWO rows
+        // against somebody who never paid. It is the case that most needs
+        // putting right and the one a `return` here used to hide.
+        return (
+          <span style={{ display: 'inline-flex', gap: 12, justifyContent: 'flex-end', alignItems: 'baseline' }}>
+            {done >= p.amountCents
+              ? <span style={{ color: 'var(--ink3)', fontSize: 12 }}>reversed in full</span>
+              : <button style={linkBtn} onClick={() => { setWriteErr(null); setSaid(null); setMoving(null); setCorrecting(p); }}>Refund or correct</button>}
+            <button style={linkBtn} onClick={() => { setWriteErr(null); setSaid(null); setCorrecting(null); setMoving(p); }}>Re-attribute</button>
+          </span>
+        );
       } },
   ];
 
@@ -932,13 +1216,25 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           A chargeback lands weeks after the sale. The correction it needs is on the row itself.
         </span>
       </div>
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice.
+          `said` shares the region rather than adding a second one, because two
+          live regions on one screen race and a reader hears whichever wins. The
+          error wins here, which is the right way round: a refusal is the more
+          urgent of the two and the confirmation is never set in the same tick. */}
+      <Announce say={writeErr ?? said} tone={writeErr ? 'crit' : undefined} />
       <form onSubmit={add} style={formRow}>
         {/* Names the currency this figure is STORED in, not the one the reader
             assumes. The Members screen's twin of this form had its label
             corrected and its write left alone, which is how a GBP gym came to
             hold dirhams. */}
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={ccy ? `Amount (${ccy})` : 'Amount'} inputMode="decimal" style={{ ...field, flex: 1 }} />
-        <select value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
+        {/* Editing the amount is the acknowledgement: somebody has been back to
+            the form after reading the sentence above, which is the only signal
+            available that they went and looked. */}
+        <input value={amount} onChange={(e) => { setAmount(e.target.value); setUnsure(false); }} placeholder={ccy ? `Amount (${ccy})` : 'Amount'} inputMode="decimal" style={{ ...field, flex: 1 }} />
+        <select aria-label="Who paid" value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
           {/* When the member list did not read, this dropdown holds nobody —
               which looks like a gym with no members rather than a list that
               failed. Unattributed is permanent once written, so the label says
@@ -946,7 +1242,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           <option value="">{members === null ? 'Unattributed — the member list could not be read' : 'Unattributed'}</option>
           {options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
-        <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} style={{ ...field, flex: 1 }}>
+        <select aria-label="How they paid" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} style={{ ...field, flex: 1 }}>
           <option value="card">card</option>
           <option value="cash">cash</option>
           <option value="transfer">transfer</option>
@@ -969,7 +1265,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
         </select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note"
                style={{ ...field, flex: 2 }} aria-label="A note on this payment" />
-        <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Record</button>
+        <button type="submit" disabled={busy || !ccy || unsure} style={primaryBtn}>Record</button>
       </form>
       <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
         Leave the date empty to record the money as arriving now. Saying which membership a payment
@@ -978,7 +1274,15 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
         into a fact — nothing else in the database links a payment to what it was for.
       </p>
       {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
+      {said && !writeErr ? <Banner live={false}>{said}</Banner> : null}
+      {unsure ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>
+          Record is closed until the amount is retyped. That is deliberate: the last attempt may
+          already be in the ledger, and a second press would take the same money twice. Check the
+          list below first.
+        </p>
+      ) : null}
       {correcting ? (
         <Correction
           p={correcting}
@@ -987,6 +1291,17 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           me={me}
           onDone={() => { setCorrecting(null); onChange(); }}
           onCancel={() => setCorrecting(null)}
+          onErr={setWriteErr}
+        />
+      ) : null}
+      {moving ? (
+        <Reattribute
+          p={moving}
+          all={payments}
+          members={members}
+          tenantId={tenantId}
+          onDone={(note) => { setMoving(null); setSaid(note); onChange(); }}
+          onCancel={() => setMoving(null)}
           onErr={setWriteErr}
         />
       ) : null}
@@ -999,10 +1314,172 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           </Banner>
         ) : <Loading />
       ) : (
-        <DataTable rows={payments} columns={cols} rowKey={(p) => p.id}
-          empty="No payments recorded in the last 30 days." />
+        <>
+          <StrayPayments rows={payments} book={currencyBook} />
+          <DataTable noun="payments" rows={payments} columns={cols} rowKey={(p) => p.id}
+            empty="No payments recorded in the last 30 days." />
+        </>
       )}
     </Section>
+  );
+}
+
+/**
+ * The payments in this window whose currency this gym has no record of using.
+ *
+ * Above the table rather than below it, because it is the reason to read the
+ * table. It is a warning and changes nothing: `gym_payments.currency` is what
+ * somebody recorded about money that actually moved, and a euro walk-in at a
+ * London gym is exactly as likely as a slip of the keyboard. Normalising it
+ * here would erase a real second currency from a register that gets reconciled
+ * against a bank statement.
+ *
+ * Nothing is rendered for a clean window. The one thing that IS rendered with
+ * no finding behind it is the sentence for a null book — "nothing was compared"
+ * is not "everything is fine", and a silent screen would say the second.
+ */
+function StrayPayments({ rows, book }: { rows: GymPayment[]; book: Array<string | null> | null }) {
+  if (!rows.length) return null;
+  if (book === null) {
+    return (
+      <div style={{ padding: '0 14px' }}>
+        <SharedBanner tone="warn">{STRAY_UNCHECKED_NOTE}</SharedBanner>
+      </div>
+    );
+  }
+  const lines = strayLines(strayCurrencies(rows, book), 'payment');
+  if (!lines.length) return null;
+  return (
+    <div style={{ padding: '0 14px' }}>
+      <SharedBanner tone="warn">
+        {lines.map((l, i) => (
+          <p key={l} style={{ margin: i === lines.length - 1 ? 0 : '0 0 8px', maxWidth: '80ch' }}>{l}</p>
+        ))}
+      </SharedBanner>
+    </div>
+  );
+}
+
+/* ── putting a payment against the right person ────────────────────────────── */
+
+/**
+ * Move a payment to the member it was actually from.
+ *
+ * The remedy that did not exist. A payment keyed against the wrong person — or
+ * against nobody, which /close reports on its own line as "Not attributed to
+ * anybody" — could only be reversed and re-entered, and `Correction` below is
+ * explicit that a reversal is dated TODAY: a name mistyped in August was put
+ * right by taking money out of August and putting it into September, in a
+ * register an accountant reads by month. If August had been closed there was no
+ * remedy at all, because supabase/parts/182 refuses the reversal.
+ *
+ * This changes two columns on the rows that are already there. `taken_at` and
+ * `amount_cents` are not in the update, which is exactly why the closed-month
+ * trigger does not fire on it — the month's total is the same money on the same
+ * day, and nothing a close signed for has moved.
+ *
+ * The corrections against the payment move WITH it. `reversePayment` copies the
+ * member onto every correction it writes, so a partly-refunded payment is two
+ * rows against one person, and moving the positive one alone would leave a
+ * negative filed against somebody who never paid. `reattributeRows` is that
+ * list and `reattributePayment` refuses to report success unless the server
+ * says it changed every one of them.
+ */
+function Reattribute({ p, all, members, tenantId, onDone, onCancel, onErr }: {
+  p: GymPayment;
+  /** The payments as READ — nullable on purpose. The corrections against this
+   *  row are found in here, so a failed read is a refusal rather than a payment
+   *  that happens to have none. */
+  all: GymPayment[] | null;
+  members: Membership[] | null;
+  tenantId: string;
+  onDone: (said: string) => void; onCancel: () => void; onErr: (s: string | null) => void;
+}) {
+  const [memberId, setMemberId] = useState(p.memberId ?? '');
+  const [membershipId, setMembershipId] = useState(p.membershipId ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const to = { memberId: memberId || null, membershipId: membershipId || null };
+  const blocker = reattributeBlocker(p, to, all, members);
+
+  // Distinct members, by the same rule the capture form above uses: a member
+  // with three memberships is one person in this list.
+  const options = [...new Map((members ?? [])
+    .filter((m) => m.memberName)
+    .map((m) => [m.memberId, m.memberName!])).entries()];
+  // Only the chosen member's memberships. The blocker refuses a mismatched pair
+  // anyway, but a dropdown that offers somebody else's membership is a dropdown
+  // that invites the refusal.
+  const theirs = (members ?? []).filter((m) => memberId && m.memberId === memberId);
+  const name = options.find(([id]) => id === memberId)?.[1] ?? null;
+
+  const go = async () => {
+    if (blocker) { onErr(blocker); return; }
+    // Unreachable behind the blocker, which refuses a null list first. Written
+    // as a return rather than a `!` so that reordering the chain later cannot
+    // turn it into a write over rows nobody read.
+    if (all == null) { onErr('The payments could not be read.'); return; }
+    const ids = reattributeRows(p, all);
+    setBusy(true);
+    try {
+      // The count comes back from the server and is what the sentence is built
+      // from. Nothing here infers that the write landed from the absence of an
+      // exception: an UPDATE filtered away by RLS is a 204 with a null error.
+      const changed = await reattributePayment(supabase, tenantId, ids, to);
+      onErr(null);
+      onDone(reattributedNote(changed, name));
+    } catch (e: any) {
+      onErr(writeFailedText(e, {
+        what: 'That re-attribution',
+        unchanged: 'the payment is still filed against whoever it was filed against before, and so is every correction under it',
+        howToCheck: 'Reload this page and read the Member column on the payment and on any correction beneath it. Nothing here has been written twice — this changes rows rather than adding them.',
+      }));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{
+      margin: '0 14px 14px', padding: '12px 14px', background: 'var(--surface2)',
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--brand)',
+    }}>
+      <div className="micro">Re-attributing {money(p.amountCents, p.currency)} from {p.memberName ?? 'nobody named'}</div>
+      <p style={{ margin: '7px 0 10px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>
+        This changes who the payment is against. It does not write a refund, it does not move the
+        money to another day, and the amount is untouched &mdash; so a month that has already been
+        closed does not refuse it, because nothing it was signed off on has changed. Any refund or
+        correction recorded against this payment moves with it; leaving one behind would file a
+        negative amount against somebody who never paid.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={memberId} aria-label="The member this payment is from"
+                onChange={(e) => {
+                  // The membership is cleared with the member on purpose. Keeping
+                  // it would leave the box showing a membership the new person
+                  // does not hold, which the blocker then refuses — a refusal the
+                  // screen caused and the reader did not.
+                  setMemberId(e.target.value); setMembershipId('');
+                }}
+                style={{ ...field, flex: 2, minWidth: 240 }}>
+          <option value="">{members === null ? 'Unattributed — the member list could not be read' : 'Unattributed — against nobody'}</option>
+          {options.map(([id, who]) => <option key={id} value={id}>{who}</option>)}
+        </select>
+        <select value={membershipId} onChange={(e) => setMembershipId(e.target.value)}
+                style={{ ...field, flex: 2, minWidth: 240 }}
+                aria-label="The membership this payment settles">
+          <option value="">Not against a membership</option>
+          {theirs.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.planName ?? 'no plan'} (from {m.startedOn})
+            </option>
+          ))}
+        </select>
+        <button onClick={go} disabled={busy || !!blocker} style={primaryBtn}>
+          {busy ? 'Moving…' : 'Move it'}
+        </button>
+        <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
+      </div>
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '68ch' }}>{blocker}</p> : null}
+    </div>
   );
 }
 
@@ -1038,27 +1515,48 @@ function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
   // Pre-filled with what is left, because a full reversal is the common case
   // and typing an amount that has to match to the penny is where a partial
   // reversal nobody meant comes from.
-  const [amt, setAmt] = useState((remaining / 100).toFixed(2));
+  //
+  // The seed was `(remaining / 100).toFixed(2)` and the read was
+  // `Math.round(parseFloat(amt) * 100)`: the two halves of one hundred, in the
+  // box that takes money back off the ledger. A ¥6,000 payment offered "60.00"
+  // to reverse, and pressing the button on the figure the screen itself put
+  // there refunded ¥6,000 as 6,000 minor units — a hundredth of the money the
+  // member actually handed over. The payment's OWN currency is what both ends
+  // read now, not the gym's today: this row is being corrected against what it
+  // was recorded in.
+  const [amt, setAmt] = useState(majorFromMinor(remaining, p.currency));
   const [note, setNote] = useState('');
   const [method, setMethod] = useState<PaymentMethod>(p.method);
   const [busy, setBusy] = useState(false);
 
-  const cents = Math.round(parseFloat(amt) * 100);
+  // NOT a charge. A correction is a NEGATIVE `gym_payments` row and nothing
+  // else — `reversePayment` inserts, it does not call Stripe — so the whole-ten
+  // rule must not stop a Kuwaiti gym handing back exactly what it took.
+  const read = readMinorAmount(amt, p.currency, false);
   const blocker =
-    reversalBlocker(p, already, Number.isFinite(cents) ? cents : NaN)
+    (read.ok ? null : read.reason)
+    ?? reversalBlocker(p, already, read.ok ? read.minorUnits : NaN)
     ?? (note.trim() ? null : 'Say what this is for. A negative row in the ledger with no reason on it is the line an accountant asks about and nobody can answer.');
 
   const go = async () => {
     if (blocker) { onErr(blocker); return; }
+    // Unreachable behind the blocker above, which puts the unreadable-amount
+    // sentence first. Written as a return rather than a `!` so that a later
+    // reordering of the blocker chain cannot turn it into a write.
+    if (!read.ok) { onErr(read.reason); return; }
     setBusy(true);
     try {
       await reversePayment(supabase, tenantId, p, {
-        kind, amountCents: cents, note: note.trim(), method, recordedBy: me.id,
+        kind, amountCents: read.minorUnits, note: note.trim(), method, recordedBy: me.id,
       });
       onErr(null);
       onDone();
     } catch (e: any) {
-      onErr(`Nothing was taken back: ${e?.message ?? 'the write was refused'}. The original payment of ${money(p.amountCents, p.currency) ?? 'that amount'} still stands in full.`);
+      onErr(writeFailedText(e, {
+        what: 'That correction',
+        unchanged: `nothing was taken back and the original payment of ${money(p.amountCents, p.currency) ?? 'that amount'} still stands in full`,
+        howToCheck: 'Reload this page and look for the negative row in the payment list below. Write it again only if it is not there — two corrections hand back the money twice.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -1102,7 +1600,7 @@ function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
         </button>
         <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
       </div>
-      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '68ch' }}>{blocker}</p> : null}
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '68ch' }}>{blocker}</p> : null}
     </div>
   );
 }
@@ -1157,28 +1655,12 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

@@ -6,20 +6,39 @@
 // uses, reading the same rows through the same row-level policies. Nothing is
 // computed twice and nothing is estimated: where the gym has not recorded
 // something, this shows a dash and says what is missing.
-import { useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { useCallback, useEffect, useState } from 'react';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { Kpi } from '@/components/Kpi';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
+import { ConsoleGate } from '@/components/Gate';
+import { failure } from '@/lib/read';
+// When this page last read the gym, and a way to ask again. See `load` below
+// for why the front page in particular could not go without one.
+import { useFetched, Fetched } from '@/components/Fetched';
+import { nextFromSearch } from '@lib/consoleNext';
+import { Banner as SharedBanner } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
+import { gymDateText } from '@lib/gymWhen';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
+// Whole units to minor units, by the places the gym's own money actually has.
+import { minorFromWhole } from '@lib/coachMoney';
 import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
-import { fetchVisits, summariseVisits } from '@lib/gymVisits';
+import { fetchVisits, summariseVisits, currentlyInside, OPEN_VISIT_HOURS } from '@lib/gymVisits';
+import { gymTodayWindow, inWindow } from '@lib/gymToday';
 import { fetchOwnerMetrics, type OwnerMetrics } from '@/lib/ownerMetrics';
 import { fetchOwnedSites } from '@/lib/sites';
 import { siteNotice, type SiteScope } from '@lib/ownedSites';
+// What this gym has not set yet, and what is broken while it has not. Every
+// input below is already read by this page, so the panel costs no query — see
+// the header of src/lib/gymSetup.ts for the counts that made it worth drawing.
+import {
+  assessGymSetup, setupLine, needsSetup,
+  type SetupItem, type SetupKey,
+} from '@lib/gymSetup';
 
 interface Gym {
   id: string;
@@ -28,6 +47,11 @@ interface Gym {
   /** `tenants.currency`. Null means the gym has not set one — which the schema
    *  says to render as a dash and ask about, never to fill in with a default. */
   currency: string | null;
+  /** `tenants.timezone` (supabase/parts/710). Null is a gym that has not said
+   *  whose day its day is — never UTC and never this laptop's. It is read here
+   *  rather than in a second query because this page already asks `tenants` for
+   *  the name and the fee, and "today" is the window three tiles are cut on. */
+  timezone: string | null;
 }
 
 /**
@@ -45,14 +69,12 @@ interface Gym {
  *  so five tiles cannot word the same silence five ways. */
 const UNREAD = 'this read did not come back — unknown, not nil';
 
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
-
 export default function Overview() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined — nobody said who
+   *  this is — and this is what stops that reading as a spinner that never
+   *  resolves, on the console's own front door. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gym, setGym] = useState<Gym | null>(null);
   // Kept apart from `error`: that one is cleared by a successful rollup read
   // immediately afterwards, which would wipe this message off the screen.
@@ -84,6 +106,12 @@ export default function Overview() {
     fillRate: number | null;
     visitsToday: number | null;
     inNow: number | null;
+    /** Whose calendar "today" was cut on, when it was not the gym's own —
+     *  `NO_ZONE_NOTE`, from `gymTodayWindow`. Null when `tenants.timezone` is
+     *  set and there is nothing to disclose. A count of arrivals "today" is a
+     *  claim about a day, and a screen that will not say which day it means is
+     *  the reason this page was quietly reporting UTC's. */
+    dayNote: string | null;
 
     /* ── which departments actually answered ──────────────────────────────
      *
@@ -102,6 +130,23 @@ export default function Overview() {
     recordRead: boolean;
     classesRead: boolean;
     doorRead: boolean;
+
+    /* ── what the gym has not set up yet ──────────────────────────────────
+     *
+     * Two counts rather than the arrays, and NULL rather than 0 when the read
+     * did not come back whole. `fetchPlans` and `fetchMemberships` both throw
+     * on a truncated read (src/lib/rowCap.ts), so a non-null array here is the
+     * whole set and its length is a count the server confirmed. A null is a
+     * price book nobody counted, which is a different fact from a price book
+     * with nothing in it — the first must not send an owner off to write a
+     * plan they already have.
+     *
+     * `activeMembers` above cannot stand in for `memberCount`: it is null when
+     * ANY of three reads failed, and it counts only memberships whose status
+     * is active — so a gym whose whole roster is frozen for the summer would
+     * be told to go and get some members in. */
+    planCount: number | null;
+    memberCount: number | null;
   } | null>(null);
   // Kept apart from `error`, which belongs to the roster read: these are the
   // five hub reads, and a failure in one of them must be SAID rather than
@@ -126,6 +171,11 @@ export default function Overview() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts, and on THIS
+      // screen the wrong one puts a sign-in form in front of somebody who is
+      // already signed in and sends them to re-enter a working password.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
 
       // Before the tenant guard, because it is the read that says whether the
@@ -135,49 +185,123 @@ export default function Overview() {
       if (!live) return;
       setSites(owned);
 
-      if (!who?.tenantId) { setTrainers([]); return; }
+      // An account with no gym has no roster to wait for, and this is what
+      // stopped the table below sitting on "Loading…" for ever.
+      //
+      // It is still a fabricated fact — `[]` is a roster that was never read —
+      // and it is left here only because nothing consumes it any more: an
+      // account with no tenant now returns before `roll`, the tiles and the
+      // table. If that branch is ever removed, this line is what puts six
+      // zeros and "invite one from Staff" back in front of somebody with no
+      // gym, so remove the two together.
+      if (!who?.tenantId) setTrainers([]);
+    })();
+    return () => { live = false; };
+  }, []);
 
+  /* ── everything about the gym, read again ─────────────────────────────────
+   *
+   * This was the tail of the mount effect above, and it ran once. The console
+   * has no router — the rail is a plain `<a href>` — so the only way this page
+   * had of asking again was a full document reload, and nothing on it said
+   * which moment its figures were the age of.
+   *
+   * On this page that is not a staleness annoyance, it is a wrong figure with a
+   * label on it. Three of the tiles are cut on TODAY: "Through the door" is
+   * `gymTodayWindow(zone)` and the headcount is `Date.now()` minus
+   * OPEN_VISIT_HOURS, both computed inside this function. A console left open
+   * on a front desk overnight — which is what a console on a front desk does —
+   * came back in the morning still counting yesterday's arrivals under a tile
+   * that says today, with no way to correct it short of reloading the tab and
+   * nothing on the screen saying it needed correcting.
+   *
+   * `useFetched` (studio-web/components/Fetched.tsx) was built for exactly this
+   * and had six callers out of thirty-five routes; the front page was not one
+   * of them. It re-reads on a press and when the tab comes back to the front,
+   * which is the moment that matters here: the tab that has been behind a
+   * spreadsheet since yesterday is the one showing a stale day.
+   *
+   * The return value is what `useFetched` stamps on, and it is deliberately
+   * "did every read come back", not "did the request go out". A refresh that
+   * lost the door log leaves the stamp where it was and the banner below says
+   * which read is missing — the same rule as `assertWrote`, one layer up.
+   */
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
       // supabase-js RESOLVES with { data, error } rather than throwing, so
       // taking only `data` turns an RLS refusal into `t === null` — which used
       // to render as a gym with no name and no session fee. Both are then
       // stated as facts about the gym: the sidebar says no gym is linked, and
       // the payroll note below says no fee is set. Neither is known to be true.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('id, name, session_fee, currency').eq('id', who.tenantId).single();
-      if (!live) return;
+        .from('tenants').select('id, name, session_fee, currency, timezone').eq('id', tenantId).single();
       setGymErr(tErr ? (tErr.message || 'The gym record could not be read.') : null);
+      const zone = t && !tErr ? (((t.timezone ?? '') as string).trim() || null) : null;
       setGym(t && !tErr
         ? {
             id: t.id,
             name: t.name ?? null,
             sessionFee: t.session_fee ?? null,
             currency: ((t.currency ?? '') as string).trim().toUpperCase() || null,
+            timezone: zone,
           }
         : null);
 
+      let rosterRead = false;
       try {
-        const rows = await fetchGymTrainers(supabase, who.tenantId);
-        if (live) setTrainers(rows);
+        const rows = await fetchGymTrainers(supabase, tenantId);
+        setTrainers(rows);
+        // Cleared on success. This used to run once, so a stale banner was not
+        // reachable; now that the page can be read again, a refusal followed by
+        // a good read would leave "Could not read the roster" in red over a
+        // roster that had just come back.
+        setError(null);
+        rosterRead = true;
       } catch (e: any) {
         // Null, not []. An empty roster is fed to `gymRollup`, which answers
         // 0 trainers, 0 clients, 0 sessions and 0 needing a look — six invented
         // figures — and the table below it says "No trainers in this gym yet.
         // Invite one." to an owner whose roster is full and whose read failed.
-        if (live) { setError(e?.message ?? 'Could not read the roster.'); setTrainers(null); }
+        setError(e?.message ?? 'Could not read the roster.'); setTrainers(null);
       }
 
       // allSettled, not all: one failing read must not take the others with it.
       // A department that cannot be read shows a dash; the rest still report.
       const from30 = new Date(Date.now() - 30 * 86400_000).toISOString();
-      const dayStart = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z').toISOString();
+
+      // ── "today", on the gym's calendar and not on UTC's ──────────────────
+      //
+      // This was `new Date(new Date().toISOString().slice(0, 10) +
+      // 'T00:00:00Z')`, which is UTC midnight with the word today on it. For a
+      // gym in Los Angeles that instant is 4pm or 5pm the PREVIOUS afternoon,
+      // so at nine in the morning the tile below had been counting since
+      // yesterday teatime and last night's 6pm and 8pm classes were in it —
+      // every day, with nothing on the tile to say so. Dubai fails the other
+      // way: UTC's day does not turn over until 4am there, so the 5am and 6am
+      // regulars were not in "today" at all until the morning was half gone.
+      //
+      // `gymTodayWindow` (src/lib/gymToday.ts) cuts the day on
+      // `tenants.timezone`. A gym that has not set one gets its READER's day
+      // and `window.note` says so under the tile — that is not a default
+      // timezone, it is the only one of the three answers that discloses which
+      // calendar it used.
+      const today = gymTodayWindow(zone);
+
+      // The door read reaches back the FURTHER of the gym's day and
+      // `OPEN_VISIT_HOURS`, and the two figures below are then cut out of it
+      // separately. They are different questions: "through the door today" is
+      // this calendar day, and "in the building" is whoever has an open visit
+      // that still counts as a person in the room. Asking one window to answer
+      // both is what would make a member who arrived at 11pm and was never
+      // checked out vanish out of the headcount at midnight.
+      const openFrom = new Date(Date.now() - OPEN_VISIT_HOURS * 3600_000).toISOString();
+      const doorSince = today.fromISO < openFrom ? today.fromISO : openFrom;
       const [mRes, pRes, plRes, cRes, vRes] = await Promise.allSettled([
-        fetchMemberships(supabase, who.tenantId),
-        fetchPayments(supabase, who.tenantId, from30),   // windowed: the tile says 30d
-        fetchPlans(supabase, who.tenantId),
-        fetchClasses(supabase, who.tenantId, from30, new Date().toISOString()),
-        fetchVisits(supabase, who.tenantId, { sinceIso: dayStart }),
+        fetchMemberships(supabase, tenantId),
+        fetchPayments(supabase, tenantId, from30),   // windowed: the tile says 30d
+        fetchPlans(supabase, tenantId),
+        fetchClasses(supabase, tenantId, from30, new Date().toISOString()),
+        fetchVisits(supabase, tenantId, { sinceIso: doorSince }),
       ]);
-      if (!live) return;
 
       const memberships = mRes.status === 'fulfilled' ? mRes.value : null;
       const payments = pRes.status === 'fulfilled' ? pRes.value : null;
@@ -187,7 +311,11 @@ export default function Overview() {
 
       const rec = (memberships && payments && plans) ? summarise(payments, memberships, plans) : null;
       const att = classes ? summariseAttendance(classes) : null;
-      const door = visits ? summariseVisits(visits) : null;
+      // Today's arrivals are the ones inside the gym's own day; the headcount
+      // is over everything fetched, because an open visit is a person in the
+      // room whichever calendar day it started on.
+      const door = visits ? summariseVisits(visits.filter((v) => inWindow(v.enteredAt, today))) : null;
+      const inNow = visits ? currentlyInside(visits).length : null;
 
       // Named, not swallowed. Each rejection carries the reason PostgREST gave
       // and the banner prints it: a refused read is something an owner can act
@@ -214,13 +342,22 @@ export default function Overview() {
         activeMembers: rec ? rec.activeMembers : null,
         fillRate: att?.fillRate ?? null,
         visitsToday: door ? door.visits : null,
-        inNow: door ? door.inside : null,
+        inNow,
+        dayNote: today.note,
         recordRead: memberships !== null && payments !== null && plans !== null,
         classesRead: classes !== null,
         doorRead: visits !== null,
+        planCount: plans === null ? null : plans.length,
+        memberCount: memberships === null ? null : memberships.length,
       });
-    })();
-    return () => { live = false; };
+
+      // Whole means the gym row, the roster and all five hub reads came back.
+      // `tErr` is read off the result rather than caught, so it has to be part
+      // of this test by hand — a refused tenant read is what makes the name,
+      // the fee, the currency and the timezone unknown, and a stamp over that
+      // would claim the whole page had just been confirmed.
+      return !tErr && rosterRead
+        && [mRes, pRes, plRes, cRes, vRes].every((r) => r.status === 'fulfilled');
   }, []);
 
   /* ── the engagement figures, from owner-metrics ────────────────────────
@@ -244,18 +381,51 @@ export default function Overview() {
    * thing the function's own header records having gone wrong.
    */
   const [engage, setEngage] = useState<OwnerMetrics | null | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    void fetchOwnerMetrics().then((m) => { if (live) setEngage(m); });
-    return () => { live = false; };
+  /** Read on the same gesture as everything else. It was its own mount-only
+   *  effect, so pressing "Read again" refreshed eight tiles and left the three
+   *  engagement ones from whenever the tab was opened — under one sentence
+   *  claiming an age for all of them. Null is the function's own word for "I
+   *  could not compute this whole", which is a failed read for stamping
+   *  purposes; a metric merely ABSENT from a non-null answer is the honest
+   *  partial the function is built to return, and still a whole read. */
+  const loadEngagement = useCallback(async (): Promise<boolean> => {
+    const m = await fetchOwnerMetrics();
+    setEngage(m);
+    return m !== null;
   }, []);
 
-  if (me === undefined) return <Splash>Loading…</Splash>;
+  /* One stamp over both readers, because there is one sentence on the page.
+   * `Promise.all` rather than sequential: they touch nothing of each other's
+   * and a serial pair doubles the wait on the slowest screen in the console. */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    async () => {
+      const id = me?.tenantId;
+      if (!id) return false;
+      const [gymWhole, engageWhole] = await Promise.all([load(id), loadEngagement()]);
+      return gymWhole && engageWhole;
+    },
+  );
+
+  // The first read goes through `refresh` so it stamps exactly like every later
+  // one, keyed on the tenant id arriving in state rather than fired at the end
+  // of the effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling it in the same tick as `setMe(who)` would run the
+  // previous render's closure — the one where `me` is still undefined — and it
+  // would answer false without reading anything. /revenue records the same
+  // trap in the same words.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+  }, [me?.tenantId, refresh]);
+
+  // Three sentences, not one div and a form. See components/Gate.tsx: a
+  // question we could not ask is not the same fact as nobody being signed in.
+  if (authUnread) return <ConsoleGate me={undefined} failed />;
+  if (me === undefined) return <Splash>Reading your account…</Splash>;
   if (me === null) return <SignIn />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gym?.name ?? null} sites={sites} current="/">
+      <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} sites={sites} current="/">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -268,7 +438,7 @@ export default function Overview() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gym?.name ?? null} current="/">
+      <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} current="/">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', maxWidth: '60ch', marginTop: 10 }}>
           This screen is for gym owners. Your account is{' '}
@@ -286,6 +456,41 @@ export default function Overview() {
     );
   }
 
+  /* ── an owner with no gym behind them ─────────────────────────────────────
+   *
+   * This was a Notice inside the page rather than a branch, so the sentence
+   * "there is nothing to show" was followed, on the same screen, by a page
+   * showing things. Three of them, none of which anything had established:
+   *
+   *  - Six zeros. The mount effect sets `setTrainers([])` when there is no
+   *    tenant, and an empty roster is a roster: `gymRollup` answers 0 trainers,
+   *    0 clients, 0 sessions, 0 awaiting an outcome and 0 needing a look. Those
+   *    are figures about a gym that does not exist, drawn in the same ink as
+   *    the real ones on every other account.
+   *  - "No trainers in this gym yet. Invite one from Staff" — an instruction to
+   *    populate a gym this account is not attached to.
+   *  - Engagement stuck on "Loading…" for ever. `refresh` returns early with no
+   *    tenant id, so `loadEngagement` never runs and `engage` never leaves
+   *    `undefined` — the one state that means "still reading". Nothing was
+   *    reading. That spinner had no end.
+   *
+   * The tenant id comes from `loadMe`, which distinguishes a profile it could
+   * not read (`roleUnknown`, handled above) from one that says there is no
+   * gym — so reaching here is a read that CAME BACK and said so. Which makes
+   * "nothing to show" a fact, and the honest rendering of it is nothing.
+   */
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} sites={sites} current="/">
+        <h1>Overview</h1>
+        <Notice>
+          Your account is not linked to a gym yet, so there is nothing to show. Whoever set up the
+          gym needs to add you as its owner.
+        </Notice>
+      </Shell>
+    );
+  }
+
   const roll: GymRollup | null = trainers ? gymRollup(trainers, gym?.sessionFee ?? null) : null;
   const ccy: TenantCurrency = gym?.currency ?? null;
   // The currency each of the two money tiles is actually in. An empty set of
@@ -294,6 +499,22 @@ export default function Overview() {
   // `amount()` withhold rather than pick whichever row happened to be first.
   const takenCcy: TenantCurrency = hub == null || hub.revenueRows === 0 ? ccy : hub.revenueCurrency;
   const mrrCcy: TenantCurrency = hub == null || hub.mrrCents == null ? ccy : hub.mrrCurrency;
+
+  /**
+   * The six settings a gym is computed from, and which of them are not set.
+   *
+   * `gym` is null both while the tenants read is in flight and after it has
+   * been refused, and `assessGymSetup` answers 'unknown' to both — which is
+   * why this can be computed unconditionally on every render without the panel
+   * ever flashing up at a gym that finished setting itself up in March.
+   */
+  const setup: SetupItem[] = assessGymSetup({
+    tenant: gym
+      ? { name: gym.name, currency: gym.currency, timezone: gym.timezone, sessionFee: gym.sessionFee }
+      : null,
+    plans: hub?.planCount ?? null,
+    members: hub?.memberCount ?? null,
+  });
 
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
@@ -327,16 +548,41 @@ export default function Overview() {
       key: 'since',
       header: 'Since',
       value: (t) => t.since,
-      render: (t) => (t.since ? new Date(t.since).toLocaleDateString() : <span className="dash">—</span>),
+      // `gym?.timezone`, not the reader's. A coach who joined at 22:00 on the
+      // 31st in Dubai joined in September, whichever laptop this is open on.
+      render: (t) => gymDateText(t.since, gym?.timezone ?? null) ?? <span className="dash">—</span>,
     },
   ];
 
   return (
-    <Shell me={me} gymName={gym?.name ?? null} current="/">
+    /* `sites` handed over, and why it matters that it is.
+     *
+     * This was the one Shell on this page that did not pass it. Shell's own
+     * comment (components/Shell.tsx, "sites had exactly ONE caller") names
+     * app/page.tsx as the caller that does — and it did, on the roleUnknown
+     * branch above only, which is the branch almost nobody reaches. The owner
+     * path, which is every owner every morning, left the prop undefined.
+     *
+     * So Shell ran `fetchOwnedSites()` a second time, off its own state, while
+     * this page already held the answer in `sites`. Two independent reads of
+     * one question, on one screen, at one moment — and they are allowed to
+     * disagree: either can be refused on its own, so the rail could say "1 of
+     * 2 sites" over a body whose site notice was rendering the failure case,
+     * or the body could warn that the site read failed while the rail beside
+     * it stated a count as fact. One read, one answer, and one fewer
+     * `my_sites()` RPC on the busiest page in the console.
+     */
+    <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} sites={sites} current="/">
       <h1>Overview</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         {gym?.name ? `${gym.name} · last 30 days` : 'Last 30 days'}
       </p>
+
+      {/* Under the title rather than beside a tile, because it is about every
+          figure on the page. The three door and "today" tiles are the ones this
+          was written for — see `load`. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym" style={{ margin: '2px 0 18px' }} />
 
       {/* Which gym these figures are. Null — so nothing renders — for a settled
           read of one gym, which is every account on the platform today. Not
@@ -345,12 +591,9 @@ export default function Overview() {
           otherwise read as the whole business. */}
       {siteNotice(sites) ? <Notice>{siteNotice(sites)}</Notice> : null}
 
-      {!me.tenantId ? (
-        <Notice>
-          Your account is not linked to a gym yet, so there is nothing to show. Whoever set up the
-          gym needs to add you as its owner.
-        </Notice>
-      ) : null}
+      {/* The "not linked to a gym" notice was here, above a page that then
+          went on to draw six zeros and a permanent spinner under it. It is a
+          branch of its own now — see `if (!me.tenantId)` above `roll`. */}
 
       {gymErr ? (
         <Notice tone="crit">
@@ -376,6 +619,21 @@ export default function Overview() {
         </Notice>
       ) : null}
 
+
+      {/* ── what this gym has not set up yet ─────────────────────────────
+          Above the tiles, because for a gym in this state the tiles are six
+          dashes and this is the reason for all six. It draws nothing at all
+          for a gym that has finished — and nothing while the reads are still
+          in flight, since an unsettled read makes every item 'unknown' rather
+          than outstanding, which is what stops a set-up gym being told it has
+          set nothing up for the second and a half its own record takes to
+          load.
+
+          The `me.tenantId` guard that used to be on this line is gone because
+          it cannot be false here any more — an account with no gym returns
+          above, rather than reading this page with the no-gym notice pinned to
+          the top of it. */}
+      <SetUp items={setup} />
 
       {/* The morning glance — the whole operation on one line, so departments
           can be read against each other rather than one screen at a time.
@@ -410,7 +668,7 @@ export default function Overview() {
             and printing any of them over a read that did not is the defect this
             page carried: an owner reading "no payments recorded" goes and asks
             the desk why nobody took any money. */}
-        <Kpi label="Taken · 30d" text={hub && hub.recordRead ? amount(hub.revenueCents, takenCcy) : null}
+        <Kpi big label="Taken · 30d" text={hub && hub.recordRead ? amount(hub.revenueCents, takenCcy) : null}
              note={hub && !hub.recordRead ? UNREAD
                : hub && hub.revenueCents == null ? 'no payments recorded'
                : hub && !takenCcy
@@ -418,7 +676,7 @@ export default function Overview() {
                      ? 'these payments are in more than one currency, so there is no one total'
                      : NO_CURRENCY_NOTE)
                : undefined} />
-        <Kpi label="Recurring / mo" text={hub && hub.recordRead ? amount(hub.mrrCents, mrrCcy) : null}
+        <Kpi big label="Recurring / mo" text={hub && hub.recordRead ? amount(hub.mrrCents, mrrCcy) : null}
              note={hub && !hub.recordRead ? UNREAD
                : hub && hub.mrrCents == null ? 'no priced plan on an active membership'
                : hub && !mrrCcy
@@ -430,15 +688,20 @@ export default function Overview() {
             the one that must not carry a 0 out of a refused read. `summarise`
             already returns a number rather than a null here, so the guard has
             to be the read itself. */}
-        <Kpi label="Active members" value={hub && hub.recordRead ? hub.activeMembers : null}
+        <Kpi big label="Active members" value={hub && hub.recordRead ? hub.activeMembers : null}
              note={hub && !hub.recordRead ? UNREAD : undefined} />
-        <Kpi label="Class fill" text={hub && hub.classesRead ? pct(hub.fillRate) : null}
+        <Kpi big label="Class fill" text={hub && hub.classesRead ? pct(hub.fillRate) : null}
              note={hub && !hub.classesRead ? UNREAD
                : hub && hub.fillRate == null ? 'no capacity recorded'
                : 'booked ÷ capacity'} />
-        <Kpi label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
+        {/* "Today" is the GYM's day — see `gymTodayWindow` in the loader. Where
+            the gym has not set a timezone the count is still stated, and the
+            note says whose day it was counted over rather than leaving an owner
+            to assume it was theirs. */}
+        <Kpi big label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
              note={hub && !hub.doorRead ? UNREAD
-               : hub?.visitsToday != null ? `${hub.visitsToday} through the door today`
+               : hub?.visitsToday != null
+                 ? `${hub.visitsToday} through the door today${hub.dayNote ? ` — ${hub.dayNote}` : ''}`
                : undefined} />
         {/* There is no "Cash position" tile any more, and its removal is the
             same repair as everything above it.
@@ -471,17 +734,24 @@ export default function Overview() {
           margin: '20px 0 24px',
         }}
       >
-        <Kpi label="Trainers" value={roll?.trainers} />
-        <Kpi label="Clients" value={roll?.clients} />
-        <Kpi label="Sessions 30d" value={roll?.sessions30} />
-        <Kpi
+        <Kpi big label="Trainers" value={roll?.trainers} />
+        <Kpi big label="Clients" value={roll?.clients} />
+        <Kpi big label="Sessions 30d" value={roll?.sessions30} />
+        <Kpi big
           label="Session value 30d"
-          // MAJOR units from payroll30For, so ×100 to reach the minor units
+          // WHOLE units from payroll30For, converted to the minor units
           // `amount` takes. It went out as a bare `value` before — a money
           // figure with nothing at all to say what money it was, on the tile an
           // owner reads first. Now it is either written in the gym's own
           // currency or not written.
-          text={roll?.payroll30 == null ? null : amount(Math.round(roll.payroll30 * 100), ccy)}
+          //
+          // And it was `Math.round(… * 100)`, which is the literal /close was
+          // mended for and this tile was not: a Tokyo gym's ¥630,000 of session
+          // value rendered as ¥63,000,000 on the first figure an owner reads.
+          // `minorFromWhole` asks `ccy` how many places its money has, and
+          // returns null when the gym has not said — which is a dash with the
+          // note beside it, not a number in no currency.
+          text={amount(minorFromWhole(roll?.payroll30, ccy), ccy)}
           // A dash with no explanation reads as a bug. Say which of the four
           // reasons it is: the gym could not be read, no fee is set, work is
           // still awaiting an outcome, or the gym has never said what money it
@@ -494,7 +764,7 @@ export default function Overview() {
                     ?? undefined
                   : undefined}
         />
-        <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
+        <Kpi big label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
              note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />
         {/* Not "at risk". `atRiskCount` is everyone `trainerHealth` does not
             return 'ok' for, and that set includes `idle` — a trainer hired
@@ -505,7 +775,7 @@ export default function Overview() {
             it is the first number an owner sees. The set is deliberately the
             same one staffView calls `flagged` — the count is right, the word
             for it was wrong. */}
-        <Kpi label="Trainers needing a look" value={roll?.atRiskCount}
+        <Kpi big label="Trainers needing a look" value={roll?.atRiskCount}
              note={roll && roll.atRiskCount > 0 && roll.atRiskClients === 0
                ? 'nothing to assess yet — no clients between them'
                : undefined} />
@@ -522,9 +792,9 @@ export default function Overview() {
         </div>
         <div style={{ padding: '14px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {engage === undefined ? (
-            <div style={{ color: 'var(--ink3)', fontSize: 13 }}>Loading…</div>
+            <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--ink3)', fontSize: 13 }}>Loading…</div>
           ) : engage === null || !engage.ok ? (
-            <div style={{ color: 'var(--ink3)', fontSize: 13, maxWidth: '68ch' }}>
+            <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--ink3)', fontSize: 13, maxWidth: '68ch' }}>
               {engage?.error
                 ?? 'These figures could not be read. That is unknown rather than nil — nobody has said your members have stopped training.'}
             </div>
@@ -565,18 +835,18 @@ export default function Overview() {
         {trainers === null && error ? (
           // Not the DataTable's empty state: that sentence claims the gym has
           // no trainers, and this branch is reached precisely when nobody knows.
-          <div style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 13 }}>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 13 }}>
             The roster could not be read, so this is not an empty gym — it is an unread one.
             The figures above that come from the roster are missing for the same reason.
           </div>
         ) : trainers === null ? (
-          <div style={{ padding: '28px 20px', color: 'var(--ink3)' }}>Loading…</div>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '28px 20px', color: 'var(--ink3)' }}>Loading…</div>
         ) : (
-          <DataTable
+          <DataTable noun="trainers"
             rows={trainers}
             columns={cols}
             rowKey={(t) => t.id}
-            empty="No trainers in this gym yet. Invite one from the Repple Studio app."
+            empty="No trainers in this gym yet. Invite one from Staff and they appear here when they accept."
           />
         )}
       </section>
@@ -584,42 +854,126 @@ export default function Overview() {
   );
 }
 
-function Kpi({ label, value, text, note }: {
-  label: string; value?: number | null; text?: string | null; note?: string;
-}) {
-  // `text` carries an already-formatted figure — money, a percentage. Null
-  // means the same thing it means for `value`: not recorded, render a dash.
-  const missing = text !== undefined ? text == null : value == null;
+// ── the eighth banner, and why a grep did not find it ───────────────────
+//
+// A sweep moved six console pages off their own local `function Banner` onto
+// the shared one in studio-web/components/Banner.tsx, which carries
+// role="alert"/aria-live so a refusal is not a silence for a screen reader.
+// This one is called `Notice`, so `grep 'function Banner'` never listed it —
+// on the first screen an owner opens every morning, carrying the roster
+// failure, the five-read hub failure, the multi-site notice and the payroll
+// blocker.
+//
+// `live` defaults on here, unlike `SharedBanner`: everything this renders is a
+// read that failed or a figure that is missing, which is exactly what a screen
+// reader has to be told about. The caller passes `live={false}` for anything an
+// Announce region on the same page is already reading out.
+function Notice({ children, tone, live = true }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
   return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div
-        className="mono"
-        style={{ fontSize: 25, marginTop: 5, color: missing ? 'var(--ink3)' : 'var(--ink)', letterSpacing: '-0.02em' }}
-      >
-        {missing ? '—' : (text ?? value!.toLocaleString())}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
+    <SharedBanner tone={tone} live={live} style={{ margin: '18px 0 0', maxWidth: '72ch' }}>
+      {children}
+    </SharedBanner>
   );
 }
 
-function Notice({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
+/* ── the first five minutes ─────────────────────────────────────────────────
+ *
+ * WHERE each of the six is set, in THIS console. The list itself is in
+ * src/lib/gymSetup.ts and holds no routes on purpose: the owner app answers
+ * the same six questions from different screens — the gym's name is on Brand
+ * there, the currency and the session fee are on Ops — so a route baked into
+ * the module would be right on one surface and wrong on the other.
+ *
+ * A Record keyed by SetupKey rather than a lookup with a fallback: adding a
+ * seventh item to the module then fails to compile here, which is the only
+ * mechanism that stops a new row rendering with nowhere to go.
+ */
+const SETUP_WHERE: Record<SetupKey, { href: string; label: string }> = {
+  currency: { href: '/settings', label: 'Gym settings' },
+  timezone: { href: '/settings', label: 'Gym settings' },
+  name: { href: '/settings', label: 'Gym settings' },
+  // Where a plan is priced. /money is the console's one writer of the price
+  // book, and it refuses until the currency above is set — which is why
+  // currency is first in SETUP_ORDER rather than merely listed.
+  plan: { href: '/money', label: 'Plans & payments' },
+  // Members are INVITED, not inserted: `memberships.member_id` references
+  // `profiles`, so a membership needs a real account behind it. /import issues
+  // the same invitations two hundred at a time off the old system's export,
+  // and is named in the row rather than linked so the primary action stays one.
+  member: { href: '/invites', label: 'Invites' },
+  fee: { href: '/settings', label: 'Gym settings' },
+};
+
+/**
+ * What is not set up yet, or nothing at all.
+ *
+ * Renders only when something is genuinely outstanding — `needsSetup` is false
+ * for a list of unknowns, so a refused read cannot put a setup checklist in
+ * front of a gym that finished setting up months ago. Done rows are not drawn:
+ * this is a list of what is left, not a scoreboard.
+ */
+function SetUp({ items }: { items: SetupItem[] }) {
+  if (!needsSetup(items)) return null;
+  const line = setupLine(items);
+  const left = items.filter((i) => i.state !== 'done');
+
   return (
-    <div
-      style={{
-        margin: '18px 0 0',
-        padding: '13px 15px',
-        borderRadius: 0,
-        background: 'var(--surface)',
-        border: '1px solid var(--ring)',
-        borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-        color: 'var(--ink2)',
-        maxWidth: '72ch',
-      }}
-    >
-      {children}
-    </div>
+    <section style={{ border: '1px solid var(--ring)', background: 'var(--surface)', margin: '18px 0 0', maxWidth: '78ch' }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+        <h2>Set this gym up</h2>
+        <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '4px 0 0' }}>
+          {/* `needsSetup` is true, so `setupLine` cannot be null here — the
+              guard is for the reader rather than for the renderer, since a
+              null interpolated into JSX would leave a sentence starting with
+              a space and nobody would know where it went. */}
+          {line ? `${line} ` : ''}Each one says what is broken until it is done. Nothing here is
+          cosmetic.
+        </p>
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {left.map((i) => (
+          <li key={i.key} style={{ padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--ink)', fontWeight: 600, fontSize: 13.5 }}>{i.title}</span>
+              {i.onlyIf ? (
+                <span style={{ color: 'var(--ink3)', fontSize: 12 }}>{i.onlyIf}</span>
+              ) : null}
+            </div>
+
+            {i.state === 'unknown' ? (
+              /* No link and no instruction. This row is a statement about a
+                 read, and telling somebody to go and set a value that may
+                 already be set is how a list like this loses its authority. */
+              <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '5px 0 0' }}>{i.unknownWhy}</p>
+            ) : (
+              <>
+                <p style={{ color: 'var(--ink2)', fontSize: 12.5, margin: '5px 0 0' }}>{i.breaks}</p>
+                {/* The gym's own name, as a value in a slot rather than the
+                    subject of a sentence — an owner who reads their real gym
+                    name here knows to ignore the row. */}
+                {i.key === 'name' && i.found ? (
+                  <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '4px 0 0' }}>
+                    Called <strong style={{ color: 'var(--ink2)' }}>{i.found}</strong> at the moment.
+                  </p>
+                ) : null}
+                <p style={{ fontSize: 12.5, margin: '6px 0 0' }}>
+                  <span style={{ color: 'var(--ink3)' }}>Set it on </span>
+                  <a href={SETUP_WHERE[i.key].href} style={{ color: 'var(--brand)' }}>
+                    {SETUP_WHERE[i.key].label}
+                  </a>
+                  {i.key === 'member' ? (
+                    <span style={{ color: 'var(--ink3)' }}>
+                      {' '}&mdash; or <a href="/import" style={{ color: 'var(--brand)' }}>Import</a> to
+                      invite everyone on the old system&rsquo;s export in one go.
+                    </span>
+                  ) : null}
+                </p>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -640,9 +994,41 @@ function SignIn() {
     const addr = email.trim();
     if (!addr) { setErr('Enter your email first, then tap Forgot password.'); return; }
     setErr(null); setSent(null);
-    await supabase.auth.resetPasswordForEmail(addr, {
+    // ── the result was thrown away ────────────────────────────────────────
+    //
+    // This line was a bare `await` with nothing read off it, and the sentence
+    // below it ran unconditionally. supabase-js RESOLVES with `{ error }`
+    // rather than throwing, so a rate limit, a refused send from the mail
+    // provider or a dropped connection all ended with the console telling
+    // somebody locked out of their own gym that a link was on its way — and
+    // they then wait for mail that no one ever tried to send, refresh, and
+    // wait again. Success claimed from the absence of a look, which is the one
+    // thing nothing in this console is allowed to do.
+    const { error } = await supabase.auth.resetPasswordForEmail(addr, {
       redirectTo: 'https://www.repplefitness.com/reset-password',
     });
+    // Naming the reason does not undo the paragraph below — with ONE exception,
+    // which is handled rather than assumed away.
+    //
+    // Nearly every error this call returns is about the REQUEST: the send was
+    // rate limited, the mail provider refused it, the browser could not reach
+    // the server. None of those says anything about whether the address has an
+    // account, and all of them are worth printing, because each is something
+    // the person can act on.
+    //
+    // The exception is "no such user". Whether GoTrue answers that at all
+    // depends on a project setting rather than on this code, so it is filtered
+    // here instead of being ruled out — and the neutral sentence is the honest
+    // rendering of it anyway: the address has no account, so no link is on its
+    // way to it, which is precisely what that sentence says.
+    if (error) {
+      const code = (error as { code?: string }).code ?? '';
+      const noSuchUser = code === 'user_not_found' || /user not found/i.test(error.message);
+      if (!noSuchUser) {
+        setErr(`That reset could not be requested: ${error.message}`);
+        return;
+      }
+    }
     // Same answer either way: telling a stranger which addresses have accounts
     // is a way of enumerating your members.
     setSent('If that address has an account, a reset link is on its way.');
@@ -653,7 +1039,20 @@ function SignIn() {
     setBusy(true); setErr(null);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) { setErr(error.message); setBusy(false); return; }
-    location.reload();
+    // Back to the screen they were sent to, when they were sent to one.
+    //
+    // `ConsoleGate` has always said "Sign in and it will open on the screen you
+    // asked for" and this line was `location.reload()`, which reloads `/`. The
+    // destination now arrives as `?next=`, and `nextFromSearch` hands back only
+    // an absolute path on this origin — never a URL, never `//host` — so a link
+    // written by somebody else cannot bounce a person who has just typed their
+    // password on to a sign-in page that is not this one.
+    //
+    // `assign`, not `replace`: Back should return to the sign-in page rather
+    // than to whatever was before it, because a person who lands somewhere
+    // unexpected reaches for Back first.
+    const next = nextFromSearch(window.location.search);
+    if (next) location.assign(next); else location.reload();
   };
 
   const linkish = {
@@ -678,8 +1077,10 @@ function SignIn() {
         <input id="email" type="email" autoComplete="email" required value={email}
                onChange={(e) => setEmail(e.target.value)} style={{ ...field, margin: '6px 0 14px' }} />
         <PasswordField label="Password" value={password} onChange={setPassword} required />
-        {err ? <div style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
-        {sent ? <div style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 12 }}>{sent}</div> : null}
+        {/* Announced. This is the first interaction anybody has with the
+            console, and a wrong password produced a visual-only sentence. */}
+        {err ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
+        {sent ? <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 12 }}>{sent}</div> : null}
         <button type="submit" disabled={busy}
                 style={{ ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
                          fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1 }}>

@@ -16,7 +16,7 @@ import {
   contrastRatio, hitSlopFor, isLargeText, luminance, meetsMark, meetsTarget,
   meetsText, readableInkOn, rgb, switchLabel,
 } from './a11y';
-import { PALETTES, brandInkFor, highContrast, metaByKey, paletteForScheme, type Theme } from '../theme/tokens';
+import { PALETTES, DATA_HUES, brandInkFor, highContrast, metaByKey, paletteForScheme, withAccent, type Theme } from '../theme/tokens';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -54,12 +54,23 @@ ok(isLargeText(44, '600'), 'the hero figure is large');
 ok(!isLargeText(17), '17pt is not large, however heavy');
 ok(!isLargeText(15, '600'), 'body at 600 is not large — WCAG bold is 700');
 ok(isLargeText(14, 700), '14pt at 700 is large');
-ok(!isLargeText(13, '600'), 'the Cta label is not large text and needs the full 4.5:1');
-// scale.ts caps weight at 600 by house rule, so on this type scale the only
-// steps that can ever take the 3:1 allowance are hero (44) and title (26).
-ok(!isLargeText(17, '600') && !isLargeText(15, '400') && !isLargeText(13, '400')
-  && !isLargeText(12, '400') && !isLargeText(11, '500'),
-  'head, body, label, caption and micro all need 4.5:1 on this scale');
+// The Cta label was 13pt at 600 and is 18pt at 700 since the approved mockups'
+// scale landed, which WCAG counts as large. The palette walk below STILL holds
+// brandInk on brand to the full 4.5:1, deliberately: the same pairing is what a
+// "selected" chip draws at 13pt, and a bar lowered for the button would be
+// lowered for the chip with it.
+ok(isLargeText(18, '700'), 'the Cta label is large text now — and is held to 4.5:1 anyway');
+ok(!isLargeText(13, '600'), 'a 13pt chip in the same two colours is not');
+// src/theme/scale.ts as it stands: Sora at 19 and up for titles and figures,
+// Plus Jakarta Sans 700 for a row title and the current tab. Those take the
+// 3:1 allowance by WCAG's arithmetic; nothing in the palette walk USES the
+// allowance for an ink, so this records the scale rather than relaxing a bar.
+ok(isLargeText(44, '700') && isLargeText(30, '700') && isLargeText(24, '700') && isLargeText(20, '700')
+  && isLargeText(19, '600') && isLargeText(17, '700') && isLargeText(14, '700'),
+  'hero, display, title, section, page, head and tab are large on this scale');
+ok(!isLargeText(16, '400') && !isLargeText(15, '400') && !isLargeText(14, '400')
+  && !isLargeText(13, '600') && !isLargeText(12, '700'),
+  'body, label, caption, micro and eyebrow all need 4.5:1 on this scale');
 
 eq(AA_TEXT, 4.5, 'AA body text is 4.5:1');
 eq(AA_LARGE, 3, 'AA large text is 3:1');
@@ -96,7 +107,9 @@ const STATUS = ['good', 'warn', 'serious', 'crit'] as const;
 // under WCAG 1.4.11 and needs 3:1 against what it is drawn on.
 const SERIES = ['s1', 's2', 's3', 's5', 's6'] as const;
 
-ok(PALETTES.length === 10, `there are ten palettes — found ${PALETTES.length}`);
+// Twelve: the ten selectable ones plus the approved board's pair, Repple and
+// Repple Dark, which became the default on 19 Sep 2026.
+ok(PALETTES.length === 12, `there are twelve palettes — found ${PALETTES.length}`);
 
 for (const p of PALETTES) {
   const t: Theme = p.theme;
@@ -129,9 +142,49 @@ for (const p of PALETTES) {
   // brand, which is not large text under any reading, so it needs 4.5:1.
   atLeast(contrastRatio(t.brandInk, t.brand), AA_TEXT, `${p.key}: the Cta label on the brand colour`);
 
+  // ── the night hero card ──────────────────────────────────────────────
+  // Three inks on two grounds, all of them text: the headline, the meta line
+  // and the tracked eyebrow on `night`; a figure and its unit on a `night2`
+  // tile. Not large-text allowance — the eyebrow is 12pt.
+  for (const ink of ['nightInk', 'nightInk2', 'nightInk3'] as const) {
+    for (const g of ['night', 'night2'] as const) {
+      atLeast(contrastRatio(t[ink], t[g]), AA_TEXT, `${p.key}: ${ink} on ${g} is text on the hero`);
+    }
+  }
+  // A hero has to read as a hero: told from the ground it sits on. 1.15:1 is
+  // not a WCAG number — a card needs no contrast to be a card — it is the
+  // floor under "one step lighter than the ground" on a dark palette, where
+  // the hero is otherwise one more dark rectangle.
+  atLeast(contrastRatio(t.night, t.bg), 1.15, `${p.key}: the hero card is told from the ground`);
+  // The accent as it is drawn ON night: a button's fill, a ring's arc, the
+  // current tab's icon — marks — with the button's label written on it.
+  atLeast(contrastRatio(t.brandBright, t.night), AA_MARK, `${p.key}: brandBright on night is a mark`);
+  atLeast(contrastRatio(t.brandDeep, t.brandBright), AA_TEXT, `${p.key}: the hero button's label on brandBright`);
+  // The accent as TEXT — a section's "See all", a chip's label on the plate.
+  for (const g of ['bg', 'surface', 'brandSoft'] as const) {
+    atLeast(contrastRatio(t.brandText, t[g]), AA_TEXT, `${p.key}: brandText on ${g} is a link`);
+  }
+
+  // ── the data palette ─────────────────────────────────────────────────
+  // Seven hues, three values each. The mark is a ring's arc or a bar on any of
+  // the four grounds, or an icon on its own plate: 3:1. The ink is a chip's
+  // label on the plate or a figure on a card: 4.5:1. The plate is measured by
+  // being a ground in both.
+  for (const h of DATA_HUES) {
+    const soft = t.data[`${h}Soft`];
+    for (const g of [...GROUNDS.map((k) => t[k]), soft]) {
+      atLeast(contrastRatio(t.data[h], g), AA_MARK, `${p.key}: data ${h} on ${g} is a mark`);
+      atLeast(contrastRatio(t.data[`${h}Ink`], g), AA_TEXT, `${p.key}: data ${h}Ink on ${g} is text`);
+    }
+    for (const k of [h, `${h}Soft`, `${h}Ink`] as const) {
+      ok(rgb(t.data[k]) != null, `${p.key}: data ${k} is a six-digit hex (${t.data[k]})`);
+    }
+  }
+
   // Every palette must be measurable in the first place. A typo'd hex reads as
   // null here rather than silently scoring 21:1 against everything.
-  for (const k of [...INKS, ...STATUS, ...SERIES, 'brand', 'brandInk', 'grid', ...GROUNDS] as const) {
+  for (const k of [...INKS, ...STATUS, ...SERIES, 'brand', 'brandInk', 'grid', ...GROUNDS,
+    'night', 'night2', 'nightInk', 'nightInk2', 'nightInk3', 'brandBright', 'brandDeep', 'brandSoft', 'brandText'] as const) {
     ok(rgb(t[k]) != null, `${p.key}: ${k} is a six-digit hex (${t[k]})`);
   }
 }
@@ -193,6 +246,52 @@ eq(best, picked, `brandInkFor picks the better of black and white for every bran
 // answered. A tenant mid-edit with "#12" in the field must not crash a screen.
 eq(brandInkFor('#12'), INK_ON_DARK, 'a half-typed hex falls back to white');
 eq(brandInkFor(''), INK_ON_DARK, 'an empty brand colour falls back to white');
+
+/* ── a gym's colour, on everything the accent touches ──────────────────── */
+
+// `withAccent` is what the app draws under a white-label colour. The button's
+// label on the accent is `brandInkFor`, walked above. These are the three
+// NEW places the accent goes since the approved mockups landed, and each has
+// a fallback that must hold for ANY hex an owner types — so they are walked
+// over the same grid, on every palette, rather than spot-checked:
+//
+//   on the night hero   the accent if it is a mark there, else the night ink
+//   as text             the accent if it is readable, else ink
+//   its plate           always the accent at 14% over the card
+//
+// and the two things a gym does not get to move are asserted unmoved.
+let accents = 0;
+for (const p of PALETTES) {
+  for (let r = 0; r < 256; r += 51) for (let g = 0; g < 256; g += 51) for (let b = 0; b < 256; b += 51) {
+    const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+    const w = withAccent(p.theme, hex);
+    accents++;
+    atLeast(contrastRatio(w.brandBright, w.night), AA_MARK, `${p.key} under ${hex}: the hero button is visible on night`);
+    for (const ground of ['bg', 'surface', 'brandSoft'] as const) {
+      atLeast(contrastRatio(w.brandText, w[ground]), AA_TEXT, `${p.key} under ${hex}: brandText on ${ground} is readable`);
+    }
+    // Where the accent could not be the hero's button, the fallback pair is
+    // the night ink on night — already measured above, and never the accent's
+    // own ink, which was chosen for a different fill.
+    if (w.brandBright !== hex) {
+      eq(w.brandBright, p.theme.nightInk, `${p.key} under ${hex}: an accent that vanishes on night gives way to the night ink`);
+      eq(w.brandDeep, p.theme.night, `${p.key} under ${hex}: and the label on it is the night itself`);
+    } else {
+      eq(w.brandDeep, brandInkFor(hex), `${p.key} under ${hex}: the hero button's label is the measured ink`);
+    }
+    ok(w.data === p.theme.data, `${p.key} under ${hex}: the data palette is meaning, not brand, and does not move`);
+    eq(w.night, p.theme.night, `${p.key} under ${hex}: nor does the night ground`);
+  }
+}
+ok(accents === PALETTES.length * 216, `every palette was walked under 216 accents (${accents})`);
+// A half-typed hex must not crash a screen here either, and must not produce
+// an unmeasurable token: everything falls back to a colour that was passing.
+{
+  const w = withAccent(PALETTES[0].theme, '#12');
+  eq(w.brandText, PALETTES[0].theme.ink, 'a half-typed accent is not text; ink is');
+  eq(w.brandBright, PALETTES[0].theme.nightInk, 'nor a hero button; the night ink is');
+  ok(rgb(w.brandSoft) != null, 'and its plate is still a colour');
+}
 
 
 /* ── following the phone between light and dark ────────────────────────── */

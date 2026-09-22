@@ -37,9 +37,12 @@
 // answer, and AsyncStorage is where it belongs. `adoptGymName` is how the gym's
 // real name gets into that cache once somebody has signed in and an owner
 // screen has read it.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VARIANT, VARIANT_LABEL } from '../lib/variant';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 
 interface BrandValue {
   appName: string;
@@ -70,7 +73,15 @@ export function BrandProvider({ children }: { children: ReactNode }) {
   // introduces itself as "Repple" reads like the wrong download.
   const [appName, setAppNameState] = useState(VARIANT_LABEL[VARIANT]);
   useEffect(() => { (async () => {
-    try { const n = await AsyncStorage.getItem(KEY); if (n) setAppNameState(n); } catch {}
+    // A cache, not the record. The gym's real name is `tenants.name` and
+    // `adoptGymName` writes it back here on every launch that reaches the
+    // server, so a read that fails leaves this app calling itself by the
+    // build's own name for one launch and correcting itself on the next. There
+    // is nothing to say to the member and nothing to withhold: the fallback IS
+    // a true name for this app. It is still worth a trace, because the same
+    // failure repeating is the difference between a flat battery and a device
+    // whose storage has stopped answering.
+    try { const n = await AsyncStorage.getItem(KEY); if (n) setAppNameState(n); } catch (e) { reportError('brand.cachedName', e); }
   })(); }, []);
   const setAppName = (n: string) => {
     const v = n.trim() || VARIANT_LABEL[VARIANT];
@@ -83,7 +94,67 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     setAppNameState(v);
     AsyncStorage.setItem(KEY, v).catch(() => {});
   };
-  return <Ctx.Provider value={{ appName, adoptGymName, setAppName }}>{children}</Ctx.Provider>;
+
+  // ── the member's own gym, adopted for the member ────────────────────────
+  //
+  // `adoptGymName` existed and its only callers were on app/(owner)/brand.tsx,
+  // a screen no member opens. So every member of every white-label gym read the
+  // BUILD's name — on the full-screen barcode they hold up at the turnstile,
+  // and in the three-letter prefix of the member number derived from it
+  // (`memberPrefix`, src/lib/membership.ts). "Repple ID REP-4417", on the two
+  // screens a member actually shows to staff.
+  //
+  // `my_gym_name()` (supabase/parts/962) answers only about the caller and only
+  // when their tenant is somebody's GYM — a personal workspace named "Tim's
+  // space" returns null, because renaming the app after the member would be
+  // worse than the defect. Anything else — the function not applied yet, no
+  // session, a refusal, no answer — leaves the cached name exactly as it was,
+  // which is what `adoptGymName` already does with a blank.
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    const ask = async () => {
+      try {
+        const { data, error } = await supabase.rpc('my_gym_name');
+        // no-error-ok: this is a name, not a fact anything is computed from.
+        // A gym that could not be read keeps whatever this device last knew.
+        if (cancelled || error) return;
+        const n = typeof data === 'string' ? data : null;
+        if (n) adoptGymName(n);
+      } catch { /* same reason */ }
+    };
+    void ask();
+    // Signing in is when the answer first becomes available: the provider mounts
+    // on the welcome screen, before there is a session to ask about.
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) void ask();
+    });
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useBrand`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.adoptGymName(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ adoptGymName, setAppName });
+  impl.current = { adoptGymName, setAppName };
+  const adoptGymNameStable = useCallback((...a: Parameters<typeof adoptGymName>) => impl.current.adoptGymName(...a), []);
+  const setAppNameStable = useCallback((...a: Parameters<typeof setAppName>) => impl.current.setAppName(...a), []);
+  const value = useMemo<BrandValue>(() => ({ appName, adoptGymName: adoptGymNameStable, setAppName: setAppNameStable }), [appName, adoptGymNameStable, setAppNameStable]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useBrand(): BrandValue {

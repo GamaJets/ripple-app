@@ -26,7 +26,7 @@
 //      Stripe answers "No such subscription" for an object that plainly exists.
 //   3. WHAT THE PLATFORM MAY TAKE. Stripe requires `application_fee_amount` to
 //      be POSITIVE and STRICTLY LESS than the charge. A fee of zero — which is
-//      what a 10% fee on a 5-unit package rounds to — is not "no fee", it is a
+//      what a 10% fee on a 4-unit package rounds to — is not "no fee", it is a
 //      rejected Checkout Session and a client who cannot buy anything.
 //
 // So they live here, with a test, and `connect-checkout`, `connect-onboard` and
@@ -171,9 +171,25 @@ export type FeeAmountResult = { ok: true; fee: number | null } | { ok: false; re
  * `fee: null` means OMIT the field, and it is not the same as zero. Stripe
  * requires `application_fee_amount` to be positive and strictly less than the
  * charge; a literal 0 is refused and takes the whole Checkout Session with it.
- * A 10% fee on a 5-unit package rounds to 0, so this is not a hypothetical —
- * it is any cheap package in any currency, and the failure would be a client
- * staring at "Could not start checkout" on a package priced correctly.
+ *
+ * ── Where the threshold actually is ───────────────────────────────────────
+ *
+ * This said "a 10% fee on a 5-unit package rounds to 0", and the file's own
+ * test says otherwise on the line below the one that pins it: the arithmetic is
+ * `Math.round`, so half a minor unit rounds UP. 5 × 10% is 0.5, which is 1 —
+ * the smallest fee that survives — and the last price that yields nothing is 4.
+ * The rule is `priceCents × pct < 50`, not `< 100`, and the comment was out by
+ * a factor of two at the boundary it existed to describe.
+ *
+ * It mattered because it travelled. The same sentence was written into
+ * `connect-checkout` (correctly, as "4 minor units at 10%") and out of here
+ * onto the public site as a pricing promise, where it has since been corrected.
+ * The code is right and was always right; the prose was wrong, and prose about
+ * a rounding boundary is the kind that gets quoted rather than re-derived.
+ *
+ * It is not a hypothetical either way — it is any cheap package in any
+ * currency, and the failure would be a client staring at "Could not start
+ * checkout" on a package priced correctly.
  *
  * The other end is refused rather than clamped: a fee that meets or exceeds the
  * charge is a misconfiguration, and clamping it to `price - 1` would quietly
@@ -186,11 +202,22 @@ export function applicationFeeCents(priceCents: unknown, pct: number): FeeAmount
   }
   if (priceCents < 0) return { ok: false, reason: 'The package price is negative.' };
   if (!Number.isFinite(pct) || pct < 0 || pct >= 100) {
+    // Bare, and deliberately. A platform fee is not required to be whole —
+    // `pct < 100` is the only bound — so this figure can carry a separator. But
+    // this module is reached from five supabase/functions entry points, and a
+    // server has no reader whose locale it could ask; `appLocale()` there would
+    // resolve to the container's. src/lib/units may not be imported here for
+    // the same reason scripts/check-functions.mjs gives.
     return { ok: false, reason: `A platform fee of ${pct}% cannot be applied.` };
   }
   const fee = Math.round((priceCents * pct) / 100);
   if (fee <= 0) return { ok: true, fee: null };
   if (fee >= priceCents) {
+    // `priceCents` is checked whole above and `fee` is `Math.round`, so neither
+    // can carry a separator; both are counts of minor units rather than
+    // amounts, and there is no currency on this sentence to take decimal places
+    // from. Only `pct` can be fractional, and it is left bare for the reason
+    // the branch above gives.
     return { ok: false, reason: `A ${pct}% fee on ${priceCents} would be ${fee}, which is not less than the charge. Stripe refuses that.` };
   }
   return { ok: true, fee };

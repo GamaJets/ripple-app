@@ -21,7 +21,7 @@
 // `error` is null, nothing was written, and a caller that checks only `error`
 // files it as stored.
 import {
-  classifyWrite, dayOf, forDay, serverRows, staleForDay, todayKey, unsentCount,
+  classifyWrite, dayOf, forDay, msUntilNextLocalDay, serverRows, staleForDay, todayKey, unsentCount,
   unsentNote, type Stamped, type WriteError,
 } from './offlineQueue';
 
@@ -206,6 +206,37 @@ const isUnsent = (id: string) => id.startsWith(LOCAL);
   const alsoBroken = <T>(_error: unknown, _rows: T[] | null | undefined): T[] | null => null;
   ok(isFailure(serverRows<{ id: string }>(null, [])) !== isFailure(alsoBroken<{ id: string }>(null, [])),
     'an empty answer is not folded into a failure either');
+}
+
+/* ── the day a screen is still judged against hours later ───────────────── */
+//
+// The defect: `useMemo(() => todayKey(), [])` freezes the day at MOUNT, and a
+// phone screen is not remounted by being backgrounded. Insurance that expired
+// on Monday read as current on Thursday.
+
+{
+  const noon = new Date(2026, 7, 31, 12, 0, 0);
+  eq(msUntilNextLocalDay(noon), 12 * 60 * 60 * 1000, 'midday is twelve hours from the roll-over');
+
+  const nearly = new Date(2026, 7, 31, 23, 59, 59, 0);
+  eq(msUntilNextLocalDay(nearly), 1000, 'a second to go is a second');
+
+  const justAfter = new Date(2026, 7, 31, 0, 0, 0, 0);
+  eq(msUntilNextLocalDay(justAfter), 24 * 60 * 60 * 1000, 'and midnight itself is a whole day from the next');
+
+  // Whatever the zone and whatever the date, waiting exactly this long lands on
+  // a DIFFERENT day, and never on a timer that fires instantly.
+  for (const at of [
+    new Date(2026, 0, 1, 0, 0, 0, 1), new Date(2026, 2, 29, 1, 30, 0),
+    new Date(2026, 9, 25, 1, 30, 0), new Date(2026, 11, 31, 23, 0, 0),
+    new Date(2027, 1, 28, 12, 0, 0),
+  ]) {
+    const ms = msUntilNextLocalDay(at);
+    ok(ms > 0, `the wait is never zero or negative at ${at.toISOString()}`);
+    ok(ms <= 25 * 60 * 60 * 1000, `and never more than a long day at ${at.toISOString()}`);
+    const then = new Date(at.getTime() + ms);
+    ok(todayKey(then) !== todayKey(at), `waiting it out changes the day at ${at.toISOString()}`);
+  }
 }
 
 if (errors.length) {

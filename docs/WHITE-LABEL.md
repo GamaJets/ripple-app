@@ -46,7 +46,7 @@ before any change to `brands.ts` or `app.config.ts` lands.
 One key in `BRANDS`. `example` at `src/lib/brands.ts:192-205` is a worked
 example built entirely from IANA's reserved `example.com` and `com.example`, so
 nothing in it can collide with a real registered identifier. It deliberately
-does **not** build — the icon paths point at `assets/brands/example/`, which
+does **not** build — the icon paths point at `assets/brands/example/`, which <!-- path-ok: the sentence's whole point is that this directory is deliberately absent, so the worked example cannot be built by accident -->
 does not exist.
 
 Per brand you must decide:
@@ -430,7 +430,7 @@ Also per brand:
   confirming their email is sent to Repple's site.
 - `src/lib/deepLink.ts:71-73` — password reset, same problem (§6).
 - Supabase's redirect allow-list is dashboard-only (there is no
-  `supabase/config.toml`); every brand's domains must be added to the one list.
+  `supabase/config.toml`); every brand's domains must be added to the one list. <!-- path-ok: naming the file this project does NOT have is the point — the allow-list is only editable in the dashboard -->
 - Resend has `repplefitness.com` verified (`docs/LAUNCH-CHECKLIST.md:52`); each
   brand needs its own verified sending domain, or its members get mail from
   their supplier.
@@ -471,16 +471,22 @@ migration for zero user-visible benefit.
   `eas.json` profile. All brands share one database, one auth table, one storage
   bucket and one set of edge functions. Row-level security
   (`supabase/parts/38-tenant-isolation.sql`) isolates tenants, not brands.
-- `studio-web/` — the Next.js owner console. `app/layout.tsx:28`
-  `title: 'Repple Studio'`; `components/Shell.tsx:170` the `REPPLE/STUDIO`
-  wordmark in JSX; `app/page.tsx:354` and `:401` link to
+- `studio-web/` — the Next.js owner console. The tab title is **no longer** one
+  of these: `studio-web/app/layout.tsx:43` sets `title: BRAND.apps.owner.name`,
+  read from `src/lib/brands.ts`, and `Console` replaces it with the gym's own
+  name once the session resolves. What is still hardcoded is
+  `studio-web/components/Shell.tsx:437`, the `REPPLE/STUDIO` wordmark in JSX,
+  and `studio-web/app/page.tsx:935` and `:997`, which link to
   `www.repplefitness.com`. One deployment, one brand.
 - `src/theme/tokens.ts:19` — the default theme's `brand: '#16b8a6'` is the
   Repple client teal, and none of the ten palettes is sourced from
   `tenants.brand_color`.
-- `ios/ReppleCoach/` — the checked-in native project directory carries the brand
-  in its name, as does `ReppleCoach.xcodeproj`. Prebuild regenerates it, but it
-  is committed.
+- `ios/Repple/` — the checked-in native project directory carries the brand in
+  its name, as do `ios/Repple.xcodeproj`, `ios/Repple.xcworkspace` and
+  `ios/Repple/Repple.entitlements`. Prebuild regenerates them, but they are
+  committed. (This said `ios/ReppleCoach/` until 8 Sep 2026; there has never <!-- path-ok: quoting the wrong path this bullet used to give, which is the record of the correction and must not resolve -->
+  been a directory of that name, and the checked-in project is the CLIENT
+  variant's, not the coach's.)
 - `supabase/parts/01-schema.sql:3` read `-- FitForge — Postgres schema` until
   1 Sep 2026 — a previous rename that leaked and was never finished, and the
   cheapest available evidence for how thoroughly a brand name spreads and how

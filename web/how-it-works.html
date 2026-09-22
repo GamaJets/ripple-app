@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: light)">
 <title>Repple — how it works</title>
   <link rel="canonical" href="https://www.repplefitness.com/how-it-works">
 <meta name="description" content="What actually happens when a gym signs up: the account, the Studio console in a browser, importing plans and payments from a spreadsheet, the timetable, the door log — and what each figure needs before it can appear.">
 <meta property="og:title" content="Repple — how it works">
 <meta property="og:description" content="The setup, in the order it happens, and what every figure needs before it can show you anything.">
 <meta property="og:url" content="https://www.repplefitness.com/how-it-works">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="audience-redesign.css?v=82df941359">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,20 +77,30 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body class="tone-studio">
+<body class="tone-studio audience-page story-page story-how">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
@@ -67,7 +117,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <section class="hero">
   <div class="wrap">
@@ -123,7 +173,7 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -142,7 +192,8 @@ addEventListener('DOMContentLoaded', function () {
         <span class="no">3</span>
         <div>
           <h3>Put the price book in</h3>
-          <p>What the gym sells: a name, a price, and whether it recurs monthly, yearly or is a one-off such as a day pass or a joining fee. Type them in on the Money screen, or paste your existing price list into Import. Prices are held as whole minor units &mdash; an integer number of fils or cents, never a decimal &mdash; because a float near a ledger is a rounding error in a spreadsheet and a dispute in a gym.</p>
+          <p><strong>Say what you charge in first.</strong> There is no default currency in the system, deliberately: a gym that has not chosen one sees a dash where a price would be rather than a figure in somebody else's money. Pick one of forty, once, and everything written from then on is denominated in it. Then the price book itself &mdash; what the gym sells: a name, a price, and whether it recurs monthly, yearly or is a one-off such as a day pass or a joining fee. Type them in on the Money screen, or paste your existing price list into Import. Prices are held as whole minor units &mdash; an integer number of fils or cents, never a decimal &mdash; because a float near a ledger is a rounding error in a spreadsheet and a dispute in a gym.</p>
+          <p class="tiny" style="margin-top:9px">Changing the currency later does not re-denominate anything already recorded &mdash; a payment keeps the currency it was taken in &mdash; so it is worth getting right on the first day rather than the second month.</p>
         </div>
       </li>
       <li>
@@ -201,10 +252,10 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Setup</span>
-          <h3>What has to exist before each figure does</h3>
+          <h3 id="chart-what-has-to-exist-before">What has to exist before each figure does</h3>
         </div>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-has-to-exist-before">
         <svg viewBox="0 0 740 392" width="740" height="392" role="img" aria-label="A map of six dependencies in Repple Studio. A price book and the memberships on it produce recurring revenue. Payments recorded or imported produce money taken in the last thirty days. A capacity recorded against each class produces a class fill rate. Check-outs as well as check-ins produce an average time in the building. A session fee plus an outcome marked on every session produces a payroll total that can be called final. The door log running produces attendance that is not only bookings.">
           <text class="cx-cap" x="16" y="30">YOU RECORD</text>
           <text class="cx-cap" x="452" y="30">STUDIO CAN THEN SHOW</text>
@@ -261,49 +312,50 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-figures">
       <table class="data">
+        <caption class="vh" id="tbl-figures">Each figure, what it needs, and what you see until then</caption>
         <thead>
-          <tr><th>Figure</th><th>What it needs</th><th>What you see until then</th></tr>
+          <tr><th scope="col">Figure</th><th scope="col">What it needs</th><th scope="col">What you see until then</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Recurring revenue</strong></td>
+            <th scope="row"><strong>Recurring revenue</strong></th>
             <td>Active memberships sitting on a plan that has a price.</td>
             <td>A dash, and which memberships have no priced plan behind them.</td>
           </tr>
           <tr>
-            <td><strong>Money taken</strong></td>
+            <th scope="row"><strong>Money taken</strong></th>
             <td>Payments recorded at the desk or brought in from a spreadsheet.</td>
             <td>A dash. An empty payment record is not the same fact as a month of nothing, and it is not drawn as one.</td>
           </tr>
           <tr>
-            <td><strong>Class fill</strong></td>
+            <th scope="row"><strong>Class fill</strong></th>
             <td>A capacity recorded against the classes being measured.</td>
             <td>A dash and &ldquo;no capacity recorded&rdquo;, rather than a percentage of an invented denominator.</td>
           </tr>
           <tr>
-            <td><strong>Average stay</strong></td>
+            <th scope="row"><strong>Average stay</strong></th>
             <td>Exits logged as well as entries.</td>
             <td>A dash. Entries alone give you a visit count, which is a different question.</td>
           </tr>
           <tr>
-            <td><strong>Payroll total</strong></td>
+            <th scope="row"><strong>Payroll total</strong></th>
             <td>A session fee set for the gym, and an outcome marked on every session in the period.</td>
             <td>A figure that refuses to call itself final, and a count of how many sessions are still unmarked.</td>
           </tr>
           <tr>
-            <td><strong>Retention</strong></td>
+            <th scope="row"><strong>Retention</strong></th>
             <td>The door log running alongside the class bookings.</td>
             <td>A reading taken from bookings only, with a note when the door log and the class record disagree.</td>
           </tr>
           <tr>
-            <td><strong>Cash position</strong></td>
+            <th scope="row"><strong>Cash position</strong></th>
             <td>An accounting connection, which is not built.</td>
             <td>A permanent dash with &ldquo;connect accounting&rdquo; under it. It is on the roadmap, not in the product.</td>
           </tr>
           <tr>
-            <td><strong>Lifetime value</strong></td>
+            <th scope="row"><strong>Lifetime value</strong></th>
             <td>A measured membership lifespan, which needs time nobody has had yet.</td>
             <td>Nothing. Studio does not print an invented multiplier and call it analysis.</td>
           </tr>
@@ -331,7 +383,7 @@ addEventListener('DOMContentLoaded', function () {
           importer never guesses at an ambiguous value &mdash; it hands the row back with a reason
           and lets somebody decide.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>It reads the whole date column first.</strong> One unambiguous value settles the file: if any row says 25/12, every 03/04 in it can be read with confidence and you are never asked. A file containing both 25/12 and 12/25 is internally inconsistent, and that is said rather than resolved.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -384,19 +436,20 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Where the work happens</div>
       <h2 class="hd">Seven pages, and the<br><span class="serif">first job on each.</span></h2>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-console">
       <table class="data">
+        <caption class="vh" id="tbl-console">The seven console pages, and the first job on each</caption>
         <thead>
-          <tr><th>Console page</th><th>What you do there first</th></tr>
+          <tr><th scope="col">Console page</th><th scope="col">What you do there first</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Import</strong></td><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
-          <tr><td><strong>Money</strong></td><td>Check the imported price book, open memberships against it, and record what comes in at the desk.</td></tr>
-          <tr><td><strong>Timetable</strong></td><td>Build the week &mdash; classes, weekly series and one-to-ones on one board &mdash; with a capacity recorded on each.</td></tr>
-          <tr><td><strong>Door</strong></td><td>Start checking people in and out, and sell or redeem a drop-in, a guest pass or a class pack.</td></tr>
-          <tr><td><strong>Sessions</strong></td><td>Clear anything sitting unmarked, then run payroll once nothing is outstanding.</td></tr>
-          <tr><td><strong>Members</strong></td><td>Open one person and see the whole of what the gym knows about them &mdash; membership, payments, visits, classes, one-to-ones and passes on one screen.</td></tr>
-          <tr><td><strong>Overview</strong></td><td>Nothing, at first. It is the last screen to become useful, because it reads back everything the other six record.</td></tr>
+          <tr><th scope="row"><strong>Import</strong></th><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
+          <tr><th scope="row"><strong>Money</strong></th><td>Check the imported price book, open memberships against it, and record what comes in at the desk.</td></tr>
+          <tr><th scope="row"><strong>Timetable</strong></th><td>Build the week &mdash; classes, weekly series and one-to-ones on one board &mdash; with a capacity recorded on each.</td></tr>
+          <tr><th scope="row"><strong>Door</strong></th><td>Start checking people in and out, and sell or redeem a drop-in, a guest pass or a class pack.</td></tr>
+          <tr><th scope="row"><strong>Sessions</strong></th><td>Clear anything sitting unmarked, then run payroll once nothing is outstanding.</td></tr>
+          <tr><th scope="row"><strong>Members</strong></th><td>Open one person and see the whole of what the gym knows about them &mdash; membership, payments, visits, classes, one-to-ones and passes on one screen.</td></tr>
+          <tr><th scope="row"><strong>Overview</strong></th><td>Nothing, at first. It is the last screen to become useful, because it reads back everything the other six record.</td></tr>
         </tbody>
       </table>
     </div>
@@ -479,11 +532,11 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Can we try it without moving the whole gym across?</summary>
-        <div class="a"><p>Yes, and it is the sensible order. Create the account, put the price book and one week of the timetable in, and run the door log for a fortnight. That is enough to see whether the attendance picture matches what you thought it was, and nothing is charged while you look.</p></div>
+        <div class="a"><p>Yes, and it is the sensible order. Create the account, put the price book and one week of the timetable in, and run the door log for a fortnight. That is enough to see whether the attendance picture matches what you thought it was, and nothing is charged while you look &mdash; the 10% on <a href="/pricing">Pricing</a> only applies once you start taking payment through Repple&rsquo;s checkout, which a fortnight of this does not.</p></div>
       </details>
       <details>
         <summary>What does it cost to set up?</summary>
-        <div class="a"><p>Nothing, and nothing is charged for the software during the first release either. There is no price set yet at all &mdash; <a href="/pricing">Pricing</a> explains exactly where that stands and how to get a quote.</p></div>
+        <div class="a"><p>Nothing, and no subscription is charged for the software during the first release either. There is no subscription price set yet at all. The one charge that is live is 10% of anything you sell through Repple&rsquo;s own checkout &mdash; not of what you record at the desk. <a href="/pricing">Pricing</a> explains exactly where that stands and how to get a quote.</p></div>
       </details>
       <details>
         <summary>Is the screen at the top of this page real data?</summary>
@@ -515,30 +568,37 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-            </svg>
-          </span>
-          Repple
-        </a>
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
+        <h2 class="fh">Apps</h2>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Getting started</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>
@@ -546,17 +606,24 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

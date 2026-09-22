@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────
--- Who may write a training programme, a nutrition plan, or coach feedback.
+-- Who may write a training program, a nutrition plan, or coach feedback.
 --
 -- Three tables carry content a coach produces FOR one named client:
 -- `assigned_programs`, `coach_nutrition` and `coach_feedback`. All three were
@@ -14,7 +14,7 @@
 -- any signed-in account could insert a row naming ANY client, provided it put
 -- its own id in `coach_id`. The receiving client's app reads these by
 -- `client_id = auth.uid()` and renders them as their plan — so a stranger could
--- put a training programme in somebody's Train tab, and a `carb_delta` in
+-- put a training program in somebody's Train tab, and a `carb_delta` in
 -- `coach_nutrition` shifts the calorie and macro targets the client eats to.
 -- No coaching link was required at any point.
 --
@@ -28,7 +28,7 @@
 -- ending a relationship revokes a coach's access to workouts, measurements,
 -- check-ins, habit logs, goals and the checklist. These three tables were not
 -- gated on it, so a FORMER coach kept read and write and could still assign a
--- programme to somebody who had left them.
+-- program to somebody who had left them.
 --
 -- ── The shape now ──────────────────────────────────────────────────────────
 --
@@ -42,7 +42,7 @@
 -- The client READS, always, and cannot write. Their access is deliberately NOT
 -- conditioned on the relationship: a plan somebody is following does not stop
 -- being theirs because they changed coach, and a client who leaves keeps the
--- programme they were given. Dropping the write is a real narrowing — the old
+-- program they were given. Dropping the write is a real narrowing — the old
 -- policy let a client DELETE feedback written about them, which is a coach's
 -- record of the working relationship and not the client's to remove.
 --

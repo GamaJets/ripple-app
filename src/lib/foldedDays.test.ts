@@ -6,7 +6,7 @@
 // Monday, and Wednesday — now at index 1 — renders collapsed while Tuesday sits
 // open. On the builder screen a day that has closed itself reads as a day whose
 // exercises have been lost.
-import { foldsAfterRemoval, foldsForNewProgramme, type FoldedDays } from './foldedDays';
+import { foldsAfterRemoval, foldsForNewProgram, type FoldedDays } from './foldedDays';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -66,10 +66,10 @@ same(before, [1, 3], 'the map passed in is left as it was');
 
 /* ── a wholesale replacement keeps nothing ─────────────────────────────── */
 
-// Loading a template or a client's programme replaces every day, so an index
+// Loading a template or a client's program replaces every day, so an index
 // that was folded now names a day the coach has never seen.
-eq(Object.keys(foldsForNewProgramme()).length, 0, 'a new programme starts with nothing folded');
-ok(foldsForNewProgramme() !== foldsForNewProgramme(), 'each caller gets its own map, not a shared one');
+eq(Object.keys(foldsForNewProgram()).length, 0, 'a new program starts with nothing folded');
+ok(foldsForNewProgram() !== foldsForNewProgram(), 'each caller gets its own map, not a shared one');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('foldedDays: ok');

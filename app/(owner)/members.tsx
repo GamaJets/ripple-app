@@ -18,45 +18,87 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
-import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead, Donut, Legend, TonedChip, fig, type Tone, HERO_FIT } from '../../src/ui/kit';
+// Joiners, leavers and churn, from the memberships this screen ALREADY holds.
+// The same module Growth's figures come from (through `useMemberChurn`), run
+// over `rows` rather than through the hook: the hook is a second read of
+// `memberships`, and two reads of one table on one screen is two places for
+// the register and its own churn to disagree.
+import { memberSpans, churnMonths, undatedExitCount, lastClosedMonth, churnHeadline } from '../../src/lib/memberChurn';
+import { PHONE_MONTHS } from '../../src/ui/memberChurn';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { isoDate } from '../../src/lib/format';
+// A count that can pass a thousand is grouped in the reader's own locale. A
+// 1,412-member gym reading "Everyone · 1412" is the house rule not being held.
+import { num } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../src/lib/staleRead';
+// The one reader for a typed amount in this product. See commitPayment.
+import { readMinorAmount } from '../../src/lib/coachMoney';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
-  setMembershipStatus, recordPayment, summarise, money,
+  setMembershipStatus, setMembershipFreeze, setMembershipDates, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
+// What money a SUM is in. `summarise` reports it and this screen used to throw
+// it away — see the header of src/lib/sumCurrency.ts for what that printed.
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
+// The gym's own calendar day for the date this screen WRITES, and the sentence
+// for a gym that has not said which calendar that is. See `today` below.
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { gymTodayWindow } from '../../src/lib/gymToday';
+// The instant this screen judges "today" against, re-settled at local midnight,
+// on every foreground and whenever the screen is focused. See `dayWindow`.
+import { useNow } from '../../src/ui/today';
+import { DateSheet } from '../../src/ui/DateSheet';
+import {
+  freezeState, frozenDays, thawedEndsOn, freezeLine, freezeRefusal,
+} from '../../src/lib/membershipFreeze';
+// What a correction to the two dates may say and what it must say first. The
+// console has had this since it grew the field; see the header of
+// src/lib/membershipDates.ts for what a phone that cannot do it costs a gym
+// that types its existing members in.
+import {
+  datesRefusal, datesPatch, datesNotes, termLine, unpausedEndsOn,
+  lensMatch, EXPIRING_DAYS, type RosterLens,
+} from '../../src/lib/membershipDates';
 
 /**
- * Today, on the CALENDAR THE PERSON IS STANDING IN.
+ * The day a membership starts is the GYM's day.
  *
- * This was `new Date().toISOString().slice(0, 10)`, which is the UTC day. A
- * membership opened at 5pm in Los Angeles was filed as starting TOMORROW — so
- * the billing anniversary is a day out, the member is counted in the wrong
- * month's joiners, and a gym east of Greenwich gets the same error in the other
- * direction before 8am.
+ * ── Two wrong answers, both fixed here ────────────────────────────────────
  *
- * `isoDate` reads the local calendar and writes the `YYYY-MM-DD` the column
- * holds. It is the same helper /accounting already uses and it is deliberately
- * not localised — this is a storage key, not a sentence.
+ * This was `new Date().toISOString().slice(0, 10)`, the UTC day: a membership
+ * opened at 5pm in Los Angeles was filed as starting TOMORROW, so the billing
+ * anniversary is a day out and the member is counted in the wrong month's
+ * joiners. That became `isoDate(new Date())`, the reader's day, and the note
+ * that replaced it said the remaining half — the phone's timezone rather than
+ * the gym's — was "a separate item and a schema change".
  *
- * The wider question — that "local" here means the phone's timezone and not the
- * GYM's, because `tenants` has no timezone column at all — is a separate item
- * and a schema change. This is strictly the half that is wrong for everybody
- * outside UTC, including an owner standing in their own gym.
+ * The schema change happened. `tenants.timezone` is supabase/parts/710 and
+ * src/lib/gymToday.ts is the one place that turns it into a day, so the note
+ * outlived the gap it described. An owner opening a membership from home three
+ * hours west of their own gym, at nine in the evening, still dated it
+ * yesterday — and this is the date the anniversary is billed on.
+ *
+ * `gymTodayWindow` never guesses. A gym with no zone, a zone read that failed,
+ * and a zone this runtime cannot resolve all come back as the reader's day
+ * carrying `NO_ZONE_NOTE`, which the sheet below prints where it writes.
  */
-const today = () => isoDate(new Date());
 
-const STATUS_TONE = (t: Theme, s: MembershipStatus) =>
-  s === 'active' ? t.brand : s === 'frozen' ? t.s3 : t.ink3;
+/** A status by NAME, so the chip on a row and the slice in the mix are one
+ *  colour and the kit picks the ink that is readable on its plate. Active is
+ *  the accent — the gym's own under white-label. It was a hairline pill whose
+ *  label was drawn in the status colour itself, which is a mark colour doing a
+ *  text job. */
+const STATUS_TONE: Record<MembershipStatus, Tone> = {
+  active: 'brand', frozen: 'blue', expired: 'amber', cancelled: 'neutral',
+};
 
 const STATUS_LABEL: Record<MembershipStatus, string> = {
   active: 'Active', frozen: 'Frozen', cancelled: 'Cancelled', expired: 'Expired',
@@ -67,16 +109,25 @@ const STATUS_LABEL: Record<MembershipStatus, string> = {
  *  full payment history is read, and both of them page rather than cap. */
 const PAYMENTS_WINDOW_DAYS = 30;
 
+/**
+ * How many name matches the Open a Membership sheet asks for.
+ *
+ * Small on purpose — it is a typeahead at a desk, not a report. Named rather
+ * than written into the query as a bare 12 because the SENTENCE beside it has
+ * to use the same number: a list at the ceiling is a prefix, and the copy that
+ * says "nobody matching" may only be printed when it is not.
+ */
+const SEARCH_LIMIT = 12;
+
 const METHODS: PaymentMethod[] = ['card', 'cash', 'transfer', 'direct_debit', 'other'];
 const METHOD_LABEL: Record<PaymentMethod, string> = {
-  card: 'Card', cash: 'Cash', transfer: 'Transfer', direct_debit: 'Direct debit', other: 'Other',
+  card: 'Card', cash: 'Cash', transfer: 'Transfer', direct_debit: 'Direct Debit', other: 'Other',
 };
 
 interface Candidate { id: string; name: string }
 
 export default function OwnerMembers() {
   const t = useTheme();
-  const router = useRouter();
   const { tenant } = useTenant();
   // The gym's own currency, and NOTHING when it has not set one.
   //
@@ -97,8 +148,23 @@ export default function OwnerMembers() {
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [rows, setRows] = useState<Membership[] | null>(null);
   const [payments, setPayments] = useState<GymPayment[]>([]);
-  const [failed, setFailed] = useState(false);   // the register read itself failed
+  // The most recent ATTEMPT failed. Not "there is nothing" — `rows` says that,
+  // separately, and the two together are what `readState` turns into the four
+  // things that can be true here. See src/lib/staleRead.ts.
+  const [failed, setFailed] = useState(false);
+  /** Why the last attempt failed, where the read gave a sentence worth showing
+   *  — `fetchMemberships` throws a TruncatedRead whose text is written to be
+   *  read by a gym owner. */
+  const [reason, setReason] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  /* ── which of them the owner is looking for ──────────────────────────────
+     A name search only helps somebody who already knows the name, and the
+     three questions an owner actually opens this screen with — who is up for
+     renewal, whose term has already run out, and who is away — could not be
+     asked of four hundred rows at all. See `lensMatch` in
+     src/lib/membershipDates.ts for what each of the three means and for why
+     'overrun' is the one specific to this product. */
+  const [lens, setLens] = useState<RosterLens>('all');
   const [busy, setBusy] = useState(false);
 
   // add-a-membership sheet
@@ -106,11 +172,37 @@ export default function OwnerMembers() {
   const [search, setSearch] = useState('');
   const [found, setFound] = useState<Candidate[] | null>(null);
   const [searchFailed, setSearchFailed] = useState(false);   // the lookup errored, ≠ no matches
+  /** Whether the lookup came back at its own ceiling — so what is on screen is
+   *  the first few matches rather than all of them, and "nobody matching" is
+   *  not a sentence this sheet may say. */
+  const [searchCut, setSearchCut] = useState(false);
+  /**
+   * Whether the register was IN HAND when the list below was filtered.
+   *
+   * `held` — the set of people who already hold an active membership — is built
+   * from `list`, which is `rows ?? []`. Under a failed register read `rows` is
+   * null, so `held` is EMPTY, and an empty set removes nobody: every match is
+   * offered as somebody with no membership, and `createMembership` will open a
+   * second one for a member who already has one.
+   *
+   * The same sheet already keeps the LOOKUP's two failures apart with
+   * `searchFailed` and `searchCut`, and says so in three places. This is the
+   * third read the sheet leans on and the only one whose failure it did not
+   * carry — and it is the one the sentence "everyone matching already holds an
+   * active membership" is actually a claim about.
+   *
+   * Captured at search time rather than read at render, so the flag describes
+   * the list being shown rather than whatever the register has done since.
+   */
+  const [heldKnown, setHeldKnown] = useState(true);
   const [picked, setPicked] = useState<Candidate | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
 
   // take-a-payment sheet
   const [payFor, setPayFor] = useState<Membership | null>(null);
+  // Why a typed amount was refused. It used to be nothing at all: a bad
+  // figure returned silently and the owner pressed Record again.
+  const [payErr, setPayErr] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('card');
 
@@ -119,9 +211,115 @@ export default function OwnerMembers() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
 
+  /**
+   * `tenants.timezone`, and whether it could be read at all — three outcomes,
+   * kept apart. A failed read is not a gym with no timezone: the first is
+   * nothing to act on, and the second is a settings field to go and fill in.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+  /**
+   * Whether the question has been ASKED yet — the third silence.
+   *
+   * The doc above this pair names two and the screen kept two, and the pair
+   * cannot hold three: before `load` returns, `zone` is null and `zoneUnread`
+   * is false, which is byte for byte the state that means "the gym row read
+   * fine and has no timezone set". `clockNote` therefore fell to
+   * `dayWindow.note` — NO_ZONE_NOTE — and the Open-a-Membership sheet told an
+   * owner, on every visit, for the whole of the round trip:
+   *
+   *   "This membership will be recorded as starting 2026-09-14 — this gym has
+   *    not set its timezone, so days and hours here are your own device's, not
+   *    the gym's"
+   *
+   * at a gym that has set its timezone. A sentence that sends somebody to
+   * change a setting that is already right is the exact failure the two-way
+   * split above was written to avoid, arrived at from the third direction.
+   *
+   * app/(owner)/ops.tsx keeps all three on the same column and gates on this
+   * one; this is that flag, by that name.
+   */
+  const [zoneRead, setZoneRead] = useState(false);
+  /**
+   * Today at the gym.
+   *
+   * Not frozen into a `useState` initialiser: a desk phone with this screen
+   * open across midnight would otherwise keep writing yesterday's date onto
+   * every membership opened after twelve, which is the shape of frozen-`today`
+   * bug this codebase keeps finding.
+   *
+   * ── and "recomputed on every render" was only half an answer ────────────
+   *
+   * It was `gymTodayWindow(zone)`, whose `now` parameter defaults to
+   * `Date.now()` — so the clock was read in the render body, and a render body
+   * is only as fresh as the last render. This screen is registered `href: null`
+   * in app/(owner)/_layout.tsx and expo-router never tears such a screen down,
+   * and nothing here re-renders on the passage of time. So on a desk phone left
+   * on this tab overnight the day did not move at midnight; it moved at the
+   * next tap, and until then the "Renewing · 30d" and "Ran out" chip counts
+   * (and the lens filtering the register by them) were cut against yesterday.
+   *
+   * `useNow()` re-settles at local midnight, on every foreground and on focus —
+   * src/ui/today.ts argues the case — so the day moves when the day moves, and
+   * the value is still computed here rather than stored, which is what keeps it
+   * from freezing. It is the same answer scripts/check-frozen-day.mjs prescribes
+   * for the two render-body clocks still on its ratchet.
+   */
+  const nowMs = useNow().getTime();
+  const dayWindow = gymTodayWindow(zone, nowMs);
+  /* ── pausing a membership, with dates on it ──────────────────────────────
+     `status = 'frozen'` has existed since part 29 and has never had dates, so
+     a pause had to be lifted by hand and gave back none of the time it took.
+     supabase/parts/2616 is the dates; src/lib/membershipFreeze.ts is what they
+     mean. The end date moves only when the owner accepts the new one HERE —
+     see that part's header for why this is not a trigger. */
+  const [freezeFor, setFreezeFor] = useState<Membership | null>(null);
+  const [fzFrom, setFzFrom] = useState('');
+  const [fzTo, setFzTo] = useState('');
+  const [fzPicking, setFzPicking] = useState<'from' | 'to' | null>(null);
+  const [fzBusy, setFzBusy] = useState(false);
+  /* ── correcting the two dates the membership runs between ────────────────
+     Kept apart from the pause above, and from the status flip beside it, for
+     the reason src/lib/membershipDates.ts opens with: this is the write a gym
+     needs on the day it types in the members it already has, and the only
+     surface for it was the web console. Everybody the owner opened on the
+     phone was filed as having joined that afternoon. */
+  const [datesFor, setDatesFor] = useState<Membership | null>(null);
+  const [dtFrom, setDtFrom] = useState('');
+  const [dtTo, setDtTo] = useState('');
+  const [dtPicking, setDtPicking] = useState<'from' | 'to' | null>(null);
+  const [dtBusy, setDtBusy] = useState(false);
+  /** Whose calendar the start date will be written on, where that needs saying.
+   *  Two silences, two sentences — a failed zone read is not an unset zone. */
+  const clockNote = !zoneRead
+    // Nothing has been established yet, so nothing is claimed. Not silence
+    // either: the sheet below quotes a date, and a reader is owed the fact that
+    // whose calendar it is on has not been settled.
+    ? 'Checking what time it is at the gym, before the date below is written on its calendar.'
+    : zoneUnread
+    ? 'This gym’s timezone could not be read, so the start date below is your own device’s calendar day, '
+      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set.'
+    : dayWindow.note;
+
   const load = useCallback(async () => {
     if (!tenant?.id) return;
     setReloading(true);
+    // The gym's clock, on its own try/catch. A register full of members is
+    // still worth showing to somebody whose timezone read was refused, and the
+    // sheet that writes a date says whose calendar it used.
+    try {
+      const z = await fetchGymZone(supabase, tenant.id);
+      setZone(z.zone); setZoneUnread(!!z.error);
+    } catch (e) {
+      reportError('members.zone', e);
+      setZone(null); setZoneUnread(true);
+    } finally {
+      // In a `finally`, because what this flag records is that the question was
+      // ASKED and came back — which is true of the refusal as well as of the
+      // answer. `zoneUnread` is what separates those two; this only separates
+      // both of them from "not yet".
+      setZoneRead(true);
+    }
     try {
       /**
        * ── The payments read is BOUNDED now ──────────────────────────────
@@ -147,18 +345,32 @@ export default function OwnerMembers() {
       ]);
       setPlans(p); setRows(m); setPayments(pay);
       setFailed(false);
+      setReason(null);
       setFetchedAt(Date.now());
-    } catch (e) {
+    } catch (e: any) {
       reportError('members.fetch', e);
       // NOT `setRows([])`. That flipped `loaded` true with nothing behind it,
       // so a failed read rendered as "Nobody on the register yet" over KPIs of
       // 0 active, 0 frozen, 0 payments logged — a gym owner told, in the
       // screen's own confident voice, that they have no members and have taken
-      // no money. The three reads land together or not at all, so null here
-      // covers all three, and `failed` is what separates "we could not ask"
-      // from "we asked and the register is empty".
-      setRows(null);
+      // no money. The three reads land together or not at all, so `failed` is
+      // what separates "we could not ask" from "we asked and the register is
+      // empty".
+      //
+      // And NOT `setRows(null)` either, which is what it used to do. That was
+      // right while this screen read exactly once, on mount. Pull-to-refresh
+      // made a second read routine, and a second read fails for reasons that
+      // say nothing about the register — a lift, a basement, a tunnel — so an
+      // owner who pulled down out of habit watched a correct roster empty in
+      // front of them and could no longer freeze or cancel anybody. The rows
+      // that landed are kept and labelled: `stale`, in `readState` below.
+      //
+      // `plans` and `payments` were already kept on this path. Keeping the
+      // memberships makes the three consistent — before this, a failed refresh
+      // left the price book and the takings from the earlier read on screen
+      // beside a register that had been emptied.
       setFailed(true);
+      setReason(typeof e?.message === 'string' ? e.message : null);
     } finally {
       setReloading(false);
     }
@@ -166,25 +378,97 @@ export default function OwnerMembers() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const loaded = rows !== null;
+  // `load` reads all three of this screen's sources together — plans,
+  // memberships and the thirty-day payments — so the gesture asks for all three.
+  const pull = usePullToRefresh(load);
+
+  // What this screen holds, and whether the last attempt landed — two facts,
+  // four states, src/lib/staleRead.ts. `loaded` used to be `rows !== null` and
+  // carried both.
+  const state = readState(rows, failed);
+  const loaded = hasRows(state);
   const list = rows ?? [];
   const sum = useMemo(() => summarise(payments, list, plans), [payments, list, plans]);
+  /* ── which money the recurring total is in ────────────────────────────────
+   *
+   * This hero was `money(sum.mrrCents, cur)`, where `cur` is `tenants.currency`
+   * — the gym's CURRENT setting — and `sum.mrrCents` is the prices of every
+   * active membership's plan added together with no regard to what currency
+   * each plan states. `membership_plans.currency` is `not null default 'AED'`,
+   * so a gym that has since set GBP had its legacy dirhams added to its pounds
+   * and the biggest figure on its register screen labelled GBP.
+   *
+   * `summarise` reports `mrrCurrency` for exactly this, and its own header says
+   * a caller holding a null must withhold the figure and say why. The console's
+   * /money and Overview both obey it; this screen threw it away. See
+   * src/lib/sumCurrency.ts, which is now the one place the rule is written.
+   *
+   * `mrrCents == null` means no active membership sits on a priced plan — no
+   * rows contributed, so nothing has contradicted the gym's own currency and
+   * the label stays stable under the dash the branch below prints anyway.
+   */
+  const mrrCcy = useMemo(
+    () => (sum.mrrCents == null ? emptyTotalMoney(cur) : totalMoney(sum.mrrCents, sum.mrrCurrency, cur)),
+    [sum.mrrCents, sum.mrrCurrency, cur],
+  );
 
+  /** The lens first, then the name. Both narrow, and the empty-state copy
+   *  below has to be able to say which of the two emptied the list. */
+  const inLens = useMemo(
+    () => (lens === 'all' ? list : list.filter((m) => lensMatch(lens, m, dayWindow.day))),
+    [list, lens, dayWindow.day],
+  );
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter((m) =>
+    if (!needle) return inLens;
+    return inLens.filter((m) =>
       (m.memberName ?? '').toLowerCase().includes(needle) ||
       (m.planName ?? '').toLowerCase().includes(needle));
-  }, [list, q]);
+  }, [inLens, q]);
+  /**
+   * How many are in each lens, for the chips.
+   *
+   * Counted only where there are rows to count — `fetchMemberships` is
+   * whole-or-throws (it pages with `readAll` and refuses past the page
+   * ceiling), so under `hasRows` this is the register and not a page of it.
+   * Under 'loading' or 'failed' the chips carry no numeral at all rather than
+   * a nought: nobody expiring and nobody-we-could-ask look identical as a 0,
+   * and on this screen the second one is a gym still billing people whose
+   * memberships ran out.
+   */
+  const lensCounts = useMemo(() => {
+    if (!hasRows(state)) return null;
+    return {
+      all: list.length,
+      expiring: list.filter((m) => lensMatch('expiring', m, dayWindow.day)).length,
+      overrun: list.filter((m) => lensMatch('overrun', m, dayWindow.day)).length,
+      paused: list.filter((m) => lensMatch('paused', m, dayWindow.day)).length,
+    } as Record<RosterLens, number>;
+  }, [list, state, dayWindow.day]);
 
   const frozen = list.filter((m) => m.status === 'frozen').length;
+
+  /** Who joined, who left and the churn between them, month by month — only
+   *  over rows that landed. Null under a loading or failed read: `churnMonths`
+   *  over an empty list is six months of nobody leaving, which is a clean bill
+   *  of health a refused read must never print. `nowMs` is the screen's own
+   *  ticking clock, so the month that counts as finished moves with it. */
+  const churn = useMemo(() => {
+    if (!hasRows(state)) return null;
+    const spans = memberSpans(list);
+    const months = churnMonths(spans, undatedExitCount(spans), nowMs, PHONE_MONTHS);
+    const closed = lastClosedMonth(months);
+    // Oldest first for a trend, and finished months only: the running month's
+    // leavers have not finished leaving.
+    const done = months.filter((m) => !m.running).reverse();
+    return { closed, headline: churnHeadline(closed), done };
+  }, [list, state, nowMs]);
 
   /** Look up people in this gym who could be given a membership. */
   const runSearch = async (text: string) => {
     setSearch(text);
     const needle = text.trim();
-    if (needle.length < 2 || !tenant?.id) { setFound(null); setSearchFailed(false); return; }
+    if (needle.length < 2 || !tenant?.id) { setFound(null); setSearchFailed(false); setSearchCut(false); return; }
     try {
       // supabase-js RESOLVES on a database error rather than rejecting, so
       // `error` has to be read off the result — the catch below only ever
@@ -199,32 +483,145 @@ export default function OwnerMembers() {
         .select('id, full_name')
         .eq('tenant_id', tenant.id)
         .ilike('full_name', `%${needle}%`)
-        .limit(12);
+        // ORDERED, because twelve of them are kept and the rest are dropped.
+        // Postgres promises nothing about which rows a `limit` without an
+        // `order` returns, so the same surname typed twice could hand back two
+        // different twelves — and the one the member is standing in front of
+        // you for might be in neither. An order makes the twelve at least
+        // predictable and repeatable.
+        .order('full_name', { ascending: true })
+        .limit(SEARCH_LIMIT);
       if (error) throw error;
+      // Built from the register, and the register may not have come back. See
+      // `heldKnown`: an empty `held` is not "nobody holds a membership".
       const held = new Set(list.filter((m) => m.status === 'active').map((m) => m.memberId));
-      setFound((data ?? [])
+      setHeldKnown(loaded);
+      const rows = (data ?? []) as any[];
+      // At the ceiling means there are probably more. The sentence below turns
+      // on this: "nobody matching, or everyone matching already holds an
+      // active membership" is a claim about EVERYONE matching, and it cannot be
+      // made from a truncated twelve.
+      setSearchCut(rows.length >= SEARCH_LIMIT);
+      setFound(rows
         .map((r: any) => ({ id: String(r.id), name: String(r.full_name || 'Member') }))
         .filter((c: Candidate) => !held.has(c.id)));
       setSearchFailed(false);
-    } catch (e) { reportError('members.search', e); setFound(null); setSearchFailed(true); }
+    } catch (e) { reportError('members.search', e); setFound(null); setSearchFailed(true); setSearchCut(false); }
   };
 
   const commitMembership = async () => {
     if (!picked || !tenant?.id) return;
     setBusy(true);
     try {
-      await createMembership(supabase, tenant.id, { memberId: picked.id, planId, startedOn: today() });
+      await createMembership(supabase, tenant.id, { memberId: picked.id, planId, startedOn: dayWindow.day });
       setAddOpen(false); setPicked(null); setSearch(''); setFound(null); setSearchFailed(false); setPlanId(null);
       await load();
     } catch (e) {
       reportError('members.create', e);
-      Alert.alert('Could not open that membership', 'Nothing was saved. Check your connection and try again.');
+      Alert.alert('Could Not Open That Membership', 'Nothing was saved. Check your connection and try again.');
     } finally { setBusy(false); }
+  };
+
+  /** Record the pause the owner has chosen, and the end date it pushes to. */
+  const savePause = async () => {
+    const m = freezeFor;
+    if (!m) return;
+    const refusal = freezeRefusal(fzFrom, fzTo, dayWindow.day);
+    if (refusal) { Alert.alert('Those Dates Will Not Work', refusal); return; }
+    // Computed here and written in the same update the dates go in, so the pair
+    // cannot half-apply. Null when the membership is open-ended: there is no
+    // term to extend, and inventing one would sell somebody an end date nobody
+    // agreed to.
+    //
+    // ── from the TERM, not from the row ──────────────────────────────────
+    //
+    // This was `thawedEndsOn(m.endsOn, …)`, and `m.endsOn` is not the term that
+    // was sold — it is the term with the pause ALREADY on it, because this
+    // screen put it there the last time Save Pause was pressed. This sheet
+    // seeds itself from `frozen_from` / `frozen_to`, so reopening an existing
+    // pause and saving it, changed or unchanged, added the same days a second
+    // time. A member paused 12–26 June on a membership ending 30 June correctly
+    // ran to 15 July; one further tap made it 30 July, and every tap after that
+    // another fortnight. Nothing else in this product writes `ends_on`, so
+    // nothing would ever have contradicted it.
+    //
+    // `unpausedEndsOn` takes the recorded pause back off first, so the arithmetic
+    // is always base-term plus the pause now being saved — which REPLACES the old
+    // one rather than compounding with it, and shrinks the end date correctly
+    // when the owner shortens a pause. See its header, and the header of
+    // `setMembershipFreeze` in src/lib/gymRecord.ts, which says the shift is
+    // applied once and leaves this screen to hold the line.
+    const base = unpausedEndsOn({ endsOn: m.endsOn, frozenFrom: m.frozenFrom, frozenTo: m.frozenTo });
+    const moved = thawedEndsOn(base, { from: fzFrom, to: fzTo });
+    setFzBusy(true);
+    try {
+      await setMembershipFreeze(supabase, m.id, fzFrom, fzTo, moved ?? undefined);
+      await load();
+      setFreezeFor(null);
+      setFzFrom(''); setFzTo('');
+    } catch (e) {
+      reportError('members.freeze', e);
+      Alert.alert('Not Paused',
+        (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.');
+    } finally { setFzBusy(false); }
+  };
+
+  /** Lift a pause recorded in error. Leaves the end date where it is — the days
+   *  were given back when it was recorded, and taking them away again on a
+   *  correction is not something to do silently. */
+  const liftPause = (m: Membership) => {
+    Alert.alert('Remove This Pause?', 'The end date stays where it is. If the pause was recorded by mistake, set the end date back yourself.', [
+      { text: 'Keep It', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        try { await setMembershipFreeze(supabase, m.id, null, null); await load(); }
+        catch (e) {
+          reportError('members.unfreeze', e);
+          Alert.alert('Not Removed', (e instanceof Error && e.message) || 'Nothing was changed.');
+        }
+      } },
+    ]);
+  };
+
+  /**
+   * Write the corrected dates, or say why nothing was written.
+   *
+   * `setMembershipDates` takes a present-or-absent patch and RETURNS on an
+   * empty one — without writing, and without throwing. So the patch is built
+   * first and a null one never reaches it: a sheet that closed on "it did not
+   * throw" would show the owner the same wrong start date back, with a
+   * successful save behind it. The Save control is disabled on the same value,
+   * so in normal running this guard is unreachable; it is here because the one
+   * thing that must not happen is this call site reporting a write it did not
+   * make.
+   */
+  const saveDates = async () => {
+    const m = datesFor;
+    if (!m) return;
+    const next = { startedOn: dtFrom, endsOn: dtTo || null };
+    const refusal = datesRefusal(next);
+    if (refusal) { Alert.alert('Those Dates Will Not Work', refusal); return; }
+    const patch = datesPatch({ startedOn: m.startedOn, endsOn: m.endsOn }, next);
+    if (!patch) { Alert.alert('Nothing to Save', 'These are the dates this membership already has.'); return; }
+    setDtBusy(true);
+    try {
+      await setMembershipDates(supabase, m.id, patch);
+      await load();
+      setDatesFor(null);
+      setDtFrom(''); setDtTo('');
+    } catch (e) {
+      // The row count is checked one layer down, so a refusal by
+      // `memberships_owner` arrives here as a thrown error rather than as a
+      // silent 204 that leaves the typed dates on screen looking saved.
+      reportError('members.dates', e);
+      Alert.alert('Dates Not Saved',
+        (e instanceof Error && e.message)
+        || `Nothing was changed. This membership still starts ${m.startedOn}. Check your connection and try again.`);
+    } finally { setDtBusy(false); }
   };
 
   const changeStatus = (m: Membership, next: MembershipStatus) => {
     const verb = next === 'frozen' ? 'Freeze' : next === 'cancelled' ? 'Cancel' : 'Reactivate';
-    Alert.alert(`${verb} this membership?`, `${m.memberName ?? 'This member'} · ${m.planName ?? 'no plan'}`, [
+    Alert.alert(`${verb} This Membership?`, `${m.memberName ?? 'This member'} · ${m.planName ?? 'no plan'}`, [
       { text: 'Back', style: 'cancel' },
       { text: verb, style: next === 'cancelled' ? 'destructive' : 'default', onPress: async () => {
         // The failure was silent before this: `setMembershipStatus` could not
@@ -238,13 +635,24 @@ export default function OwnerMembers() {
         catch (e) {
           reportError('members.status', e);
           Alert.alert(
-            `Could not ${verb.toLowerCase()} that membership`,
+            `Could Not ${verb} That Membership`,
             (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.',
           );
         }
       } },
     ]);
   };
+
+  /**
+   * Whether Record payment may act, named once.
+   *
+   * It was spelled out three times in the sheet below — in `disabled`, in the
+   * fill colour and in the ink colour — and the third copy had dropped `cur`,
+   * so a gym that has not set a currency drew brand-coloured text on a disabled
+   * grey button. Three copies of a condition is how one of them comes to
+   * disagree, and the one that disagreed was the one a person looks at.
+   */
+  const payReady = !!amount.trim() && !busy && !!cur;
 
   const commitPayment = async () => {
     if (!payFor || !tenant?.id) return;
@@ -254,8 +662,31 @@ export default function OwnerMembers() {
     // and the one thing that must never happen is this call site inventing one
     // to satisfy the type.
     if (!cur) return;
-    const major = parseFloat(amount.replace(/,/g, ''));
-    if (!Number.isFinite(major) || major <= 0) return;
+    // ── the hundred that is not a hundred everywhere ─────────────────────
+    //
+    // This was `parseFloat` and then `Math.round(major * 100)` on the write.
+    // Two decimal places is right for a sterling gym and wrong for a third of
+    // the currencies this product supports: a Tokyo gym taking ¥5,000 at the
+    // desk wrote 500,000 minor units — ¥500,000 — into its own ledger, and a
+    // Kuwaiti gym's 82.500 was stored as 8.250 KWD, wrong by a factor of ten in
+    // the direction nobody notices.
+    //
+    // `readMinorAmount` takes the decimal places from the currency, refuses a
+    // thousands separator rather than guessing which side of the Channel the
+    // typist grew up on, and refuses a third decimal place rather than rounding
+    // it. It is the one reader for a typed amount in this product; this was the
+    // last write that did its own arithmetic.
+    //
+    // Not a render bug. A figure drawn wrong is embarrassing and a figure
+    // WRITTEN wrong is a gym's takings, and nothing downstream can recover it.
+    // NOT a charge. This is the desk writing down money that has already been
+    // handed over, and Stripe is nowhere in the transaction. A member paying
+    // 82.505 KWD in notes was refused here by Stripe's whole-ten rule, and the
+    // only way forward was to record an amount nobody paid.
+    const read = readMinorAmount(amount, cur, false);
+    if (!read.ok) { setPayErr(read.reason); return; }
+    const minorUnits = read.minorUnits;
+    if (minorUnits <= 0) { setPayErr('A payment has to be for more than nothing.'); return; }
     setBusy(true);
     try {
       // The currency goes with the amount, and it is the gym's own or nothing.
@@ -268,7 +699,7 @@ export default function OwnerMembers() {
       // label is what makes the owner confident.
       await recordPayment(supabase, tenant.id, {
         memberId: payFor.memberId,
-        amountCents: Math.round(major * 100),
+        amountCents: minorUnits,
         method,
         takenAt: new Date().toISOString(),
         currency: cur,
@@ -277,7 +708,7 @@ export default function OwnerMembers() {
       await load();
     } catch (e) {
       reportError('members.payment', e);
-      Alert.alert('Payment not recorded', 'Nothing was saved. Check your connection and try again.');
+      Alert.alert('Payment Not Recorded', 'Nothing was saved. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
@@ -291,37 +722,116 @@ export default function OwnerMembers() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Members</Text>
-        </View>
+        <PageHead title="Members" />
 
-        {/* When the register was read, whether this phone can reach us, and a
-            way to ask again. An owner at a desk in a basement was reading a
-            roster with nothing on the page saying how old it was. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} style={{ marginTop: 0, marginBottom: sp.md }} />
+        {/* One caveat for the whole screen, because staleness is a fact about
+            the read and every figure below comes off the same read. Said here
+            rather than repeated into each note: three copies of "not confirmed
+            current" is how the three come to disagree.
 
-        <Hero
-          label="Recurring Revenue (monthly)"
-          figure={money(sum.mrrCents, cur) ?? "—"}
-          note={failed
-            ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'
-            : sum.mrrCents != null && !cur
+            `warn`, not `crit`. The rows below are real and complete; what
+            failed is the attempt to confirm them, and a red mark over a correct
+            register is the boy who cried wolf on the one screen an owner uses
+            to cancel somebody's billing. */}
+        {state === 'stale' ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{staleNote('register', reason)}</Flag>
+        ) : null}
+
+        {/* The figure as a card, the way the coach's Payments card leads with
+            its own — the kit's bare `Hero` was the one block here the board
+            does not draw. */}
+        {(() => {
+          // A figure only where there are rows behind it. `summarise` over three
+          // empty arrays returns a null MRR today, so this was already a dash
+          // under a failed read — by arithmetic rather than on purpose, which is
+          // one refactor of `summarise` away from printing a confident 0.
+          const figure = hasRows(state) ? (money(sum.mrrCents, mrrCcy.currency) ?? '—') : '—';
+          const note = state === 'failed'
+            ? failedNote('register', reason)
+            : state === 'loading'
+            ? 'Reading your register…'
+            : mrrCcy.gap === 'unstated'
+            // The plans this total is made of are not all in one money. Adding
+            // them was never a sum, and the previous version of this line put
+            // the result under whichever code the gym had set most recently.
+            ? MIXED_CURRENCY_NOTE
+            : sum.mrrCents != null && mrrCcy.gap === 'no_gym_currency'
             // The figure is known and the money it is in is not. Printing it
             // bare would be read in whatever currency the owner is thinking in,
             // which is the same wrong number with fewer clues.
             ? 'This gym has not set its currency, so a recurring total cannot be written down. An owner sets it in Ops.'
             : sum.mrrCents == null
-            ? loaded && list.length === 0
+            ? canSayEmpty(state) && list.length === 0
               ? 'No memberships on the register yet.'
-              : 'No active membership sits on a priced plan, so this is not known — which is not the same as nothing.'
-            : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`}
-        />
+              : 'No active membership sits on a priced plan, so this is not known, which is not the same as nothing.'
+            : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`;
+          return (
+            <Section>
+              <SectionHead title="Recurring Revenue · Monthly" />
+              {/* One spoken sentence over label, figure and note, as the Hero
+                  grouped them. A money figure is shrunk to fit and never
+                  wrapped: broken across two lines it is a different number. */}
+              <View accessible accessibilityLabel={`Recurring revenue, monthly, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+              {/* The membership mix, under the money it explains: every
+                  membership on the register by the status the door reads.
+                  Slices only over rows that landed — under a loading or failed
+                  read it is the grey track and four dashes, never an even
+                  split and never four noughts. A stale register still draws:
+                  those rows are real, and the flag above says what is not. */}
+              {(() => {
+                const known = hasRows(state);
+                const slices = (['active', 'frozen', 'expired', 'cancelled'] as const).map((st) => {
+                  const n = known ? list.filter((m) => m.status === st).length : null;
+                  return { label: STATUS_LABEL[st], value: n, tone: STATUS_TONE[st], shown: n == null ? null : num(n) };
+                });
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap', marginTop: sp.lg }}>
+                    <Donut slices={slices} centre={known ? num(list.length) : null} sub={list.length === 1 ? 'membership' : 'memberships'}
+                      spoken={known
+                        ? `Membership mix. ${slices.map((x) => `${x.label}, ${x.shown}`).join('. ')}`
+                        : 'Membership mix, not read'} />
+                    <Legend items={slices} />
+                  </View>
+                );
+              })()}
+            </Section>
+          );
+        })()}
 
-        <Rule />
+        {/* ── who stayed: the last finished month, as tiles on the ground ───
+            Churn amber, joiners in the accent, leavers red, each over its own
+            finished months — real history, because a membership carries the
+            day it started and the day it ended. Withheld figures keep their
+            reason on the page: `churnHeadline` writes one for every month it
+            refuses a rate for, and it is printed under the tiles. */}
+        <KpiRow tiles items={[
+          { label: churn?.headline.label ? `Churn · ${churn.headline.label}` : 'Churn', tone: 'amber',
+            value: fig(churn?.headline.pct ?? null), unit: churn?.headline.pct == null ? undefined : '%',
+            trend: churn ? churn.done.map((m) => m.churn) : undefined },
+          { label: 'Joined', tone: 'brand', value: churn?.closed ? num(churn.closed.joined) : '—',
+            delta: churn?.closed?.label, trend: churn ? churn.done.map((m) => m.joined) : undefined },
+          { label: 'Left', tone: 'red', value: churn?.closed ? num(churn.closed.left) : '—',
+            delta: churn?.closed?.label, trend: churn ? churn.done.map((m) => m.left) : undefined },
+        ]} />
+        {churn && churn.headline.pct == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {`Churn: ${churn.headline.note}.`}
+          </Text>
+        ) : null}
+
+        {/* When the register was read, whether this phone can reach us, and a
+            way to ask again. An owner at a desk in a basement was reading a
+            roster with nothing on the page saying how old it was. Under the
+            figure rather than over it, so the first viewport is the register
+            and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} />
+
 
         <Section>
           <SectionHead title="The Register" />
@@ -335,10 +845,60 @@ export default function OwnerMembers() {
           ]} />
         </Section>
 
-        <Rule />
 
         <Section>
-          <SectionHead title={loaded && list.length ? `Memberships · ${list.length}` : 'Memberships'} />
+          {/* The heading counts the REGISTER and the note counts what is on
+              screen. With a lens on, "Memberships · 412" over six rows is true
+              and incomplete; the note is the half that says which six. */}
+          <SectionHead
+            title={loaded && list.length ? `Memberships · ${num(list.length)}` : 'Memberships'}
+            note={loaded && list.length && (lens !== 'all' || q.trim()) ? `${num(shown.length)} Shown` : undefined}
+          />
+
+          {/* ── the three questions, above the name box ────────────────────
+              A name search is for somebody who already knows the name. These
+              are what an owner actually opens the register to ask, and the
+              rows have always carried the answers — nothing here is a new read
+              or a new column. `lensMatch` in src/lib/membershipDates.ts is
+              where each one is defined.
+
+              'Ran out' is the one worth naming twice: supabase/parts/2616 is
+              deliberate that nothing flips `status` at midnight, so a term
+              that ended in June sits beside a status of Active and the
+              turnstile reads the status. `datesNotes` has always said that to
+              an owner who happened to open the dates sheet on the right
+              person. Until now nothing anywhere let them find those people. */}
+          {loaded && list.length > 0 ? (
+            <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
+              {(
+                [
+                  ['all', 'Everyone', 'Every membership on the register'],
+                  ['expiring', `Renewing · ${EXPIRING_DAYS}d`, `Memberships running out in the next ${EXPIRING_DAYS} days`],
+                  ['overrun', 'Ran Out', 'Memberships whose end date has passed and that the door still lets through'],
+                  ['paused', 'Paused', 'Memberships with a pause recorded that has not finished'],
+                ] as const
+              ).map(([key, label, hint]) => {
+                const on = lens === key;
+                // A count only where there are rows behind it. Null under a
+                // read that has not landed — the chip keeps its word and drops
+                // its numeral, rather than offering a 0 that reads as an
+                // all-clear.
+                const n = lensCounts ? lensCounts[key] : null;
+                return (
+                  <Pressable key={key} onPress={() => setLens(key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={n == null ? label : `${label}, ${num(n)}`}
+                    accessibilityHint={hint}
+                    accessibilityState={{ selected: on }}
+                    style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>
+                      {label}{n == null ? '' : ` · ${num(n)}`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
           {loaded && list.length > 0 ? (
             <TextInput
@@ -350,11 +910,26 @@ export default function OwnerMembers() {
             />
           ) : null}
 
-          {failed ? (
+          {/* What the lens means, where it is not self-evident and where
+              somebody is about to act on it. Said under the chips rather than
+              in them: a chip is a word and this is a consequence. */}
+          {loaded && list.length > 0 && lens === 'overrun' && (lensCounts?.overrun ?? 0) > 0 ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              These memberships have an end date that has already passed and a status the door
+              still reads as live, because nothing in this product closes a membership at
+              midnight. Cancel the ones that are over, or correct the end date on the ones that
+              are not. An end date on its own changes nothing.
+            </Flag>
+          ) : null}
+
+          {/* `state === 'failed'`, not `failed`. This branch is for a screen
+              holding nothing; a failed refresh over rows that did land is
+              'stale', keeps the list below, and is said once at the top.
+              The old wording — "this screen simply has nothing to show you" —
+              was true of both and is only true of this one. */}
+          {state === 'failed' ? (
             <Flag tone={t.crit}>
-              The register could not be read. Nobody has been removed and no membership has
-              lapsed — this screen simply has nothing to show you. Check your connection and try
-              again.
+              {failedNote('register', reason)} Check your connection and try again.
             </Flag>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
@@ -370,13 +945,26 @@ export default function OwnerMembers() {
                which is a true thing to say and a different thing. */
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody on the register yet. Open a membership for someone who already has a Repple
-              account — a membership has to point at a real account, so somebody who has never
+              account. A membership has to point at a real account, so somebody who has never
               used the app is invited rather than imported.
             </Text>
           ) : shown.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No membership matches “{q.trim()}”.</Text>
+            /* Which of the two narrowings emptied it. "No membership matches"
+               over an empty Ran-out lens would read as "nobody by that name",
+               and an owner who had typed nothing would be told their search
+               found nothing. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {inLens.length === 0
+                ? lens === 'expiring'
+                  ? `Nobody's membership runs out in the next ${EXPIRING_DAYS} days.`
+                  : lens === 'overrun'
+                  ? 'Nobody is training on a membership whose end date has passed.'
+                  : lens === 'paused'
+                  ? 'Nobody is paused, and no pause is booked.'
+                  : 'No membership matches “' + q.trim() + '”.'
+                : `No membership here matches “${q.trim()}”. Tap Everyone to search the whole register.`}
+            </Text>
           ) : shown.map((m, i) => {
-            const tone = STATUS_TONE(t, m.status);
             const live = m.status === 'active' || m.status === 'frozen';
             return (
               <View key={m.id}>
@@ -384,7 +972,7 @@ export default function OwnerMembers() {
                 <View style={{ paddingVertical: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>
                         {m.memberName ?? 'Member'}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -392,29 +980,92 @@ export default function OwnerMembers() {
                         {m.endsOn ? ` · ends ${m.endsOn}` : ''}
                       </Text>
                     </View>
-                    <View style={{ borderWidth: hairline, borderColor: tone, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2 }}>
-                      <Text style={{ ...ty.micro, color: tone }}>{STATUS_LABEL[m.status]}</Text>
-                    </View>
+                    <View><TonedChip label={STATUS_LABEL[m.status]} tone={STATUS_TONE[m.status]} /></View>
                   </View>
+                  {/* The pause, in words, on every row that has one. An
+                      unreadable pause says so rather than saying nothing:
+                      whether somebody can get in on Tuesday is not a thing to
+                      be quiet about. */}
+                  {(() => {
+                    const st = freezeState({ from: m.frozenFrom, to: m.frozenTo }, dayWindow.day);
+                    if (st === 'none') return null;
+                    const days = frozenDays({ from: m.frozenFrom, to: m.frozenTo });
+                    const line = freezeLine(st, {
+                      from: m.frozenFrom, to: m.frozenTo, days,
+                      // Already written into `endsOn` when the owner accepted
+                      // it, so the sentence names where it ALREADY runs to
+                      // rather than promising a move a second time.
+                      newEndsOn: null,
+                    });
+                    if (!line) return null;
+                    return (
+                      <Text style={{ ...ty.caption, color: st === 'unreadable' ? t.ink2 : t.ink3, marginTop: sp.sm }}>
+                        {line}
+                        {/* The one disagreement worth naming on the row: the
+                            dates say paused and the door still says active.
+                            supabase/parts/2616 is deliberate about not
+                            changing the status at midnight, so somebody has to
+                            be told when the two differ. */}
+                        {st === 'frozen' && m.status === 'active'
+                          ? ' The status still says active, so they can still get in.'
+                          : ''}
+                      </Text>
+                    );
+                  })()}
 
                   <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                     <Pressable onPress={() => { setPayFor(m); setAmount(''); }} hitSlop={6}
                       accessibilityRole="button" accessibilityLabel={`Take a payment from ${m.memberName ?? 'this member'}`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Take payment</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Take Payment</Text>
                     </Pressable>
                     {m.status === 'active' ? (
                       <Pressable onPress={() => changeStatus(m, 'frozen')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Freeze membership"
                         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Freeze</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Freeze</Text>
                       </Pressable>
                     ) : null}
+                    {/* Dates, which is the half the status flip never had. Kept
+                        as its own control rather than folded into Freeze: the
+                        status is what the door reads TODAY and the dates are
+                        what happens by itself, and an owner may well want one
+                        without the other. */}
+                    <Pressable
+                      onPress={() => {
+                        setFreezeFor(m);
+                        setFzFrom(m.frozenFrom ?? '');
+                        setFzTo(m.frozenTo ?? '');
+                      }}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set pause dates for ${m.memberName ?? 'this membership'}`}
+                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
+                        {m.frozenFrom ? 'Pause Dates' : 'Pause Dates…'}
+                      </Text>
+                    </Pressable>
+                    {/* The dates the membership RUNS between, which is a
+                        different question from the days it is paused for and a
+                        different one again from what the door reads today. A
+                        migrated roster is corrected here. */}
+                    <Pressable
+                      onPress={() => {
+                        setDatesFor(m);
+                        setDtFrom(m.startedOn ?? '');
+                        setDtTo(m.endsOn ?? '');
+                      }}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Correct the dates on ${m.memberName ?? 'this'} membership`}
+                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Correct Dates</Text>
+                    </Pressable>
                     {m.status === 'frozen' ? (
                       <Pressable onPress={() => changeStatus(m, 'active')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Reactivate membership"
                         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Reactivate</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Reactivate</Text>
                       </Pressable>
                     ) : null}
                     {live ? (
@@ -427,7 +1078,7 @@ export default function OwnerMembers() {
                             needs 3:1 and clears it everywhere. Destructive intent is not lost
                             — the confirm step is what actually carries it. */}
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Cancel</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>Cancel</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -448,103 +1099,371 @@ export default function OwnerMembers() {
       {/* ── open a membership ─────────────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Open a Membership</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              Find someone in your gym who does not already hold an active membership.
-            </Text>
-
-            <Text style={lab}>Member</Text>
-            {picked ? (
-              <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
-                <Icon name="check" size={16} color={t.brand} />
-                <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{picked.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>change</Text>
-              </Pressable>
-            ) : (
-              <>
-                <TextInput value={search} onChangeText={runSearch} autoFocus
-                  placeholder="Type at least two letters of their name"
-                  placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
-                {searchFailed ? (
-                  <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-                    The lookup failed, so this cannot tell you whether they have an account. Do
-                    not read it as “not found” — check your connection and type the name again.
-                  </Flag>
-                ) : found !== null ? (
-                  found.length === 0 ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      Nobody matching, or everyone matching already holds an active membership.
-                    </Text>
-                  ) : (
-                    <View style={{ marginTop: sp.sm, maxHeight: 190 }}>
-                      <ScrollView keyboardShouldPersistTaps="handled">
-                        {found.map((c, i) => (
-                          <Pressable key={c.id} onPress={() => setPicked(c)}
-                            style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.surface3 }}>
-                            <Text style={{ ...ty.body, color: t.ink }}>{c.name}</Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )
-                ) : null}
-              </>
-            )}
-
-            <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
-            {failed && plans.length === 0 ? (
-              // The price book rides on the same read as the register, so when
-              // that read failed there is no basis for "no plans set up yet" —
-              // an owner who has plans would be told they have none and open
-              // the membership unpriced, which is how a paying member ends up
-              // contributing nothing to MRR.
-              <Flag tone={t.crit}>
-                Your plans could not be read, so none can be offered here. Opening a membership
-                now would leave it with no plan attached even if you have one.
-              </Flag>
-            ) : plans.length === 0 ? (
-              <Text style={{ ...ty.caption, color: t.ink3 }}>
-                No plans set up yet. The membership can still be opened without one — recurring
-                revenue will read as a dash until a priced plan is attached.
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* The state this sheet is in while it is being used — search field
+                focused, keyboard up, the 190pt results list showing — is taller than
+                the window, and "Open membership" sat under the bottom of it. The
+                results list keeps its own scroller inside this one; it is capped at
+                190pt so the two do not fight over the same gesture. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Open a Membership</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                Find someone in your gym who does not already hold an active membership.
               </Text>
-            ) : (
-              <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
-                {plans.filter((p) => p.active).map((p) => {
-                  const on = planId === p.id;
-                  return (
-                    <Pressable key={p.id} onPress={() => setPlanId(on ? null : p.id)}
-                      style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
-                        {p.name} · {money(p.priceCents, p.currency) ?? '—'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
 
-            <View style={{ marginTop: sp.lg }}>
-              <Pressable disabled={!picked || busy} onPress={commitMembership}
-                style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: picked && !busy ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Opening…' : 'Open membership'}
+              {/* The start date this sheet is about to write, and whose calendar
+                  it is. Said here rather than nowhere: the date never appeared on
+                  screen at all, and it is the date the billing anniversary falls
+                  on for as long as the membership runs. Nothing is drawn when the
+                  gym has set a zone and it was read — there is no disclosure to
+                  make then. */}
+              {clockNote ? (
+                <View style={{ marginBottom: sp.lg }}>
+                  <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day}. ${clockNote}`}</Flag>
+                </View>
+              ) : null}
+
+              <Text style={lab}>Member</Text>
+              {picked ? (
+                <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
+                  <Icon name="check" size={16} color={t.brand} />
+                  <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{picked.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>change</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <TextInput value={search} onChangeText={runSearch} autoFocus
+                    placeholder="Type at least two letters of their name"
+                    placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
+                  {searchFailed ? (
+                    <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+                      The lookup failed, so this cannot tell you whether they have an account. Do
+                      not read it as “not found”. Check your connection and type the name again.
+                    </Flag>
+                  ) : found !== null ? (
+                    <>
+                    {/* The register is what says who already holds a membership,
+                        and it is a different read from the lookup above. Said
+                        here, beside the names, because this is where the owner
+                        decides — and because without it the names read as a
+                        checked list rather than an unchecked one. */}
+                    {!heldKnown ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        Your membership register could not be read, so nobody below has been checked
+                        against it. Anyone here may already hold an active membership, and opening
+                        one now would be a second. Pull down on the register behind this sheet and
+                        try again before adding anybody.
+                      </Flag>
+                    ) : null}
+                    {found.length === 0 ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        {!heldKnown
+                          // The half of the sentence that is a claim about the
+                          // register is dropped, because the register was not
+                          // read. What is left is the half the lookup can
+                          // actually support.
+                          ? 'Nobody matching that name.'
+                          : searchCut
+                          ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership, which is not the same as everyone who matches. Type more of the name.`
+                          : 'Nobody matching, or everyone matching already holds an active membership.'}
+                      </Text>
+                    ) : (
+                      <View style={{ marginTop: sp.sm, maxHeight: 190 }}>
+                        {/* Said above the list rather than under it, because the
+                            list scrolls and this is the part that stops somebody
+                            concluding a name is not in the gym. */}
+                        {searchCut ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                            The first {SEARCH_LIMIT} matches, in name order. There are more. If the person
+                            you want is not here, type more of their name.
+                          </Text>
+                        ) : null}
+                        <ScrollView keyboardShouldPersistTaps="handled">
+                          {found.map((c, i) => (
+                            <Pressable key={c.id} onPress={() => setPicked(c)}
+                              style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.surface3 }}>
+                              <Text style={{ ...ty.body, color: t.ink }}>{c.name}</Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+                    </>
+                  ) : null}
+                </>
+              )}
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
+              {/* Gated on 'failed' rather than on `failed`: a stale screen has
+                  the price book from the earlier read and can offer it. An owner
+                  who pulled to refresh in a lift should not then be told their
+                  plans are unreadable while they are listed two lines down. */}
+              {state === 'failed' && plans.length === 0 ? (
+                // The price book rides on the same read as the register, so when
+                // that read failed there is no basis for "no plans set up yet" —
+                // an owner who has plans would be told they have none and open
+                // the membership unpriced, which is how a paying member ends up
+                // contributing nothing to MRR.
+                <Flag tone={t.crit}>
+                  Your plans could not be read, so none can be offered here. Opening a membership
+                  now would leave it with no plan attached even if you have one.
+                </Flag>
+              ) : plans.length === 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  No plans set up yet. The membership can still be opened without one; recurring
+                  revenue will read as a dash until a priced plan is attached.
                 </Text>
-              </Pressable>
-              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
-            </View>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
+                  {plans.filter((p) => p.active).map((p) => {
+                    const on = planId === p.id;
+                    return (
+                      <Pressable key={p.id} onPress={() => setPlanId(on ? null : p.id)}
+                        style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
+                        <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>
+                          {p.name} · {money(p.priceCents, p.currency) ?? '—'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={{ marginTop: sp.lg }}>
+                {/* Disabled by colour only, and colour is the one thing a screen
+                    reader does not get: this read as an ordinary "Open
+                    membership" button whether or not anybody had been picked, and
+                    a double-tap did nothing and said nothing. See src/lib/a11y.ts
+                    and the `Cta` in src/ui/kit.tsx, which announces its own
+                    disabled state; these three hand-rolled sheet buttons in the
+                    owner app were the ones that did not. */}
+                <Pressable disabled={!picked || busy} onPress={commitMembership}
+                  accessibilityRole="button"
+                  accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open Membership'}
+                  accessibilityState={{ disabled: !picked || busy, busy }}
+                  accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
+                  style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: picked && !busy ? t.brandInk : t.ink3 }}>
+                    {busy ? 'Opening…' : 'Open Membership'}
+                  </Text>
+                </Pressable>
+                <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── the dates a membership is paused for ──────────────────────────── */}
+      <Modal visible={!!freezeFor} transparent animationType="slide" onRequestClose={() => setFreezeFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFreezeFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
+          {freezeFor ? (<>
+            <Text style={{ ...ty.head, color: t.ink }}>Pause This Membership</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+              {freezeFor.memberName ?? 'This member'} · {freezeFor.planName ?? 'no plan'}. The days are added back on
+              the end, so they get the time they paid for.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: sp.md }}>
+              {([['from', 'FIRST DAY', fzFrom], ['to', 'LAST DAY', fzTo]] as const).map(([which, label, val]) => (
+                <Pressable key={which} onPress={() => setFzPicking(which)} disabled={fzBusy}
+                  accessibilityRole="button" accessibilityLabel={`${label}${val ? `, ${val}` : ', not chosen yet'}`}
+                  style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: fzBusy ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+                  <Text style={{ ...ty.body, color: val ? t.ink : t.ink3, marginTop: 2 }}>{val || 'Choose'}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {/* What the owner is accepting, before they accept it. An end date
+                that moves without being shown is a term somebody changed
+                silently. */}
+            {(() => {
+              const days = frozenDays({ from: fzFrom, to: fzTo });
+              // The SAME arithmetic `savePause` will do, off the same base — a
+              // preview computed differently from the write is worse than no
+              // preview, because the owner accepts the one they were shown.
+              const base = unpausedEndsOn({
+                endsOn: freezeFor.endsOn, frozenFrom: freezeFor.frozenFrom, frozenTo: freezeFor.frozenTo,
+              });
+              const moved = thawedEndsOn(base, { from: fzFrom, to: fzTo });
+              // Days already given back by the pause recorded on this row, which
+              // this save REPLACES rather than adds to. Said out loud whenever
+              // there is one, because the end date can come back SHORTER than it
+              // is now and an owner who is not told will read that as a bug.
+              const had = freezeFor.frozenFrom || freezeFor.frozenTo
+                ? frozenDays({ from: freezeFor.frozenFrom, to: freezeFor.frozenTo })
+                : null;
+              if (days == null) return null;
+              return (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                  {days === 1 ? '1 day' : `${days} days`} paused.{' '}
+                  {moved
+                    ? moved === freezeFor.endsOn
+                      ? `The end date stays at ${moved}.`
+                      : `The end date moves from ${freezeFor.endsOn} to ${moved}.`
+                    : base == null && freezeFor.endsOn
+                    // An end date that is there and cannot be read is not an
+                    // open-ended membership, and calling it one would tell an
+                    // owner their member has no term at all.
+                    ? 'The end date on this membership could not be read, so this app cannot say where it moves to. Ask before relying on it.'
+                    : 'This membership has no end date, so there is nothing to extend. It simply does not run on those days.'}
+                  {had != null
+                    ? ` This replaces the pause already recorded here, so the ${had === 1 ? 'day it gave' : `${had} days it gave`} back ${had === 1 ? 'is' : 'are'} taken off first rather than kept on top.`
+                    : ''}
+                </Text>
+              );
+            })()}
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+              <View style={{ flex: 1 }}>
+                <Cta wide label={fzBusy ? 'Saving…' : 'Save Pause'} disabled={fzBusy}
+                  onPress={() => { void savePause(); }} />
+              </View>
+              {freezeFor.frozenFrom ? (
+                <Ghost label="Remove" a11yLabel="Remove this pause"
+                  onPress={() => { const m = freezeFor; setFreezeFor(null); liftPause(m); }} />
+              ) : null}
+            </View>
+          </>) : null}
+        </View>
+      </Modal>
+
+      {/* Outside the modal above: a Modal inside a Modal is the one arrangement
+          iOS will not reliably present. Same reason as app/(client)/standing.tsx. */}
+      <DateSheet
+        visible={fzPicking != null}
+        value={fzPicking === 'to' ? fzTo : fzFrom}
+        fallback={fzPicking === 'to' ? (fzFrom || null) : null}
+        heading={fzPicking === 'to' ? 'Last Day of the Pause' : 'First Day of the Pause'}
+        note={fzPicking === 'to'
+          ? 'The last day they cannot train. It runs again the day after.'
+          : 'The first day the membership does not run.'}
+        onCancel={() => setFzPicking(null)}
+        onPick={(iso) => {
+          if (fzPicking === 'to') setFzTo(iso);
+          else {
+            setFzFrom(iso);
+            // A first day after the last one leaves a backwards range in two
+            // filled-looking fields, and the owner would meet a refusal about a
+            // mistake the app watched them make.
+            if (fzTo && fzTo < iso) setFzTo('');
+          }
+          setFzPicking(null);
+        }}
+      />
+
+      {/* ── the dates a membership runs between ───────────────────────────── */}
+      <Modal visible={!!datesFor} transparent animationType="slide" onRequestClose={() => setDatesFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDatesFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
+          {datesFor ? (() => {
+            const term = {
+              startedOn: datesFor.startedOn, endsOn: datesFor.endsOn,
+              frozenFrom: datesFor.frozenFrom, frozenTo: datesFor.frozenTo,
+              status: datesFor.status,
+            };
+            const next = { startedOn: dtFrom, endsOn: dtTo || null };
+            const refusal = datesRefusal(next);
+            const patch = datesPatch({ startedOn: datesFor.startedOn, endsOn: datesFor.endsOn }, next);
+            const notes = datesNotes(term, next, dayWindow.day);
+            const stored = termLine(term);
+            return (<>
+              <Text style={{ ...ty.head, color: t.ink }}>Correct These Dates</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                {datesFor.memberName ?? 'This member'} · {datesFor.planName ?? 'no plan'}.
+                {/* What is stored right now, said before it is replaced. The
+                    fields below are already seeded with it, and a field is a
+                    poor record of what it used to hold. */}
+                {stored ? ` Recorded as ${stored}.` : ' The start date on this membership cannot be read.'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.md }}>
+                {([['from', 'STARTED', dtFrom], ['to', 'ENDS', dtTo]] as const).map(([which, label, val]) => (
+                  <Pressable key={which} onPress={() => setDtPicking(which)} disabled={dtBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label === 'STARTED' ? 'The day this membership began' : 'The day it ends, if it does'}${val ? `, ${val}` : ', not set'}`}
+                    accessibilityState={{ disabled: dtBusy }}
+                    style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: dtBusy ? 0.5 : 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+                    <Text style={{ ...ty.body, color: val ? t.ink : t.ink3, marginTop: 2 }}>
+                      {val || (which === 'to' ? 'Open-ended' : 'Choose')}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              {/* Clearing the end date is the only way to say "this runs until
+                  somebody stops it", and a calendar grid has no cell for that.
+                  It is a state the schema has always had and is not the same as
+                  expired. */}
+              {dtTo ? (
+                <Pressable onPress={() => setDtTo('')} disabled={dtBusy} hitSlop={6}
+                  accessibilityRole="button" accessibilityLabel="Clear the end date, so this membership runs until somebody stops it"
+                  accessibilityState={{ disabled: dtBusy }}
+                  style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>No End Date</Text>
+                </Pressable>
+              ) : null}
+
+              {/* Said before the save, because afterwards there is nothing left
+                  to notice. Each of these is a consequence neither field can
+                  show. */}
+              {notes.map((n) => (
+                <Text key={n} style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{n}</Text>
+              ))}
+              {refusal ? (
+                <View style={{ marginTop: sp.md }}><Flag tone={t.warn}>{refusal}</Flag></View>
+              ) : !patch ? (
+                /* Not an error, and not silence either. `setMembershipDates`
+                   answers an empty patch by returning, so a Save that ran here
+                   would look exactly like a successful one. */
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  These are the dates this membership already has.
+                </Text>
+              ) : null}
+
+              <View style={{ marginTop: sp.lg }}>
+                <Cta wide label={dtBusy ? 'Saving…' : 'Save Dates'} disabled={dtBusy || !!refusal || !patch}
+                  onPress={() => { void saveDates(); }} />
+              </View>
+            </>);
+          })() : null}
+        </View>
+      </Modal>
+
+      {/* Outside the modal above, for the reason the pause picker is: iOS will
+          not reliably present a Modal inside a Modal. */}
+      <DateSheet
+        visible={dtPicking != null}
+        value={dtPicking === 'to' ? dtTo : dtFrom}
+        fallback={dtPicking === 'to' ? (dtFrom || null) : null}
+        heading={dtPicking === 'to' ? 'The Day This Membership Ends' : 'The Day This Membership Began'}
+        note={dtPicking === 'to'
+          ? 'The last day it runs. Leave it unset for a membership that runs until somebody stops it.'
+          : 'Tenure, cohort retention and the billing anniversary are all measured from this day.'}
+        onCancel={() => setDtPicking(null)}
+        onPick={(iso) => {
+          if (dtPicking === 'to') setDtTo(iso);
+          else {
+            setDtFrom(iso);
+            // A start moved past the end leaves a backwards term in two
+            // filled-looking fields, and the owner would meet a refusal about a
+            // mistake the app watched them make.
+            if (dtTo && dtTo < iso) setDtTo('');
+          }
+          setDtPicking(null);
+        }}
+      />
+
       {/* ── take a payment ────────────────────────────────────────────────── */}
       <Modal visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Take a payment</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Take a Payment</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {payFor?.memberName ?? 'Member'} · recorded at the desk, not charged to a card.
             </Text>
@@ -560,13 +1479,21 @@ export default function OwnerMembers() {
             {cur ? (
               <>
                 <Text style={lab}>Amount ({cur})</Text>
-                <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="decimal-pad"
+                <TextInput value={amount} onChangeText={(v) => { setAmount(v); setPayErr(null); }} autoFocus keyboardType="decimal-pad"
                   placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
                   onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
+                {/* The server's own words, or this screen's. A refused amount
+                    used to return silently, so an owner who typed 1,250.00 in a
+                    gym billing in yen pressed Record, watched nothing happen,
+                    and pressed it again. A status colour is a mark and never
+                    ink — the sentence carries the meaning. */}
+                {payErr ? (
+                  <View style={{ marginTop: sp.sm }}><Flag tone={t.warn}>{payErr}</Flag></View>
+                ) : null}
               </>
             ) : (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                This gym has not set its currency, so a payment cannot be recorded yet — an amount
+                This gym has not set its currency, so a payment cannot be recorded yet: an amount
                 with no currency is a number, and it would be stored as one permanently. An owner
                 sets the currency in Ops, and this form works from that moment on.
               </Text>
@@ -577,19 +1504,43 @@ export default function OwnerMembers() {
               {METHODS.map((m) => {
                 const on = method === m;
                 return (
+                  // Which method is chosen was carried entirely by the fill
+                  // colour, so a screen reader heard four identical buttons —
+                  // "Card", "Cash", … — with nothing saying which one this
+                  // payment is about to be recorded as. `selected` is the
+                  // announcement, and app/(owner)/rota.tsx's own chips have
+                  // used it since they were written.
                   <Pressable key={m} onPress={() => setMethod(m)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Record this as ${METHOD_LABEL[m]}`}
+                    accessibilityState={{ selected: on }}
                     style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{METHOD_LABEL[m]}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>{METHOD_LABEL[m]}</Text>
                   </Pressable>
                 );
               })}
             </View>
 
             <View style={{ marginTop: sp.lg }}>
+              {/* Three reasons this refuses and none of them was said out
+                  loud. The currency one is the worst: with no `tenants.currency`
+                  the button is dead for a reason explained in a paragraph
+                  further up the sheet that a screen reader has already passed,
+                  and the sentence is what the person needs, not the dimming.
+                  The ink also disagreed with the fill — `color` tested
+                  `amount.trim() && !busy` while `backgroundColor` tested `cur`
+                  as well, so a currency-less gym drew brand-coloured text on
+                  the disabled grey. One condition now, named once. */}
               <Pressable disabled={!amount.trim() || busy || !cur} onPress={commitPayment}
-                style={{ backgroundColor: amount.trim() && !busy && cur ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: amount.trim() && !busy ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Recording…' : 'Record payment'}
+                accessibilityRole="button"
+                accessibilityLabel={`Record this payment against ${payFor?.memberName ?? 'this member'}`}
+                accessibilityState={{ disabled: !payReady, busy }}
+                accessibilityHint={!cur
+                  ? 'This gym has not set its currency, so a payment cannot be recorded yet. An owner sets it in Ops.'
+                  : !amount.trim() ? 'Enter an amount first.' : undefined}
+                style={{ backgroundColor: payReady ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, ...font('600'), color: payReady ? t.brandInk : t.ink3 }}>
+                  {busy ? 'Recording…' : 'Record Payment'}
                 </Text>
               </Pressable>
               <Ghost label="Cancel" onPress={() => setPayFor(null)} />

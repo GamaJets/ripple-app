@@ -23,7 +23,7 @@
 //   · when was this person last seen at all — the hero, from `assessDrift`,
 //     the same verdict and the same words the roster orders itself by;
 //   · what is outstanding — unread messages, goals past their target date,
-//     days they have marked that disagree with the programme;
+//     days they have marked that disagree with the program;
 //   · and only then, the five screens plus the thread and the builder, each
 //     with a line underneath saying whether there is anything in there.
 //
@@ -39,7 +39,7 @@
 //
 // ── Where the dashes come from ─────────────────────────────────────────────
 //
-// Eight independent reads feed this, and each carries its own LoadStatus,
+// Nine independent reads feed this, and each carries its own LoadStatus,
 // because they fail independently and mean different things when they do. A
 // refused read is never rendered as an empty answer, and a truncated one is
 // never counted — see src/lib/rowCap.ts and src/ui/loadStatus.ts. Where a
@@ -51,6 +51,15 @@
 // for anything but a timestamp, so the app could say WHEN somebody trained and
 // never WHAT they did — see the row it feeds, and app/(trainer)/client-training.tsx
 // behind it.
+//
+// The ninth is the one record on this screen that neither the client nor the
+// coach wrote: what the GYM recorded about them coming in. It was readable by a
+// coach on a screen of its own and by nothing here, so the page that answers
+// "how is this person doing" could say when they last opened the app and not
+// whether they had been through a door. It is read as STAFF rather than as
+// their coach — see the section — and it is the one read on this screen whose
+// EMPTY answer can mean "your account cannot see a register", which is why it
+// says so before it shows a figure.
 //
 // The eighth is the client's intake — the form a coach takes before they train
 // somebody, which until now this product did not have anywhere. It reads one
@@ -73,15 +82,19 @@
 // they have a real one from the first round trip. The roster now says which
 // table each row came from and this screen asks it — see
 // src/lib/clientRecord.ts, and `handAdded` in src/lib/trainerMock.ts.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, QuickRow, Cta, Ghost, Notice, Flag, fig, PageHead, Ring, TonedChip, IconPlate, Expandable, type Tone } from '../../src/ui/kit';
+import Svg, { Polygon, Polyline } from 'react-native-svg';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, value as sora, grown, fontScale } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
@@ -94,7 +107,23 @@ import { areaLabel, INJURY_AREAS } from '../../src/lib/injuries';
 import { askToRecordInjury } from '../../src/ui/injuryAsk';
 import { askToCompleteIntake, useClientIntake } from '../../src/ui/intake';
 import { intakeLine, intakePrompt } from '../../src/lib/intake';
-import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+// "Has this person signed it" — the coach's half of the question the client
+// portal has been able to answer since part 135.
+import { useClientPaperwork } from '../../src/ui/clientPaperwork';
+// And the other half of that question, which is not the coach's paperwork at
+// all: the PLATFORM liability release. Refused to every coach since part 84 and
+// narrowed by the owner on 13 September 2026 to two facts — signed or not, and
+// which version. supabase/parts/2671 is the argument and the policy.
+import { useClientRelease } from '../../src/ui/clientRelease';
+import { useNow, useToday } from '../../src/ui/today';
+import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
+import { releaseLine, releaseVerdict, releaseOutstanding, RELEASE_PRIVACY_NOTE } from '../../src/lib/clientRelease';
+import { WAIVER_VERSION } from '../../src/lib/waiver';
+import { fmtDay, num1 } from '../../src/lib/format';
+import { worstStatus, isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { useInvites } from '../../src/ui/invites';
+import { useScrollPad } from '../../src/ui/keyboardPad';
+import { inviteOffer, inviteSendBlocker, inviteMode, invitedLine, notRecordedLine } from '../../src/lib/clientInvite';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
 import {
@@ -102,7 +131,13 @@ import {
   type ActivityEvent, type Drift,
 } from '../../src/lib/clientDrift';
 import { appLocale } from '../../src/lib/locale';
+import { nextUp, nextUpLine, nextUpUrgent } from '../../src/lib/nextUp';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
+// The register and the door log, folded into one record by src/lib/attendance.ts
+// and asked the two questions a coach actually has — see the section below.
+import { useClientAttendance } from '../../src/ui/clientAttendance';
+import { staffScopeNote } from '../../src/lib/attendance';
+import { longestGap, currentGap, classMix, averageDwell } from '../../src/lib/attendanceGaps';
 // The credit rule, shared with the client's own ledger and with the booking
 // screen, so a coach and their client can never be shown different answers
 // about which pack paid for the same hour. See supabase/parts/370.
@@ -121,21 +156,22 @@ import { coachWeek, planWindow, type ScheduledFocus } from '../../src/lib/coachW
 import { recentWindow, summariseAdherence, type ChecklistRow, type TickRow } from '../../src/lib/adherence';
 import { fetchSharedInbox } from '../../src/lib/photoShare';
 import { type Inbox } from '../../src/lib/photoInbox';
-import { weightDeltaIn } from '../../src/lib/units';
+import { weightDeltaIn, weightIn, weightLabel } from '../../src/lib/units';
 import { deltaLabel, deltaMoved } from '../../src/lib/deltaLabel';
 import { bodyLine } from '../../src/lib/clientBody';
 import {
   COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode,
 } from '../../src/lib/types';
 import {
-  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
+  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programLine,
   attention, noAccountNote, unaskedNote,
 } from '../../src/lib/clientBrief';
 import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
 import {
-  checkInAge, checkInGapLine, ratingsLine, readCoachCheckIns,
+  checkInAge, checkInGapLine, readCoachCheckIns,
   type CheckInRow, type CoachCheckIn,
 } from '../../src/lib/coachCheckins';
+import { CheckInReview } from '../../src/ui/coach/CheckInReview';
 import {
   CHANNELS, CONTACT_OUTCOMES, triedLine,
   type Channel, type Contact, type ContactOutcome,
@@ -153,8 +189,9 @@ import {
 // "add up what somebody paid" is how a coach comes to be shown two answers to
 // the question they are about to end a relationship on.
 import {
-  clientValue, valueEmptyLine, valueSpanLine, valueStatus,
-  VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS,
+  clientValue, valueEmptyLine, valueSpanLine, valueStatus, paymentsCounted, paymentsFloorLine,
+  refundedLine,
+  VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS, VALUE_IS_NET_OF_REFUNDS,
   type ClientValue,
 } from '../../src/lib/clientValue';
 import { minorMoney } from '../../src/lib/coachMoney';
@@ -175,6 +212,7 @@ import {
   type FollowUpRead,
 } from '../../src/lib/interventions';
 import type { WorkoutEntry } from '../../src/lib/mockData';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 // The summary row's read, and no more: enough to count the days trained, date
@@ -239,8 +277,43 @@ function Chip({ t, label, on, busy, onPress }: {
     <Pressable onPress={busy ? undefined : onPress} accessibilityRole="button"
       accessibilityState={{ selected: on, disabled: busy }}
       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, opacity: busy && !on ? 0.5 : 1 }}>
-      <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * A figure with its trend beside it — the approved profile's "Weight 78.4 kg"
+ * and its little line. Built here because the kit's `Spark` is the full chart
+ * (a touch readout, an axis, 74pt) and `KpiTile` is a card of its own; this is
+ * a row INSIDE a card. It draws nothing it was not given: fewer than two
+ * readings is a figure with no line, and a null figure is the dash. The line
+ * is decoration over a number already printed, so it is hidden from a screen
+ * reader and the row is spoken once.
+ */
+function TrendFigure({ t, label, shown, note, trend, tone }: {
+  t: Theme; label: string; shown: string | null; note?: string;
+  trend: (number | null)[] | null; tone: Exclude<Tone, 'brand' | 'neutral'>;
+}) {
+  const W = 84, H = 30, pad = 3;
+  const pts = (trend ?? []).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const min = Math.min(...pts), rng = (Math.max(...pts) - min) || 1;
+  const xy = pts.map((v, i) => `${(i / Math.max(1, pts.length - 1)) * W},${pad + (H - pad * 2) * (1 - (v - min) / rng)}`).join(' ');
+  return (
+    <View accessible accessibilityLabel={[label, shown ?? 'no figure', note].filter(Boolean).join(', ')}
+      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>
+      <View style={{ flexShrink: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.micro, ...font('400'), color: t.ink3 }}>{label}</Text>
+        <Text style={{ ...sora(19), color: t.ink }}>{fig(shown)}</Text>
+        {note ? <Text style={{ ...ty.micro, color: t.data[`${tone}Ink`] }}>{note}</Text> : null}
+      </View>
+      {pts.length >= 2 ? (
+        <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Polygon fill={t.data[`${tone}Soft`]} points={`${xy} ${W},${H} 0,${H}`} />
+          <Polyline points={xy} fill="none" stroke={t.data[tone]} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      ) : null}
+    </View>
   );
 }
 
@@ -260,13 +333,35 @@ export default function ClientScreen() {
   // as long as this screen was open — see the note in client-training.tsx,
   // which avoided it, and the ref-backed wrappers in src/ui/roster.tsx, which
   // now guarantee `refresh` keeps one identity for the life of the provider.
-  useFocusEffect(useCallback(() => { void r.refresh(); }, [r.refresh]));
+  // NOTE: this was the ONLY thing this screen refreshed on focus, and it is the
+  // roster — the name at the top and the drift band. The thirteen effects that
+  // read what has actually happened to this person all hang off `readNonce`,
+  // which was bumped by pull-to-refresh and by nothing else. So a coach who
+  // logged a session from this screen and came back found the name refreshed
+  // and What They've Actually Done unchanged. The whole set now re-reads on
+  // focus, at `useRefreshOnFocus` further down where every reload it needs is
+  // in scope; the roster is one of the five it asks for, which is why this
+  // line is not also still here.
 
   const ap = useAssignedPrograms();
+  /* ── the nonce every read on this screen hangs off ──────────────────────
+   *
+   * Thirteen separate effects read the server here — the drift, the goals, the
+   * planned week, what they trained, their uid, their packages and passes and
+   * credits, the money strands, the shared photos, the scans, their gym, the
+   * contact log and the check-ins. They are separate on purpose: each fails
+   * independently, and this screen says so section by section rather than
+   * collapsing thirteen answers onto one spinner.
+   *
+   * Collapsing them into one loader to make a refresh easy would undo that.
+   * So the refresh does the opposite: it bumps this, every one of those
+   * effects has it in its dependency array, and all thirteen re-read through
+   * the code that already knows how to report each of them. */
+  const [readNonce, setReadNonce] = useState(0);
   // `status` as well as the tenant: a null tenant under 'error' is a read that
   // failed, not a coach with no gym, and the contact log below decides whether
   // it applies to this client off exactly that distinction.
-  const { tenant, status: tenantStatus } = useTenant();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // Who a logged contact is filed under. `member_interventions_staff_w`
   // requires `by_id = auth.uid()` in its WITH CHECK — a coach must not be able
   // to file a call under a colleague's name, because "who has already tried" is
@@ -306,7 +401,67 @@ export default function ClientScreen() {
   // the only thing that knows which table the row came from, so it is asked.
   // See src/lib/clientRecord.ts.
   const queryable = clientIsQueryable(id, client?.handAdded);
+  // ── getting a hand-added client onto the app, from the screen about them ──
+  //
+  // A coach adds somebody by hand from the Add Client sheet, which is the ONLY
+  // place in this app that offers either an invite or the coaching code about a
+  // named person. Afterwards this screen said "Send them your coaching code and
+  // everything below starts filling in" and offered no control that did it — so
+  // the coach's only route was to go back and add the person again.
+  //
+  // `inviteOffer` takes `handAdded` three-valued and offers only on an explicit
+  // true. That is the OPPOSITE default from `clientIsQueryable` above, and the
+  // asymmetry is deliberate: a wrong guess there wastes a read, a wrong guess
+  // here puts an invitation in front of somebody who already has an account.
+  const invites = useInvites();
+  // The page grew a TextInput — the invite address — and this ScrollView's
+  // bottom padding was a bare 40. `useScrollPad` is the HOOK, not the constant:
+  // the constant alone pads the page permanently and is what made screens read
+  // as blank at the bottom when it was first tried. This one only adds the
+  // typing headroom while a keyboard is actually up.
+  const scrollPad = useScrollPad();
+  const invite = inviteOffer(client?.handAdded, who);
+  const [inviteTo, setInviteTo] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteSent, setInviteSent] = useState<string | null>(null);
+  // `invites.sent` is null-ish under a failed read, and an empty list under
+  // 'error' is indistinguishable from a coach who has sent fifty. The blocker
+  // is handed null in that case and refuses, rather than letting a send rewrite
+  // a row it could not see.
+  const invitePrior = isWhole(invites.status) ? invites.sent : null;
+  const inviteBlocker = inviteSendBlocker(inviteTo, invitePrior);
   const canRead = USE_SUPABASE && queryable && !!id;
+
+  /* ── has this person signed it ──────────────────────────────────────────
+   *
+   * The coach's question is never "who has signed the waiver", it is "has THIS
+   * person signed it", asked ninety seconds before a first session. The app
+   * could answer it and offered the answer only to the client:
+   * src/lib/coachDocs.ts's `outstanding()` is headed "the one question the
+   * client portal asks" and is imported by app/(client)/coach-documents.tsx
+   * alone. The coach's route was Documents → one document → a roster-length
+   * list of names, per document, per session. Nobody does that twice.
+   *
+   * Hand-added clients are passed as null: somebody with no account cannot have
+   * accepted anything, and the section says that rather than reading three
+   * tables to find nothing. */
+  const paperwork = useClientPaperwork(auth.user?.id ?? null, queryable ? id : null);
+
+  /**
+   * And whether they have signed the platform's own release.
+   *
+   * A different record, a different owner and a different policy from the one
+   * above: `liability_waivers` (part 84) is the client's legal record and is
+   * readable by nobody but them. What this reads is the status mirror part 2671
+   * created — the person and the version, and there is no third column on it to
+   * read. The document stays shut.
+   *
+   * Hand-added clients are passed as null for the same reason as the paperwork
+   * above, and the section is not rendered for them at all: somebody with no
+   * account has not signed anything, and "they have not signed the release" is
+   * a sentence about a person rather than about a record.
+   */
+  const release = useClientRelease(queryable ? id : null);
 
   /* ── when were they last seen at all ────────────────────────────────────── */
 
@@ -358,15 +513,37 @@ export default function ClientScreen() {
         // regression this item must not introduce into a figure that was
         // working, and it costs one extra query only for the clients it
         // actually happens to.
-        const driftEvents = unusable
-          ? (await readClientActivity(supabase, [id], {
-              days: DEFAULT_WINDOWS.historyDays,
-              tenantId: tenant?.id ?? null,
-            })).byClient[id] ?? []
-          : (read.byClient[id] ?? []).filter((e) => {
-              const at = Date.parse(e.at);
-              return Number.isFinite(at) && at >= Date.now() - DEFAULT_WINDOWS.historyDays * 86_400_000;
-            });
+        let driftEvents: ActivityEvent[];
+        if (unusable) {
+          const narrow = await readClientActivity(supabase, [id], {
+            days: DEFAULT_WINDOWS.historyDays,
+            tenantId: tenant?.id ?? null,
+          });
+          if (!live) return;
+          // The narrow read's OWN flags, which used to be dropped on the floor
+          // — `.truncated` and `.notAsked` discarded, `driftFailed` left false,
+          // and the result handed to `assessDrift` regardless.
+          //
+          // src/lib/clientDrift.ts states the rule this broke: silence cannot
+          // be inferred from a set that was cut off. And this branch runs ONLY
+          // when the wide read was already too big, so it runs for the
+          // heaviest-logging clients — the ones who train most. The coach opened
+          // the record of somebody who was in yesterday, read a number of days
+          // since anything happened, and sent the message you send to somebody
+          // who has stopped coming.
+          if (narrow.truncated || narrow.notAsked.length > 0) {
+            setDrift(null);
+            setDriftFailed(true);
+            setActivity({ events: read.byClient[id] ?? [], readFromMs, truncated: true });
+            return;
+          }
+          driftEvents = narrow.byClient[id] ?? [];
+        } else {
+          driftEvents = (read.byClient[id] ?? []).filter((e) => {
+            const at = Date.parse(e.at);
+            return Number.isFinite(at) && at >= Date.now() - DEFAULT_WINDOWS.historyDays * 86_400_000;
+          });
+        }
         if (!live) return;
         // `since` is when they joined the book. Without it a client added
         // yesterday and a client silent for eight weeks are the same shape of
@@ -379,7 +556,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, tenant?.id, joinedAt]);
+  }, [canRead, id, tenant?.id, joinedAt, readNonce]);
 
   /* ── what they are working toward ───────────────────────────────────────── */
 
@@ -407,7 +584,7 @@ export default function ClientScreen() {
       setGoalStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   // 'error' is the only thing that may produce an unreadable board, and an
   // unreadable board is the only thing that may print as "could not be read".
@@ -420,34 +597,70 @@ export default function ClientScreen() {
 
   const [days, setDays] = useState<PlannedDay[] | null>(null);
   const [weekStatus, setWeekStatus] = useState<LoadStatus>('loading');
-  // Fixed at the read rather than recomputed every render, so a screen left
-  // open over midnight cannot re-sort itself under the coach's hands.
+  /**
+   * ONE local day for the whole screen.
+   *
+   * This hook was already here, three hundred lines down, judging whether a gym
+   * pass has expired and how long it is since the client was last through a
+   * door — and its own note there said the rule: "One read of the day for the
+   * whole screen, not one per feature." The screen was breaking it. A SECOND
+   * day lived in the `todayISO` state below, seeded from a `useState`
+   * initialiser and moved only when the planned-week read ran, and three things
+   * are judged against that one: the ahead/gone split of the marked week, the
+   * AGEING OF THIS CLIENT'S INVOICES (`ageingBook`), and how long ago they were
+   * last scanned (`bodyLine`).
+   *
+   * So a coach sitting on this screen as midnight passed was shown an
+   * attendance gap that had grown by a day beside an invoice book that had not,
+   * and a body-composition line a day behind the one above it. Two answers to
+   * "what day is it", a finger's width apart, on the screen a coach decides
+   * whether to chase somebody from.
+   *
+   * It is declared here rather than there because this is the first thing on
+   * the screen that needs it. `useToday` is not a ticking clock — it moves at
+   * the next local midnight and on the app coming back to the foreground, and
+   * compares before it sets — so nothing re-sorts under a coach who is reading:
+   * the only moment it moves is the moment the answer changed.
+   */
+  const today = useToday();
+  /**
+   * The day the WINDOW below was read for.
+   *
+   * Still its own value, because `planWindow` is a property of the read and not
+   * of the render, and `coachWeek` must split the days it was handed on the day
+   * they were asked for. What changed is that the day turning now re-runs the
+   * read — `today` is in the dependency list — so the two can no longer drift
+   * apart by three days on a screen that mounts once and is never torn down
+   * (app/(trainer)/_layout.tsx registers this one `href: null`).
+   */
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
   useEffect(() => {
     if (!canRead || !id) return;
     let live = true;
     setDays(null); setWeekStatus('loading');
     (async () => {
-      const today = isoToday(new Date());
-      const w = planWindow(today);
+      // The read's own instant, named apart from the screen's `today` above so
+      // the window and the day it is split on are visibly the same one.
+      const readDay = isoToday(new Date());
+      const w = planWindow(readDay);
       if (!w) { if (live) setWeekStatus('error'); return; } // unreachable: isoToday always parses
       const read = await fetchClientPlannedDays(id, w.fromISO, w.toISO);
       if (!live) return;
-      setTodayISO(today);
+      setTodayISO(readDay);
       setDays(read.days);
       setWeekStatus(read.days == null ? 'error' : read.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, today, readNonce]);
 
-  // The programme is the coach's own row and null covers three situations —
+  // The program is the coach's own row and null covers three situations —
   // none assigned, the read failed, and one assigned by a different coach,
   // which `assigned_programs_coach_rw` will not show this one. `undefined`
   // through `planConflict` claims no conflict on an unknown.
-  const programme = id ? ap.getProgram(id) : null;
+  const program = id ? ap.getProgram(id) : null;
   const focusOn = useCallback<ScheduledFocus>(
-    (weekday) => (programme ? scheduledFocus(programme.days, weekday) : undefined),
-    [programme],
+    (weekday) => (program ? scheduledFocus(program.days, weekday) : undefined),
+    [program],
   );
   const week = useMemo(
     () => coachWeek(weekStatus === 'error' ? null : days, todayISO, focusOn),
@@ -492,7 +705,7 @@ export default function ClientScreen() {
       setTrainedStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   // Null under 'error', for the same reason every other board on this screen
   // gets one: an empty list is the only shape "they have never trained" and
@@ -501,6 +714,22 @@ export default function ClientScreen() {
     () => trainingBoard(trainedStatus === 'error' ? null : (trained ? sessionsOf(trained) : null), trainedStatus),
     [trainedStatus, trained],
   );
+
+  // Days trained in each of the last eight weeks, oldest first — the trend
+  // beside the Days Trained figure. Only from a WHOLE read: a week drawn from
+  // a truncated log is a dip nobody trained through. A nought here is a week
+  // the whole log says they did not train, which is a fact.
+  const weeklyTrained = useMemo(() => {
+    if (!isWhole(trainedStatus) || trainingBoardValue.state === 'unreadable') return null;
+    const dayNo = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); };
+    const today = dayNo(todayISO);
+    const weeks: number[] = Array(8).fill(0);
+    for (const d of trainingBoardValue.days) {
+      const back = Math.floor((today - dayNo(d.day)) / 7);
+      if (back >= 0 && back < 8) weeks[7 - back] += 1;
+    }
+    return weeks;
+  }, [trainedStatus, trainingBoardValue, todayISO]);
 
   /* ── their list, and the days they were in the app ──────────────────────── */
 
@@ -533,7 +762,7 @@ export default function ClientScreen() {
       } catch { if (live) { setUid(null); setUidStatus('error'); } }
     })();
     return () => { live = false; };
-  }, [authRev]);
+  }, [authRev, readNonce]);
 
   const [items, setItems] = useState<ChecklistRow[] | null>(null);
   const [itemStatus, setItemStatus] = useState<LoadStatus>('loading');
@@ -591,7 +820,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, uid, uidStatus]);
+  }, [canRead, id, uid, uidStatus, readNonce]);
 
   /* ── what pays for their sessions ───────────────────────────────────────── */
 
@@ -672,18 +901,14 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, uid, uidStatus]);
+  }, [canRead, id, uid, uidStatus, readNonce]);
 
-  // The gym pass has to be live on a DATE, and the date is local: a pass
-  // expires at the gym, not at an instant in UTC.
-  const creditToday = useMemo(() => {
-    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-  }, []);
+  // `today` — the screen's one local day — is read further up, above the
+  // planned-week effect that is the earliest thing on this screen to need it.
   const coachPacks: Entitlement[] | null = useMemo(
     () => (packRows === undefined ? null : coachPackLines(packBalance(packRows ?? null).lines)), [packRows]);
   const gymPtPasses: Entitlement[] | null = useMemo(
-    () => (passRows === undefined ? null : gymPtLines(passRows, creditToday)), [passRows, creditToday]);
+    () => (passRows === undefined ? null : gymPtLines(passRows, today)), [passRows, today]);
   const creditRoute: CreditRoute = useMemo(
     () => chooseRoute(packRows === undefined || packRows === null ? null : (coachPacks?.length ?? 0) > 0,
                       passRows === undefined || passRows === null ? null : (gymPtPasses?.length ?? 0) > 0),
@@ -691,8 +916,28 @@ export default function ClientScreen() {
   const creditLines = useMemo(
     () => payingLines(creditRoute, coachPacks, gymPtPasses), [creditRoute, coachPacks, gymPtPasses]);
   const creditsRemaining = useMemo(() => creditsLeft(creditLines), [creditLines]);
+  /**
+   * `useNow()`, not `buildLedger`'s default argument.
+   *
+   * The default is `Date.now()` READ WHEN THE MEMO RUNS, and the deps were the
+   * rows and the route — neither of which changes as time passes. So the split
+   * between `past` and `upcoming` was frozen at whatever moment the sessions
+   * landed, for as long as the screen stayed mounted. A coach who opened this
+   * client at eight and looked again at ten was still being told that the nine
+   * o'clock they had just taught was the next one coming. src/ui/today.ts.
+   */
+  /**
+   * ONE clock for the whole screen, for the reason `useToday` above it gives
+   * about one read of the day: two `useNow` subscriptions are two midnight
+   * timers, two AppState listeners and two focus effects answering the same
+   * question, and they can answer it a millisecond apart. Everything on this
+   * screen that is judged against "now" — the credit ledger below, and `nowMs`
+   * in the briefing — is judged against this one.
+   */
+  const now = useNow();
   const creditLedger: Ledger | null = useMemo(
-    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute)), [creditRows, creditRoute]);
+    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute, now.getTime())),
+    [creditRows, creditRoute, now]);
   const creditShortfall = useMemo(() => shortfallLine(creditLedger), [creditLedger]);
   const creditsLoading = packRows === undefined || passRows === undefined || creditRows === undefined;
   const creditsUnread = !creditsLoading && (packRows === null || passRows === null || creditRows === null);
@@ -741,7 +986,7 @@ export default function ClientScreen() {
       setSales(p); setRenewals(r); setReceipts(rec); setSubs(sb); setInvoices(inv);
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /** The three statuses as one set, passed whole to `clientValue`. Never
    *  composed here — the set IS the argument, and a caller that took two of
@@ -827,7 +1072,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── whether there is a body-composition trend to look at ───────────────── */
 
@@ -839,32 +1084,47 @@ export default function ClientScreen() {
   // sentence would be a worse answer to the same question, and a count computed
   // here would be a second place that could disagree with client-body.tsx about
   // how many scans somebody has.
+  //
+  // Twelve now, and the weight with the date. The approved profile draws their
+  // weight as a figure with a trend beside the adherence ring, and a trend is
+  // a handful of points, not a history: the newest dozen is a window that says
+  // what it is (each point keeps its own date), never a total, so no cap
+  // arithmetic rides on it. client-body.tsx still owns every figure taken off
+  // the whole set.
   const [scanTop, setScanTop] = useState<{ newestISO: string | null; hasEarlier: boolean } | null>(null);
+  /** Oldest first, kilograms as stored. A scan with no readable weight is
+   *  dropped rather than drawn at zero. Null until the read lands. */
+  const [scanWeights, setScanWeights] = useState<number[] | null>(null);
   const [scansFailed, setScansFailed] = useState(false);
   useEffect(() => {
     if (!canRead || !id) return;
     let live = true;
-    setScanTop(null); setScansFailed(false);
+    setScanTop(null); setScanWeights(null); setScansFailed(false);
     (async () => {
       // `taken_at` is a DATE and nothing stops two scans sharing one, so the id
       // settles the ties — otherwise which of them is "the newest" can change
       // between reads, and so can the date printed under this client's name.
-      const { data, error } = await supabase.from('scans').select('taken_at')
+      const { data, error } = await supabase.from('scans').select('taken_at, weight_kg')
         .eq('client_id', id)
         .order('taken_at', { ascending: false }).order('id', { ascending: false })
-        .limit(2);
+        .limit(12);
       if (!live) return;
       if (error) {
         // Null, never an empty answer. A refused read must not tell a coach
         // their client has never been scanned.
         reportError('client.scans', error);
-        setScanTop(null); setScansFailed(true); return;
+        setScanTop(null); setScanWeights(null); setScansFailed(true); return;
       }
-      const rows = (data ?? []) as { taken_at: string }[];
+      const rows = (data ?? []) as { taken_at: string; weight_kg: number | string | null }[];
       setScanTop({ newestISO: rows[0]?.taken_at ?? null, hasEarlier: rows.length > 1 });
+      // `weight_kg` is a numeric and arrives as a string from PostgREST; a
+      // null one is a scan without a weight, which is a hole and not a nought.
+      setScanWeights(rows.slice().reverse()
+        .map((row) => (row.weight_kg == null ? NaN : Number(row.weight_kg)))
+        .filter((kg) => Number.isFinite(kg) && kg > 0));
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── how the coach delivers to this person ──────────────────────────────── */
 
@@ -892,6 +1152,12 @@ export default function ClientScreen() {
    * from it would assert how somebody is coached on the strength of a read
    * that failed. 'partial' is fine: the people listed are real, this client is
    * one of them, and their row came back whole.
+   *
+   * whole-ok: 'partial' is the deliberate half of that. This screen does not
+   * count the roster or say anything about its size — it reads one field off
+   * one named client's row, and `!!client` is the proof that that row is in
+   * hand. A truncated read makes the SET a prefix; it does not make the row
+   * that came back any less that person's own.
    */
   const modeKnown = !!client && r.status !== 'error' && r.status !== 'loading';
 
@@ -952,7 +1218,7 @@ export default function ClientScreen() {
       setClientTenantStatus('ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [contactStatus, setContactStatus] = useState<LoadStatus>('loading');
@@ -987,7 +1253,7 @@ export default function ClientScreen() {
       setContactStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id, tenant?.id, contactTick]);
+  }, [canRead, id, tenant?.id, contactTick, readNonce]);
 
   /** The contact sheet's own state. Null when it is closed. */
   const [logging, setLogging] = useState<{ channel: Channel | null; outcome: ContactOutcome | null; note: string } | null>(null);
@@ -1016,7 +1282,7 @@ export default function ClientScreen() {
     setLogBusy(false);
     if (error || !data || data.length !== 1) {
       if (error) reportError('client.logContact', error, { clientId: id });
-      setLogErr('That contact was not recorded, so nobody else can see it. Nothing has changed — try again.');
+      setLogErr('That contact was not recorded, so nobody else can see it. Nothing has changed. Try again.');
       return;
     }
     setLogging(null);
@@ -1071,18 +1337,41 @@ export default function ClientScreen() {
       setCiStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
-  const nowMs = Date.now();
-  const attn = attention({
-    who,
-    unread: client ? client.unread : null,
-    goalStatus, board, weekStatus, week,
-    driftFailed,
-    nowMs,
-  });
+  /**
+   * The instant everything below is judged against — the goals past their
+   * target date, the age of the last check-in, how long ago each contact was,
+   * and the follow-up window.
+   *
+   * This was a bare `Date.now()` read in the render body, and that is wrong in
+   * both directions at once.
+   *
+   * Stale: src/ui/today.ts states it — "a bare `todayKey()` in the render body
+   * is correct and does not re-render: it is only right at the moment something
+   * else happens to redraw". app/(trainer)/_layout.tsx registers this screen
+   * with `href: null`, so it mounts once and is never torn down, and nothing
+   * here redraws on its own. A coach who opened a client last night and picked
+   * the phone up this morning read yesterday's answer to "3 goals past their
+   * target date" and yesterday's "rang them 2 days ago".
+   *
+   * And churning: `Date.now()` is a NEW VALUE ON EVERY RENDER, and it is in the
+   * dependency array of the `followUps` memo below — which runs
+   * `assessAllFollowUps` over every activity event this screen read, up to a
+   * thousand of them, once per contact. A memo whose dependency changes every
+   * render is not a memo. This screen re-renders on every keystroke in three
+   * TextInputs (the invite address, the injury ask, and the note in the contact
+   * sheet), so typing "rang, no answer" into the sheet re-ran that assessment
+   * fourteen times.
+   *
+   * `useNow()` is both halves: it is STATE, so it moves at local midnight, on
+   * the app coming back to the foreground and on this screen being focused —
+   * and it keeps ONE identity between those moments, so the memo below memoises.
+   * It is the same instant the credit ledger is split on, read once above.
+   */
+  const nowMs = now.getTime();
   const noAccount = noAccountNote(queryable, who);
   // Non-null when no read was issued at all. Every line below defers to it,
   // because the alternative is a screen full of "Reading their goals…" for a
@@ -1095,6 +1384,23 @@ export default function ClientScreen() {
   const unasked = !id
     ? 'No client was named in the link that opened this screen, so nothing was read.'
     : unaskedNote(USE_SUPABASE, queryable, who);
+  /**
+   * When this person is next in the diary — src/lib/nextUp.ts.
+   *
+   * The header of this screen has printed `next {client.next}` since it shipped,
+   * and `RosterClient.next` is the literal string '—' in all three places
+   * src/ui/roster.tsx builds a client. Nothing has ever computed it. Meanwhile
+   * `creditLedger.upcoming` — every booked session this client has ahead of
+   * them, whatever pays for it — was already in this component and was spent on
+   * one figure, "Booked Ahead 3", with no date on it anywhere.
+   *
+   * `unasked` is passed as a boolean rather than as its sentence: a client with
+   * no account has no diary to read, which is a different thing from an empty
+   * one, and the module keeps that apart from a read that failed.
+   */
+  const diary = useMemo(() => nextUp({
+    ledger: creditLedger, loading: creditsLoading, unread: creditsUnread, unasked: !!unasked,
+  }), [creditLedger, creditsLoading, creditsUnread, unasked]);
   /** Whether the gym's shared contact log is about this person at all. */
   const cScope = contactScope({
     coachTenantId: tenant?.id ?? null,
@@ -1166,12 +1472,6 @@ export default function ClientScreen() {
    *  and the two must not read the same. */
   const checkInGap = unasked ?? checkInGapLine(ciStatus, checkIns ? checkIns.length : 0, who);
 
-  const driftTone = !drift ? t.ink3
-    : drift.status === 'at_risk' ? t.crit
-    : drift.status === 'idle' ? t.s5
-    : drift.status === 'watch' ? t.warn
-    : t.brand;
-
   // Weight moves in kilograms on the wire and is read in whichever unit the
   // coach set. Converted as a SPAN rather than as two rounded ends — the reason
   // `weightDeltaIn` exists — and a dash where no second scan has ever been
@@ -1196,6 +1496,112 @@ export default function ClientScreen() {
   const ci = useClientIntake(canRead ? id : null);
   const intakeNudge = intakePrompt(ci.state, ci.progress, who);
 
+  /* ── the ninth read: whether they have actually been coming in ───────────
+   *
+   * Everything else on this screen is what the client said or what the coach
+   * wrote. This is what the GYM recorded — `class_bookings.attended_at`, the
+   * register, and `gym_visits`, the door log — folded into one timeline by
+   * src/lib/attendance.ts so one hour of somebody's life is one row.
+   *
+   * It is read as STAFF, not as their coach: both policies behind it are scoped
+   * to `my_tenant()`, so a coach with no gym is handed zero rows and no error.
+   * That is indistinguishable from a client who has never been recorded, which
+   * is why `staffScopeNote` is on screen before any of it is read — the rule
+   * lives in the module rather than in a sentence here.
+   *
+   * `att.reload` and not `att` in the refresh dependencies below: the hook
+   * returns a fresh object every render and the reload it exposes is stable, so
+   * depending on the object would rebuild the whole refresh callback on every
+   * paint and re-arm the focus listener with it. */
+  const att = useClientAttendance(canRead ? id : null);
+  const attReload = att.reload;
+  /** Only from a whole read. The cap falls at the OLD end of a newest-first
+   *  page, which is exactly where a longer gap would be — see the header of
+   *  src/lib/attendanceGaps.ts for why one of these two figures survives a
+   *  truncated record and the other cannot. */
+  const attWhole = att.status === 'ready';
+  const attLongest = longestGap(att.days, attWhole);
+  const attSince = currentGap(att.days, today, attLongest);
+  const attMix = classMix(att.events);
+  const attDwell = attWhole ? averageDwell(att.events) : null;
+  /** Three states, never two: `useTenant` still loading is "not known yet" and
+   *  must not be worded as a coach with no gym. */
+  // `isWhole`, not `!== 'error'` and not a hand-written enumeration: only
+  // 'ready' settles this. Under anything else whether this coach can reach a
+  // register is UNKNOWN, and null is the answer the note is written for.
+  const attHasGym: boolean | null = isWhole(tenantStatus) ? tenant != null : null;
+  // Nothing is said while the first read is in flight: "we could not tell which
+  // gym you belong to" is false of a read that has not finished, and it would
+  // be on screen for the whole of every normal open.
+  const attScope = tenantStatus === 'loading' ? null : staffScopeNote(attHasGym);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This is the screen a coach opens before a session to find out what has
+   * happened to somebody, and almost everything on it is written by that
+   * person on their own phone: a check-in, a scan, a photo, a payment, a
+   * training day. None of it arrives here by itself.
+   *
+   * `readNonce` carries the thirteen effect reads; the roster, the program
+   * assignments, the gym, the glucose series, the intake and the attendance
+   * record come from providers and are asked for beside them. All of them together, because
+   * the briefing at the top of this screen is composed ACROSS them — a
+   * sentence about somebody's silence built from a fresh contact log and a
+   * stale activity read is a sentence about nobody. */
+  const reloadEverything = useCallback(() => {
+    setReadNonce((n) => n + 1);
+    return Promise.all([
+      r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
+      gl.refresh(), Promise.resolve(ci.reload()), Promise.resolve(paperwork.reload()),
+      Promise.resolve(release.reload()),
+      attReload(),
+    ]);
+  }, [r, ap, refreshTenant, gl, ci, paperwork, release, attReload]);
+  const pull = usePullToRefresh(reloadEverything);
+
+  /* ── and the same set when the coach comes back ─────────────────────────
+   *
+   * Every screen a coach reaches FROM here writes something this screen is
+   * about: logging a session, marking an outcome, writing a checklist, filing
+   * a contact. They came back to the same page they left. `readNonce` had no
+   * trigger but the gesture above, so the briefing at the top of this screen —
+   * composed across thirteen reads — went on describing the person as they were
+   * when the app started.
+   *
+   * The first focus is skipped: the mount effects are already reading, and
+   * doubling thirteen queries on the way in is the cost this hook exists to
+   * avoid. See src/ui/refreshOnFocus.ts. */
+  useRefreshOnFocus(reloadEverything);
+
+  /* ── the briefing ───────────────────────────────────────────────────────
+   *
+   * Composed HERE rather than three hundred lines up, because this is the first
+   * point at which every fact it is allowed to raise exists. It used to take
+   * unread messages, goals, the marked week and drift, and nothing else — while
+   * the same screen read and rendered a disclosure list, an intake and an
+   * ageing invoice book further down. A coach who read the short list at the
+   * top and did not scroll was not told that somebody had just disclosed a
+   * knee, that their intake was half answered, or that they were three weeks
+   * late paying. Every one of those was already on the screen and none of them
+   * was in the part written to say what needs doing.
+   */
+  const attn = attention({
+    who,
+    unread: client ? client.unread : null,
+    // Off the roster row, and null under a failed roster read: an empty
+    // disclosure list from a read that did not land is not a client who has
+    // disclosed nothing. Only the area and the recency flag — never the note,
+    // which is seeded from the line off an uploaded document.
+    injuries: r.status === 'error' ? null : (client?.injuries ?? null),
+    goalStatus, board, weekStatus, week,
+    intake: ci.state,
+    intakeLeft: ci.progress.of - ci.progress.done,
+    invoiceStatus: invoices.status,
+    overdueInvoices: owed.overdue.length,
+    driftFailed,
+    nowMs,
+  });
+
 
   const go = (pathname: string) => () => {
     if (!id) return;
@@ -1216,7 +1622,7 @@ export default function ClientScreen() {
     const r = await askToRecordInjury(id, askArea, askNote);
     setAskBusy(false);
     if (!r.sent) {
-      Alert.alert('Not sent', `${who} has not been asked${r.error ? ` (${r.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Sent', `${who} has not been asked${r.error ? ` (${r.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
       return;
     }
     setAskOpen(false); setAskArea(null); setAskNote('');
@@ -1241,7 +1647,7 @@ export default function ClientScreen() {
     const res = await askToCompleteIntake(id, ci.state, ci.progress);
     setIntakeAsking(false);
     if (!res.sent) {
-      Alert.alert('Not sent', `${who} has not been asked${res.error ? ` (${res.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Sent', `${who} has not been asked${res.error ? ` (${res.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
       return;
     }
     Alert.alert(
@@ -1253,91 +1659,382 @@ export default function ClientScreen() {
     );
   };
 
+  /* ── the infographic card's figures ─────────────────────────────────────── */
+
+    // Off the roster row, and a dash where it cannot answer: a client
+  // with no submitted check-in is not at 0% adherence. It led a
+  // second strip under the name — Adherence · Last Active · Unread —
+  // that stood over this one, so the page opened on six figures in
+  // two rows and two of them were the same Unread. One strip now,
+  // the review's "compact outcome/adherence summary": how well they
+  // stuck to it, what it did to the scale, and whether they are
+  // showing up. Last Active is the line under their name and the
+  // status row beneath it; Unread leads Needs You when there is
+  // one and rides on the Message action.
+  const adherencePct = client?.adherence ?? null;
+
+    // The unit rides on the FIGURE, so it only appears when there is
+  // one. `deltaLabel` drops the unit itself when nothing moved —
+  // "No change", not "No change kg" — and this cell was appending
+  // `wu` beside it in a separate element, putting the unit back and
+  // printing "No change kg" for every client whose two scans came
+  // out within a rounded 0.1. `deltaMoved` is the same rounding
+  // deltaLabel judges on, so the two cannot disagree.
+  // The newest scan that carries a weight; null while the read is out or when
+  // it failed, which draws the dash.
+  const latestKg = scanWeights && scanWeights.length ? scanWeights[scanWeights.length - 1] : null;
+
+    // `unasked` first, and it was the one figure on this screen that
+  // did not have it. The caption under this row already defers to
+  // `unasked`; the FIGURE did not, so a hand-added client could be
+  // shown "In the App 0 / 28 days" with "Nothing of theirs can be
+  // read until they join Repple" printed underneath it.
+  //
+  // It is reachable rather than theoretical: `handAdded` is
+  // three-valued and is `undefined` until the roster lands, which
+  // is the honest default (src/lib/clientRecord.ts) — so on a cold
+  // launch from Check In the thirteen reads all start, the ticks
+  // read comes back with zero rows and NO error because
+  // `is_my_client()` finds no `clients` row, and `summariseAdherence`
+  // over no ticks is a truthful 0 out of 28 about a set nobody was
+  // entitled to ask for. When the roster then says the person was
+  // typed in by hand, `canRead` goes false and every effect returns
+  // at its guard WITHOUT clearing what it already stored.
+  //
+  // Zero days in the app is the sentence a coach acts on. It must
+  // never be manufactured by a read that was never entitled to an
+  // answer — the third state, not the empty one.
+  const seenDays = unasked || !seen ? null : seen.seenDays;
+
+  // The drift band as a NAME from the data palette, for the chip and the ring:
+  // green on track, amber slipping, red needs you — and grey for idle, which is
+  // nothing to report rather than a warning.
+  const driftName: Tone = !drift ? 'neutral'
+    : drift.status === 'at_risk' ? 'red'
+    : drift.status === 'watch' ? 'amber'
+    : drift.status === 'idle' ? 'neutral'
+    : 'brand';
+
   const G = layout.gutter;
+  // Where the Check-in card sits in the scroll, for the action that goes to
+  // it. Null until it has been laid out, and the action does nothing then
+  // rather than scrolling to the top and looking as though it had worked.
+  const scroller = useRef<ScrollView>(null);
+  const [checkInY, setCheckInY] = useState<number | null>(null);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs, textTransform: 'capitalize' }} numberOfLines={1}>
+        {/* ── the record's head, the approved way ─────────────────────────
+            The pushed-page head with the message control in its trailing
+            slot; under it the identity ROW — a 68pt toned monogram, the name
+            in Sora, and what the roster already holds about them as chips:
+            the drift band (a colour beside its word) and their goal. */}
+        <PageHead title="Client Profile" backLabel="Back to clients"
+          trailing={id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : undefined} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: sp.lg, paddingHorizontal: sp.xs }}>
+          <View style={{ width: grown(68), height: grown(68), borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <Text style={{ ...sora(24), color: t.brandText }}>
+              {(fullName || 'Client').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}
+            </Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }} numberOfLines={2}>
               {fullName || 'Client'}
+            </Text>
+            {/* The band is the roster's own verdict in the roster's own words.
+                No drift read, no chip: an unknown is said in the line under
+                the ring, not dressed as a grey "on track". */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {!unasked && drift ? <TonedChip label={DRIFT_LABEL[drift.status]} tone={driftName} /> : null}
+              {client ? <TonedChip label={client.goal.replace(/\b[a-z]/g, (c) => c.toUpperCase())} tone="blue" /> : null}
+              {/* A manual lead is not an app user, and the head has to say so
+                  before anything under it is read: every dash below means
+                  "there is no account to ask", not "they have done nothing".
+                  The Notice further down explains it and offers the
+                  invitation; this is the mark that makes the two kinds of
+                  client look different at a glance, in words as well as
+                  colour. */}
+              {client?.handAdded ? <TonedChip label="Added by Hand · No Account" tone="neutral" /> : null}
+            </View>
+            {/* `next` is NOT here, and its absence is the point: `RosterClient.next`
+                is the literal '—' everywhere it is built. The real answer is a
+                section of its own below — src/lib/nextUp.ts. */}
+            <Text style={{ ...ty.caption, color: t.ink3 }} numberOfLines={2}>
+              {client ? `${COACHED_MODE_SHORT[client.mode]} · ${/\bago$/.test(client.lastActive) ? `last active ${client.lastActive}` : client.lastActive}` : 'Your book'}
             </Text>
           </View>
         </View>
 
-        {/* The row's own facts, which the roster already holds. `lastActive`
-            and `next` are the roster's strings and are printed as they are. */}
-        {client ? (
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            {client.goal} · {COACHED_MODE_SHORT[client.mode]} · last active {client.lastActive} · next {client.next}
-          </Text>
-        ) : null}
+        {/* ── how they are doing, as a picture ────────────────────────────
+            The approved profile's infographic card: the adherence ring beside
+            their weight and their training, each a figure with its trend. It
+            was a strip of three figures third on the page over a paragraph
+            explaining them; the paragraph is behind "About These Figures".
+
+            Every mark obeys the read behind it. No adherence on the roster
+            row is a ring with no arc and a dash, never 0%. The weight is the
+            newest scan's and its trend the last dozen scans'; one scan is a
+            figure with no line. Days Trained is `trainingBoard`'s count, which
+            is null unless the read was whole, and its trend is drawn only
+            from a whole read. */}
+        <Section>
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+            <Ring size={108} tone={driftName === 'red' || driftName === 'amber' ? driftName : 'brand'}
+              value={adherencePct == null ? null : adherencePct / 100}
+              figure={adherencePct == null ? null : `${adherencePct}%`} sub="adherence"
+              spoken={adherencePct == null ? 'Adherence, no check-in to read it from' : `Adherence ${adherencePct} percent, from their latest check-in`} />
+            <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', justifyContent: 'center', gap: sp.md }}>
+              <TrendFigure t={t} label="Weight" tone="blue"
+                shown={unasked || latestKg == null ? null : weightLabel(latestKg, wu)}
+                note={delta == null ? undefined : `${deltaLabel(delta, { since: null, noChange: 'No change' })}${deltaMoved(delta) ? ` ${wu}` : ''}`}
+                trend={unasked || !scanWeights ? null : scanWeights.map((kg) => weightIn(kg, wu))} />
+              <TrendFigure t={t} label="Days Trained" tone="purple"
+                shown={unasked || trainingBoardValue.dayCount == null ? null : String(trainingBoardValue.dayCount)}
+                trend={unasked ? null : weeklyTrained} />
+            </View>
+          </View>
+          {/* The one line that qualifies the picture, and it is the drift
+              read's own: how long since anything was on record, or why that is
+              not known. Unknown, refused and partial reads stay unknown rather
+              than becoming a reassuring zero. */}
+          <View accessible
+            accessibilityLabel={drift?.quietDays == null
+              ? `Activity status unknown. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`
+              : `Activity status, ${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`}
+            style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+            <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>
+              {drift?.quietDays == null ? 'Recent activity unknown' : `${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record`}
+              {!unasked && seenDays != null && seen ? ` · in the app ${seenDays} / ${seen.windowDays} days` : ''}
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{unasked ?? lastSeenLine(drift, driftFailed, who)}</Text>
+          </View>
+          <Expandable title="About These Figures">
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {adherencePct != null ? 'Adherence is from their latest check-in. ' : `No check-in carries an adherence rating for ${who}, so the ring is empty rather than at nought. `}
+              {deltaKg == null
+                ? `No second scan on record for ${who}, so there is no change to state: a dash rather than a nil movement nobody measured. `
+                : `The weight change is across the scans on record; the line is the last dozen. `}
+              Days Trained counts days with anything logged, and its line is the last eight weeks.
+              {unasked
+                ? ''
+                : seen == null
+                ? ' Their ticks could not be read, so the days they were in the app are unknown rather than none.'
+                : ` In the app is days out of the last ${seen.windowDays} they ticked something. It is evidence they stood in front of their list, not a score.`}
+              {!unasked && drift && drift.status !== 'on_track'
+                ? ` ${DRIFT_LABEL[drift.status]} is judged on check-ins, logged workouts, completed sessions and gym visits over the last ${DEFAULT_WINDOWS.historyDays} days.`
+                : ''}
+            </Text>
+          </Expandable>
+        </Section>
+
+
+        {/* ── the order of this page ───────────────────────────────────────
+            The data-layout review's stack for a coaching record: who they are
+            and when they were last seen · NEEDS YOU · a compact summary · the
+            direct actions · the current plan and goal · the evidence
+            (training, nutrition, body, recovery, attendance, the check-in) ·
+            then the business · then the administration. Injuries are the one
+            departure: the review lists them seventh and also says they must
+            be met before a program is changed and must never sit under
+            money, so they stand directly under the plan, above every summary.
+            The approved look puts the picture first: head · the infographic
+            card (the compact summary, with the status line inside it) · NEEDS
+            YOU · actions · plan · injuries · next session · Their Record.
+            Nothing was removed; every block below is the
+            block it was. */}
+
+        {/* ── what is outstanding ─────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Needs You" />
+          {unasked ? (
+            <Flag tone={t.ink3}>
+              {unasked} Nothing is outstanding on this screen because nothing was asked for, which
+              is not the same as there being nothing.
+            </Flag>
+          ) : null}
+          {!unasked && attn.items.length === 0 && !attn.blind ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              Nothing outstanding that this screen can see: no unread messages, no goal past its
+              target date, and nothing marked ahead that argues with your program.
+            </Text>
+          ) : null}
+          {/* `attention()` returns its items in the order a coach should act
+              on them — a new injury first, because it is the one item about
+              what must NOT be written next, then a reply owed, goals past
+              their date, marked days, intake, and money last (the review:
+              money never outranks an injury or an overdue coaching action).
+              They were drawn as equals. The first is the single
+              highest-priority issue and reads as one — at body size, in ink;
+              the rest follow as the quieter list they are. */}
+          {(unasked ? [] : attn.items).map((line, i) => (
+            <View key={line} accessible accessibilityLabel={line}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+              <IconPlate icon="bell" tone={i === 0 ? 'red' : 'amber'} size={38} />
+              <Text style={{ ...(i === 0 ? { ...ty.body, ...font('600') } : ty.label), color: i === 0 ? t.ink : t.ink2, flex: 1, minWidth: 0 }}>{line}</Text>
+            </View>
+          ))}
+          {/* An empty list above cannot be allowed to read as an all-clear when
+              a read that would have filled it never landed. */}
+          {!unasked && attn.blind ? (
+            <View style={{ marginTop: attn.items.length ? sp.md : 0 }}>
+              <Flag tone={t.ink3}>{attn.blind}</Flag>
+            </View>
+          ) : null}
+        </Section>
 
         {/* Three different reasons there is no client here, and they are not
             the same sentence. A refused roster read is not an empty book. */}
         {!id ? (
           <Section>
-            <Notice tone={t.warn} kicker="No client" title="This screen was opened without a client"
+            <Notice tone={t.warn} kicker="No Client" title="This screen was opened without a client"
               note="Go back to your clients and open somebody from the list." />
           </Section>
         ) : !client && r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Everything below is still read for this person directly. What is missing is the roster row — their goal, delivery, weight and unread count come from it." />
+              note="Everything below is still read for this person directly. What is missing is the roster row. Their goal, delivery, weight and unread count come from it." />
           </Section>
         ) : !client && r.status !== 'loading' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not on your book" title={`${who} is not on your roster`}
+            <Notice tone={t.warn} kicker="Not on Your Book" title={`${who} is not on your roster`}
               note="They may have been removed, or the coaching relationship may have ended. The reads below will come back empty because the policies behind them require a live coaching link." />
           </Section>
         ) : null}
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Goals, planned days, ticks and photos belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have none." />
           </Section>
         ) : noAccount ? (
           <Section>
-            <Notice tone={t.s5} kicker="Added by hand" title={`${who} has no Repple account yet`} note={noAccount} />
+            <Notice tone={t.s5} kicker="Added by Hand" title={`${who} has no Repple account yet`} note={noAccount} />
+            {/* The control the notice above has always described and never
+                offered. Until this, a coach who wanted to invite the person
+                they were looking at had to go back to Add Client and add them
+                a second time. */}
+            {invite.offer ? (
+              <View style={{ marginTop: sp.lg }}>
+                <SectionHead title={invite.head} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{invite.note}</Text>
+                <TextInput
+                  value={inviteTo}
+                  onChangeText={(v) => { setInviteTo(v); setInviteSent(null); }}
+                  placeholder="Their email address"
+                  placeholderTextColor={t.ink3}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  accessibilityLabel={`Email address to invite ${who} with`}
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }}
+                />
+                {inviteBlocker ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{inviteBlocker}</Text>
+                ) : null}
+                <View style={{ marginTop: sp.md }}>
+                  <Cta wide
+                    disabled={inviteBusy || !!inviteBlocker}
+                    label={inviteBusy ? 'Sending…' : 'Send an Invitation'}
+                    a11yLabel={`Send ${who} an invitation to join`}
+                    onPress={async () => {
+                      const to = inviteTo.trim();
+                      setInviteBusy(true);
+                      try {
+                        // `sendInvite` resolves true ONLY once the row is on the
+                        // server. A false is not a silent failure to swallow:
+                        // the coach is about to tell somebody to expect an
+                        // invitation that does not exist.
+                        const ok = await invites.sendInvite(to, inviteMode(client?.mode));
+                        setInviteSent(ok ? invitedLine(who, to) : notRecordedLine(who, to));
+                        if (ok) setInviteTo('');
+                      } finally { setInviteBusy(false); }
+                    }} />
+                </View>
+                {inviteSent ? (
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{inviteSent}</Text>
+                ) : null}
+                {/* The code works whoever they are and whatever address they
+                    sign up with, which is the half an emailed invite cannot do. */}
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label="Show Your Coaching Code" onPress={go('/(trainer)/join-code')} />
+                </View>
+              </View>
+            ) : null}
           </Section>
         ) : null}
 
-        {/* ── the two things a coach comes here to DO ─────────────────────────
-            Both of these existed already and neither could be found: booking a
-            client was only ever reachable from the calendar, which asks who it
-            is for after the coach has already said, and their programme was the
-            sixth row of a list below a hero and two sections — off the bottom of
-            the screen on any phone. Reading about somebody is not the reason you
-            open their page; these are. */}
+        {/* ── the four things a coach comes here to DO ─────────────────────
+            The review's fourth slot: message, log a session, update the
+            program, review the check-in. All four existed — as the tenth and
+            eleventh rows of Their Record, a row under the booking button, and
+            a section at the foot of the page — and none was where a thumb
+            lands. Same destinations and the same params as the rows they
+            replace, so there is still one path to each and not two that can
+            drift. The builder is the Programs TAB, so it alone is handed an
+            origin to come back to. Check-in does not leave: the review of it
+            is further down THIS page, and the action scrolls to it. */}
+        {id ? (
+          <View style={{ marginTop: sp.lg }}>
+            <QuickRow items={[
+              { icon: 'chat', label: client && client.unread != null && client.unread > 0 ? `Message · ${client.unread}` : 'Message', onPress: go('/(trainer)/chat') },
+              { icon: 'train', label: 'Log Session', onPress: go('/(trainer)/log-session') },
+              { icon: 'grid', label: 'Program', onPress: () => { router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); } },
+              { icon: 'check', label: 'Check-in', onPress: () => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); } },
+            ]} />
+            {/* Said under the row rather than lost with the row it came from:
+                a checked-in client is the moment logging is for. */}
+            {justCheckedIn ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                {who} is checked in. Log Session takes the exercises as you go. It lands in their own record and shows up in their app.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* ── what they are on, and what it is for ─────────────────────────
+            The review's fifth slot, as one card: the program and the goal it
+            serves were the sixth row of one list and the first row of
+            another. The injuries card is the NEXT one down, above every
+            summary, and when there are any the program row says so in its
+            own words — the review asks that safety information is met before
+            a program is changed, and a coach who taps the row has read its
+            note. */}
         {id ? (
           <Section>
-            <Cta label={`Book ${who} a Session`} wide onPress={go('/(trainer)/calendar')} />
-            <View style={{ marginTop: sp.md }}>
-              <ListRow icon="grid" title={programme ? 'Their Program' : `Build ${who} a Program`}
-                note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)}
-                tone={ap.status === 'error' ? t.warn : undefined}
-                onPress={go('/(trainer)/builder')} />
-            </View>
+            <SectionHead title="Current Plan and Goal" />
+            {/* The builder is the Programs TAB, so unlike every other row on
+                this screen it does not arrive with a way back to this record.
+                It is the only destination here handed an origin; the rest are
+                their own screens and carry their own Back. */}
+            <ListRow icon="grid" title={program ? 'Their Program' : `Build ${who} a Program`}
+              note={programLine(ap.status, program?.title ?? null, program?.days.length ?? null, who)
+                + (client?.injuries && client.injuries.length
+                  ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed. They are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
+                  : '')}
+              tone={ap.status === 'error' ? t.warn : 'brand'}
+              onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
+            <ListRow icon="target" title="What They're Working Toward"
+              note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
+              tone={goalStatus === 'error' ? t.warn : 'blue'}
+              onPress={go('/(trainer)/client-goals')} />
           </Section>
         ) : null}
-
-        <Rule />
 
         {/* ── what they cannot do ─────────────────────────────────────────────
             The coach's side of this screen never read injuries at all. A client
             disclosing a knee reached their coach as a flag on the roster row and
-            a gate on the programme builder, and nowhere on the page about them —
+            a gate on the program builder, and nowhere on the page about them —
             so the one place a coach looks up a person before deciding what to
             put them through was the one place it was missing.
 
-            It sits above the hero deliberately. Everything below is how they are
-            going; this is what they must not be given, and it is the wrong thing
-            to find after you have already read three sections. */}
+            It sits above the evidence deliberately. Everything below is how they
+            are going; this is what they must not be given, and it is the wrong
+            thing to find after you have already read three sections — or after
+            you have opened the builder, which is why it stands directly under
+            the program row. */}
         {id ? (
           <Section>
             <SectionHead title="Injuries They Have Disclosed" />
@@ -1351,6 +2048,35 @@ export default function ClientScreen() {
               <Flag tone={t.warn}>
                 Your roster could not be read, so anything {who} has disclosed could not be read
                 either. This is not a statement that they have disclosed nothing.
+              </Flag>
+            ) : /* ── the arm the comment three lines up already forbade ──────
+                   Under 'loading' the roster is `[]`, so `client` is null, so
+                   `!client?.injuries` was true and this section said "Nothing
+                   on record for Amy" — the exact sentence the note above calls
+                   how somebody gets programmed into an injury they took the
+                   trouble to disclose. Not a theoretical render: Check In on a
+                   cold launch opens this screen while the roster read is still
+                   in flight, and on a gym network that is seconds, not a
+                   flicker.
+
+                   "How You Coach Them" further down this same file already has
+                   this arm (`r.status === 'loading' ? 'Reading your roster…'`).
+                   This is that arm, in a section where being wrong costs more
+                   than a set of chips. */
+              r.status === 'loading' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Reading your roster. Anything {who} has disclosed is on it, so nothing here is a
+                statement about them yet.
+              </Text>
+            ) : !client && r.status === 'partial' ? (
+              // The same defect one step along: under 'partial' the roster is
+              // real and is a PREFIX, so a client past the cap is absent from
+              // it for a reason that has nothing to do with what they have
+              // disclosed. `isWhole` is the rule; this is the branch it needs.
+              <Flag tone={t.warn}>
+                Only part of your roster came back, and {who} is not in the part that did, so
+                anything they have disclosed was not read either. This is not a statement that they
+                have disclosed nothing.
               </Flag>
             ) : !client?.injuries ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -1367,7 +2093,7 @@ export default function ClientScreen() {
                 {client.injuries.map((inj, i) => (
                   <View key={`${inj.area}-${i}`} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{areaLabel(inj.area)}</Text>
+                      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{areaLabel(inj.area)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{inj.severity}</Text>
                       {inj.isNew ? <Flag tone={t.warn}>New</Flag> : null}
                     </View>
@@ -1377,9 +2103,9 @@ export default function ClientScreen() {
                   </View>
                 ))}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Their own words. Their programme cannot be assigned until you have read these, and
+                  Their own words. Their program cannot be assigned until you have read these, and
                   their app already flags or swaps movements that load them. Only {who} can add,
-                  change or remove one — you cannot, deliberately, because a gate the coach can edit
+                  change or remove one. You cannot, deliberately, because a gate the coach can edit
                   their way out of is not a gate.
                 </Text>
               </>
@@ -1416,6 +2142,739 @@ export default function ClientScreen() {
             ) : null}
           </Section>
         ) : null}
+
+        {/* ── when they are next in, and the button that books it ──────────
+            This card held two things a coach comes here to DO — book them and
+            open their program — because neither could be found: booking was
+            only ever reachable from the calendar, which asks who it is for
+            after the coach has already said, and the program was the sixth
+            row of a list off the bottom of the screen. The program is in
+            Current Plan and Goal and on the action row now; this card keeps
+            the booking, and the page's one full-width green button. */}
+        {id ? (
+          <Section>
+            {/* ── when you are seeing them next ─────────────────────────────
+                Above the button that books one, because it is the fact that
+                decides whether to press it. Every state is src/lib/nextUp.ts's
+                — and the one it exists to prevent is an empty `upcoming` list
+                under a failed read being drawn as "nothing booked", which is
+                what a coach reads before deciding not to ring somebody.
+
+                The DATE is rendered here rather than in the module: it is the
+                reader's language and the reader's order, and a month name
+                written into a lib would be in that file's. */}
+            {/* A `SectionHead`, like every other head on the page. It was a
+                line of `ty.micro` typed in capitals — the one heading here the
+                kit could not strengthen when it strengthened the rest. */}
+            <SectionHead title="Next Session" />
+            <View style={{ marginBottom: sp.md }}>
+              {diary.startsAt ? (
+                <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: 2 }}>
+                  {new Date(diary.startsAt).toLocaleString(appLocale(), {
+                    weekday: 'short', day: 'numeric', month: 'short',
+                    hour: 'numeric', minute: '2-digit',
+                  })}
+                </Text>
+              ) : null}
+              {/* The sentence carries the warning where there is one, and the
+                  mark is a mark rather than coloured words — `nextUpUrgent` is
+                  true for exactly one case, and it is hours somebody has paid
+                  for and is not using. */}
+              {nextUpUrgent(diary, creditsRemaining) ? (
+                <View style={{ marginTop: 3 }}>
+                  <Flag tone={t.warn}>{nextUpLine(diary, creditsRemaining, who)}</Flag>
+                </View>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {nextUpLine(diary, creditsRemaining, who)}
+                </Text>
+              )}
+            </View>
+            <Cta label={`Book ${who} a Session`} wide onPress={go('/(trainer)/calendar')} />
+          </Section>
+        ) : null}
+
+
+        {/* ── the ways in, each saying whether there is anything in there ─── */}
+        <Section>
+          <SectionHead title="Their Record" />
+
+          {/* The board's first row on this page is Notes, and until this round
+              the page had no way to them at all: a coach's private notes, the
+              feedback they send, tags, meal targets and the weekly summary are
+              WRITTEN in the client sheet on the Clients tab, and the only road
+              there was back to the roster and in again. The roster opens this
+              page directly now (a coach on TestFlight: "only see information
+              of a client if I choose their profile"), so this row is that
+              sheet's way in — `?sheet=` is consumed once by
+              app/(trainer)/dashboard.tsx and cleared. Not offered for a
+              manual lead the roster does not hold: the sheet is drawn from
+              the roster row, and without one it has nothing to open on. */}
+          {id && client ? (
+            // No caption: this page does not read the notes, and a row's
+            // caption is a fact off a read or it is nothing.
+            <ListRow icon="pencil" title="Notes and Coaching Tools" tone="amber"
+              onPress={() => router.push({ pathname: '/(trainer)/dashboard', params: { sheet: id } } as any)} />
+          ) : null}
+
+          {/* First of the evidence, because the scans on the other side of this
+              row are what two of the three measured goal kinds are held
+              against — the goals themselves are in Current Plan and Goal,
+              directly above this card — and because "how is this person
+              actually going" is the same question asked twice. */}
+          <ListRow icon="ruler" title="Measurements"
+            // The healthy case is one fact — "Last scan Wed 2 Sep". Every
+            // other state keeps `bodyLine`'s sentence, because failed, loading
+            // and never-scanned are three different things to tell a coach.
+            note={unasked ?? (scanTop?.newestISO && scanTop.hasEarlier && !scansFailed ? `Last scan ${fmtDay(scanTop.newestISO)}` : bodyLine(
+              scansFailed,
+              scanTop == null && !scansFailed,
+              scanTop?.newestISO ?? null,
+              scanTop?.hasEarlier ?? false,
+              todayISO,
+              who,
+            ))}
+            tone={scansFailed ? t.warn : 'blue'}
+            onPress={go('/(trainer)/client-body')} />
+
+          {/* Movement, strength, mobility and custom tests. The client reads
+              the same rows under My Assessments. */}
+          <ListRow icon="target" title="Assessments" note="Record a test and compare to last time"
+            tone="teal" onPress={go('/(trainer)/assessments')} />
+
+          {/* Directly under the body composition and above the plan, because
+              this is the only row on the screen about what has already
+              happened. Everything else here is an intention — a goal, a marked
+              day, a list, a program — and a coach standing in front of
+              somebody wants the record before the plan. */}
+          <ListRow icon="dumbbell" title="Training"
+            note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
+            tone={trainedStatus === 'error' ? t.warn : 'purple'}
+            onPress={go('/(trainer)/client-training')} />
+
+          {/* Directly under "What They've Actually Done", because these two are
+              the same question asked from either end: the hours that happened
+              and the hours that were booked and then were not. The record
+              behind it — `public.session_cancellations`, supabase/parts/380 —
+              was written by a trigger on every cancellation since that part was
+              applied and read by nothing at all, which left the one person who
+              acts on it unable to see it.
+
+              There is NO caption, where there was a sentence describing the
+              screen. This screen does not read that table, and a count
+              summarised from a read that has not happened is the shape every
+              other row here avoids by owning its own status. The screen behind the row gates its figures on
+              `isWhole` and says which of loading, failed and empty it is. */}
+          <ListRow icon="calendar" title="Cancelled Sessions" tone="red"
+            onPress={go('/(trainer)/client-cancellations')} />
+
+          <ListRow icon="calendar" title="Planned Week"
+            note={unasked ?? weekLine(weekStatus, week, who)}
+            tone={weekStatus === 'error' ? t.warn : 'teal'}
+            onPress={go('/(trainer)/client-week')} />
+
+          {/* Beside the training week rather than under it, because the two are
+              the same week seen from either side of the plate: what they are
+              lifting and what they are eating while they do it. No caption:
+              their targets are read by the screen behind the row, not by this
+              one. Pushed with the
+              id like every row here — client-nutrition falls back to its own
+              roster picker when it is opened without one, so a coach who
+              arrives from Explore is asked who they mean, and a coach who
+              arrives from here is not asked twice. */}
+          <ListRow icon="meals" title="Nutrition" tone="orange"
+            onPress={go('/(trainer)/client-nutrition')} />
+
+          {/* This carried a comment saying `checklists.tsx` "starts on its own
+              client picker and does not read `clientId` off the route", so the
+              summary was about this client and the screen it opened still asked
+              the coach to pick them.
+
+              Both halves were false, and had been since that screen was
+              rewritten. `checklists.tsx:93` reads `clientId` with
+              `useLocalSearchParams` and seeds `picked` from it, and `go()` at
+              line 603 has always pushed `{ clientId: id, name: fullName }`. So
+              the row opened on the right client the whole time.
+
+              Corrected rather than deleted, because a stale comment is worse
+              than none: this one described a gap that was already closed, and
+              the next person to read it would either have "fixed" a working
+              screen or left the row alone believing it was broken. Half the
+              defects in this codebase's own roadmap are comments that outlived
+              the code they described. */}
+          <ListRow icon="check" title="Daily Checklist"
+            note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
+            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : 'teal'}
+            onPress={go('/(trainer)/checklists')} />
+
+          <ListRow icon="camera" title="Progress Photos"
+            note={unasked ?? photosLine(inbox, photosFailed, who)}
+            tone={photosFailed ? t.warn : 'pink'}
+            onPress={go('/(trainer)/client-photos')} />
+
+          {/* The approved profile's last two rows. Neither is a new
+              destination: Check-ins is the review further down THIS page (the
+              same scroll the action row does) and Messages is the thread. Each
+              caption is the read this page already holds — how old the newest
+              check-in is, how many messages are unread — and is left off
+              rather than written as a nought when there is nothing to say. */}
+          {id ? (
+            <ListRow icon="check" title="Check-ins" tone="brand"
+              note={unasked ? undefined : latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined}
+              onPress={() => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); }} />
+          ) : null}
+          {id ? (
+            <ListRow icon="message" title="Messages" tone="purple"
+              note={client && client.unread != null && client.unread > 0 ? `${client.unread} unread` : undefined}
+              onPress={go('/(trainer)/chat')} />
+          ) : null}
+
+        </Section>
+
+
+        {/* ── Blood sugar, if they have chosen to show it ──────────────────
+            Three outcomes that a naive screen would render identically, and
+            they mean opposite things:
+
+              · the client has not turned sharing on — there may be a fortnight
+                of readings sitting in their app and it is not the coach's to
+                see. Say so, and say nothing about whether any exist.
+              · sharing is on and the window is empty — genuinely nothing
+                recorded.
+              · the read failed — unknown, and NOT "nothing recorded".
+
+            The database enforces the first of those (parts/102-glucose.sql);
+            this section only decides which sentence to print. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Blood Sugar" />
+            {/* Nothing was asked, so nothing here is an answer. Without this,
+                a hand-added client — whose `clients` row does not exist, so the
+                consent column reads back as no row at all — drew the warning
+                below, which tells a coach a read of somebody's blood sugar
+                failed when no such read was ever entitled to run. */}
+            {unasked ? (
+              <Flag tone={t.ink3}>{unasked}</Flag>
+            ) : gl.sharedWithCoach === false ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} has not shared their glucose readings. Whether they have any is not
+                something this screen can tell you. They choose, in their own app, under Blood
+                Sugar.
+              </Text>
+            ) : gl.status === 'error' || gl.sharedWithCoach === null ? (
+              <Flag tone={t.warn}>
+                Their readings could not be read. This is not a statement that there are none.
+              </Flag>
+            ) : gl.status === 'loading' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>Loading.</Text>
+            ) : /* ── the fourth state, which this chain did not have ──────────
+                   `src/ui/glucoseData.ts` reads `.limit(ROW_CAP)` and returns
+                   'partial' at `>= ROW_CAP`, and ROW_CAP is 1000. A CGM writes
+                   every 5-15 minutes, so the fourteen days this section is
+                   headed by are between 1,344 and 4,032 readings — a sensor
+                   sharing at all all but guarantees the ceiling. The chain
+                   above named 'error' and 'loading' with `===` and let
+                   'partial' fall through to the figures, so the coach read
+                   "Average 6.4 · Highest 11.2 · In range 74% · last 14 days.
+                   1000 readings": four figures about a different fortnight than
+                   the label above them, with the ROW CAP printed as a total.
+                   Every one of them is arithmetic over a prefix, and the prefix
+                   is whichever end of the window PostgREST happened to return.
+
+                   The client's own copy of this was fixed and carries the note
+                   — `known` is `status === 'ready'`, app/(client)/glucose.tsx
+                   :132 and :414. This is that gate, and the sentence names what
+                   is withheld rather than leaving four dashes. */
+              gl.status === 'partial' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} has more readings on record than one request returns, so an average, a
+                highest, a share in range and a count of them would each be arithmetic over
+                whichever part came back. None of the four is shown. Their readings are real and
+                there are more of them than this. It is not a fortnight that went badly.
+              </Text>
+            ) : gl.readings.length === 0 ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} is sharing, and their monitor has recorded nothing in the last 14 days.
+              </Text>
+            ) : (
+              <>
+                {/* The kit's row, so each figure is one spoken sentence and
+                    the unit sits beside the value rather than in a footnote. */}
+                <View style={{ marginTop: sp.sm }}>
+                  <KpiRow items={[
+                    { label: 'Latest', value: fig(gl.summary.latest ? num1(gl.summary.latest.mmol) : null), unit: gl.summary.latest ? 'mmol/L' : undefined },
+                    { label: 'Average', value: fig(gl.summary.averageMmol == null ? null : num1(gl.summary.averageMmol)), unit: gl.summary.averageMmol == null ? undefined : 'mmol/L' },
+                    { label: 'Highest', value: fig(gl.summary.highestMmol == null ? null : num1(gl.summary.highestMmol)), unit: gl.summary.highestMmol == null ? undefined : 'mmol/L' },
+                    { label: 'In Range', value: fig(gl.summary.inTypicalPct), unit: gl.summary.inTypicalPct == null ? undefined : '%' },
+                  ]} />
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  Last 14 days. {gl.summary.count} reading{gl.summary.count === 1 ? '' : 's'}.
+                </Text>
+
+                {/* Meals with a reading either side. Shown because it is the
+                    only part of this a coach can act on — and shown as
+                    arithmetic, never as a judgement about the meal.
+
+                    ── why the meal rows now have a state of their own ────────
+                    These are two reads, not one: `glucose_readings` and
+                    `food_logs`. `gl.pairedStatus` is `worstStatus` of the two
+                    (src/ui/glucoseData.ts :263) and is exported for exactly
+                    this — but only app/(client)/glucose.tsx :317 consumed it,
+                    and this screen ignored it. A refused `food_logs` read
+                    leaves `paired` empty, this list mapped over nothing, and
+                    the meal rows simply were not there: no gap, no sentence, no
+                    difference at all from a client who logged no meals. A coach
+                    concludes their client has stopped logging food and says so
+                    to them. Three states here, as on their own copy. */}
+                {gl.pairedStatus === 'error' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    What {who} ate could not be read, so nothing can be put beside these readings.
+                    This is not a statement that they have logged no meals.
+                  </Text>
+                ) : gl.pairedStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Reading their meals…</Text>
+                ) : gl.pairedStatus === 'partial' ? (
+                  // 'partial' is a read that FINISHED, so "still loading" would
+                  // be this screen misreporting its own state — the same
+                  // distinction their own copy draws in the same place.
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    More is on record than one request returns, so what sits around {who}&rsquo;s
+                    meals cannot be shown. A meal missing from below may simply be on the other
+                    side of that limit.
+                  </Text>
+                ) : gl.paired.filter((x) => x.rise != null).length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    No meal in the last 14 days has a reading either side of it.
+                  </Text>
+                ) : null}
+                {gl.pairedStatus !== 'ready' ? null : gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
+                  <View key={x.meal.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{x.meal.name}</Text>
+                    {/* rtl-ok: before → peak is a reading BEFORE a meal and the
+                        reading after it. The arrow is time, not layout, and a
+                        coach reading it backwards would see a rise as a fall.
+                        What this does not fix, and cannot from here: inside an
+                        Arabic paragraph the platform's bidi algorithm reorders
+                        the two numeric runs around the neutral arrow, so the
+                        honest long-term fix is two labelled fields rather than
+                        a glyph between them. Recorded rather than papered over. */}
+                    <Text style={{ ...ty.label, color: t.ink3 }}>
+                      {x.before ? num1(x.before.mmol) : '—'} → {x.peak ? num1(x.peak.mmol) : '—'}
+                    </Text>
+                    <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: END_ALIGN }}>
+                      {/* A rise of 0.04 mmol/L formatted as "0.0" and was
+                          then given a plus. Shown as arithmetic, and a rise
+                          the monitor did not record is not arithmetic. */}
+                      {deltaLabel(x.rise, { since: null, noChange: '0.0', noBaseline: '—' })}
+                    </Text>
+                  </View>
+                ))}
+
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  What their monitor recorded, nothing more. Repple does not turn these into dietary
+                  advice and neither should this screen. Targets are set with their clinician, and
+                  {' '}{who} can withdraw this at any time, which hides the history as well.
+                </Text>
+              </>
+            )}
+          </Section>
+        ) : null}
+
+
+        {/* ── whether they have actually been coming in ────────────────────
+            The two numbers a coach opens an attendance record to find, and
+            until now the only coach-side reader of that record was a separate
+            screen nothing on this one linked to. Both are decided in
+            src/lib/attendanceGaps.ts, which also holds the reason only one of
+            them survives a truncated read.
+
+            There is no attendance percentage here and there is not going to be
+            one, for the reason app/(trainer)/client-attendance.tsx sets out at
+            length: a percentage needs a count of the classes somebody was
+            EXPECTED at, and a register nobody ticked is not evidence they were
+            expected or that they did not come. */}
+        <Section>
+          <SectionHead title="Coming In" />
+          {unasked ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : (
+            <>
+              {/* Said BEFORE any of it is read. A coach whose account is not
+                  attached to a gym matches neither policy and is handed an
+                  empty record with no error — which reads exactly like a client
+                  who has never been through a door. */}
+              {attScope ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Notice tone={t.warn} kicker="Scope"
+                    title={attHasGym === null ? 'We could not tell which gym you belong to' : 'Your account is not attached to a gym'}
+                    note={attScope} />
+                </View>
+              ) : null}
+
+              {att.status === 'error' ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Notice tone={t.crit} kicker="Not Read" title="Their attendance could not be read"
+                    note="The figures below are dashes because the record did not come back. It is NOT a record of them never coming in." />
+                </View>
+              ) : null}
+
+              <KpiRow items={[
+                {
+                  label: 'Since Last In',
+                  value: fig(attSince ? attSince.days : null),
+                  unit: attSince ? (attSince.days === 1 ? 'day' : 'days') : undefined,
+                },
+                {
+                  label: 'Longest Gap',
+                  value: fig(attLongest ? attLongest.days : null),
+                  unit: attLongest ? 'days' : undefined,
+                },
+              ]} />
+
+              {att.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Reading their attendance…</Text>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {attSince
+                    ? `Last recorded at a gym on ${fmtDay(attSince.since)}. `
+                    : att.status === 'ready' && attHasGym === true
+                      ? `Your gym has nothing on record for ${who}, which for plenty of gyms means it does not scan the door and its registers are not marked, rather than that they have stayed away. `
+                      : `How long it has been since ${who} was in could not be established, which is not the same as them not coming. `}
+                  {attLongest
+                    ? `The longest they have gone between visits is ${attLongest.days} days, from ${fmtDay(attLongest.from)} to ${fmtDay(attLongest.to)}.`
+                    : attWhole
+                      ? 'There are not yet two days on record to measure a gap between, so there is nothing to compare this against.'
+                      : 'No longest gap while the record is incomplete: the part that did not come back is the OLD end, which is exactly where a longer one would be.'}
+                </Text>
+              )}
+
+              {/* The comparison that turns a number into a decision. Only ever
+                  drawn from `aRecord` true — the field is null when there is no
+                  completed gap to beat, and rendering that as "normal for them"
+                  would be reassurance invented out of nothing. */}
+              {attSince?.aRecord ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Flag tone={t.warn}>
+                    That is already longer than {who} has ever gone between visits in the record you
+                    can see. It is the gap, not a verdict. The record starts where it starts.
+                  </Flag>
+                </View>
+              ) : null}
+
+              {/* What the attendance is MADE of, which is the third thing a
+                  coach wants and the one the gaps above cannot say: somebody
+                  who has only ever been marked off at Pilates is a different
+                  conversation from somebody who does four things. Counted from
+                  what was actually marked — a booking is an intention and a
+                  waitlist place is not even that. */}
+              {attMix.rows.length || attMix.floor ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {attMix.rows.length
+                    ? `What they turn up to: ${attMix.rows.map((m) => `${m.label} ${m.times}`).join(' · ')}${attMix.floor ? ` · on the floor ${attMix.floor}` : ''}.`
+                    : `No class of theirs has been marked off, and the door has them in ${attMix.floor} times.`}
+                  {' '}Counted from what was marked at the time, never from what they booked.
+                </Text>
+              ) : null}
+
+              {/* Never folded into a named row above: a coach reading "8
+                  Pilates" when four of the eight are classes nobody could open
+                  is being told something this app does not know. */}
+              {attMix.unreadable ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {attMix.unreadable} more {attMix.unreadable === 1 ? 'attendance was' : 'attendances were'} at a class
+                  this app could not open, usually a gym they are no longer with. The attendance is real; only the
+                  class is missing, so it is counted here rather than under a name we would be guessing at.
+                </Text>
+              ) : null}
+
+              {attDwell ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  They stay about {attDwell.minutes} minutes, averaged over the {attDwell.over} visit
+                  {attDwell.over === 1 ? '' : 's'} that recorded both an entry and an exit
+                  {attDwell.without ? `. ${attDwell.without} more had no exit on the door, and are not in that average` : ''}.
+                </Text>
+              ) : null}
+
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+                <Ghost label="Their Attendance"
+                  a11yLabel={`Every visit your gym has on record for ${who}`}
+                  onPress={() => router.push({ pathname: '/(trainer)/client-attendance', params: { clientId: id as string } })} />
+              </View>
+            </>
+          )}
+        </Section>
+
+
+        {/* ── what they actually wrote to you ──────────────────────────────
+            The half of the check-in this product collected every week and
+            never once showed the person it was addressed to. The weight and
+            the timestamp were read on four screens; the four self-ratings and
+            the note the client typed were read by nothing at all.
+            The note comes first and is drawn as a quotation, because it is the
+            only thing on this screen that is somebody's own words rather than
+            this app's summary of them. */}
+        {/* The wrapper is only there to be measured: the Check-in action at
+            the top of the page scrolls to it. */}
+        <View onLayout={(e) => setCheckInY(e.nativeEvent.layout.y)}>
+        <Section>
+          {/* Board page 12, read the coach's way: the head says which
+              check-in this is and how old it is; the answers follow in the
+              shapes the client gave them — faces, tracks, the notes box —
+              and the coach's reply stands where the client's submit did.
+              src/ui/coach/CheckInReview.tsx draws them; nothing about what is
+              read, or when it is withheld, has moved. */}
+          <SectionHead title="Check-in"
+            // Null rather than a dash when the timestamp will not parse: a
+            // dash where a date goes, beside a note somebody wrote, reads as
+            // the screen having broken.
+            note={latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined} />
+          {checkInGap ? (
+            ciStatus === 'error' && !unasked
+              ? <Flag tone={t.warn}>{checkInGap}</Flag>
+              : <Text style={{ ...ty.body, color: t.ink3 }}>{checkInGap}</Text>
+          ) : latestCheckIn ? (<>
+            <CheckInReview checkIn={latestCheckIn} who={who} weightUnit={wu}
+              onReply={id ? go('/(trainer)/chat') : undefined} />
+
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+              {/* Adherence is the client's own 1-5 rating of how well they
+                  stuck to the plan, and it is stated here as the scale it is
+                  on. The roster shows the same column as a percentage, and the
+                  day the two were confused a client who rated themselves 4 out
+                  of 5 was displayed as 4% and flagged at risk. */}
+              Their own ratings, out of five, including how well they feel they stuck to the plan. Not the same figure as the adherence percentage on your roster, which counts what they ticked.
+              {ciStatus === 'partial'
+                ? ' Only part of their history came back, so the count below is at least this many rather than all of them.'
+                : ''}
+            </Text>
+
+            {checkIns && checkIns.length > 1 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {checkIns.length} check-ins on record.
+              </Text>
+            ) : null}
+          </>) : null}
+        </Section>
+        </View>
+
+
+        {/* ── what they have paid you ──────────────────────────────────────
+            R1. The number the decision on this screen turns on, and it was on
+            no coach-side screen about a named person: sales lived on Payments,
+            renewals on Payments, cash on Receipts, and no per-person total
+            anywhere. A coach ends a £2,400 relationship and a £120 one through
+            the same two-tap dialog.
+
+            It is a SUM OF ROWS THAT ALREADY EXIST — money already charged or
+            already handed over — and `VALUE_IS_PAST` says so on the screen,
+            because a coach who reads it as a forecast will act on it as one.
+
+            The cash half is not optional. A receipts read that did not come
+            back whole withholds the TOTAL exactly as a failed sales read does,
+            and for most self-employed coaches cash is the bigger half. The
+            arithmetic is `clientValue`'s and this screen does not repeat it. */}
+        <Section>
+          <SectionHead title="What They Have Paid You" note="All Time" />
+          {unasked ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : !value || valueRead === 'loading' ? (
+            // `valueStatus` and not a status composed here. It is exported for
+            // exactly this: a caller that took two of the three reads would
+            // produce a status saying the figure is trustworthy while the cash
+            // half is still in flight.
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what they have paid you…</Text>
+          ) : (<>
+            <KpiRow items={[
+              {
+                label: 'Worth',
+                // Two currencies are two amounts of money and are never added.
+                // A client who paid in AED and once in GBP has two pots and
+                // there is no single figure for them.
+                value: value.ledger.total && value.ledger.total.pots.length
+                  ? value.ledger.total.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                  : '—',
+              },
+              // `paymentsCounted`, not `value.payments`. The count on the
+              // value is the rows that ARRIVED — kept deliberately, so the
+              // sentence below can call it a floor — and printing it here, a
+              // finger's width from "Worth —", made the dash read as "we
+              // cannot price these four" instead of "we do not know there were
+              // four".
+              { label: 'Payments', value: fig(paymentsCounted(value)) },
+              {
+                label: 'Owed Now',
+                value: owed.outstanding && owed.outstanding.pots.length
+                  ? owed.outstanding.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                  : '—',
+              },
+            ]} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {value.ledger.total ? (valueSpanLine(value, new Date(nowMs)) ?? '') : valueEmptyLine(value)}
+            </Text>
+            {/* What went back, beside the figure it was taken out of. The total
+                above is net of refunds, so without this a coach reads a smaller
+                number over an unchanged payment count and has no way to tell a
+                refund from money that was never taken — which is the reading
+                that makes them doubt the screen rather than the sale.
+                app/(trainer)/money.tsx renders the same pair. */}
+            {refundedLine(value) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{refundedLine(value)}</Text>
+            ) : null}
+            {/* The count the KPI above may not state, said as the floor it is —
+                "we could not total 14 payments" is a more useful sentence to a
+                coach than "we could not total your payments". */}
+            {paymentsFloorLine(value) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{paymentsFloorLine(value)}</Text>
+            ) : null}
+            {/* An amount with no currency on it is a hole in the figure, and
+                the size of the hole is what is worth reporting. It is never
+                summed into a unit nobody stated. */}
+            {value.ledger.total && (value.ledger.total.unlabelled > 0 || value.ledger.total.unpriced > 0) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                {value.ledger.total.unlabelled > 0
+                  ? `${value.ledger.total.unlabelled} of their payments carry an amount with no currency on it and are in no figure above. `
+                  : ''}
+                {value.ledger.total.unpriced > 0
+                  ? `${value.ledger.total.unpriced} of their payments have no amount recorded at all.`
+                  : ''}
+              </Flag>
+            ) : null}
+            {/* Their subscription, in Stripe's own state and this app's word
+                for it. `statusLabel` is the same function Payments renders, so
+                a coach cannot read "past due" on one screen and "active" here
+                about one subscription. */}
+            <View style={{ marginTop: sp.md }}>
+              {subs.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading whether they are on a subscription…</Text>
+              ) : subs.status === 'ready' ? (
+                <Text style={{ ...ty.label, color: t.ink2 }}>
+                  {sub
+                    ? `On a subscription to you (${statusLabel(sub.status)}).`
+                    : `${who} is not on a subscription to you. What they have paid is one-off sales, cash, or both.`}
+                </Text>
+              ) : (
+                <Flag tone={t.warn}>
+                  Whether {who} is on a subscription could not be read. That is our end and not a statement
+                  that they are on none, so do not cancel or re-sell anything against it.
+                </Flag>
+              )}
+            </View>
+            {/* What they owe, aged, from the coach's own invoice book. Nothing
+                here is inferred from a payment processor, because nothing about
+                a payment processor reaches that table. */}
+            <View style={{ marginTop: sp.md }}>
+              {owed.withheld ? (
+                <Flag tone={t.warn}>{owed.withheld}</Flag>
+              ) : owed.overdue.length === 0 && owed.upcoming.length === 0 && owed.undated.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  You have raised no invoice to {who} that is still open.
+                </Text>
+              ) : (<>
+                {[...owed.overdue, ...owed.upcoming, ...owed.undated].slice(0, 5).map((a) => (
+                  <View key={a.invoice.id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>
+                      {invoiceNumber(a.invoice.seq)} — {a.age.line}
+                    </Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{invoiceMoney(a.invoice) ?? '—'}</Text>
+                  </View>
+                ))}
+                {owed.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{owed.undatedNote}</Flag> : null}
+              </>)}
+            </View>
+            {/* Where a coach goes to change any of it. Deep links only — this
+                screen reads money and writes none of it. */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+              <Ghost label="Payments" onPress={() => router.push('/(trainer)/payments')} />
+              <Ghost label="Invoices" onPress={() => router.push('/(trainer)/invoices')} />
+              <Ghost label="Record a Payment" onPress={() => router.push('/(trainer)/receipts')} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_IS_PAST}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_IS_NET_OF_REFUNDS}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
+            {/* One wording of this warning in the app. `VALUE_MAY_DOUBLE_COUNT`
+                is clientValue.ts's, written for this figure; it points at
+                `RECEIPT_MAY_DOUBLE_COUNT` rather than restating it, and a
+                second phrasing here would be the copy that drifts. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_MAY_DOUBLE_COUNT}</Text>
+          </>)}
+        </Section>
+
+
+        {/* ── what pays for their sessions ─────────────────────────────────
+            The number a coach plans a renewal conversation around, and the one
+            line they have to act on. Both come from src/lib/sessionCredits.ts,
+            which is the same module the client's own ledger reads — so the two
+            of them cannot be shown different answers about the same hour, which
+            is exactly how a renewal conversation goes wrong.
+
+            An unread balance is a dash and a written reason. "0 left" about a
+            client holding ten is the sentence that has a coach chasing money
+            they have already been paid. */}
+        <Section>
+          <SectionHead title="Session Credits" />
+          {unasked ? (
+            /* Gated on `unasked` like every other section on this screen —
+               :1494, :1552 and :1724 all are, and this one was not. The three
+               reads behind it return before they start for a client with no
+               account (`if (!canRead || !id) return;`), so all three stayed
+               `undefined` and the spinner below could not be resolved by any
+               pull, retry or reconnection. A hand-added client is the ordinary
+               case for a coach taking cash, and this is the section that says
+               whether that person has hours left. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : creditsLoading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what pays for their sessions…</Text>
+          ) : creditsUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              We couldn’t read what pays for their sessions. This is our end, not a statement that they
+              have nothing left, so do not settle anything against it.
+            </Text>
+          ) : creditRoute === 'none' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {who} holds no pack from you and no PT pass from the gym. Their sessions are settled with
+              you directly, which is an ordinary arrangement and not something to chase.
+            </Text>
+          ) : (<>
+            <KpiRow items={[
+              { label: 'Sessions Left', value: fig(creditsRemaining) },
+              { label: 'Sold By', value: creditRoute === 'gym_pass' ? 'The gym' : 'You' },
+              { label: 'Booked Ahead', value: fig(creditLedger ? creditLedger.upcoming.length : null) },
+            ]} />
+            {(creditLines ?? []).map((l) => (
+              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingEnd: sp.md }}>{l.label}</Text>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {creditRoute === 'gym_pass'
+                ? 'The gym sold this pack and assigned you. One credit comes off it when you mark a session complete.'
+                : 'A session they booked themselves came off this pack at booking. One you booked for them comes off when you mark it complete.'}
+            </Text>
+            {creditShortfall ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.warn}>{creditShortfall} You delivered those hours and nothing paid for them.</Flag>
+              </View>
+            ) : null}
+            {/* The most recent few, so the coach can see WHICH hour a credit
+                went on rather than only how many are gone. */}
+            {creditLedger && creditLedger.past.length > 0 ? (
+              <View style={{ marginTop: sp.md }}>
+                {creditLedger.past.slice(0, 5).map((r) => (
+                  <View key={r.sessionId} style={{ paddingVertical: sp.sm }}>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                      {new Date(r.startsAt).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short' })}
+                      {'  '}
+                      <Text style={{ color: t.ink3 }}>{coachLedgerLine(r)}</Text>
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </>)}
+        </Section>
+
 
         {/* ── what they told you before you started ────────────────────────
             Directly under the injuries and above everything about how they are
@@ -1462,367 +2921,126 @@ export default function ClientScreen() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Readiness questions, training history, what they want, what they have already
                   tried, when they can train, and who to call. You cannot fill any of it in for
-                  them — the database refuses it — which is what makes it worth reading.
+                  them (the database refuses it), which is what makes it worth reading.
                 </Text>
               </>
             )}
           </Section>
         ) : null}
 
-        {/* ── Blood sugar, if they have chosen to show it ──────────────────
-            Three outcomes that a naive screen would render identically, and
-            they mean opposite things:
+        {/* ── your paperwork, for this person ─────────────────────────────
+            Directly under the intake, because the two are read in the same
+            breath and for the same reason: this is the material a coach goes
+            through BEFORE putting somebody through anything.
 
-              · the client has not turned sharing on — there may be a fortnight
-                of readings sitting in their app and it is not the coach's to
-                see. Say so, and say nothing about whether any exist.
-              · sharing is on and the window is empty — genuinely nothing
-                recorded.
-              · the read failed — unknown, and NOT "nothing recorded".
-
-            The database enforces the first of those (parts/102-glucose.sql);
-            this section only decides which sentence to print. */}
+            Every sentence here comes from src/lib/clientPaperwork.ts, which
+            takes the LoadStatus as its first argument on purpose — a failed
+            read, a truncated read and a client who has genuinely signed
+            everything all arrive as an empty list, and only one of them means
+            they are covered. */}
         {id ? (
           <Section>
-            <SectionHead title="Blood Sugar" />
-            {/* Nothing was asked, so nothing here is an answer. Without this,
-                a hand-added client — whose `clients` row does not exist, so the
-                consent column reads back as no row at all — drew the warning
-                below, which tells a coach a read of somebody's blood sugar
-                failed when no such read was ever entitled to run. */}
-            {unasked ? (
-              <Flag tone={t.ink3}>{unasked}</Flag>
-            ) : gl.sharedWithCoach === false ? (
-              <Text style={{ ...ty.body, color: t.ink2 }}>
-                {who} has not shared their glucose readings. Whether they have any is not
-                something this screen can tell you — they choose, in their own app, under Blood
-                Sugar.
-              </Text>
-            ) : gl.status === 'error' || gl.sharedWithCoach === null ? (
-              <Flag tone={t.warn}>
-                Their readings could not be read. This is not a statement that there are none.
+            <SectionHead title="Your Paperwork" />
+            {!queryable ? (
+              <Flag tone={t.ink3}>
+                {who} was added by hand and has no Repple account, so there is nothing for them to have
+                accepted. Paperwork starts applying to them when they join with your code.
               </Flag>
-            ) : gl.status === 'loading' ? (
-              <Text style={{ ...ty.body, color: t.ink2 }}>Loading.</Text>
-            ) : gl.readings.length === 0 ? (
-              <Text style={{ ...ty.body, color: t.ink2 }}>
-                {who} is sharing, and their monitor has recorded nothing in the last 14 days.
-              </Text>
             ) : (
               <>
-                <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
-                  {[
-                    { label: 'Latest', v: gl.summary.latest ? gl.summary.latest.mmol.toFixed(1) : null },
-                    { label: 'Average', v: gl.summary.averageMmol == null ? null : gl.summary.averageMmol.toFixed(1) },
-                    { label: 'Highest', v: gl.summary.highestMmol == null ? null : gl.summary.highestMmol.toFixed(1) },
-                    { label: 'In range', v: gl.summary.inTypicalPct == null ? null : `${gl.summary.inTypicalPct}%` },
-                  ].map((k) => (
-                    <View key={k.label} style={{ flex: 1 }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{k.label}</Text>
-                      <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>{fig(k.v)}</Text>
+                {paperworkOutstanding(paperwork.status, paperwork.items) || paperwork.status === 'error' || paperwork.status === 'partial' ? (
+                  <Flag tone={t.warn}>{paperworkLine(paperwork.status, paperwork.items, who)}</Flag>
+                ) : (
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{paperworkLine(paperwork.status, paperwork.items, who)}</Text>
+                )}
+                {/* The documents themselves, outstanding first. Shown under
+                    'partial' as well — the rows are real; it is the COUNT above
+                    them that cannot be stated. */}
+                {paperwork.status === 'ready' || paperwork.status === 'partial' ? paperwork.items.map((it) => (
+                  <View key={it.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink, flex: 1 }} numberOfLines={1}>{it.title}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {/* The words say it; the dot is the mark beside them. */}
+                      {it.acceptedAt ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />}
+                      <Text style={{ ...ty.caption, color: it.acceptedAt ? t.ink3 : t.ink2 }}>{paperworkItemLine(it, fmtDay)}</Text>
                     </View>
-                  ))}
-                </View>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  mmol/L, last 14 days. {gl.summary.count} reading{gl.summary.count === 1 ? '' : 's'}.
-                </Text>
-
-                {/* Meals with a reading either side. Shown because it is the
-                    only part of this a coach can act on — and shown as
-                    arithmetic, never as a judgement about the meal. */}
-                {gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
-                  <View key={x.meal.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{x.meal.name}</Text>
-                    <Text style={{ ...ty.label, color: t.ink3 }}>
-                      {x.before ? x.before.mmol.toFixed(1) : '—'} → {x.peak ? x.peak.mmol.toFixed(1) : '—'}
-                    </Text>
-                    <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: 'right' }}>
-                      {/* A rise of 0.04 mmol/L formatted as "0.0" and was
-                          then given a plus. Shown as arithmetic, and a rise
-                          the monitor did not record is not arithmetic. */}
-                      {deltaLabel(x.rise, { since: null, noChange: '0.0', noBaseline: '—' })}
-                    </Text>
                   </View>
-                ))}
-
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  What their monitor recorded, nothing more. Repple does not turn these into dietary
-                  advice and neither should this screen — targets are set with their clinician, and
-                  {' '}{who} can withdraw this at any time, which hides the history as well.
-                </Text>
+                )) : null}
+                <View style={{ marginTop: sp.md, flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                  <Ghost label="Your Documents" icon="info" onPress={() => router.push('/(trainer)/documents')} />
+                </View>
               </>
             )}
           </Section>
         ) : null}
 
-        <Rule />
+        {/* ── the platform release, which is not your paperwork ───────────
+            Directly under it because it is the same ninety seconds — a coach
+            about to put a stranger through a first session — and above
+            everything else because it is the only line on this screen that is
+            about whether to train them at all.
 
-        {/* ── the hero: the one thing worth knowing first ─────────────────── */}
-        <Hero
-          label="Days Since Anything on Record"
-          figure={fig(drift?.quietDays ?? null)}
-          unit={drift?.quietDays != null ? (drift.quietDays === 1 ? 'day' : 'days') : undefined}
-          note={unasked ?? lastSeenLine(drift, driftFailed, who)}
-          tone={driftTone}
-        />
-        {!unasked && drift && drift.status !== 'on_track' ? (
-          <Flag tone={driftTone}>
-            {DRIFT_LABEL[drift.status]} — check-ins, logged workouts, completed sessions and gym visits, over the last {DEFAULT_WINDOWS.historyDays} days.
-          </Flag>
+            What it is NOT is the document. `liability_waivers` (part 84) is the
+            client's own legal record and no coach may read it; the owner
+            narrowed that on 13 September 2026 to status only, and this line is
+            the whole of the widening. The note underneath says so to the one
+            person who could otherwise go looking for the rest of it.
+
+            Rendered only for a client with an account: somebody the coach typed
+            in by hand has not signed anything, and saying so about a PERSON —
+            rather than about a record that does not exist — is an accusation
+            this screen has no business making. */}
+        {id && queryable ? (
+          <Section>
+            <SectionHead title="Liability Release" />
+            {(() => {
+              // One verdict, read once, so the flag and the sentence can never
+              // disagree about what the read said.
+              const verdict = releaseVerdict(release.status, release.signatures, WAIVER_VERSION);
+              const line = releaseLine(release.status, release.signatures, WAIVER_VERSION, who);
+              if (releaseOutstanding(verdict)) return <Flag tone={t.warn}>{line}</Flag>;
+              // A read that failed or came back short is stated, not flagged: a
+              // warning colour over an unknown is the same lie as a calm one,
+              // and it is the colour a coach stops reading. src/lib/clientRelease.ts
+              // makes the argument in full.
+              if (verdict === 'unreadable' || verdict === 'truncated') return <Flag tone={t.ink3}>{line}</Flag>;
+              return <Text style={{ ...ty.body, color: t.ink2 }}>{line}</Text>;
+            })()}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {RELEASE_PRIVACY_NOTE}
+            </Text>
+          </Section>
         ) : null}
 
-        <Rule />
+        {/* ── the documents about them ─────────────────────────────────────
+            Administration, so with the administration: these two were the
+            last rows of Their Record, between a coach and the evidence. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Reports and Documents" />
+            {/* Last, because it is the only row here that is the END of something
+                rather than a way into it — twelve weeks, a move, a handover to
+                another coach. It belongs on this screen and not only in Explore:
+                the document is ABOUT a named person, and the moment a coach wants
+                one is the moment they are standing on that person's screen. The
+                id goes with it for the same reason the rows above pass it; open
+                from Explore and client-report asks who the report is for. */}
+            <ListRow icon="pencil" title={`Write ${who} a Report`}
+              note={`The handover document at the end of a block, read from ${who}'s record, not from memory.`}
+              onPress={go('/(trainer)/client-report')} />
+            {/* Sending paperwork starts here, on the screen of the person it is
+                for, because that is where a coach is standing when they decide to
+                — the same argument the report row above makes.
 
-        {/* ── what is outstanding ─────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Needs You" />
-          {unasked ? (
-            <Flag tone={t.ink3}>
-              {unasked} Nothing is outstanding on this screen because nothing was asked for — which
-              is not the same as there being nothing.
-            </Flag>
-          ) : null}
-          {!unasked && attn.items.length === 0 && !attn.blind ? (
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              Nothing outstanding that this screen can see: no unread messages, no goal past its
-              target date, and nothing marked ahead that argues with your programme.
-            </Text>
-          ) : null}
-          {(unasked ? [] : attn.items).map((line, i) => (
-            <View key={line} style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-              <Flag tone={t.warn}>{line}</Flag>
-            </View>
-          ))}
-          {/* An empty list above cannot be allowed to read as an all-clear when
-              a read that would have filled it never landed. */}
-          {!unasked && attn.blind ? (
-            <View style={{ marginTop: attn.items.length ? sp.md : 0 }}>
-              <Flag tone={t.ink3}>{attn.blind}</Flag>
-            </View>
-          ) : null}
-        </Section>
-
-        <Rule />
-
-        {/* ── three figures, and a dash wherever the record cannot answer ─── */}
-        <Section>
-          <SectionHead title="Where They Are" />
-          <KpiRow items={[
-            {
-              // The unit rides on the FIGURE, so it only appears when there is
-              // one. `deltaLabel` drops the unit itself when nothing moved —
-              // "No change", not "No change kg" — and this cell was appending
-              // `wu` beside it in a separate element, putting the unit back and
-              // printing "No change kg" for every client whose two scans came
-              // out within a rounded 0.1. `deltaMoved` is the same rounding
-              // deltaLabel judges on, so the two cannot disagree.
-              label: 'Weight Change',
-              value: delta == null ? '—' : deltaLabel(delta, { since: null, noChange: 'No change' }),
-              unit: deltaMoved(delta) ? wu : undefined,
-            },
-            { label: 'In the App', value: fig(seen ? seen.seenDays : null), unit: seen ? `/ ${seen.windowDays} days` : undefined },
-            { label: 'Unread', value: fig(client ? client.unread : null) },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {deltaKg == null
-              ? `No second scan on record for ${who}, so there is no change to state — a dash rather than a nil movement nobody measured. `
-              : `Across the scans on record. `}
-            {unasked
-              ? unasked
-              : seen == null
-              ? 'Their ticks could not be read, so the days they were in the app are unknown rather than none.'
-              : `Days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
-          </Text>
-        </Section>
-
-        <Rule />
-
-        {/* ── what they have paid you ──────────────────────────────────────
-            R1. The number the decision on this screen turns on, and it was on
-            no coach-side screen about a named person: sales lived on Payments,
-            renewals on Payments, cash on Receipts, and no per-person total
-            anywhere. A coach ends a £2,400 relationship and a £120 one through
-            the same two-tap dialog.
-
-            It is a SUM OF ROWS THAT ALREADY EXIST — money already charged or
-            already handed over — and `VALUE_IS_PAST` says so on the screen,
-            because a coach who reads it as a forecast will act on it as one.
-
-            The cash half is not optional. A receipts read that did not come
-            back whole withholds the TOTAL exactly as a failed sales read does,
-            and for most self-employed coaches cash is the bigger half. The
-            arithmetic is `clientValue`'s and this screen does not repeat it. */}
-        <Section>
-          <SectionHead title="What They Have Paid You" note="All time" />
-          {unasked ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
-          ) : !value || valueRead === 'loading' ? (
-            // `valueStatus` and not a status composed here. It is exported for
-            // exactly this: a caller that took two of the three reads would
-            // produce a status saying the figure is trustworthy while the cash
-            // half is still in flight.
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what they have paid you…</Text>
-          ) : (<>
-            <KpiRow items={[
-              {
-                label: 'Worth',
-                // Two currencies are two amounts of money and are never added.
-                // A client who paid in AED and once in GBP has two pots and
-                // there is no single figure for them.
-                value: value.ledger.total && value.ledger.total.pots.length
-                  ? value.ledger.total.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
-                  : '—',
-              },
-              { label: 'Payments', value: fig(value.payments) },
-              {
-                label: 'Owed Now',
-                value: owed.outstanding && owed.outstanding.pots.length
-                  ? owed.outstanding.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
-                  : '—',
-              },
-            ]} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {value.ledger.total ? (valueSpanLine(value, new Date(nowMs)) ?? '') : valueEmptyLine(value)}
-            </Text>
-            {/* An amount with no currency on it is a hole in the figure, and
-                the size of the hole is what is worth reporting. It is never
-                summed into a unit nobody stated. */}
-            {value.ledger.total && (value.ledger.total.unlabelled > 0 || value.ledger.total.unpriced > 0) ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
-                {value.ledger.total.unlabelled > 0
-                  ? `${value.ledger.total.unlabelled} of their payments carry an amount with no currency on it and are in no figure above. `
-                  : ''}
-                {value.ledger.total.unpriced > 0
-                  ? `${value.ledger.total.unpriced} of their payments have no amount recorded at all.`
-                  : ''}
-              </Flag>
-            ) : null}
-            {/* Their subscription, in Stripe's own state and this app's word
-                for it. `statusLabel` is the same function Payments renders, so
-                a coach cannot read "past due" on one screen and "active" here
-                about one subscription. */}
-            <View style={{ marginTop: sp.md }}>
-              {subs.status === 'loading' ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>Reading whether they are on a subscription…</Text>
-              ) : subs.status === 'ready' ? (
-                <Text style={{ ...ty.label, color: t.ink2 }}>
-                  {sub
-                    ? `On a subscription to you — ${statusLabel(sub.status)}.`
-                    : `${who} is not on a subscription to you. What they have paid is one-off sales, cash, or both.`}
-                </Text>
-              ) : (
-                <Flag tone={t.warn}>
-                  Whether {who} is on a subscription could not be read. That is our end and not a statement
-                  that they are on none, so do not cancel or re-sell anything against it.
-                </Flag>
-              )}
-            </View>
-            {/* What they owe, aged, from the coach's own invoice book. Nothing
-                here is inferred from a payment processor, because nothing about
-                a payment processor reaches that table. */}
-            <View style={{ marginTop: sp.md }}>
-              {owed.withheld ? (
-                <Flag tone={t.warn}>{owed.withheld}</Flag>
-              ) : owed.overdue.length === 0 && owed.upcoming.length === 0 && owed.undated.length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>
-                  You have raised no invoice to {who} that is still open.
-                </Text>
-              ) : (<>
-                {[...owed.overdue, ...owed.upcoming, ...owed.undated].slice(0, 5).map((a) => (
-                  <View key={a.invoice.id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.sm }}>
-                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>
-                      {invoiceNumber(a.invoice.seq)} — {a.age.line}
-                    </Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{invoiceMoney(a.invoice) ?? '—'}</Text>
-                  </View>
-                ))}
-                {owed.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{owed.undatedNote}</Flag> : null}
-              </>)}
-            </View>
-            {/* Where a coach goes to change any of it. Deep links only — this
-                screen reads money and writes none of it. */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-              <Ghost label="Payments" onPress={() => router.push('/(trainer)/payments')} />
-              <Ghost label="Invoices" onPress={() => router.push('/(trainer)/invoices')} />
-              <Ghost label="Record a Payment" onPress={() => router.push('/(trainer)/receipts')} />
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_IS_PAST}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
-            {/* One wording of this warning in the app. `VALUE_MAY_DOUBLE_COUNT`
-                is clientValue.ts's, written for this figure; it points at
-                `RECEIPT_MAY_DOUBLE_COUNT` rather than restating it, and a
-                second phrasing here would be the copy that drifts. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_MAY_DOUBLE_COUNT}</Text>
-          </>)}
-        </Section>
-
-        <Rule />
-
-        {/* ── what pays for their sessions ─────────────────────────────────
-            The number a coach plans a renewal conversation around, and the one
-            line they have to act on. Both come from src/lib/sessionCredits.ts,
-            which is the same module the client's own ledger reads — so the two
-            of them cannot be shown different answers about the same hour, which
-            is exactly how a renewal conversation goes wrong.
-
-            An unread balance is a dash and a written reason. "0 left" about a
-            client holding ten is the sentence that has a coach chasing money
-            they have already been paid. */}
-        <Section>
-          <SectionHead title="Session Credits" />
-          {creditsLoading ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what pays for their sessions…</Text>
-          ) : creditsUnread ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              We couldn’t read what pays for their sessions. This is our end, not a statement that they
-              have nothing left, so do not settle anything against it.
-            </Text>
-          ) : creditRoute === 'none' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {who} holds no pack from you and no PT pass from the gym. Their sessions are settled with
-              you directly, which is an ordinary arrangement and not something to chase.
-            </Text>
-          ) : (<>
-            <KpiRow items={[
-              { label: 'Sessions Left', value: fig(creditsRemaining) },
-              { label: 'Sold By', value: creditRoute === 'gym_pass' ? 'The gym' : 'You' },
-              { label: 'Booked Ahead', value: fig(creditLedger ? creditLedger.upcoming.length : null) },
-            ]} />
-            {(creditLines ?? []).map((l) => (
-              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
-                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingRight: sp.md }}>{l.label}</Text>
-                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
-              </View>
-            ))}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {creditRoute === 'gym_pass'
-                ? 'The gym sold this pack and assigned you. One credit comes off it when you mark a session complete.'
-                : 'A session they booked themselves came off this pack at booking. One you booked for them comes off when you mark it complete.'}
-            </Text>
-            {creditShortfall ? (
-              <View style={{ marginTop: sp.md }}>
-                <Flag tone={t.warn}>{creditShortfall} You delivered those hours and nothing paid for them.</Flag>
-              </View>
-            ) : null}
-            {/* The most recent few, so the coach can see WHICH hour a credit
-                went on rather than only how many are gone. */}
-            {creditLedger && creditLedger.past.length > 0 ? (
-              <View style={{ marginTop: sp.md }}>
-                {creditLedger.past.slice(0, 5).map((r) => (
-                  <View key={r.sessionId} style={{ paddingVertical: sp.sm }}>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
-                      {new Date(r.startsAt).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short' })}
-                      {'  '}
-                      <Text style={{ color: t.ink3 }}>{coachLedgerLine(r)}</Text>
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </>)}
-        </Section>
-
-        <Rule />
+                It is a plain push and not `go`: Documents is about the coach's own
+                paperwork and takes no client, and handing it a clientId it does
+                not read would be a parameter that looks like it does something.
+                The picker on that screen names every client, this one included. */}
+            <ListRow icon="pencil" title="Send Them a Document"
+              note="Your own waivers, agreements and forms. Pick one and send it to a single client."
+              onPress={() => router.push('/(trainer)/documents')} />
+          </Section>
+        ) : null}
 
         {/* ── who has already tried them ───────────────────────────────────
             `member_interventions` was built for the person about to make the
@@ -1898,191 +3116,11 @@ export default function ClientScreen() {
               </View>
             ) : null}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Shared with everybody on your gym’s staff. A contact recorded here is not attendance and does not move anybody’s retention verdict — it is the record of what was tried, so the next person to look does not try it again.
+              Shared with everybody on your gym’s staff. A contact recorded here is not attendance and does not move anybody’s retention verdict. It is the record of what was tried, so the next person to look does not try it again.
             </Text>
           </>)}
         </Section>
 
-        <Rule />
-
-        {/* ── what they actually wrote to you ──────────────────────────────
-            The half of the check-in this product collected every week and
-            never once showed the person it was addressed to. The weight and
-            the timestamp were read on four screens; the four self-ratings and
-            the note the client typed were read by nothing at all.
-            The note comes first and is drawn as a quotation, because it is the
-            only thing on this screen that is somebody's own words rather than
-            this app's summary of them. */}
-        <Section>
-          <SectionHead title="What They Told You" />
-          {checkInGap ? (
-            ciStatus === 'error' && !unasked
-              ? <Flag tone={t.warn}>{checkInGap}</Flag>
-              : <Text style={{ ...ty.body, color: t.ink3 }}>{checkInGap}</Text>
-          ) : latestCheckIn ? (<>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-              <Text style={{ ...ty.label, color: t.ink3 }}>Their latest check-in</Text>
-              {/* Null rather than a dash when the timestamp will not parse:
-                  a dash where a date goes, beside a note somebody wrote, reads
-                  as the screen having broken. */}
-              {checkInAge(latestCheckIn.at, nowMs)
-                ? <Text style={{ ...ty.caption, color: t.ink3 }}>{checkInAge(latestCheckIn.at, nowMs)}</Text>
-                : null}
-            </View>
-
-            {latestCheckIn.note ? (
-              <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.brand }}>
-                <Text style={{ ...ty.body, color: t.ink }}>{latestCheckIn.note}</Text>
-              </View>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                They sent the form without writing anything with it.
-              </Text>
-            )}
-
-            {/* Withheld entirely when none of the four was answered, rather
-                than drawn as a row of dashes that says nothing and takes up
-                the space where something might have. */}
-            {ratingsLine(latestCheckIn)
-              ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{ratingsLine(latestCheckIn)}</Text>
-              : null}
-
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {/* Adherence is the client's own 1-5 rating of how well they
-                  stuck to the plan, and it is stated here as the scale it is
-                  on. The roster shows the same column as a percentage, and the
-                  day the two were confused a client who rated themselves 4 out
-                  of 5 was displayed as 4% and flagged at risk. */}
-              Their own ratings, out of five, including how well they feel they stuck to the plan. Not the same figure as the adherence percentage on your roster, which counts what they ticked.
-              {ciStatus === 'partial'
-                ? ' Only part of their history came back, so the count below is at least this many rather than all of them.'
-                : ''}
-            </Text>
-
-            {checkIns && checkIns.length > 1 ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {checkIns.length} check-ins on record.
-              </Text>
-            ) : null}
-          </>) : null}
-        </Section>
-
-        <Rule />
-
-        {/* ── the ways in, each saying whether there is anything in there ─── */}
-        <Section>
-          <SectionHead title="Open" />
-
-          <ListRow icon="target" title="What They're Working Toward"
-            note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
-            tone={goalStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-goals')} />
-
-          {/* Directly under the goals, because the scans on the other side of
-              this row are what two of the three measured goal kinds are held
-              against — and because "how is this person actually going" is the
-              same question asked twice. */}
-          <ListRow icon="chart" title="Their Body Composition"
-            note={unasked ?? bodyLine(
-              scansFailed,
-              scanTop == null && !scansFailed,
-              scanTop?.newestISO ?? null,
-              scanTop?.hasEarlier ?? false,
-              todayISO,
-              who,
-            )}
-            tone={scansFailed ? t.warn : undefined}
-            onPress={go('/(trainer)/client-body')} />
-
-          {/* Directly under the body composition and above the plan, because
-              this is the only row on the screen about what has already
-              happened. Everything else here is an intention — a goal, a marked
-              day, a list, a programme — and a coach standing in front of
-              somebody wants the record before the plan. */}
-          <ListRow icon="train" title="What They've Actually Done"
-            note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
-            tone={trainedStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-training')} />
-
-          <ListRow icon="calendar" title="The Week They've Planned"
-            note={unasked ?? weekLine(weekStatus, week, who)}
-            tone={weekStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-week')} />
-
-          {/* Beside the training week rather than under it, because the two are
-              the same week seen from either side of the plate: what they are
-              lifting and what they are eating while they do it. Pushed with the
-              id like every row here — client-nutrition falls back to its own
-              roster picker when it is opened without one, so a coach who
-              arrives from Explore is asked who they mean, and a coach who
-              arrives from here is not asked twice. */}
-          <ListRow icon="meals" title="What They're Eating"
-            note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
-            onPress={go('/(trainer)/client-nutrition')} />
-
-          {/* This carried a comment saying `checklists.tsx` "starts on its own
-              client picker and does not read `clientId` off the route", so the
-              summary was about this client and the screen it opened still asked
-              the coach to pick them.
-
-              Both halves were false, and had been since that screen was
-              rewritten. `checklists.tsx:93` reads `clientId` with
-              `useLocalSearchParams` and seeds `picked` from it, and `go()` at
-              line 603 has always pushed `{ clientId: id, name: fullName }`. So
-              the row opened on the right client the whole time.
-
-              Corrected rather than deleted, because a stale comment is worse
-              than none: this one described a gap that was already closed, and
-              the next person to read it would either have "fixed" a working
-              screen or left the row alone believing it was broken. Half the
-              defects in this codebase's own roadmap are comments that outlived
-              the code they described. */}
-          <ListRow icon="check" title="Their Daily Checklist"
-            note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
-            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/checklists')} />
-
-          <ListRow icon="camera" title="Progress Photos They Sent You"
-            note={unasked ?? photosLine(inbox, photosFailed, who)}
-            tone={photosFailed ? t.warn : undefined}
-            onPress={go('/(trainer)/client-photos')} />
-
-          <ListRow icon="train" title={justCheckedIn ? `Log What ${who} Just Did` : 'Log a Session You Ran'}
-            note={justCheckedIn
-              ? `${who} is checked in. Enter the exercises as you go — it lands in their own record and shows up in their app.`
-              : `Goes into ${who}'s own record, marked as logged by you.`}
-            onPress={go('/(trainer)/log-session')} />
-
-          <ListRow icon="chat" title={`Message ${who}`}
-            note={client && client.unread != null && client.unread > 0
-              ? `${client.unread} unread from them in your thread.`
-              : 'Open your thread with them.'}
-            onPress={go('/(trainer)/chat')} />
-
-          {/* Last, because it is the only row here that is the END of something
-              rather than a way into it — twelve weeks, a move, a handover to
-              another coach. It belongs on this screen and not only in Explore:
-              the document is ABOUT a named person, and the moment a coach wants
-              one is the moment they are standing on that person's screen. The
-              id goes with it for the same reason the rows above pass it; open
-              from Explore and client-report asks who the report is for. */}
-          <ListRow icon="pencil" title={`Write ${who} a Report`}
-            note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
-            onPress={go('/(trainer)/client-report')} />
-          {/* Sending paperwork starts here, on the screen of the person it is
-              for, because that is where a coach is standing when they decide to
-              — the same argument the report row above makes.
-
-              It is a plain push and not `go`: Documents is about the coach's own
-              paperwork and takes no client, and handing it a clientId it does
-              not read would be a parameter that looks like it does something.
-              The picker on that screen names every client, this one included. */}
-          <ListRow icon="pencil" title="Send Them a Document"
-            note="Your own waivers, agreements and forms — pick one and send it to a single client."
-            onPress={() => router.push('/(trainer)/documents')} />
-        </Section>
-
-        <Rule />
 
         {/* ── the one thing here that is yours to change ────────────────────
             Small on purpose. It is one word about somebody, sitting where a
@@ -2126,7 +3164,7 @@ export default function ClientScreen() {
                 ) : modeUnsaved ? (
                   <View style={{ marginTop: sp.md }}>
                     <Flag tone={t.warn}>
-                      Not saved. {COACHED_MODE_SHORT[modeUnsaved]} is on this phone only — the server
+                      Not saved. {COACHED_MODE_SHORT[modeUnsaved]} is on this phone only. The server
                       kept the delivery it already had, so {who}&rsquo;s own app and your other devices
                       are still on that one and this screen is the only place the two disagree. Tap
                       it again to retry.
@@ -2139,8 +3177,8 @@ export default function ClientScreen() {
         ) : null}
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Notes, feedback, tags and meal-plan targets are on the client sheet on your Clients
-          screen. Everything else here is read-only: a goal, a planned day and a tick are the
+          Notes, feedback, tags and meal-plan targets are behind Notes and Coaching Tools, under
+          Their Record. Everything else here is read-only: a goal, a planned day and a tick are the
           client&rsquo;s own, and none of them can be changed from here. How you coach somebody is
           yours rather than theirs, which is why it is the one thing above that you can set.
         </Text>
@@ -2148,41 +3186,56 @@ export default function ClientScreen() {
       </ScrollView>
 
       {/* ── ask them to record it ─────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the note explaining what the client mentioned sits at the foot of the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={askOpen} animationType="slide" transparent onRequestClose={() => setAskOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            You cannot add this for them — an injury has to come from the person who has it, or the
-            programme gate it closes would mean nothing. This messages them and points them at the
-            right screen.
-          </Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What did they mention?</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-              {INJURY_AREAS.map((a) => (
-                <Pressable key={a.id} onPress={() => setAskArea(askArea === a.id ? null : a.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: askArea === a.id }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: askArea === a.id ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: askArea === a.id ? t.brandInk : t.ink2 }}>{a.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In your words (optional)</Text>
-            <TextInput value={askNote} onChangeText={setAskNote} multiline
-              placeholder={`You mentioned your knee was sore after Tuesday…`}
-              placeholderTextColor={t.ink3}
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              They read this in your thread, so write it as you would say it. What they add is theirs,
-              and they can change or remove it whenever they like.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+              You cannot add this for them. An injury has to come from the person who has it, or the
+              program gate it closes would mean nothing. This messages them and points them at the
+              right screen.
             </Text>
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What did they mention?</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {INJURY_AREAS.map((a) => (
+                  <Pressable key={a.id} onPress={() => setAskArea(askArea === a.id ? null : a.id)}
+                    accessibilityRole="button" accessibilityState={{ selected: askArea === a.id }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: askArea === a.id ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: askArea === a.id ? t.brandInk : t.ink2 }}>{a.label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In your words (optional)</Text>
+              <TextInput value={askNote} onChangeText={setAskNote} multiline
+                placeholder={`You mentioned your knee was sore after Tuesday…`}
+                placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                They read this in your thread, so write it as you would say it. What they add is theirs,
+                and they can change or remove it whenever they like.
+              </Text>
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── record what was tried ──────────────────────────────────────────
@@ -2194,55 +3247,70 @@ export default function ClientScreen() {
           finished wearing an answer. A coach who genuinely does not know
           chooses "Not recorded" themselves, which is a different event from
           having skipped the question. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the note saying what was actually tried sits at the foot of the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!logging} animationType="slide" transparent onRequestClose={() => setLogging(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            Everybody on your gym’s staff sees this. It records what was tried, not whether it worked — and it is not attendance, so it does not change how this client is assessed.
-          </Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
-              {channelOptions(CHANNELS).map((o) => (
-                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, channel: o.value } : d))}
-                  accessibilityRole="button" accessibilityState={{ selected: logging?.channel === o.value }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.channel === o.value ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: logging?.channel === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What came of it?</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
-              {outcomeOptions(CONTACT_OUTCOMES).map((o) => (
-                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, outcome: o.value } : d))}
-                  accessibilityRole="button" accessibilityState={{ selected: logging?.outcome === o.value }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.outcome === o.value ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: logging?.outcome === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What was said (optional)</Text>
-            <TextInput value={logging?.note ?? ''} onChangeText={(v) => setLogging((d) => (d ? { ...d, note: v } : d))} multiline
-              placeholder="Away until the 12th, coming back to the Tuesday class."
-              placeholderTextColor={t.ink3}
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              The reason two people do not make the same call. Optional, because “rang, no answer” is already worth recording.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+              Everybody on your gym’s staff sees this. It records what was tried, not whether it worked, and it is not attendance, so it does not change how this client is assessed.
             </Text>
-            {logErr ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logErr}</Flag> : null}
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={logBusy || !!(logging && draftBlocker(logging))}
-            label={logBusy ? 'Recording…' : 'Record It'} onPress={() => { void saveContact(); }} />
-          {logging && draftBlocker(logging)
-            ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{draftBlocker(logging)}</Text>
-            : null}
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setLogging(null)} />
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+                {channelOptions(CHANNELS).map((o) => (
+                  <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, channel: o.value } : d))}
+                    accessibilityRole="button" accessibilityState={{ selected: logging?.channel === o.value }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.channel === o.value ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: logging?.channel === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What came of it?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+                {outcomeOptions(CONTACT_OUTCOMES).map((o) => (
+                  <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, outcome: o.value } : d))}
+                    accessibilityRole="button" accessibilityState={{ selected: logging?.outcome === o.value }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.outcome === o.value ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: logging?.outcome === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What was said (optional)</Text>
+              <TextInput value={logging?.note ?? ''} onChangeText={(v) => setLogging((d) => (d ? { ...d, note: v } : d))} multiline
+                placeholder="Away until the 12th, coming back to the Tuesday class."
+                placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                The reason two people do not make the same call. Optional, because “rang, no answer” is already worth recording.
+              </Text>
+              {logErr ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logErr}</Flag> : null}
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={logBusy || !!(logging && draftBlocker(logging))}
+              label={logBusy ? 'Recording…' : 'Record It'} onPress={() => { void saveContact(); }} />
+            {logging && draftBlocker(logging)
+              ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{draftBlocker(logging)}</Text>
+              : null}
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setLogging(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

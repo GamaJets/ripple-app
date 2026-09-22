@@ -265,7 +265,7 @@ export function cadenceLine(c: Cadence): string {
     return `Nothing has come through for ${since}. They come ${gap}, so they are not late.`;
   }
   if (c.state === 'due') {
-    return `Nothing for ${since}. They come ${gap}, so they were due — not late enough to read anything into.`;
+    return `Nothing for ${since}. They come ${gap}, so they were due, but not late enough to read anything into.`;
   }
   return `Nothing for ${since}, and they come ${gap}. That is ${c.overdueDays} day${c.overdueDays === 1 ? '' : 's'} past their own usual gap.`;
 }

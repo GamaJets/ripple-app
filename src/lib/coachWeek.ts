@@ -9,13 +9,13 @@
 // ── This file adds no vocabulary ───────────────────────────────────────────
 //
 // Every judgement below is src/lib/dayPlan.ts's: `planOutcome` decides what may
-// be said about a day, `planConflict` decides whether a mark and the programme
+// be said about a day, `planConflict` decides whether a mark and the program
 // disagree, and `DAY_TYPE_LABEL` names the day. What is here is the arrangement
 // — which days are in view, which side of today they sit, and the same
 // sentences re-voiced for a coach reading about somebody else. dayPlan speaks
 // to the client in the second person ("Your program schedules Push"); handing
 // those strings to a coach would have them read a sentence addressed to the
-// wrong person about a programme that is theirs, not the reader's.
+// wrong person about a program that is theirs, not the reader's.
 //
 // ── A plan is still not a record, and here it is not even a claim ──────────
 //
@@ -34,9 +34,12 @@
 // of the guard the header of dayPlan.ts asks for: there is no input to this
 // module that makes it say a plan was kept.
 //
-// Pure and dependency-free apart from dayPlan and localDate, so the window
-// arithmetic can be run under the three zones the repo tests in.
+// Pure and dependency-free apart from dayPlan, localDate and the app's own date
+// formatters, so the window arithmetic can be run under the six zones the repo
+// tests in. format.ts is pure too: it reads a locale and writes a string, and
+// touches no clock, no zone and no storage.
 import { dateParts } from './localDate';
+import { fmtAxisDay, weekdayNameShort } from './format';
 import {
   compareIsoDays, planConflict, planOutcome, DAY_TYPE_LABEL,
   type PlanConflict, type PlanOutcome, type PlannedDay, type PlannedDayType,
@@ -59,7 +62,7 @@ export const DAYS_BEHIND = 7;
  * A fortnight rather than a week, because the things worth catching are planned
  * in weekly units and a seven-day window shows them too late. A deload week
  * starting Monday appears in a rolling week's view on Monday — the day it
- * begins, by which point the programme for it is already the wrong programme.
+ * begins, by which point the program for it is already the wrong program.
  * Fourteen days always contains the whole of the next calendar week whatever
  * day the coach opens this, which is the horizon a coach can still act on.
  */
@@ -122,7 +125,7 @@ export interface CoachPlanDay {
   /** Always from `planOutcome`. Never 'log-agrees' or 'nothing-logged' while
    *  this screen does not read the log — see the file header. */
   outcome: PlanOutcome;
-  /** From `planConflict`, null when there is none AND when the programme could
+  /** From `planConflict`, null when there is none AND when the program could
    *  not be read. The two are kept apart by the caller, which knows which. */
   conflict: PlanConflict | null;
   /** Days from today. Negative behind, 0 today. */
@@ -130,14 +133,14 @@ export interface CoachPlanDay {
 }
 
 /**
- * The programme's focus for a weekday (0 Sun … 6 Sat), as `scheduledFocus`
- * returns it: a string for a scheduled session, null for a day the programme
- * leaves empty, and `undefined` when the programme is not known at all.
+ * The program's focus for a weekday (0 Sun … 6 Sat), as `scheduledFocus`
+ * returns it: a string for a scheduled session, null for a day the program
+ * leaves empty, and `undefined` when the program is not known at all.
  *
  * The third case is not pedantry. A coach reads `assigned_programs` only for
  * clients currently theirs and only for rows they assigned themselves
  * (assigned_programs_coach_rw, supabase/parts/69), so "no row came back" does
- * not mean "this client has no programme" — it can equally mean the programme
+ * not mean "this client has no program" — it can equally mean the program
  * is another coach's. `undefined` travels through `planConflict` untouched and
  * no conflict is claimed on it.
  */
@@ -163,7 +166,7 @@ export interface CoachWeek {
   /** Behind today, most recent first — the nearest miss is the one being asked
    *  about. */
   gone: CoachPlanDay[];
-  /** The subset of `ahead` where the mark and the programme disagree, in date
+  /** The subset of `ahead` where the mark and the program disagree, in date
    *  order. Ahead only: a disagreement is worth surfacing while it can still be
    *  settled, and one on a day already gone is an argument about the past. It
    *  is still drawn on the past row itself, where it explains the day. */
@@ -207,8 +210,8 @@ export function coachWeek(
     const outcome = planOutcome(plan.type, plan.dateISO, todayISO, null);
     if (!outcome) continue;
     const weekday = weekdayOf(plan.dateISO);
-    // A date with no readable weekday cannot be matched against a programme, so
-    // the programme is unknown for it rather than empty.
+    // A date with no readable weekday cannot be matched against a program, so
+    // the program is unknown for it rather than empty.
     const scheduled = weekday == null ? undefined : focusOn(weekday);
     rows.push({ plan, side, outcome, conflict: planConflict(plan.type, scheduled), offset });
   }
@@ -225,20 +228,27 @@ export function coachWeek(
 
 /* ── the same sentences, addressed to the coach ────────────────────────────── */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 /**
- * 'Thu 3 Sep'. Assembled rather than handed to `toLocaleDateString`, for the
- * reason `thousands` in src/lib/checklist.ts is assembled: this string is
- * asserted in a test and rendered on devices in every locale the app ships to,
- * and a formatter that changes underneath both makes the test meaningless.
+ * 'Thu 3 Sep' — and 'Do 3 Sep', '木 9月3日', in the coach's own language.
+ *
+ * The date is still read out of its PARTS and never out of `new Date(dateISO)`:
+ * `dateParts` and `weekdayOf` are what make this the client's own calendar day
+ * in every zone, and `fmtAxisDay` takes year, month index and day as numbers so
+ * there is nothing left to parse. What has gone is the pair of English arrays
+ * this used to assemble from.
+ *
+ * The old header argued the other way — "assembled rather than handed to
+ * toLocaleDateString ... this string is asserted in a test, and a formatter
+ * that changes underneath both makes the test meaningless". The test was the
+ * thing that needed changing: a coach reading a Norwegian phone was shown an
+ * English weekday over every day of their week so that a literal in a test file
+ * could stay short. The test now derives the shape it expects.
  */
 export function dayHeading(dateISO: string): string {
   const p = dateParts(dateISO);
   if (!p) return '—';
   const wd = weekdayOf(dateISO);
-  return `${wd == null ? '' : WEEKDAYS[wd] + ' '}${p[2]} ${MONTHS[p[1]]}`;
+  return `${wd == null ? '' : weekdayNameShort(wd) + ' '}${fmtAxisDay(p[0], p[1], p[2])}`;
 }
 
 /** 'Today', 'Tomorrow', 'In 4 days', 'Yesterday', '5 days ago'. Which side of
@@ -266,23 +276,23 @@ export function coachPlanLine(type: PlannedDayType, outcome: PlanOutcome, who: s
   const label = DAY_TYPE_LABEL[type].toLowerCase();
   switch (outcome) {
     case 'not-yet':
-      return `${who} has marked this a ${label}. It hasn’t happened yet — this is what they intend, not what they did.`;
+      return `${who} has marked this a ${label}. It hasn’t happened yet. This is what they intend, not what they did.`;
     case 'today':
       return `${who} has marked today a ${label}. The day is still running, so there is nothing to hold it against yet.`;
     case 'log-unknown':
       return `${who} marked this a ${label} and the day has gone. This screen doesn’t read their training log, so it can’t tell you whether anything was logged against it.`;
     case 'nothing-logged':
-      return `${who} marked this a ${label} and nothing was logged on the day. That is not evidence they kept to it — an unlogged session looks exactly the same from here.`;
+      return `${who} marked this a ${label} and nothing was logged on the day. That is not evidence they kept to it. An unlogged session looks exactly the same from here.`;
     case 'log-agrees':
       return `${who} marked this a ${label} and there is training logged on the day. The log is what happened; this row is only what they meant to do.`;
     case 'log-disagrees':
-      return `${who} marked this a ${label} and there is training logged on the day. Both stand as they are — neither has been changed to match the other.`;
+      return `${who} marked this a ${label} and there is training logged on the day. Both stand as they are. Neither has been changed to match the other.`;
   }
 }
 
 /**
- * A disagreement between the mark and the programme, to the coach who wrote the
- * programme. `planConflict` decides whether there is one; this only says it in
+ * A disagreement between the mark and the program, to the coach who wrote the
+ * program. `planConflict` decides whether there is one; this only says it in
  * the right voice, and says it as something to raise rather than something to
  * fix here — nothing on this screen writes to either side.
  */
@@ -293,19 +303,19 @@ export function coachConflictLine(
 ): string {
   const label = DAY_TYPE_LABEL[type].toLowerCase();
   return conflict.kind === 'plan-schedules-a-session'
-    ? `Your programme puts ${conflict.focus} on this day and ${who} has marked it a ${label}. Worth agreeing which one stands before the day arrives.`
-    : `${who} has marked this a training day and your programme schedules nothing on it. Their mark doesn’t add a session to the programme — it says what they intend to do.`;
+    ? `Your program puts ${conflict.focus} on this day and ${who} has marked it a ${label}. Worth agreeing which one stands before the day arrives.`
+    : `${who} has marked this a training day and your program schedules nothing on it. Their mark doesn’t add a session to the program. It says what they intend to do.`;
 }
 
 /**
- * Why no day on this screen is being compared against a programme, or null when
+ * Why no day on this screen is being compared against a program, or null when
  * they are. Said out loud because a screen showing no conflicts looks identical
  * whether it checked and found none or never checked at all.
  */
-export function programmeCaveat(known: boolean, who: string): string | null {
+export function programCaveat(known: boolean, who: string): string | null {
   return known
     ? null
-    : `No programme of yours is assigned to ${who} that this app can read, so nothing below has been checked against one. That is not the same as their week agreeing with it.`;
+    : `No program of yours is assigned to ${who} that this app can read, so nothing below has been checked against one. That is not the same as their week agreeing with it.`;
 }
 
 /** The client's own words on a day, or null. Where a travel day and a refeed

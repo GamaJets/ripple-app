@@ -83,6 +83,24 @@ export interface WorkoutEntry {
    *  See src/lib/timedSets.ts for why a hold contributes no tonnage and no
    *  estimated 1RM, and what it is worth instead. */
   timed?: boolean[];
+  /** The tempo each of those sets was PERFORMED at, aligned to `sets` the same
+   *  way, in the order a prescribed tempo is written in — eccentric · pause at
+   *  the bottom · concentric · pause at the top, with `X` in the concentric
+   *  slot for "as fast as you can".
+   *
+   *  This is the other half of a prescription that has only ever had one.
+   *  src/lib/setIntensity.ts has read, named and spelled out a tempo since it
+   *  was written, and nothing in the app could record one — so a coach could
+   *  ask for a four-second eccentric and the log could not say whether they got
+   *  it.
+   *
+   *  Null AT AN INDEX is not a tempo of zero and not a prescription met: it is
+   *  a set nobody was asked about, which is the ordinary case, because the
+   *  member is only asked where a tempo was prescribed. Absent ENTIRELY is the
+   *  same answer for the whole entry. Read it through `recordedTempo` in
+   *  src/lib/performedTempo.ts, which is also what stops a short array sliding
+   *  one set's tempo onto another. */
+  tempos?: (string | null)[];
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
   cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
   /** Seconds per heart-rate zone during the session. Absent when no HR source
@@ -107,8 +125,23 @@ export interface WorkoutEntry {
    *  client. Absent means they logged it themselves. Attribution is not
    *  editable from either app — the database trigger refuses a change. */
   loggedBy?: string;
-  /** When the client changed something their coach had logged. Absent means
+  /** The booked PT session this training was logged against, when it was
+   *  logged against one. Absent is the ordinary case — a client's own workout,
+   *  a coach's own training, or an hour written up from a client's record
+   *  rather than from the session (supabase/parts/890).
+   *
+   *  Read-only here, like `amendedAt` and for a related reason: it is a fact
+   *  about the WRITE that made the row, so it is not in `PERSISTED_FIELDS` and
+   *  `entryToRow` does not send it. src/ui/floorQueue.ts puts it on the insert.
+   *  src/lib/loggedSession.ts is what reads it back. */
+  sessionId?: string;
+  /** When a coach-logged set was changed after it was filed. Absent means
    *  untouched since. Server-set: the trigger stamps it, the app only reads it,
    *  which is why it is not in PERSISTED_FIELDS. */
   amendedAt?: string;
+  /** WHO made that change: the member it is about, or the coach who logged it
+   *  (supabase/parts/3230). Server-set with `amendedAt` and read-only for the
+   *  same reason. Absent on a change stamped before the column existed, which
+   *  is why a caption must still be able to say "changed" without a name. */
+  amendedBy?: string;
 }

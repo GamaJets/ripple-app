@@ -88,13 +88,13 @@ export function packageEditBlocker(p: PackagePatch): string | null {
   }
   if (p.name !== undefined) {
     const n = p.name.trim();
-    if (!n) return 'A package needs a name — it is what your client sees on the payment page.';
+    if (!n) return 'A package needs a name. It is what your client sees on the payment page.';
     if (n.length > 120) return 'That name is too long for a payment page. Keep it under 120 characters.';
   }
   if (p.price_cents !== undefined) {
     const c = p.price_cents;
     if (!Number.isFinite(c) || !Number.isInteger(c)) {
-      return 'A price has to be a whole number of minor units — pence, cents, fils.';
+      return 'A price has to be a whole number of minor units: pence, cents, fils.';
     }
     // Zero is refused rather than treated as free. A free package is a real
     // thing somebody might want and it is not what this control is for: Stripe
@@ -125,6 +125,39 @@ export function isReprice(p: PackagePatch, currentCents: number | null | undefin
   return p.price_cents !== currentCents;
 }
 
+/** True when the patch changes the name at all. The counterpart to `isReprice`,
+ *  and it exists for the same reason: the warning below must appear when the
+ *  name has actually moved and not when a coach is correcting a price. */
+export function isRename(p: PackagePatch, currentName: string | null | undefined): boolean {
+  if (p.name === undefined) return false;
+  return p.name.trim() !== String(currentName ?? '').trim();
+}
+
+/**
+ * What a rename does to sales that have already happened.
+ *
+ * ── The one thing on this screen that is NOT forward-looking ──────────────
+ *
+ * The header above spends four paragraphs establishing that a price edit
+ * cannot reach a sale already made: `client_purchases.amount_cents` and
+ * `client_subscriptions.amount_cents` are written at checkout and every screen
+ * renders from those columns. That is true of the PRICE and it is not true of
+ * the NAME, because there is no name column on either table. `packageLabels`
+ * and `fetchClientPurchases` in src/lib/connect.ts both resolve a sale's label
+ * with a LIVE `trainer_packages` lookup, so renaming "10-Session Pack" to
+ * "20-Session Pack" relabels every pack ever sold under the old name — in the
+ * coach's own Session Packs list, in the client's purchase history, and on the
+ * refund sheet, where a coach decides how much money to give back while
+ * reading a product description that did not exist at the time of the sale.
+ *
+ * The proper fix is a stored label on the sale, written at checkout, which
+ * needs a column and a webhook change. Until that exists this is the honest
+ * thing to do: say so before the coach taps Save, so a rename is a decision
+ * rather than a surprise found months later.
+ */
+export const RENAME_RELABELS_HISTORY =
+  'A name is the one thing here that is not forward-looking. Sales already made carry no name of their own, so they are labelled from this package as it stands today. Rename it and every pack you have already sold under the old name is relabelled too, in your own lists, in your client’s purchase history and on the refund screen. The price, the currency and the number of sessions on those sales do not move.';
+
 /**
  * What a coach has to be told before they reprice, or null when there is
  * nothing to say.
@@ -137,13 +170,13 @@ export function isReprice(p: PackagePatch, currentCents: number | null | undefin
  */
 export function repriceNote(activeSubscribers: number | null): string {
   if (activeSubscribers == null) {
-    return 'This changes the price for new sales only. Whether anybody is currently subscribed at the old price could not be read, so this is not a statement that nobody is — anybody who is stays on what they signed up to pay, and Stripe keeps billing them that until you move them yourself.';
+    return 'This changes the price for new sales only. Whether anybody is currently subscribed at the old price could not be read, so this is not a statement that nobody is. Anybody who is stays on what they signed up to pay, and Stripe keeps billing them that until you move them yourself.';
   }
   if (activeSubscribers === 0) {
     return 'This changes the price for new sales only. Nobody is currently subscribed at the old price.';
   }
   const n = activeSubscribers;
-  return `This changes the price for new sales only. ${n} ${n === 1 ? 'person is' : 'people are'} subscribed at the old price and ${n === 1 ? 'stays' : 'stay'} on it — Stripe charges what they signed up to pay, and nothing here moves them. Moving somebody to a new rate means cancelling and re-selling, which is their decision to make.`;
+  return `This changes the price for new sales only. ${n} ${n === 1 ? 'person is' : 'people are'} subscribed at the old price and ${n === 1 ? 'stays' : 'stay'} on it. Stripe charges what they signed up to pay, and nothing here moves them. Moving somebody to a new rate means cancelling and re-selling, which is their decision to make.`;
 }
 
 /** What a coach is told when a package edit did not land. `updatePackage`
@@ -152,4 +185,4 @@ export function repriceNote(activeSubscribers: number | null): string {
  *  defect src/lib/wroteRows.ts was written about. A coach told their new price
  *  is live when it is not sells at the old one indefinitely. */
 export const PACKAGE_NOT_SAVED =
-  'That package was not changed, so it is still on sale at the price and name it had. Nothing has changed — try again.';
+  'That package was not changed, so it is still on sale at the price and name it had. Nothing has changed. Try again.';

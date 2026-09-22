@@ -62,17 +62,19 @@
 //    `cacheable` off so the next write cannot overwrite an unread queue with an
 //    empty one. That single line is the difference between a corrupt cache
 //    costing a session and a corrupt cache costing every session on the phone.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { WorkoutEntry } from '../lib/mockData';
-import { rowToEntry, entryToRow } from '../lib/workoutRow';
+import { rowToEntry, entryToRow, patchToRow } from '../lib/workoutRow';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { worstStatus, type LoadStatus } from './loadStatus';
+import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, unsentCount, type WriteOutcome } from '../lib/offlineQueue';
+import { CHANGE_DEBOUNCE_MS, refreshLive } from '../lib/liveRead';
 // The queue's own rules, out here where a test can hold both ends of each —
 // src/lib/workoutRow.ts makes that argument at length about the row converters
 // it took out of this same file, having found two fields that had never once
@@ -82,6 +84,7 @@ import {
   readQueue, serverId, sessionKey, toQueueRows, withoutStored,
 } from '../lib/workoutQueue';
 import { useAuthRevision } from './authRevision';
+import { useLiveRead, useRecoverRead } from './readRefresh';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -205,6 +208,10 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // `waterStatus` apart from `status`. What screens read is the worse of the
   // two, because a list is only as complete as its worst source.
   const [serverStatus, setServerStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /** The signed-in account, as STATE as well as a ref. The ref is read inside
+   *  callbacks; this is what the realtime subscription below keys on, and a
+   *  ref cannot start an effect. */
+  const [uid, setUid] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -270,15 +277,16 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         // the provider behind "We couldn't read your training log" on Home. The
         // queue is left alone rather than read: it is keyed by account, and
         // there is no account to key it by.
-        if (!sess?.session) { uidRef.current = null; setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!sess?.session) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { reportError('workoutLog.hydrate.auth', authErr); setServerStatus('error'); return; }
         const id = auth?.user?.id;
         // Genuinely signed out: there is no history to fetch, and saying so is
         // accurate rather than a swallowed failure.
-        if (!id) { uidRef.current = null; setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!id) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
         uidRef.current = id;
+        setUid(id);
         cacheable.current = true;
 
         // ── the device's queue, first and fast ────────────────────────────
@@ -433,6 +441,36 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     const owner = uidRef.current;
     if (!USE_SUPABASE || !owner) return;
     for (const t of queuedSessions(listRef.current.filter(isQueued))) {
+      // ── does the server already have this session? ──────────────────────
+      //
+      // The hydrate asks this — `withoutStored`, above — and this loop never
+      // did, and the two run on completely different triggers: the hydrate on
+      // mount, this on the reconnect edge and on returning to the foreground.
+      // So a session whose insert LANDED and whose response was lost is queued,
+      // and the next time the app came forward this sent it again. That is one
+      // duplicate per flush, for ever, and the member sees the same ride twice
+      // and then three times.
+      //
+      // One narrow read per session, on the timestamp about to be sent, and the
+      // matching entries come out of the queue instead of going up. A failed
+      // read leaves the queue exactly as it was and the send proceeds, because
+      // an unanswered question is not permission to drop somebody's session —
+      // a duplicate can be deleted and a lost set cannot.
+      try {
+        const { data, error } = await supabase
+          .from('workouts').select('id, performed_at, exercise')
+          .eq('user_id', owner).eq('performed_at', t);
+        if (!error && Array.isArray(data) && data.length) {
+          const held = withoutStored(
+            listRef.current.filter(isQueued),
+            data.map((r: any) => ({ id: String(r.id), t: String(r.performed_at), exercise: String(r.exercise), sets: [] })),
+          );
+          if (held.length !== listRef.current.filter(isQueued).length) {
+            const stillQueued = new Set(held.map((e) => e.id));
+            setLog(listRef.current.filter((e) => !isQueued(e) || stillQueued.has(e.id)), owner);
+          }
+        }
+      } catch { /* the send below is the fallback, and it is the safe one */ }
       // Re-read from `listRef` each time round: the send before this one
       // rewrote the list with the ids it adopted, and a stale slice would offer
       // a row the server has just taken.
@@ -507,22 +545,11 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     // is the entire write — and still `false`, because it will not survive the
     // relaunch and the caller must not say "saved".
     if (!USE_SUPABASE || !uidRef.current) { apply(); return false; }
-    const patch: Record<string, unknown> = {};
-    if ('exercise' in next) patch.exercise = next.exercise;
-    if ('t' in next) patch.performed_at = next.t;
-    if ('sets' in next) patch.sets = next.sets ?? null;
-    // `bw` and `timed` are aligned to `sets` and had no key here at all, so an
-    // edit that changed the sets left the flags on the server describing the
-    // OLD ones — and an edit sheet that could not write them could not offer
-    // them either. Both columns exist (supabase/parts/162 and 204); undefined
-    // is sent as null so clearing the last bodyweight set really clears it.
-    if ('bw' in next) patch.bw = next.bw ?? null;
-    if ('timed' in next) patch.timed = next.timed ?? null;
-    if ('feel' in next) patch.feel = next.feel ?? null;
-    if ('cardio' in next) patch.cardio = next.cardio ?? null;
-    if ('kcal' in next) patch.kcal = next.kcal ?? null;
-    if ('zones' in next) patch.zones = next.zones ?? null;
-    if ('sessionMins' in next) patch.session_mins = next.sessionMins ?? null;
+    // `bw`, `timed` and `tempos` are aligned to `sets`, so an edit that changes
+    // the sets must rewrite them too, and undefined must reach the server as
+    // null. The mapping lives in src/lib/workoutRow.ts so the coach's
+    // correction path writes exactly the same columns.
+    const patch = patchToRow(next);
     // Nothing to send is not a failure — the row already says what was asked.
     if (!Object.keys(patch).length) return true;
     try {
@@ -633,13 +660,121 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
 
   // The worse of the two reads. A screen fed by this is only as complete as the
   // weaker of "what the server said" and "what this device was holding".
-  const status = worstStatus(serverStatus, queueStatus);
+  //
+  // Under a ceiling, because neither of the two statuses above can ever leave
+  // 'loading' on its own if the request never settles — and no request in this
+  // app carries a timeout. The hydrate effect moves `serverStatus` in a `try`
+  // and in a `catch`; a socket that accepts and then says nothing runs neither,
+  // so a member on gym wifi behind a captive portal was left with Home reading
+  // "Reading your training log…" over dashes where their streak and this week's
+  // sessions should be, for as long as the app stayed open — and this screen is
+  // a tab, so that is until it is killed. src/lib/readDeadline.ts is the whole
+  // argument; the read itself is untouched and a late answer still lands.
+  const status = useReadDeadline(worstStatus(serverStatus, queueStatus));
 
+  // Re-run this read when the signal comes back, without the member having to
+  // know the app is stuck and think to pull down. The queued sets go up first
+  // — see the ordering note in src/lib/readRefresh.ts — so the rows that come
+  // back already contain the session they just logged in the basement.
+  useRecoverRead('workoutLog', status, reload);
+  /* ── and the other half: a read that WORKED but has gone out of date ──────
+   *
+   * A coach logs a session into their client's record and it is the client's
+   * own row — their streak, their records, their week. This provider read it on
+   * mount and nothing has asked since, so it was invisible until the app was
+   * cold-started. See src/lib/liveRead.ts; this is the registration, and the
+   * foreground and reconnect triggers are the ones src/ui/readRefresh.tsx was
+   * already installing. */
+  useLiveRead('workoutLog', status, reload);
+
+  /* ── hearing about a coach's write while the app is open ──────────────────
+   *
+   * The foreground trigger above covers somebody picking their phone up. This
+   * covers the case that produced the report: the member is IN the app, their
+   * coach saves the session standing next to them, and the screen goes on
+   * showing a list that was correct a minute ago.
+   *
+   * Three things make this narrow on purpose.
+   *
+   * 1. THE FILTER IS THE MEMBER'S OWN ROWS. `user_id=eq.<id>` is evaluated on
+   *    the server, so this subscription is not a firehose of everybody's sets.
+   *
+   * 2. IT IGNORES THE MEMBER'S OWN WRITES. `logged_by` is null on a row the
+   *    member logged themselves, and this provider ALREADY has those — it
+   *    inserts optimistically and adopts the ids the server assigns
+   *    (`addWorkouts`). Refetching on top of that races the adoption over the
+   *    same list, which is the exact hazard `refreshLive` refuses a read in
+   *    flight for. So only a row somebody ELSE wrote is news.
+   *
+   * 3. A BURST IS ONE REFETCH. A coach's save is one row per set, so a
+   *    six-exercise day arrives as twenty-odd events inside a second.
+   *    `CHANGE_DEBOUNCE_MS` gathers them.
+   *
+   * What it does NOT catch: a coach DELETING a row. A delete payload carries
+   * only the primary key unless the table is set to REPLICA IDENTITY FULL, so
+   * `logged_by` is not there to test and the event cannot be told from the
+   * member's own deletion. Left uncaught rather than guessed at — the next
+   * foreground picks it up, and the alternative is refetching on every delete
+   * the member performs themselves.
+   */
+  useEffect(() => {
+    if (!USE_SUPABASE || !uid) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const bump = (payload: { new?: { logged_by?: string | null } | null }) => {
+      const by = payload?.new?.logged_by ?? null;
+      // Somebody else, or nobody: a row with no `logged_by` is the member's own
+      // and this provider already has it.
+      if (!by || by === uid) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refreshLive('changed', { only: 'workoutLog' });
+      }, CHANGE_DEBOUNCE_MS);
+    };
+    const ch = supabase
+      .channel(`workouts:${uid}`)
+      .on(
+        'postgres_changes' as any,
+        { event: 'INSERT', schema: 'public', table: 'workouts', filter: `user_id=eq.${uid}` } as any,
+        bump as any,
+      )
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      void supabase.removeChannel(ch);
+    };
+  }, [uid]);
+
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useWorkoutLog`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addWorkout(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addWorkout, addWorkouts, logWorkouts, retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload });
+  impl.current = { addWorkout, addWorkouts, logWorkouts, retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload };
+  const addWorkoutStable = useCallback((...a: Parameters<typeof addWorkout>) => impl.current.addWorkout(...a), []);
+  const addWorkoutsStable = useCallback((...a: Parameters<typeof addWorkouts>) => impl.current.addWorkouts(...a), []);
+  const logWorkoutsStable = useCallback((...a: Parameters<typeof logWorkouts>) => impl.current.logWorkouts(...a), []);
+  const retryWorkoutsStable = useCallback((...a: Parameters<typeof retryWorkouts>) => impl.current.retryWorkouts(...a), []);
+  const flushWorkoutsStable = useCallback((...a: Parameters<typeof flushWorkouts>) => impl.current.flushWorkouts(...a), []);
+  const updateWorkoutStable = useCallback((...a: Parameters<typeof updateWorkout>) => impl.current.updateWorkout(...a), []);
+  const removeWorkoutStable = useCallback((...a: Parameters<typeof removeWorkout>) => impl.current.removeWorkout(...a), []);
+  const setSessionMinsStable = useCallback((...a: Parameters<typeof setSessionMins>) => impl.current.setSessionMins(...a), []);
+  const reloadStable = useCallback((...a: Parameters<typeof reload>) => impl.current.reload(...a), []);
+  const value = useMemo<WorkoutLogValue>(() => ({ log, status, unsent, addWorkout: addWorkoutStable, addWorkouts: addWorkoutsStable, logWorkouts: logWorkoutsStable, retryWorkouts: retryWorkoutsStable, flushWorkouts: flushWorkoutsStable, updateWorkout: updateWorkoutStable, removeWorkout: removeWorkoutStable, setSessionMins: setSessionMinsStable, reload: reloadStable }), [log, status, unsent, addWorkoutStable, addWorkoutsStable, logWorkoutsStable, retryWorkoutsStable, flushWorkoutsStable, updateWorkoutStable, removeWorkoutStable, setSessionMinsStable, reloadStable]);
   return (
-    <Ctx.Provider value={{
-      log, status, unsent, addWorkout, addWorkouts, logWorkouts,
-      retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload,
-    }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

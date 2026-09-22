@@ -35,6 +35,7 @@
 // acknowledgement, no notification to them, nothing they can interfere with.
 
 import type { LoadStatus } from '../ui/loadStatus';
+import { retryLine, type Reach } from './reachability';
 
 /* ── blocking ─────────────────────────────────────────────────────────────── */
 
@@ -201,7 +202,7 @@ export function reportCategoryLabel(id: ReportCategory): string {
 export const REPORT_EXPLAINER =
   'What you report is recorded with the message itself, so it stays on record even if it is deleted afterwards. '
   + 'The other person is not told that you reported them, and they cannot see or remove it. '
-  + 'Reporting on its own does not stop them messaging you — block them as well if you want that.';
+  + 'Reporting on its own does not stop them messaging you. Block them as well if you want that.';
 
 /** Confirmation after the row exists. Never shown on the strength of a call
  *  that returned without raising: the caller checks for an id first. */
@@ -212,12 +213,37 @@ export function reportFiledLine(category: ReportCategory, blocked: BlockState): 
     : `${head}\n\nThey can still message you. Block them if you want that to stop.`;
 }
 
-/** When the report did not land. Says plainly that nothing was recorded, for
- *  the same reason `requestAccountDeletion`'s failure branch does: somebody who
- *  believes a report is filed stops looking for another way to get help. */
-export const REPORT_FAILED_NOTE =
-  'That report was not recorded, so nothing has been filed. Check your connection and try again. '
-  + 'If it keeps failing, email us from the address on your account and quote the date and time.';
+/**
+ * When the report did not land. Says plainly that nothing was recorded, for
+ * the same reason `requestAccountDeletion`'s failure branch does: somebody who
+ * believes a report is filed stops looking for another way to get help.
+ *
+ * ── Why this stopped being a const ────────────────────────────────────────
+ *
+ * Its middle sentence was "Check your connection and try again", printed
+ * whatever had happened — and `report_abuse` raises on every refusal, so half
+ * of what lands here is the server having READ the report and declined it. A
+ * person who has just been abused, sent to their wifi settings over a refusal,
+ * retries a call that will refuse identically every time and does not go and
+ * find the other way to get help that the last sentence offers them.
+ *
+ * A const cannot say which, because a module-level string is built at import,
+ * when the app has observed nothing and `reach` is always 'unknown'. So it is a
+ * function of the one fact that decides the sentence, and the caller — the
+ * `report` in `useThreadSafety`, src/ui/messaging.ts — supplies it. The shape
+ * is `retryLine`'s own (src/lib/reachability.ts): the pure module takes the
+ * reach, the React side reads it.
+ *
+ * The escalation stays last and stays specific. `retryLine`'s 'online' answer
+ * ends "let us know if it keeps happening", which is only useful next to a
+ * sentence saying HOW — the same order app/(client)/settings.tsx uses for the
+ * account-deletion refusal.
+ */
+export function reportFailedNote(reach: Reach): string {
+  return 'That report was not recorded, so nothing has been filed. '
+    + `${retryLine(reach)} `
+    + 'If it keeps failing, email us from the address on your account and quote the date and time.';
+}
 
 /** Small helper: "your coach" → "Your coach" at the head of a sentence. Kept
  *  here rather than inline so the two confirms cannot drift. */

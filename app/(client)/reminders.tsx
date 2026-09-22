@@ -33,8 +33,8 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field, PageHead, IconPlate, ListRow } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { pushAvailable } from '../../src/ui/pushNotifications';
 import { REMINDERS_KEY as KEY, rescheduleReminders } from '../../src/ui/reminderSync';
 import {
@@ -43,6 +43,11 @@ import {
   type CustomReminder, type FixedKind, type FixedReminder, type SavedReminders, type Weekday,
 } from '../../src/lib/reminderPlan';
 import { jsDayForIndex } from '../../src/lib/weekStart';
+// The slop that brings a small control up to 44pt. See the Remove button on
+// each of the member's own reminders.
+import { hitSlopFor } from '../../src/lib/a11y';
+import { movedNote } from '../../src/lib/notifyPrefs';
+import { useNotifyPrefs } from '../../src/ui/notifyPrefs';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const fmt = (h: number, m: number) => `${two(((h + 11) % 12) + 1)}:${two(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -51,6 +56,9 @@ const newId = () => 'r_' + Math.random().toString(36).slice(2, 8);
 export default function Reminders() {
   const t = useTheme();
   const router = useRouter();
+  // The member's own quiet hours, so this screen can say when a time it is
+  // being given will not be the time the reminder arrives.
+  const notify = useNotifyPrefs();
   const [hydration, setHydration] = useState(true);
   const [every, setEvery] = useState(3);      // hours between hydration nudges
   const [startH, setStartH] = useState(9);
@@ -62,17 +70,60 @@ export default function Reminders() {
   const [name, setName] = useState('');
   const [sh, setSh] = useState('08');
   const [sm, setSm] = useState('00');
+  /**
+   * Whether the saved settings have actually been read off this phone.
+   *
+   * ── Why this is three states and not a boolean ───────────────────────────
+   *
+   * Every control above starts at a DEFAULT — hydration on, nine to nine, no
+   * custom reminders, no weigh-in, no photo — and until the store answers,
+   * those defaults are on screen wearing the member's own settings' clothes.
+   * A read that never answers leaves them there for good. The catch below used
+   * to say "the defaults stand, and nothing is scheduled from them", and the
+   * first half was true while the second was not: Save is live, and Save
+   * schedules whatever is on screen.
+   *
+   * What that costs, in order:
+   *
+   *   · It OVERWRITES. `saveAndSchedule` writes `current()` over
+   *     `repple.reminders`, so the member's custom reminders, their weigh-in
+   *     and photo rows and every day list they chose are replaced by the
+   *     starting settings of a screen that never managed to read them.
+   *   · It ORPHANS. `ids` is `[]` after a failed read, so the blob written
+   *     carries no ids, `rescheduleReminders` cancels nothing, and every
+   *     notification the last save scheduled stays live with no id list left
+   *     that can ever cancel it. The header of this file names that exact
+   *     harm — "the next Save cancels a stale set and leaves the live one
+   *     firing forever with nothing on any screen to explain it" — and this
+   *     was the path back into it.
+   *
+   * So a read that failed is said out loud and Save is refused until it lands.
+   * 'loading' is separated from 'error' for the usual reason: one of them is
+   * over in a moment and the other is not, and a member owed a sentence about
+   * their reminders should not be handed "could not be read" while we are
+   * still reading.
+   */
+  const [read, setRead] = useState<'loading' | 'ready' | 'error'>('loading');
 
   // Through `savedFromStored`, not a bare JSON.parse. That function migrates
   // the older shape — which had no day lists at all — by reading an ABSENT list
   // as every day. Parsing the blob here by hand would read it as no days and
   // silently switch off every reminder every existing member has set.
+  //
+  // `savedFromStored(null)` is the defaults and that is the right answer for a
+  // member who has never saved: nothing stored is a fact about them. A read
+  // that THREW is not, and lands in 'error' below rather than in the same
+  // defaults.
   useEffect(() => {
+    let cancelled = false;
     AsyncStorage.getItem(KEY).then((r) => {
+      if (cancelled) return;
       const p = savedFromStored(r);
       setHydration(p.hydration); setEvery(p.every); setStartH(p.startH); setEndH(p.endH);
       setHydrationDays(p.hydrationDays); setSupps(p.supps); setFixed(p.fixed); setIds(p.ids);
-    }).catch(() => { /* the defaults stand, and nothing is scheduled from them */ });
+      setRead('ready');
+    }).catch(() => { if (!cancelled) setRead('error'); });
+    return () => { cancelled = true; };
   }, []);
 
   /** The settings as they stand, in the shape the plan and the store both take. */
@@ -80,8 +131,8 @@ export default function Reminders() {
 
   const addSupp = () => {
     const nm = name.trim(); const h = parseInt(sh, 10); const m = parseInt(sm, 10);
-    if (!nm) { Alert.alert('Name it', 'Give the supplement or reminder a name.'); return; }
-    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
+    if (!nm) { Alert.alert('Name It', 'Give the supplement or reminder a name.'); return; }
+    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the Time', 'Use 24-hour time: 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
     // Every day unless they say otherwise, because that is what this control
     // did before day pickers existed and changing the default silently would
     // change what "Add Reminder" means for everybody who already knows it.
@@ -105,8 +156,22 @@ export default function Reminders() {
 
   /** The day picker, used by hydration, all three fixed kinds and every custom
    *  reminder — one control, so seven abbreviations cannot come to mean seven
-   *  different things in four places. */
-  const DayPicker = ({ days, onToggle, label }: { days: readonly Weekday[]; onToggle: (d: Weekday) => void; label: string }) => (
+   *  different things in four places.
+   *
+   *  A PLAIN FUNCTION, called as `dayPicker(days, onToggle, label)`, and not a
+   *  component rendered as `<DayPicker …/>`. A component declared in this body
+   *  is a new function object on every render, so React sees a different
+   *  element TYPE and unmounts and remounts the whole picker instead of
+   *  updating it — and these are seven `accessibilityRole="checkbox"`
+   *  Pressables. Tapping a day sets state on this screen, which re-renders it,
+   *  which would destroy and rebuild the very checkbox the member just tapped
+   *  at the moment VoiceOver is announcing its new checked state. Same rule as
+   *  app/(client)/injuries.tsx and app/(client)/report.tsx:475. It closes over
+   *  `t`, `ty`, `sp` and `radius` from this body, so it stays a call here
+   *  rather than being lifted to module scope. Nothing maps over this picker
+   *  itself, so no `key` moves; the inner `key={d}` is on the Pressable the
+   *  inner `.map` already returns and is untouched. */
+  const dayPicker = (days: readonly Weekday[], onToggle: (d: Weekday) => void, label: string) => (
     <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
       {/* Drawn in the order src/lib/weekStart.ts opens a week. The underlying
           numbering starts at Sunday because that is what expo-notifications
@@ -121,7 +186,7 @@ export default function Reminders() {
             accessibilityLabel={`${label}, ${DAY_LABEL[d]}`}
             hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
             style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink3 }}>{DAY_LABEL[d].slice(0, 1)}</Text>
+            <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink3 }}>{DAY_LABEL[d].slice(0, 1)}</Text>
           </Pressable>
         );
       })}
@@ -129,6 +194,20 @@ export default function Reminders() {
   );
 
   const saveAndSchedule = async () => {
+    // Nothing is written over settings this screen never managed to read. See
+    // the note on `read`: the controls above are showing their own defaults,
+    // and saving them would replace the member's reminders AND leave the
+    // notifications the last save scheduled live with no id list to cancel
+    // them by.
+    if (read !== 'ready') {
+      Alert.alert(
+        read === 'loading' ? 'Still Reading Your Reminders' : 'Your Reminders Could Not Be Read',
+        read === 'loading'
+          ? 'Your saved reminders have not come off this phone yet, so what is on screen is not them. Nothing has been changed. Try again in a moment.'
+          : 'Your saved reminders could not be read off this phone, so what is on screen is the starting settings rather than yours. Nothing has been changed: saving now would replace the reminders you have set with these. Close this screen and open it again.',
+      );
+      return;
+    }
     // Stored FIRST, then scheduled from what was stored.
     //
     // The order is the whole point. `rescheduleReminders` reads the saved blob,
@@ -141,7 +220,7 @@ export default function Reminders() {
     try {
       await AsyncStorage.setItem(KEY, JSON.stringify(saved));
     } catch {
-      Alert.alert('Not saved', 'Your reminder settings could not be stored on this phone, so nothing was scheduled and nothing was changed. Try again in a moment.');
+      Alert.alert('Not Saved', 'Your reminder settings could not be stored on this phone, so nothing was scheduled and nothing was changed. Try again in a moment.');
       return;
     }
 
@@ -163,20 +242,20 @@ export default function Reminders() {
     // above the body "You'll get 0 daily reminders", a title and a count that
     // contradict each other over nothing being scheduled at all.
     if (!pushAvailable()) {
-      Alert.alert('Settings saved, nothing scheduled yet',
-        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working — you do not have to come back to this screen.');
+      Alert.alert('Settings Saved, Nothing Scheduled Yet',
+        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working. You do not have to come back to this screen.');
       return;
     }
     if (scheduled === 0) {
       Alert.alert(
-        wanted === 0 ? 'Saved' : 'Saved, but nothing will be sent',
+        wanted === 0 ? 'Saved' : 'Saved, but Nothing Will Be Sent',
         wanted === 0
           ? 'No reminders are set. Turn one on, or add your own, and it will be scheduled.'
-          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings — they will be scheduled the next time you open the app, without coming back here.',
+          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings. They will be scheduled the next time you open the app, without coming back here.',
       );
       return;
     }
-    Alert.alert('Reminders set',
+    Alert.alert('Reminders Set',
       `${plan.length} reminder${plan.length === 1 ? '' : 's'}, ${scheduled} notification${scheduled === 1 ? '' : 's'} a week.`
       + (scheduled < wanted ? ` ${wanted - scheduled} could not be scheduled.` : ''));
   };
@@ -188,7 +267,7 @@ export default function Reminders() {
     <Pressable onPress={() => set(val)}
       accessibilityRole="radio" accessibilityState={{ selected: cur === val }}
       style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: cur === val ? '600' : '500', color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(cur === val ? '600' : '500'), color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
   // What the hour and minute boxes will actually schedule, in the 12-hour form
@@ -210,34 +289,50 @@ export default function Reminders() {
   const suppOk = !isNaN(suppH) && suppH >= 0 && suppH <= 23 && !isNaN(suppM) && suppM >= 0 && suppM <= 59;
   const suppEcho = suppOk
     ? `Reminds you every day at ${fmt(suppH, suppM)}.`
-    : 'Use a 24-hour time — 20:30 is half past eight in the evening.';
+    : 'Use a 24-hour time: 20:30 is half past eight in the evening.';
+  // ── the other half of the echo ─────────────────────────────────────────
+  //
+  // The echo above says what was typed. It said nothing about what will
+  // actually be scheduled, and those are not the same time: every reminder here
+  // is 'reminders', which is quietable, so a time inside the member's own quiet
+  // hours is MOVED. Somebody who set a supplement reminder for 11pm saw 11pm
+  // echoed back beside the box and found out it was a morning reminder by never
+  // being reminded at night. The only mention of quiet hours on this screen was
+  // a link at the bottom.
+  const movedFor = (h: number, m: number) => movedNote(h, m, 'reminders', notify.prefs, fmt);
+  const suppMoved = suppOk ? movedFor(suppH, suppM) : null;
   const num = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, width: 54, textAlign: 'center' } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Daily</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Reminders</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Gentle daily nudges for hydration and supplements.</Text>
+        <PageHead title="Reminders" subtitle="Gentle daily nudges" />
 
         {!pushAvailable() ? (
-          <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
-            note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working — you do not have to come back to this screen." />
+          <Notice kicker="Not Sending Yet" title="Nothing Can Be Scheduled on This Build"
+            note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working. You do not have to come back to this screen." />
         ) : null}
 
-        <Rule />
+        {/* Before any control, because every control below it is showing a
+            starting value that may not be the member's. Said for the fraction
+            of a second the read takes, and said for as long as a read that
+            failed leaves it true. */}
+        {read === 'loading' ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the reminders you have saved…</Text>
+        ) : read === 'error' ? (
+          <Notice tone={t.warn} kicker="Not Read"
+            title="Your Saved Reminders Could Not Be Read on This Phone"
+            note="What is set below is this screen's starting point rather than yours, so saving is switched off: it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
+        ) : null}
+
 
         {/* Hydration */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: hydration ? sp.lg : 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-              <Icon name="water" size={17} color={t.brand} />
-              <Text style={{ ...ty.head, color: t.ink }}>Hydration nudges</Text>
+            {/* Water is teal everywhere in the app; grey while it is off. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1, minWidth: 0 }}>
+              <IconPlate icon="water" tone={hydration ? 'teal' : 'neutral'} />
+              <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>Hydration Nudges</Text>
             </View>
             {/* A switch, announced as one. It was an unnamed button whose state
                 was a dot's position and a track colour — nothing a screen
@@ -248,13 +343,13 @@ export default function Reminders() {
               accessibilityState={{ checked: hydration }}
               hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
               style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-              <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
+              <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: hydration ? t.brandInk : t.ink3, alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
             </Pressable>
           </View>
           {hydration ? (
             <View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Every</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 hours')}{seg(3, every, setEvery, '3 hours')}{seg(4, every, setEvery, '4 hours')}</View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 Hours')}{seg(3, every, setEvery, '3 Hours')}{seg(4, every, setEvery, '4 Hours')}</View>
               {/* Two bare boxes reading [9] to [21] under the word "Between".
                   Nothing said they were hours, and nothing said they were a
                   24-hour clock — so somebody who wants nudges until nine in the
@@ -280,11 +375,11 @@ export default function Reminders() {
               {startH > endH ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet — the last hour is earlier in the day than the first.</Text>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet. The last hour is earlier in the day than the first.</Text>
                 </View>
               ) : null}
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On these days · {daysLabel(hydrationDays)}</Text>
-              <DayPicker days={hydrationDays} label="Hydration nudges" onToggle={(d) => setHydrationDays((p) => toggleDay(p, d))} />
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On These Days · {daysLabel(hydrationDays)}</Text>
+              {dayPicker(hydrationDays, (d) => setHydrationDays((p) => toggleDay(p, d)), 'Hydration nudges')}
               {hydrationDays.length === 0 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
@@ -295,7 +390,6 @@ export default function Reminders() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── Training, weigh-in, progress photo ────────────────────────────
             The three the product has an opinion about, and the three a member
@@ -304,7 +398,7 @@ export default function Reminders() {
             nobody chose — the same rule that keeps the app from inventing a
             step goal or a water target. */}
         <Section>
-          <SectionHead title="Training And Body" />
+          <SectionHead title="Training and Body" />
           {(['training', 'weighin', 'photo'] as FixedKind[]).map((k, i) => {
             const f = fixed[k] ?? { on: false, hour: k === 'weighin' ? 7 : 18, minute: 0, days: [...EVERY_DAY] };
             const label = k === 'training' ? 'Train Today' : k === 'weighin' ? 'Weigh In' : 'Progress Photo';
@@ -316,8 +410,14 @@ export default function Reminders() {
             return (
               <View key={k} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  {/* A hue per kind while it is on — training the accent, the
+                      weigh-in blue, the photo purple — and grey while it is
+                      off, so the card shows at a glance which are live. The
+                      switch beside it is what says so aloud. */}
+                  <IconPlate icon={k === 'training' ? 'dumbbell' : k === 'weighin' ? 'scale' : 'camera'}
+                    tone={!f.on ? 'neutral' : k === 'training' ? 'brand' : k === 'weighin' ? 'blue' : 'purple'} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {f.on ? `${fmt(f.hour, f.minute)} · ${daysLabel(f.days)}` : why}
                     </Text>
@@ -326,7 +426,7 @@ export default function Reminders() {
                     accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: f.on }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                     style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: f.on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-                    <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: f.on ? 'flex-end' : 'flex-start' }} />
+                    <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: f.on ? t.brandInk : t.ink3, alignSelf: f.on ? 'flex-end' : 'flex-start' }} />
                   </Pressable>
                 </View>
                 {f.on ? (
@@ -335,7 +435,7 @@ export default function Reminders() {
                       <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y={`${label}, hour on a 24-hour clock`}>
                         <TextInput value={String(f.hour)} onChangeText={(x) => setFixedFor(k, { hour: Math.min(23, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
                       </Field>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink3, paddingBottom: 13 }}>:</Text>
                       <Field label="Min" style={{ flex: 0 }} a11y={`${label}, minutes past the hour`}>
                         <TextInput value={two(f.minute)} onChangeText={(x) => setFixedFor(k, { minute: Math.min(59, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
                       </Field>
@@ -344,7 +444,10 @@ export default function Reminders() {
                           evening types 8 and is woken by it otherwise. */}
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1, paddingBottom: 13 }}>{fmt(f.hour, f.minute)}</Text>
                     </View>
-                    <DayPicker days={f.days} label={label} onToggle={(d) => setFixedFor(k, { days: toggleDay(f.days, d) })} />
+                    {movedFor(f.hour, f.minute) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{movedFor(f.hour, f.minute)}</Text>
+                    ) : null}
+                    {dayPicker(f.days, (d) => setFixedFor(k, { days: toggleDay(f.days, d) }), label)}
                     {f.days.length === 0 ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
@@ -358,7 +461,6 @@ export default function Reminders() {
           })}
         </Section>
 
-        <Rule />
 
         {/* Supplements */}
         <Section>
@@ -366,14 +468,24 @@ export default function Reminders() {
           {supps.map((s, i) => (
             <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink2 }}>{s.name}</Text>
+                <IconPlate icon="bell" tone="amber" />
+                <View style={{ flex: 1, marginStart: sp.md }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{s.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{daysLabel(s.days)}</Text>
                 </View>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginRight: sp.md }}>{fmt(s.hour, s.minute)}</Text>
-                <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+                <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink, marginEnd: sp.md }}>{fmt(s.hour, s.minute)}</Text>
+                {/* 16pt of glyph with `hitSlop={6}` is a 28pt target — the
+                    smallest control on this screen, and the only destructive
+                    one on it. The two switches above it are 48 × 28 and each
+                    carries 8pt of slop for the same reason; this one was left
+                    at 6, which does not even reach what they reach.
+                    `hitSlopFor` takes a 16pt icon to the 44pt in
+                    src/lib/a11y.ts without moving anything on the row, which
+                    matters here because the row's time sits immediately to its
+                    left. */}
+                <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={hitSlopFor(16)}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
               </View>
-              <DayPicker days={s.days} label={s.name} onToggle={(d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x)))} />
+              {dayPicker(s.days, (d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x))), s.name)}
             </View>
           ))}
           {/* [08]:[00] beside a name, with nothing saying which clock. This is
@@ -391,20 +503,19 @@ export default function Reminders() {
             <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y="Hour on a 24-hour clock">
               <TextInput value={sh} onChangeText={setSh} keyboardType="number-pad" style={num} />
             </Field>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink3, paddingBottom: 13 }}>:</Text>
             <Field label="Min" style={{ flex: 0 }} a11y="Minutes past the hour">
               <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
             </Field>
           </View>
           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{suppEcho}</Text>
+          {suppMoved ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{suppMoved}</Text> : null}
           <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
             <Ghost label="Add Reminder" icon="plus" onPress={addSupp} />
           </View>
         </Section>
 
-        <Rule />
 
-        <Rule />
 
         {/* The other half of the same subject. This screen decides WHAT gets
             sent and when; that one decides which kinds reach you at all, and
@@ -412,19 +523,21 @@ export default function Reminders() {
             the only route to that screen, so a member who wants a 3am nudge to
             stop has somewhere to go from the screen they set it on. */}
         <Section>
-          <Pressable onPress={() => router.push('/(client)/notification-prefs')}
-            accessibilityRole="button" accessibilityLabel="Notification settings and quiet hours"
-            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Notification Settings</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Which kinds of notification reach you, and the hours to hold them until.</Text>
-            </View>
-            <Icon name="chevron" size={14} color={t.ink3} />
-          </Pressable>
+          <ListRow icon="bell" tone="amber" title="Notification Settings" note="Which kinds reach you, and your quiet hours"
+            onPress={() => router.push('/(client)/notification-prefs')} />
         </Section>
 
         <View style={{ marginTop: layout.section }}>
-          <Cta label="Save & Schedule" onPress={saveAndSchedule} wide />
+          {/* Disabled from the same one fact the notice at the top of the
+              screen is drawn from, rather than from a second test that could
+              come to disagree with it. `saveAndSchedule` refuses as well: a
+              disabled button is a courtesy and the refusal is the guarantee. */}
+          <Cta label="Save & Schedule" onPress={saveAndSchedule} wide disabled={read !== 'ready'} />
+          {read === 'error' ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+              Saving is off until your reminders read, so nothing here can be written over them.
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>

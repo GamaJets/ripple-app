@@ -26,14 +26,25 @@
 // screen has to remember to validate it and no two screens can validate it
 // differently. `parsePlan` returning null means the column held nothing this
 // build understands; `status` is still what says whether it was read at all.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+//
+// `recipe_refs` (part 3210) rides on the same row and is parsed the same way,
+// by `readCoachRecipeRefs`. It holds the REFERENCE to a real recipe the coach
+// pinned into a slot — four keys: source, id, title and image address — and
+// never the recipe, whose figures, ingredients and method are fetched again
+// through the `recipes` function every time. src/lib/coachRecipeRefs.ts is the
+// only way in or out, because a spread of a whole dish type-checks as a
+// reference and would write a cache the licence forbids.
+import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { parsePlan, type CoachMealPlan } from '../lib/mealPlan';
+import { readCoachRecipeRefs, coachRecipeRefsJson, type CoachRecipeRefs } from '../lib/coachRecipeRefs';
 import { reportError } from '../lib/reportError';
 import { writeFailure } from '../lib/wroteRows';
 
@@ -46,6 +57,12 @@ export interface NutritionAdjust extends CoachAdjust {
   /** The week the coach composed, already parsed. Undefined means the row was
    *  never read; null means it was read and holds no plan this build knows. */
   plan?: CoachMealPlan | null;
+  /** The real recipes the coach pinned into that week, day → position. Parsed
+   *  on the way in like `plan`, and for the same reason: no screen should have
+   *  to remember that the column holds a reference and never a recipe. Empty
+   *  is "they pinned none"; UNDEFINED is "the row was never read", and
+   *  `status` is still what tells the two apart. */
+  recipeRefs?: CoachRecipeRefs;
 }
 
 interface CoachNutritionValue {
@@ -59,10 +76,16 @@ interface CoachNutritionValue {
   setAdjust: (clientId: string, patch: Partial<NutritionAdjust>) => Promise<boolean>;
   /** Resolves true only when the adjustment was actually removed server-side. */
   clear: (clientId: string) => Promise<boolean>;
-  /** Send a composed week to the client. Resolves true only when the server
-   *  confirmed a row — a PostgREST write that matched nothing resolves with no
-   *  error at all, so the returned row is the only proof it landed. */
-  setPlan: (clientId: string, plan: CoachMealPlan) => Promise<boolean>;
+  /** Send a composed week to the client, with the recipes pinned into it.
+   *  Resolves true only when the server confirmed a row — a PostgREST write
+   *  that matched nothing resolves with no error at all, so the returned row is
+   *  the only proof it landed. The refs travel WITH the plan, in one statement,
+   *  so a week and the recipes in it cannot half-arrive. */
+  setPlan: (clientId: string, plan: CoachMealPlan, recipeRefs: CoachRecipeRefs) => Promise<boolean>;
+  /** Read the adjustments again. Under 'error' every get() null means unknown,
+   *  and the screens above then have to withhold the coach's plan entirely —
+   *  so there has to be a way to ask a second time. */
+  reload: () => void;
 }
 
 const Ctx = createContext<CoachNutritionValue | null>(null);
@@ -72,24 +95,51 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, NutritionAdjust>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── no session, or no answer: this screen decides what somebody EATS ─
+        //
+        // No session is a true answer, not a failed check — that part was
+        // right, and a provider that mounts on the welcome screen must not
+        // latch at 'error' before anybody has signed in. The reason written
+        // beside it was wrong: it said getUser() REJECTS when nobody is signed
+        // in. It does not. src/lib/authReadFate.ts quotes the installed
+        // auth-js: both calls RESOLVE on a failure, `getSession()` with
+        // `{ data: { session: null }, error }` when the stored access token has
+        // expired and the refresh cannot reach the server.
+        //
+        // `error` was not named on that line, so an outage landed as
+        // `session: null` and this provider answered 'ready' with an empty map.
+        // That is the exact substitution this file's own header is about, one
+        // call earlier than the read it describes: under 'ready' a null from
+        // `get()` means "no coach adjustment", the macro screens fall back to
+        // the generic formula, and a client whose coach cut them 400 kcal is
+        // served the uncorrected targets and eats to them. An absence is never
+        // a clearance, and least of all here.
+        //
+        // The call stays `getSession()` — it answers from device storage and
+        // therefore answers with no signal — and its error is now classified
+        // once, in the one place that discrimination is written down.
+        const who = await sessionUid('coachNutrition.load');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setStatus('ready'); return; }
+        // Signed out is 'ready': nobody is signed in, there are no
+        // adjustments, and that emptiness is true. Unreadable is 'error', and
+        // it is the arm that matters most in this file — it is what stops every
+        // macro screen presenting the generic target as this client's coach's
+        // instruction. The mapping is src/lib/authGateStatus.ts's, and it is
+        // tested there because reversing it here compiles and passes every gate
+        // this repo has.
+        //
+        // Discriminated on `fate`, not on `!who.uid`: the failure branch is the
+        // one that needs `fate`, and `!who.uid` does not narrow it there.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
         // `const { data } = …` — `error` was not even named, so a refused read
         // was indistinguishable from a client with no adjustment.
@@ -105,13 +155,22 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
         if (error) { setStatus('error'); return; }
         const page = capped(data);
         const m: Record<string, NutritionAdjust> = {};
-        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined, plan: parsePlan(r.plan) };
+        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined, plan: parsePlan(r.plan), recipeRefs: readCoachRecipeRefs(r.recipe_refs) };
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
         setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); /* stay in-memory, but say so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** The read is a MERGE rather than an assignment, which is what makes this
+   *  safe over an optimistic adjustment: a change the coach just made and the
+   *  server has not yet returned is not dropped by the answer to a query that
+   *  was sent before it. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const get = (clientId: string) => map[clientId] ?? null;
   const setAdjust = async (clientId: string, patch: Partial<NutritionAdjust>): Promise<boolean> => {
@@ -178,12 +237,19 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
    * coach whose relationship had ended would otherwise watch this succeed and
    * send nothing.
    */
-  const setPlan = async (clientId: string, plan: CoachMealPlan): Promise<boolean> => {
-    setMap((m) => ({ ...m, [clientId]: { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(m[clientId] ?? {}), plan, mealOverride: undefined } }));
+  const setPlan = async (clientId: string, plan: CoachMealPlan, recipeRefs: CoachRecipeRefs): Promise<boolean> => {
+    // `coachRecipeRefsJson` and not the map: it rebuilds every entry down to
+    // the four keys `coach_nutrition_recipe_refs_shape_ck` allows, and the
+    // CHECK is the licence — Spoonacular's terms let Repple keep a recipe's
+    // id, title and image address and nothing else. A fifth key does not
+    // silently persist, it makes the whole statement fail, and the coach is
+    // told the week did not send.
+    const refs = coachRecipeRefsJson(recipeRefs);
+    setMap((m) => ({ ...m, [clientId]: { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(m[clientId] ?? {}), plan, recipeRefs: readCoachRecipeRefs(refs), mealOverride: undefined } }));
     if (!USE_SUPABASE || !uid) return false;
     try {
       const { data, error } = await supabase.from('coach_nutrition')
-        .upsert({ client_id: clientId, coach_id: uid, plan, meal_override: null }, { onConflict: 'client_id' })
+        .upsert({ client_id: clientId, coach_id: uid, plan, recipe_refs: refs, meal_override: null }, { onConflict: 'client_id' })
         .select('client_id');
       if (error) { reportError('coachNutrition.setPlan', error, { clientId }); return false; }
       if (!data || data.length === 0) {
@@ -194,7 +260,30 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('coachNutrition.setPlan', e, { clientId }); return false; }
   };
 
-  return <Ctx.Provider value={{ get, status, setAdjust, clear, setPlan }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCoachNutrition`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.get(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ get, setAdjust, clear, setPlan });
+  impl.current = { get, setAdjust, clear, setPlan };
+  const getStable = useCallback((...a: Parameters<typeof get>) => impl.current.get(...a), []);
+  const setAdjustStable = useCallback((...a: Parameters<typeof setAdjust>) => impl.current.setAdjust(...a), []);
+  const clearStable = useCallback((...a: Parameters<typeof clear>) => impl.current.clear(...a), []);
+  const setPlanStable = useCallback((...a: Parameters<typeof setPlan>) => impl.current.setPlan(...a), []);
+  const value = useMemo<CoachNutritionValue>(() => ({ get: getStable, status, setAdjust: setAdjustStable, clear: clearStable, setPlan: setPlanStable, reload }), [getStable, status, setAdjustStable, clearStable, setPlanStable, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useCoachNutrition(): CoachNutritionValue {

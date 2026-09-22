@@ -248,7 +248,7 @@ export function siteChangeCm(h: SiteHistory): number | null {
 export function siteChangeLine(h: SiteHistory, unit: LengthUnit): string {
   const cm = siteChangeCm(h);
   if (cm == null || h.previous == null) {
-    return 'One reading only, so there is nothing yet to compare it to — not a change of zero.';
+    return 'One reading only, so there is nothing yet to compare it to. It is not a change of zero.';
   }
   const d = lengthDeltaIn(cm, unit);
   const since = dayHeading(h.previous.atISO);
@@ -287,7 +287,7 @@ export function siteAgeLine(h: SiteHistory, todayISO: string): string {
   const on = dayHeading(h.latest.atISO);
   const when = whenLabel(h.latest.atISO, todayISO);
   return isSiteStale(h, todayISO)
-    ? `Measured ${on} · ${when} — a training block ago, so it is not where they are now.`
+    ? `Measured ${on} · ${when}. That is a training block ago, so it is not where they are now.`
     : `Measured ${on} · ${when}`;
 }
 
@@ -300,6 +300,6 @@ export function siteAgeLine(h: SiteHistory, todayISO: string): string {
  */
 export const DIRECTION_CAVEAT =
   'Each change is shown with its sign and nothing else. Whether down is progress ' +
-  'depends on the site and on what they are working toward — a waist and an arm ' +
-  'moving the same way mean opposite things — and the tape does not record which, ' +
+  'depends on the site and on what they are working toward (a waist and an arm ' +
+  'moving the same way mean opposite things), and the tape does not record which, ' +
   'so this screen does not colour it in.';

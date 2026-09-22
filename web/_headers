@@ -1,4 +1,75 @@
 
+# ── WHY THIS FILE NOW CARRIES MORE THAN A CONTENT TYPE ────────────────────
+#
+# Six pages under web/ execute JavaScript fetched from a third party:
+#
+#     signup.html, join.html, coach.html, confirmed.html,
+#     forgot-password.html, reset-password.html
+#
+# each `import`s @supabase/supabase-js from https://cdn.jsdelivr.net at a
+# FLOATING major version (`@2`), with no Subresource Integrity — an ES module
+# import cannot carry an `integrity` attribute — and, until this file said
+# otherwise, with no Content-Security-Policy over it either.
+#
+# Those are precisely the pages where somebody types a password. Three of them
+# are the account-creation and password-reset flows. Anything jsDelivr serves
+# for that specifier runs with full access to those forms. That is the whole
+# threat model in one sentence, and it had nothing in front of it.
+#
+# A CSP does not remove the dependency — only self-hosting that one file does,
+# and that is worth doing. What it does is bound the blast radius: with the
+# policy below, a compromised or substituted module still runs, but it cannot
+# exfiltrate to an arbitrary host, because `connect-src` names the only two
+# origins this site is allowed to talk to.
+#
+# ── WHY 'unsafe-inline' IS HERE, SAID PLAINLY ─────────────────────────────
+#
+# It is a real weakening and it is not decoration to admit it. Every page has
+# an inline <script> for the phone nav, and there are 194 inline `style=`
+# attributes across the site. Nonces need a server that renders per request;
+# this directory has no build step and Cloudflare Pages serves it static, so
+# there is nothing to generate one. Hashes would work for the scripts and would
+# have to be regenerated on every edit to any page's <head> — a gate nobody
+# would keep green, which this repo has learned is worse than no gate.
+#
+# So the honest position: script-src is 'self' + jsDelivr + inline, which stops
+# script being pulled from any OTHER host, and the clauses that are absolute —
+# frame-ancestors, object-src, base-uri, form-action — are the ones doing the
+# structural work. Removing 'unsafe-inline' needs the inline scripts moved to
+# files; that is a real change to twenty-two pages and it belongs in its own
+# pass, not smuggled into a headers file overnight.
+#
+# ── WHAT EACH DIRECTIVE IS FOR ────────────────────────────────────────────
+#
+#   default-src 'self'      nothing loads from anywhere unless named below
+#   script-src              + jsDelivr, because six pages import from it
+#   style-src / font-src    Google Fonts, which styles.css @imports
+#   connect-src             the Supabase project, and nothing else. This is the
+#                           clause that matters if the CDN module is ever bad.
+#   img-src data:           the tick icon in styles.css is a data: URI
+#   frame-ancestors 'none'  the site cannot be framed, so it cannot be clickjacked
+#   form-action 'self'      a form cannot be repointed at somebody else's host
+#   base-uri 'self'         <base> cannot be injected to re-root relative URLs
+#   object-src 'none'       no plugins, ever
+#
+# Referrer-Policy is strict-origin-when-cross-origin so that the full path of
+# the page a visitor is on is not handed to Google with the font request —
+# they still learn the origin, which privacy.html now says out loud.
+#
+# HSTS deliberately WITHOUT includeSubDomains. A year-long max-age on the apex
+# is safe and reversible-ish; extending it to every subdomain is a promise about
+# hosts this file cannot see, and getting it wrong takes a subdomain off the air
+# for a year with no way to tell a browser to forget it early. Add it when
+# somebody has actually enumerated the subdomains and confirmed all are TLS.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://phgfwzpkkwdysftlgkoq.supabase.co; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000
+
 # Apple refuses an association file that is not served as JSON, and this one
 # deliberately has no .json extension, so nothing else infers the type for it.
 /.well-known/apple-app-site-association

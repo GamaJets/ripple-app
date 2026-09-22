@@ -14,17 +14,24 @@
 // The writes had the mirror problem: both were fire-and-forget with empty
 // rejection handlers, so a template rejected by the server sat in the list for
 // the rest of the session and vanished on the next launch.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+//
+// The READ had a third version of the same fault and it is now in
+// src/lib/templateLibrary.ts, where it can be tested: the list was only rebuilt
+// when the server returned at least one row, so an answer of ZERO — which is
+// exactly what the server returns once a coach has deleted their last template
+// — left the deleted row sitting on the screen. Reported by a coach as "I tap
+// to delete a template but it doesn't delete the template".
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildProgram, type Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
-import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { writeFailure } from '../lib/wroteRows';
 import { reportError } from '../lib/reportError';
+import { isStarterId, mergeLibrary, readLibrary, type LibraryClient, type ProgramTemplate } from '../lib/templateLibrary';
 
-export interface ProgramTemplate { id: string; name: string; program: Program }
+export type { ProgramTemplate } from '../lib/templateLibrary';
 
 let SEQ = 1;
 const mkId = () => 'tpl_' + Date.now().toString(36) + '_' + (SEQ++);
@@ -68,6 +75,10 @@ interface TemplatesValue {
    *  starter cannot be deleted — see `removeTemplateFrom` — and a screen needs
    *  to know that before it draws a control that would fail. */
   isStarter: (id: string) => boolean;
+  /** Read the library again. Under 'error' the three starters are all a coach
+   *  can see and their own templates are missing without being missing, so a
+   *  screen that lists them needs a way to ask a second time. */
+  reload: () => void;
 }
 
 const Ctx = createContext<TemplatesValue | null>(null);
@@ -77,47 +88,39 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
   const [templates, setTemplates] = useState<ProgramTemplate[]>(() => seed());
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
+  // Templates whose INSERT is still out. The read below rebuilds the list from
+  // the server's answer, and without this it would take a template the coach
+  // saved half a second ago off the screen while its write was succeeding. See
+  // `mergeLibrary`.
+  const pending = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
-      try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
-        if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out: the starters really are the whole library.
-        if (!id) { setStatus('ready'); return; }
-        setUid(id);
-        // Newest-first rather than the oldest-first this was, because the cap
-        // decides which end is kept and a coach's most recent templates are the
-        // ones they are working from. The list is rebuilt in that order below,
-        // which is also the order the picker should show them in.
-        const { data, error } = await supabase.from('program_templates')
-          .select('id, name, program').eq('coach_id', id)
-          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
-        if (cancelled) return;
-        // `error || !data` used to return down the same path as a coach who has
-        // simply not saved anything, leaving the seed starters standing in for
-        // their library with nothing to mark the difference.
-        if (error) { setStatus('error'); return; }
-        const page = capped(data);
-        const real: ProgramTemplate[] = page.rows.filter((r: any) => r.program).map((r: any) => ({ id: r.id, name: r.name, program: r.program as Program }));
-        // Show the coach's own saved templates first, then the seed starters.
-        if (real.length) setTemplates((p) => [...real, ...p.filter((x) => x.id.startsWith('seed_'))]);
-        setStatus(page.truncated ? 'partial' : 'ready');
-      } catch { if (!cancelled) setStatus('error'); }
+      // Every branch of this read ends in a terminal status — see
+      // src/lib/templateLibrary.ts, where that is the contract the tests hold
+      // it to. `reload` below sets 'loading' synchronously, so a path that came
+      // back without a status would latch this provider, and every screen fed
+      // by it, at 'loading' for the life of the process.
+      const r = await readLibrary(supabase as unknown as LibraryClient);
+      if (cancelled) return;
+      if (r.uid) setUid(r.uid);
+      // Rebuilt on EVERY answer, including an empty one. It used to be guarded
+      // on the server having returned at least one row, so deleting your last
+      // template left it on the screen — see the header of templateLibrary.ts.
+      if (r.rows) { const rows = r.rows; setTemplates((p) => mergeLibrary(rows, p, pending.current)); }
+      setStatus(r.status);
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   /**
    * Who is signed in, asked at the moment of the write.
@@ -171,27 +174,32 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
     setTemplates((p) => [tpl, ...p]);
     const drop = () => setTemplates((p) => p.filter((x) => x.id !== id));
     if (!USE_SUPABASE) return { ok: true, why: null };
-    const me = await writerId();
-    if (!me) {
-      drop();
-      return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
-    }
+    // Marked in flight for as long as the write is out, so a reload that lands
+    // in the middle of it rebuilds the list WITH this row rather than without.
+    pending.current.add(id);
     try {
-      const { data, error } = await supabase.from('program_templates')
-        .insert({ id, coach_id: me, name: nm, program: tpl.program }).select('id');
-      if (error) { reportError('programTemplates.save', error, { id }); drop(); return { ok: false, why: 'The server refused it.' }; }
-      if (!data || !data.length) {
-        reportError('programTemplates.save', new Error('template insert returned no row'), { id });
+      const me = await writerId();
+      if (!me) {
         drop();
-        return { ok: false, why: 'The server accepted the request and stored no row, so there is nothing to come back to.' };
+        return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
       }
-      return { ok: true, why: null };
-    } catch (e) { reportError('programTemplates.save', e, { id }); drop(); return { ok: false, why: 'It did not reach the server.' }; }
+      try {
+        const { data, error } = await supabase.from('program_templates')
+          .insert({ id, coach_id: me, name: nm, program: tpl.program }).select('id');
+        if (error) { reportError('programTemplates.save', error, { id }); drop(); return { ok: false, why: 'The server refused it.' }; }
+        if (!data || !data.length) {
+          reportError('programTemplates.save', new Error('template insert returned no row'), { id });
+          drop();
+          return { ok: false, why: 'The server accepted the request and stored no row, so there is nothing to come back to.' };
+        }
+        return { ok: true, why: null };
+      } catch (e) { reportError('programTemplates.save', e, { id }); drop(); return { ok: false, why: 'It did not reach the server.' }; }
+    } finally { pending.current.delete(id); }
   };
   const saveTemplate = async (name: string, program: Program): Promise<boolean> =>
     (await saveTemplateTo(name, program)).ok;
 
-  const isStarter = (id: string) => id.startsWith('seed_');
+  const isStarter = isStarterId;
 
   /**
    * Delete one of the coach's own templates.
@@ -222,7 +230,7 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
    * ── And what a delete does NOT touch ──────────────────────────────────────
    *
    * No foreign key anywhere in this database points at `program_templates` —
-   * read off `pg_constraint` live, the result was empty. A programme assigned
+   * read off `pg_constraint` live, the result was empty. A program assigned
    * from a template is a jsonb COPY in `assigned_programs`, with no reference
    * back, so deleting the stencil cannot reach a client who is training from
    * it, and `workouts` — keyed by user and date — cannot be reached from either.
@@ -263,7 +271,30 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
   };
   const removeTemplate = async (id: string): Promise<boolean> => (await removeTemplateFrom(id)).ok;
 
-  const value = useMemo(() => ({ templates, status, saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom, isStarter }), [templates, status, uid]);
+  // ── Why the four writers are handed out through a ref ─────────────────────
+  //
+  // This value was already memoised, and it was memoised WRONGLY: the four
+  // writers below are plain arrows rebuilt on every render, and the dependency
+  // list was `[templates, status, uid, reload]` — so the object handed to
+  // consumers carried whichever copy of them existed when one of those four
+  // last moved. That is the second half of the trap src/ui/roster.tsx spells
+  // out: a memo whose deps do not cover its members hands out stale closures,
+  // and listing the members instead would have made the memo do nothing at all
+  // because their identity changes every render.
+  //
+  // The ref is the way out of both. The wrappers are created once, so the value
+  // is stable; the implementations behind them are this render's, so they still
+  // close over the current `templates` and `uid`.
+  const impl = useRef({ saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom });
+  impl.current = { saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom };
+  const saveTemplateStable = useCallback((...a: Parameters<typeof saveTemplate>) => impl.current.saveTemplate(...a), []);
+  const saveTemplateToStable = useCallback((...a: Parameters<typeof saveTemplateTo>) => impl.current.saveTemplateTo(...a), []);
+  const removeTemplateStable = useCallback((...a: Parameters<typeof removeTemplate>) => impl.current.removeTemplate(...a), []);
+  const removeTemplateFromStable = useCallback((...a: Parameters<typeof removeTemplateFrom>) => impl.current.removeTemplateFrom(...a), []);
+  const value = useMemo<TemplatesValue>(
+    () => ({ templates, status, saveTemplate: saveTemplateStable, saveTemplateTo: saveTemplateToStable, removeTemplate: removeTemplateStable, removeTemplateFrom: removeTemplateFromStable, isStarter, reload }),
+    [templates, status, saveTemplateStable, saveTemplateToStable, removeTemplateStable, removeTemplateFromStable, isStarter, reload],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

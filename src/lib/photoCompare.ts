@@ -59,7 +59,7 @@ import { dateParts } from './localDate';
 // client had chosen, so a pounds reader compared two photographs of themselves
 // against figures in a unit they do not think in. The unit is a parameter and
 // not a hook because this module is pure and asserted against under plain node.
-import { weightIn, weightDeltaIn, type WeightUnit } from './units';
+import { weightIn, weightDeltaIn, plainExact, type WeightUnit } from './units';
 // The one character the whole app signs a loss with. Imported rather than
 // re-typed because a second '−' literal in the tree is a second thing that can
 // be typed as a hyphen by mistake — which is exactly what happened here.
@@ -284,7 +284,16 @@ export function compareRows(
 /** A figure for the screen. The house rule in one function: what the record
  *  cannot support is a dash, never a zero. */
 export function readingText(v: number | null, unit: string): string {
-  return v === null ? '—' : `${v} ${unit}`;
+  // `plainExact`, not `${v}`. Every figure that reaches here is a weight at
+  // 0.1 kg, a body-fat percentage or a skeletal-muscle mass, so most of them
+  // carry a decimal separator — and `String` writes a full stop in every
+  // locale. `deltaText` below prints the CHANGE in the column beside this one
+  // and now spells it the same way; the two disagreeing was the visible half of
+  // the bug, one table showing "80,1 kg" against "-1.4 kg".
+  //
+  // Separator only: the digits are byte-identical to what `String` gave, which
+  // is what lets the two columns keep the grain `compareRows` chose for them.
+  return v === null ? '—' : `${plainExact(v)} ${unit}`;
 }
 
 /** A change for the screen, signed so the direction is unambiguous. A measured
@@ -309,7 +318,11 @@ export function readingText(v: number | null, unit: string): string {
  *  explicit; only the character changed. */
 export function deltaText(v: number | null, unit: string): string {
   if (v === null) return '—';
-  return `${v > 0 ? '+' : v < 0 ? MINUS : ''}${Math.abs(v)} ${unit}`;
+  // `plainExact` on the magnitude keeps the promise the comment above makes —
+  // the digits are byte-identical to `Math.abs(v)`'s own spelling — and puts
+  // the reader's decimal separator between them. The sign is still built by
+  // hand, before the figure, so U+2212 stays where it was put.
+  return `${v > 0 ? '+' : v < 0 ? MINUS : ''}${plainExact(Math.abs(v))} ${unit}`;
 }
 
 /**
@@ -328,7 +341,7 @@ export function compareBasis(rows: CompareRow[]): string {
     return 'The figures under each photo are the InBody scan recorded on that day.';
   }
   if (!beforeMeasured && !afterMeasured) {
-    return 'Neither of these days has an InBody scan, so there are no figures to put beside the photos — only the photos themselves.';
+    return 'Neither of these days has an InBody scan, so there are no figures to put beside the photos, only the photos themselves.';
   }
   return beforeMeasured
     ? 'Only the earlier day has an InBody scan, so there is nothing to measure the change against.'
@@ -370,7 +383,7 @@ export function compareSummary(
   days: number | null,
   rows: CompareRow[],
 ): string {
-  const head = `Progress comparison — ${beforeLabel} → ${afterLabel} (${spanLabel(days)})`;
+  const head = `Progress comparison: ${beforeLabel} → ${afterLabel} (${spanLabel(days)})`;
   const lines = rows.map(
     (r) => `${r.label}: ${readingText(r.before, r.unit)} → ${readingText(r.after, r.unit)} (${deltaText(r.delta, r.unit)})`,
   );
@@ -381,7 +394,7 @@ export function compareSummary(
     '',
     compareBasis(rows),
     COMPARE_DISCLAIMER,
-    'The photographs themselves are not attached — they stay private to this account.',
+    'The photographs themselves are not attached; they stay private to this account.',
   ].join('\n');
 }
 

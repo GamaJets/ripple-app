@@ -148,23 +148,131 @@ const closedClean = expiryLine(
 ok(/used/i.test(closedClean), 'a pack that ran out having been fully used says exactly that');
 ok(closedClean !== closedWithLoss, 'the two are different sentences, which is the whole point of the column');
 
+// ── a credit that came BACK on to a pack that was already over ────────────
+//
+// `refund_pack_session` (supabase/parts/123) decrements `sessions_used` on the
+// newest pack with usage and does not ask whether that pack's window has
+// closed. So a member whose session is refunded after their pack ran out holds
+// a credit nothing in the database will let them draw. `packBalance` keeps it
+// out of the hero — correct, a figure somebody books against must not contain a
+// credit that cannot be booked — and counts it in `onClosedPacks` so it can be
+// talked about. Nothing talked about it, and this line said the opposite.
+const refundedOntoClosed = expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 1, '2026-09-01') ?? '';
+ok(!/had been used/i.test(refundedOntoClosed),
+  'a pack holding a refunded credit is never described as one where everything had been used — it had not, it was given back');
+ok(refundedOntoClosed.includes('1'), 'the credit is counted out loud rather than quietly dropped');
+ok(/cannot be booked/i.test(refundedOntoClosed),
+  'and the member is told it cannot be spent, which is the fact they would otherwise discover at the door');
+// Voice-neutral, and deliberately. `expiryLine` is read by both apps — the
+// coach's app/(trainer)/payments.tsx falls through to it whenever
+// `strandedNote` is null, and null is exactly this case — so a sentence saying
+// "ask your coach" would be shown to the coach about their own client. Every
+// other sentence in that function keeps the same rule.
+ok(!/your coach|your gym/i.test(refundedOntoClosed),
+  'and addresses nobody, because the coach reads this same line about their own client');
+ok(/still open|new pack|move/i.test(refundedOntoClosed),
+  'while still saying what has to happen to it');
+
+// Both things at once are two separate events and both are said.
+const lostAndBack = expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 6 }, 2, '2026-09-01') ?? '';
+ok(lostAndBack.includes('6') && lostAndBack.includes('2'),
+  'six stranded at expiry and two refunded afterwards are different facts on different days, and neither hides the other');
+
+// The clean sentence survives, and only where it is true: both counts read,
+// both nought.
+ok(/used/i.test(expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 0, '2026-09-01') ?? ''),
+  'a genuinely emptied pack still says so');
+// An unread balance is not a nought here either: `left` null must not be read
+// as "nothing came back".
+ok(!/went back/i.test(expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, null, '2026-09-01') ?? ''),
+  'and an unread balance claims no refund it did not read');
+
 /* ── 6. the coach's side of it ────────────────────────────────────────────── */
 
-// Only ever about a pack that actually lost somebody something. A note about a
-// pack that ran out empty is a message with nothing in it.
-eq(strandedNote('Dana', { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, '2026-09-01'), null,
+// Nothing to raise about a pack that ran out empty AND has had nothing put back
+// on it. Both counts have to be nought, not just the first one.
+eq(strandedNote('Dana', { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 0, '2026-09-01'), null,
   'there is nothing to raise about a pack that ran out having been used');
-eq(strandedNote('Dana', { expiresOn: '2026-08-31' }, '2026-09-01'), null,
+eq(strandedNote('Dana', { expiresOn: '2026-08-31' }, 0, '2026-09-01'), null,
   'and nothing to raise about a window that has lapsed but not been closed — the credits are still spendable');
-eq(strandedNote('Dana', NO_WINDOW, '2026-09-01'), null, 'and nothing at all about a pack with no window');
+eq(strandedNote('Dana', NO_WINDOW, 0, '2026-09-01'), null, 'and nothing at all about a pack with no window');
+eq(strandedNote('Dana', { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, null, '2026-09-01'), null,
+  'and an unread balance raises nothing, because a null is not a credit that came back');
 
-const raise = strandedNote('Dana Reyes', { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 3 }, '2026-09-01') ?? '';
+const raise = strandedNote('Dana Reyes', { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 3 }, 0, '2026-09-01') ?? '';
 ok(raise.startsWith('Dana Reyes'), 'the note names the person the conversation is with');
 ok(raise.includes('3'), 'and how many sessions they paid for and did not take');
 ok(/yours to choose|better coming from you/i.test(raise), 'and leaves the decision with the coach rather than making it');
 
-const unnamed = strandedNote(null, { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 3 }, '2026-09-01') ?? '';
+const unnamed = strandedNote(null, { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 3 }, 0, '2026-09-01') ?? '';
 ok(unnamed.startsWith('This client'), 'a name we could not read never renders a sentence starting with a space');
+
+/* ── 6b. the case the coach was never told about at all ───────────────────── */
+//
+// `refund_pack_session` (supabase/parts/123) gives a credit back to the newest
+// pack WITH USAGE and never asks whether that pack's window has closed. The
+// client's half of this was fixed in `expiryLine`; the coach's half returned
+// null, so app/(trainer)/payments.tsx fell through to the client's line and
+// printed it to the coach about the coach's own client.
+
+const refundOnly = strandedNote('Dana Reyes',
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 1, '2026-09-01') ?? '';
+ok(refundOnly !== '', 'a credit refunded on to a closed pack is something the coach is told about');
+ok(refundOnly.includes('1'), 'and it says how many');
+ok(/yours to do|only yours/i.test(refundOnly),
+  'and names the coach as the one who can move it, because a client cannot pick a credit up off a closed pack');
+
+// Both events, both said. They happen on different days and one must not stand
+// in for the other.
+const both = strandedNote('Dana Reyes',
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 3 }, 2, '2026-09-01') ?? '';
+ok(both.includes('3') && both.includes('2'),
+  'three stranded when the window shut and two refunded afterwards are different facts, and neither hides the other');
+
+/* ── 6c. THE VOICE RULE, PINNED ───────────────────────────────────────────── */
+//
+// `expiryLine` is read by BOTH apps: the client's Memberships & Packs, and the
+// coach's Payments screen, which falls through to it whenever `strandedNote` is
+// null. So no sentence in `expiryLine` may address the reader as the client —
+// "ask your coach" printed to a coach about their own client is the exact
+// failure this pins. `strandedNote` is the only place the coach may be
+// addressed, and it is read by nobody else.
+//
+// This is a rule, not a rendering, which is why it is a test and not a comment.
+
+const everyClientLine = [
+  // closed, credits lost
+  expiryLine({ expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 6 }, 0, '2026-09-01'),
+  // closed, credit refunded back on — the case the clause was added for
+  expiryLine({ expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 1, '2026-09-01'),
+  // closed, both
+  expiryLine({ expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 6 }, 2, '2026-09-01'),
+  // closed and genuinely empty
+  expiryLine({ expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 0, '2026-09-01'),
+  // lapsed but not yet closed
+  expiryLine({ expiresOn: '2026-08-31' }, 3, '2026-09-01'),
+  // inside the window
+  expiryLine({ expiresOn: '2026-09-05' }, 3, '2026-09-01'),
+].filter((x): x is string => !!x);
+
+ok(everyClientLine.length >= 5, 'the voice rule is checked against every sentence expiryLine can produce, not one of them');
+for (const line of everyClientLine) {
+  ok(!/\byour coach\b|\byour gym\b|\byour trainer\b|\bask your\b/i.test(line),
+    `expiryLine is read by the coach about their own client and may never address the client: ${line}`);
+  ok(!/\byou have\b|\byou paid\b|\byou did not\b|\byour pack\b|\byour sessions\b/i.test(line),
+    `expiryLine may not say "you" to either party, because it does not know which one is reading: ${line}`);
+}
+
+// And the coach's line is allowed to do the opposite — that is the whole reason
+// the two functions exist separately. If this ever stops being true, somebody
+// has merged them.
+const coachLines = [raise, refundOnly, both];
+ok(coachLines.every((l) => /\byou\b|\byours\b/i.test(l)),
+  'strandedNote addresses the coach directly, which is what makes it the coach\'s half and not a second copy of the client\'s');
 
 ok(/not refunded|nothing gives them back/i.test(EXPIRY_IS_NOT_A_REFUND),
   'and the list says out loud that nothing hands a stranded credit back on its own');

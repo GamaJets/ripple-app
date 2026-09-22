@@ -116,6 +116,36 @@ export function friendLine(r: ReferralRow): string {
 }
 
 /**
+ * The sentence under a list of invites that stopped at the server's own ceiling.
+ *
+ * `my_referrals()` ends `limit 200` (supabase/parts/128-a-cohort-and-a-credit
+ * .sql), and that limit is inside the function body, so nothing on this side
+ * can see it: src/lib/rowCap.ts detects truncation by asking for one row more
+ * than it will accept, and the server cannot answer with 201 however the client
+ * phrases the request. A referrer with two hundred and fifty friends on the
+ * code was therefore handed two hundred of them under 'ready', with no sentence
+ * anywhere saying the list ended before their friends did.
+ *
+ * A line under the LIST rather than a 'partial' over the whole screen, and the
+ * distinction is the whole point. `my_referral_summary()` counts every row
+ * server-side — part 128 says so in as many words — so "250 joined · 90 have
+ * started training" is exact and stays exact. Turning the screen 'partial'
+ * would withdraw two true figures in order to report one cut list, which is the
+ * opposite trade to the one worth making.
+ *
+ * Null when there is nothing to say, so the caller draws nothing rather than an
+ * empty line where a sentence would be.
+ */
+export function invitesCutLine(shown: number, cap: number): string | null {
+  if (!Number.isFinite(shown) || !Number.isFinite(cap) || cap <= 0) return null;
+  if (shown < cap) return null;
+  // The order is `created_at desc`, so what is missing is the oldest — said
+  // out loud, because "some are missing" leaves a referrer wondering whether
+  // it is the friend they invited this morning.
+  return `Only your ${num(cap)} most recent invites are listed here. The counts above cover everyone who has used your code.`;
+}
+
+/**
  * The two counts, or an honest refusal to state them.
  *
  * Under anything but 'ready' this states no figure and, critically, does not
@@ -179,15 +209,15 @@ export const CONVERSION_RULE =
  */
 export function rewardNote(brand: string): string {
   return `${brand} records who you brought in and whether they started training. What `
-    + 'that is worth is up to your gym or coach — nothing here is a discount or '
+    + 'that is worth is up to your gym or coach. Nothing here is a discount or '
     + 'a credit, and no reward has been promised on their behalf.';
 }
 
 /** What the referrer sees about a friend, and what the friend sees about them.
  *  Held against my_referrals()'s select list by the test beside this file. */
 export const REFERRAL_PRIVACY_NOTE =
-  'You see a friend’s first name and whether they have started training — '
-  + 'nothing else about them. They are never shown anything about your training.';
+  'You see a friend’s first name and whether they have started training, '
+  + 'and nothing else about them. They are never shown anything about your training.';
 
 /* ── the coach's side of the same rows ─────────────────────────────────────
  *
@@ -323,12 +353,12 @@ export function coachSummaryLine(status: LoadStatus, rows: CoachReferrer[] | nul
  */
 export const COACH_REWARD_NOTE =
   'Nothing has been credited to anybody. There is no discount, no free session and no balance '
-  + 'here — what a referral is worth is yours to decide, in your own money, and this app has '
+  + 'here. What a referral is worth is yours to decide, in your own money, and this app has '
   + 'never been told what that is.';
 
 /** What a coach sees about the people their client brought in, which is nothing.
  *  Held against coach_referrals()'s select list by the test beside this file. */
 export const COACH_REFERRAL_PRIVACY_NOTE =
   'You see which of your own clients brought people in and how many. You are not shown who those '
-  + 'people are — they used your client’s code, not yours, and most of them never agreed to be '
+  + 'people are. They used your client’s code, not yours, and most of them never agreed to be '
   + 'listed to you.';

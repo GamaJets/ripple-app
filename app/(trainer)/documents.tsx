@@ -18,8 +18,11 @@
 // ── What cannot happen here, and why the screen says so ───────────────────
 //
 // A document cannot be edited once it is uploaded. Not the title, not the file:
-// `coach_documents_immutable_guard` (supabase/parts/135) refuses the update, and
-// there is no UPDATE grant to reach it with anyway. That is not caution, it is
+// `coach_documents_immutable_guard` (supabase/parts/137-a-coachs-own-paperwork.sql
+// — the comments on this feature said "part 135" throughout, which is a
+// different file about standing appointments; `grant select, insert on
+// public.coach_documents to authenticated` is at 137:302) refuses the update,
+// and there is no UPDATE grant to reach it with anyway. That is not caution, it is
 // the whole point — an acceptance points at a document, so a coach who could
 // swap the file behind an accepted one would be holding a signed acceptance of
 // something nobody read. Re-issuing amended paperwork is a NEW document plus a
@@ -35,21 +38,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag, KpiRow, IconPlate, Segmented, fig } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// How many people have accepted each document, on the document — the answer
+// this screen already held behind a per-document panel and never put where the
+// question is asked. src/lib/docAcceptance.ts has the whole argument, including
+// why no number is produced from a read that was cut short.
+import {
+  ACCEPTANCE_COUNTS_UNCOUNTABLE_NOTE, COUNTABLE_DOCUMENTS_CAP,
+  acceptedCount, acceptedLine, acceptedNeedsMark, tallyAcceptances,
+} from '../../src/lib/docAcceptance';
 import { fmtDay } from '../../src/lib/format';
 import {
-  COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, checkUpload,
-  coachDocPath, shapeDocs, sizeLabel, standingLine, uploadRefusalLine,
+  COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, DOC_KINDS, checkUpload, type DocKind,
+  coachDocPath, extForMime, shapeDocs, sizeLabel, standingLine, STANDING_ROW_CAP, STANDING_TRUNCATED_NOTE,
+  uploadRefusalLine,
   type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
 import {
-  SEND_IS_ONE_WAY, audienceLine, isAddressed, memberLine, sendBlock, sendBlockLine,
+  AUDIENCE_ROW_CAP, SEND_IS_ONE_WAY, audienceLine, isAddressed, memberLine, sendBlock, sendBlockLine,
   sendFailure, sendFailureLine, sendWarning, shapeAudience,
   type AudienceMember, type RawAudienceRow,
 } from '../../src/lib/coachDocAudience';
@@ -76,6 +90,8 @@ export default function CoachDocumentsScreen() {
   const router = useRouter();
 
   const [docs, setDocs] = useState<CoachDoc[]>([]);
+  // What the next upload is (part 3290). Paperwork unless the coach picks otherwise.
+  const [newKind, setNewKind] = useState<DocKind>('paperwork');
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,6 +101,14 @@ export default function CoachDocumentsScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [standing, setStanding] = useState<Standing[] | null>(null);
   const [standingStatus, setStandingStatus] = useState<LoadStatus>('ready');
+  /* How many people have accepted each document, keyed by document id, for the
+   * whole list at once. Null is UNKNOWN — a read that failed, or one that was
+   * never attempted — and is never an empty tally, because "no acceptances" and
+   * "we could not ask" are opposite facts about somebody's signed paperwork.
+   * `countStatus` carries the other half: 'partial' means the rows are real and
+   * are not all of them, under which no count may be stated at all. */
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
+  const [countStatus, setCountStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Which document's SEND panel is open. Separate from `openId` above on
   // purpose: "who has accepted it" and "who is it even in front of" are two
   // questions, and a coach opening the second one has not stopped wanting the
@@ -107,6 +131,12 @@ export default function CoachDocumentsScreen() {
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
+    /* Every bail-out below says so about the counts as well. Leaving them where
+     * they were would carry the PREVIOUS read's numbers under the next list —
+     * "4 people have accepted this" against a document whose acceptances we
+     * have just failed to read, which is the shape of claim this screen exists
+     * to be careful with. Null is UNKNOWN and draws no number. */
+    const noCounts = () => { setCounts(null); setCountStatus('error'); };
     try {
       // Both of these used to be 'ready', and 'ready' is the one status this
       // screen's render treats as a licence to say "You haven't added any
@@ -116,38 +146,97 @@ export default function CoachDocumentsScreen() {
       // agreements were not on file. They are; we simply had nobody to ask as.
       // 'error' means UNKNOWN (src/ui/loadStatus.ts), which is exactly what
       // this is, and the render already draws it as "could not be read".
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('error'); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) { setStatus('error'); return; }
-      const id = auth?.user?.id ?? null;
-      if (!id) { setStatus('error'); return; }
+      /* One question, asked once. This was a `getSession()` whose `error` was
+       * not on the line — so a stored session that could not be read came back
+       * as `{ data: { session: null }, error }` and was indistinguishable here
+       * from having none — followed by a `getUser()` that did name its error
+       * and reached the same three lines. The three branches always agreed, so
+       * nothing visible was ever wrong; what was wrong is that the agreement
+       * was a coincidence of four hand-written lines rather than a rule, and
+       * the discarded error was on scripts/check-reads.mjs's ratchet for
+       * exactly that reason. `signedInUid` is the rule, written once in
+       * src/lib/authedUid.ts and tested there. */
+      const me = await signedInUid('coachDocs.whoami');
+      if (me.uid === null) { setStatus('error'); noCounts(); return; }
+      const id = me.uid;
       setUid(id);
       const { data, error } = await supabase.from('coach_documents')
-        .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at')
+        .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at, kind')
         .eq('coach_id', id)
         .order('created_at', { ascending: false })
         .limit(capLimit());
       // An empty list under a failed read means "we could not ask", and a coach
       // told they have no paperwork on file would upload it a second time.
-      if (error) { setStatus('error'); return; }
+      if (error) { setStatus('error'); noCounts(); return; }
       const page = capped(data);
       setDocs(shapeDocs(page.rows.map((r: any): RawCoachDoc => ({
         id: r.id, coach_id: r.coach_id, title: r.title, path: r.path, mime: r.mime,
         bytes: r.bytes, required: r.required, retired: r.retired_at != null,
-        created_at: r.created_at, accepted_at: null,
+        created_at: r.created_at, accepted_at: null, kind: r.kind,
       }))));
       setStatus(page.truncated ? 'partial' : 'ready');
-    } catch (e) { reportError('coachDocs.load', e); setStatus('error'); }
+
+      /* ── how many have accepted each of them ─────────────────────────────
+       *
+       * One read for the whole list, rather than the per-document RPC behind
+       * the Who's Accepted panel. `coach_document_acceptances` is readable
+       * here without anything being widened: `coach_doc_accept_own_r`
+       * (supabase/parts/137, § “The acceptance”) admits a coach to the acceptance rows of their
+       * OWN documents through an `exists` on `coach_documents.coach_id =
+       * auth.uid()`, and `authenticated` holds `select` on the table. The ids
+       * in the filter come straight out of the list above, which was itself
+       * `.eq('coach_id', id)` — so this cannot be pointed at anybody else's
+       * paperwork even by mistake, and it goes nowhere near part 84.
+       *
+       * Only `document_id` is selected. Who accepted and when is the panel's
+       * business and stays there; a count needs neither. */
+      const ids = page.rows.map((r: any) => String(r.id)).filter(Boolean);
+      if (ids.length === 0) {
+        // A completed read of an empty list. Nothing to count and nothing
+        // unknown about it — the tally is genuinely empty rather than absent.
+        setCounts({});
+        setCountStatus('ready');
+      } else if (ids.length > COUNTABLE_DOCUMENTS_CAP) {
+        // Not a row cap: PostgREST takes the `in` filter in the query string,
+        // so past this the URL is the thing that breaks, and a request that is
+        // quietly cut produces a count that is quietly wrong. 'partial' is the
+        // honest status for "the rows would be real and would not be all of
+        // them", and under it no number is drawn at all.
+        setCounts(null);
+        setCountStatus('partial');
+      } else {
+        const { data: acc, error: accErr } = await supabase
+          .from('coach_document_acceptances')
+          .select('document_id')
+          .in('document_id', ids)
+          .limit(capLimit());
+        if (accErr) {
+          reportError('coachDocs.counts', accErr);
+          noCounts();
+        } else {
+          const accPage = capped(acc);
+          setCounts(tallyAcceptances(accPage.rows as { document_id?: unknown }[]));
+          // 'partial' is not 'ready' (src/ui/loadStatus.ts). A tally built from
+          // a prefix of the acceptance rows under-counts every document it
+          // touches, and an under-count here reads as clients who have not
+          // signed — which is the one direction a coach acts on.
+          setCountStatus(accPage.truncated ? 'partial' : 'ready');
+        }
+      }
+    } catch (e) { reportError('coachDocs.load', e); setStatus('error'); noCounts(); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // The one read on this screen, and the same one focus runs. A refused read
+  // draws "could not be read" over the coach's whole paperwork list, and a
+  // coach who cannot get past that sentence uploads everything a second time.
+  const pull = usePullToRefresh(load);
 
   /* ── Adding one ────────────────────────────────────────────────────────── */
 
   async function addDocument() {
     if (!uid) {
-      Alert.alert('Not signed in', 'Sign in again and your paperwork will be here.');
+      Alert.alert('Not Signed In', 'Sign in again and your paperwork will be here.');
       return;
     }
     const picked = await pickDocument({ type: DOC_MIME_TYPES });
@@ -156,7 +245,7 @@ export default function CoachDocumentsScreen() {
     // this build has no picker at all, and saying so is the only honest thing —
     // the button is already disabled for it, and this is the second lock.
     if (picked.outcome === 'unavailable') {
-      Alert.alert('This build cannot open your files', DOCUMENT_PICKER_UNAVAILABLE_NOTE);
+      Alert.alert('This Build Cannot Open Your Files', DOCUMENT_PICKER_UNAVAILABLE_NOTE);
       return;
     }
     if (picked.outcome === 'error') {
@@ -171,13 +260,39 @@ export default function CoachDocumentsScreen() {
     // Checked here, before any bytes move. A 413 from storage arrives as an
     // opaque failure, and "that file is too large" is a sentence somebody can
     // act on.
-    const verdict = checkUpload({ filename: a.name, mime: a.mimeType, bytes: a.size ?? 0 });
-    if (!verdict.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(verdict.reason)); return; }
+    //
+    // ── and the size the picker did not give ──────────────────────────────
+    //
+    // `a.size` is null when the PICKER could not say how big the file is.
+    // expo-document-picker types it `size?: number` and several Android
+    // providers leave it out, which src/ui/nativeModules.ts carries through as
+    // null rather than inventing a number for it. This line then invented one:
+    // `a.size ?? 0`, and `checkUpload` refuses anything at or below zero bytes
+    // as 'empty' — so a perfectly readable waiver was turned away with "That
+    // file is empty, so there is nothing to ask anybody to accept", and no
+    // amount of trying again could get past it, because nothing about the file
+    // was wrong. An unreported size is not a size of nothing; it is the house
+    // rule about null and zero, wearing a file picker.
+    //
+    // So the size is judged where it is KNOWN: from the picker when the picker
+    // gave one, and otherwise off the bytes themselves below — which is the
+    // true length, and is still in front of the upload, which is what this
+    // check exists to be in front of.
+    const declared = typeof a.size === 'number' && Number.isFinite(a.size) ? a.size : null;
+    if (declared !== null) {
+      const verdict = checkUpload({ filename: a.name, mime: a.mimeType, bytes: declared });
+      if (!verdict.ok) { Alert.alert('Can’t Use That File', uploadRefusalLine(verdict.reason)); return; }
+    } else {
+      // The two things that can still be settled without a size are settled
+      // here, so a file of a kind we cannot use is never read into memory.
+      if (!a.name.trim()) { Alert.alert('Can’t Use That File', uploadRefusalLine('name')); return; }
+      if (!extForMime(a.mimeType)) { Alert.alert('Can’t Use That File', uploadRefusalLine('type')); return; }
+    }
 
     const path = coachDocPath({
       coachId: uid, filename: a.name, mime: a.mimeType as string, millis: Date.now(), token: newToken(),
     });
-    if (!path) { Alert.alert('Can’t use that file', uploadRefusalLine('type')); return; }
+    if (!path) { Alert.alert('Can’t Use That File', uploadRefusalLine('type')); return; }
 
     setBusy(true);
     try {
@@ -188,16 +303,21 @@ export default function CoachDocumentsScreen() {
         bytes = await res.arrayBuffer();
       } catch (e) {
         reportError('coachDocs.read-file', e);
-        Alert.alert('Couldn’t read that file', 'It could not be read off this device, so nothing was uploaded.');
+        Alert.alert('Couldn’t Read That File', 'It could not be read off this device, so nothing was uploaded.');
         return;
       }
-      if (bytes.byteLength === 0) { Alert.alert('Can’t use that file', uploadRefusalLine('empty')); return; }
+      // The real length, whatever the picker said about it — and the whole of
+      // the size check when the picker said nothing. Still before the upload,
+      // so a file too large for the bucket is refused with a sentence rather
+      // than by an opaque 413, and an empty one is still called empty.
+      const read = checkUpload({ filename: a.name, mime: a.mimeType, bytes: bytes.byteLength });
+      if (!read.ok) { Alert.alert('Can’t Use That File', uploadRefusalLine(read.reason)); return; }
 
       const { error: upErr } = await supabase.storage
         .from(BUCKET).upload(path, bytes, { contentType: a.mimeType as string, upsert: false });
       if (upErr) {
         reportError('coachDocs.upload', upErr, { path });
-        Alert.alert('Not uploaded', 'That document was not saved, so nothing has been added and nobody has been asked to accept anything.');
+        Alert.alert('Not Uploaded', 'That document was not saved, so nothing has been added and nobody has been asked to accept anything.');
         return;
       }
 
@@ -206,7 +326,7 @@ export default function CoachDocumentsScreen() {
       // invisible, which is the safe side of this particular failure.
       const title = (a.name || 'Document').replace(/\.[^./\\]+$/, '').slice(0, 120) || 'Document';
       const { error: rowErr } = await supabase.from('coach_documents').insert({
-        coach_id: uid, title, path, mime: a.mimeType, bytes: bytes.byteLength, required: false,
+        coach_id: uid, title, path, mime: a.mimeType, bytes: bytes.byteLength, required: false, kind: newKind,
       });
       if (rowErr) {
         reportError('coachDocs.insert', rowErr, { path });
@@ -214,7 +334,7 @@ export default function CoachDocumentsScreen() {
         // second ago — so the storage delete policy allows this.
         // no-error-ok: the row insert already failed and is what the coach is told about; a leftover object is invisible to everybody and is the operator's purge queue's problem, not a second alert
         await supabase.storage.from(BUCKET).remove([path]);
-        Alert.alert('Not added', 'The file uploaded but could not be filed, so it has been removed. Nothing has been asked of anybody.');
+        Alert.alert('Not Added', 'The file uploaded but could not be filed, so it has been removed. Nothing has been asked of anybody.');
         return;
       }
       await load();
@@ -229,11 +349,11 @@ export default function CoachDocumentsScreen() {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(d.path, SIGNED_TTL_S);
     if (error || !data?.signedUrl) {
       reportError('coachDocs.sign', error, { path: d.path });
-      Alert.alert('Couldn’t open it', 'The link to that document could not be created just now. Try again in a moment.');
+      Alert.alert('Couldn’t Open It', 'The link to that document could not be created just now. Try again in a moment.');
       return;
     }
     try { await WebBrowser.openBrowserAsync(data.signedUrl); }
-    catch (e) { reportError('coachDocs.open', e); Alert.alert('Couldn’t open it', 'This device would not open that document.'); }
+    catch (e) { reportError('coachDocs.open', e); Alert.alert('Couldn’t Open It', 'This device would not open that document.'); }
   }
 
   /* ── Who has accepted ──────────────────────────────────────────────────── */
@@ -244,7 +364,16 @@ export default function CoachDocumentsScreen() {
     wantStanding.current = d.id;
     setStanding(null);
     setStandingStatus('loading');
-    const { data, error } = await supabase.rpc('coach_document_standing', { p_document: d.id });
+    // `.limit(capLimit())` and `capped()`, exactly as the document list on this
+    // screen does at `load` above and as src/ui/coachThreads.ts does for the
+    // sibling RPC. PostgREST stops at 1000 rows and says nothing, and the
+    // sentence this read feeds is not a figure on a dashboard — it is "All 12
+    // of your clients have accepted this", a claim about a signed waiver. A
+    // read that stopped at the cap can produce it out of twelve rows of
+    // nineteen, and the coach then trains the other seven believing they are
+    // covered.
+    const { data, error } = await supabase.rpc('coach_document_standing', { p_document: d.id })
+      .limit(capLimit());
     // The coach has closed this panel or opened another document's. There is
     // one `standing` list on this screen and one `standingStatus` beside it, so
     // without this check a slower answer for the waiver lands under the
@@ -252,17 +381,27 @@ export default function CoachDocumentsScreen() {
     // have never been shown.
     if (wantStanding.current !== d.id) return;
     if (error) { setStandingStatus('error'); return; }
-    setStanding((data ?? []).map((r: any) => ({
+    const page = capped(Array.isArray(data) ? data : []);
+    setStanding(page.rows.map((r: any) => ({
       clientId: String(r.client_id),
       name: (r.client_name && String(r.client_name).trim()) || 'A client',
       acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
     })));
-    setStandingStatus('ready');
+    // 'partial' is not 'ready' (src/ui/loadStatus.ts): the names may be shown,
+    // the count over them may not.
+    //
+    // Two ceilings, and only one of them was ever visible. `capped()` catches
+    // PostgREST's silent 1000-row stop. STANDING_ROW_CAP catches the `limit
+    // 500` written INSIDE `coach_document_standing()`, which is the lower of
+    // the two and therefore the only one that has ever actually bitten — and
+    // which rowCap.ts is structurally unable to see, because it detects a cut
+    // by asking for one row more than the server is willing to give.
+    setStandingStatus(page.truncated || page.rows.length >= STANDING_ROW_CAP ? 'partial' : 'ready');
   }
 
   /* ── Sending one to a particular client ────────────────────────────────── */
   //
-  // The half part 135 did not build. Uploading a document made it readable by
+  // The half part 137 did not build. Uploading a document made it readable by
   // the WHOLE roster and there was no way to put one in front of one person —
   // which is most of what a coach actually sends: a training agreement, a rehab
   // protocol written after one consultation, a plan somebody paid for.
@@ -281,7 +420,8 @@ export default function CoachDocumentsScreen() {
     setAudience(null);
     setSendOff(false);
     setAudienceStatus('loading');
-    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id })
+      .limit(capLimit());
     // As in `showStanding`: one audience list, one status, and the panel above
     // is headed by whichever document is open now. A stale answer landing here
     // would show who has and has not been sent the OTHER document, and every
@@ -297,8 +437,13 @@ export default function CoachDocumentsScreen() {
       setAudienceStatus('error');
       return;
     }
-    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
-    setAudienceStatus('ready');
+    // Capped for the same reason as the standing read, and with more at stake:
+    // the sentence under this panel says who can open the document, and the
+    // picker under THAT performs a send that cannot be undone. See the
+    // 'part-read' arm of `sendBlock`.
+    const page = capped(Array.isArray(data) ? data : []);
+    setAudience(shapeAudience(page.rows as RawAudienceRow[]));
+    setAudienceStatus(page.truncated || page.rows.length >= AUDIENCE_ROW_CAP ? 'partial' : 'ready');
   }
 
   function sendTo(d: CoachDoc, m: AudienceMember, addressed: boolean) {
@@ -323,7 +468,7 @@ export default function CoachDocumentsScreen() {
               if (why) {
                 if (why !== 'unavailable') reportError('coachDocs.send', error, { id: d.id });
                 setSendOff(why === 'unavailable');
-                Alert.alert('Not sent', sendFailureLine(why));
+                Alert.alert('Not Sent', sendFailureLine(why));
                 return;
               }
               // Re-read rather than patching the row in place: the send may have
@@ -339,14 +484,34 @@ export default function CoachDocumentsScreen() {
 
   /** Re-read the audience for a document whose panel is already open. */
   async function openSendRefresh(d: CoachDoc) {
-    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id })
+      .limit(capLimit());
+    // The same guard `openSend` makes, for the same reason and with the send
+    // already behind it. This is called from inside `sendTo`, so the coach has
+    // just tapped Send and is free to close this panel and open another
+    // document's while the re-read is in flight — at which point this answer
+    // landed under the OTHER document's heading, and every name in it is a
+    // live Send control. One tap on it puts the wrong paperwork in front of a
+    // client, and SEND_IS_ONE_WAY means there is no taking it back.
+    if (wantAudience.current !== d.id) return;
     if (error) {
-      reportError('coachDocs.audience', error, { id: d.id });
+      // And the same three-way reading of the failure. Without it a build
+      // running against a database that has not had part 156 applied showed a
+      // generic error here and the correct "this needs an update" sentence in
+      // `openSend`, from the same RPC, seconds apart.
+      const why = sendFailure({ error, returned: true });
+      setSendOff(why === 'unavailable');
+      if (why !== 'unavailable') reportError('coachDocs.audience', error, { id: d.id });
       setAudienceStatus('error');
       return;
     }
-    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
-    setAudienceStatus('ready');
+    // Capped for the same reason as the standing read, and with more at stake:
+    // the sentence under this panel says who can open the document, and the
+    // picker under THAT performs a send that cannot be undone. See the
+    // 'part-read' arm of `sendBlock`.
+    const page = capped(Array.isArray(data) ? data : []);
+    setAudience(shapeAudience(page.rows as RawAudienceRow[]));
+    setAudienceStatus(page.truncated || page.rows.length >= AUDIENCE_ROW_CAP ? 'partial' : 'ready');
   }
 
   /* ── The two things a coach may change ─────────────────────────────────── */
@@ -360,7 +525,7 @@ export default function CoachDocumentsScreen() {
     // nothing.
     if (error || data !== true) {
       reportError('coachDocs.required', error, { id: d.id });
-      Alert.alert('Not changed', 'That could not be changed just now, so it is still as it was.');
+      Alert.alert('Not Changed', 'That could not be changed just now, so it is still as it was.');
       return;
     }
     await load();
@@ -371,9 +536,9 @@ export default function CoachDocumentsScreen() {
       `Retire “${d.title}”?`,
       'It stops being shown to clients who have not accepted it, and stops being something you can require. '
       + 'Everyone who has already accepted it keeps that record and can still read what they agreed to. '
-      + 'This cannot be undone — issue a new version instead of bringing this one back.',
+      + 'This cannot be undone. Issue a new version instead of bringing this one back.',
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Retire',
           style: 'destructive',
@@ -381,7 +546,7 @@ export default function CoachDocumentsScreen() {
             const { data, error } = await supabase.rpc('retire_coach_document', { p_document: d.id });
             if (error || data !== true) {
               reportError('coachDocs.retire', error, { id: d.id });
-              Alert.alert('Not retired', 'That could not be retired just now, so it is still in circulation.');
+              Alert.alert('Not Retired', 'That could not be retired just now, so it is still in circulation.');
               return;
             }
             await load();
@@ -396,18 +561,41 @@ export default function CoachDocumentsScreen() {
   const live = docs.filter((d) => !d.retired);
   const retired = docs.filter((d) => d.retired);
   const accepted = standing?.filter((s) => s.acceptedAt).length ?? 0;
+  /* `isWhole(countStatus)`, never `countStatus !== 'error'`. The claim these
+   * counts make is "this many people have signed your waiver", and both of the
+   * statuses that comparison would admit produce a wrong one: under 'loading'
+   * the tally is null and every document reads as unsigned, and under 'partial'
+   * it is built from a prefix and under-counts every document it touches. */
+  const countsWhole = isWhole(countStatus);
+  /* Said once, above the list, rather than against every row. The coach needs
+   * to know the numbers are missing; they do not need to be told eleven times.
+   *
+   * Only when there is paperwork for it to be about, and only when the DOCUMENT
+   * list itself was read: when that failed the screen is already saying so over
+   * the whole list, and "the counts could not be worked out" underneath it is a
+   * second sentence about the same failure.
+   *
+   * Written as the two statuses it WANTS rather than as `!== 'error' && !==
+   * 'loading'`, which is the enumeration scripts/check-whole.mjs exists for and
+   * which would be admitting 'partial' by accident rather than on purpose. Here
+   * 'partial' is wanted: a truncated document list is still a list of real
+   * documents, and the coach is owed the sentence about their counts. Nothing
+   * is counted on the strength of it — `countsWhole` above is what gates the
+   * numbers, and it is `isWhole`. */
+  const countsUnstated = docs.length > 0
+    && (status === 'ready' || status === 'partial')
+    && (countStatus === 'error' || countStatus === 'partial');
+  /** The acceptance line for one document, or null when no number may be said. */
+  const acceptedFor = (d: CoachDoc) => acceptedCount(counts, d.id, countsWhole);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your paperwork</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Documents</Text>
-          </View>
-        </View>
+        {/* The board's page head (coach page 15 lists this one as Forms &
+            PDFs; the rows on Profile call it Your Documents, and the title
+            says what it holds). */}
+        <PageHead title="Documents" />
 
         {!USE_SUPABASE ? (
           <Section>
@@ -420,6 +608,20 @@ export default function CoachDocumentsScreen() {
           <>
             {/* The failed read is a Flag, not warn-coloured ink: warn as text is
                 3.87–4.08:1 on the three light palettes, below AA. */}
+            {/* ── the paperwork at a glance ───────────────────────────────────
+                Three tiles on the ground before the sentence that qualifies
+                them. Counted under a 'ready' read ONLY: under 'partial' the
+                rows are the most recent page and a count of them is a floor
+                printed as a total, and under 'error' they are not what is on
+                file, so all three draw the dash and the sentence below says
+                why. Amber on Required because those are the ones a client is
+                being asked to act on. */}
+            <KpiRow tiles items={[
+              { label: 'In Circulation', value: status === 'ready' ? String(live.length) : fig(null), tone: 'teal' },
+              { label: 'Must Accept', value: status === 'ready' ? String(live.filter((d) => d.required).length) : fig(null), tone: 'amber' },
+              { label: 'Retired', value: status === 'ready' ? String(retired.length) : fig(null), tone: 'neutral' },
+            ]} />
+
             {status === 'error' ? (
               <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
                 Your documents could not be read just now, so this list is not what is on file. Nothing here has changed.
@@ -436,15 +638,27 @@ export default function CoachDocumentsScreen() {
                     had added no paperwork. The two cases are separated now, and
                     only the genuinely empty one says nothing was ever added. */}
                 {status === 'loading' ? 'Reading your documents.'
-                  : status === 'partial' ? 'Showing the most recent of your documents — there are more than fit in one read.'
+                  : status === 'partial' ? 'Showing the most recent of your documents. There are more than fit in one read.'
                     : live.length === 0 && retired.length === 0 ? 'You haven’t added any paperwork yet.'
-                      : live.length === 0 ? `Nothing is in circulation — the ${retired.length === 1 ? 'document you have added has' : `${retired.length} documents you have added have`} all been retired.`
+                      : live.length === 0 ? `Nothing is in circulation. The ${retired.length === 1 ? 'document you have added has' : `${retired.length} documents you have added have`} all been retired.`
                         : `${live.length} document${live.length === 1 ? '' : 's'} in circulation.`}
               </Text>
             )}
 
+            {/* A mark and a sentence, not a silent absence of numbers. A coach
+                who sees no count against any document would read it as a
+                screen that has never had the feature, and would go back to
+                opening the panels one at a time. */}
+            {countsUnstated ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{ACCEPTANCE_COUNTS_UNCOUNTABLE_NOTE}</Flag>
+            ) : null}
+
             <Section>
-              <Cta label={busy ? 'Uploading…' : 'Add a document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
+              {/* What it is decides where the client finds it: paperwork on
+                  Documents, guides under Nutrition Guides and Learn. */}
+              <Segmented style={{ marginBottom: sp.md }} value={newKind} onChange={setNewKind}
+                options={DOC_KINDS.map((k) => ({ key: k.key, label: k.key === 'nutrition' ? 'Nutrition' : k.key === 'education' ? 'Education' : 'Paperwork', a11yLabel: k.label }))} />
+              <Cta label={busy ? 'Uploading…' : newKind === 'nutrition' ? 'Add a Nutrition Guide' : newKind === 'education' ? 'Add a Guide for Clients' : 'Add a Document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
               {/* Disabled with the reason beside it rather than live and inert.
                   A button that opens nothing reads as a broken screen, and the
                   coach's next move is to try it again. */}
@@ -459,25 +673,50 @@ export default function CoachDocumentsScreen() {
                   roster. Addressing it to one person is a separate act, on the
                   document itself, and it takes the document away from everybody
                   else — see sendWarning in src/lib/coachDocAudience.ts. */}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Everyone you coach can read what you add. To put one in front of a single client, use Send
-                to a Client on the document once it is here.
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                Everyone you coach can read what you add. Send to a Client narrows one document.
               </Text>
             </Section>
 
             {live.length ? (
               <Section>
-                <SectionHead title="IN CIRCULATION" />
+                <SectionHead title="In Circulation" />
                 {live.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}
                     <View style={{ paddingVertical: sp.md }}>
-                      <Pressable onPress={() => open(d)} accessibilityRole="button" accessibilityLabel={`Open ${d.title}`}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.title}</Text>
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                          {sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
-                        </Text>
+                      <Pressable onPress={() => open(d)} accessibilityRole="button" accessibilityLabel={`Open ${d.title}`}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                        {/* Amber where a client is asked to accept it, teal where
+                            it is only there to be read. The switch under the row
+                            says the same in words. */}
+                        <IconPlate icon="pencil" tone={d.required ? 'amber' : 'teal'} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ ...ty.head, color: t.ink }}>{d.title}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            {d.kind !== 'paperwork' ? `${DOC_KINDS.find((k) => k.key === d.kind)?.label} · ` : ''}{sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
+                          </Text>
+                        </View>
                       </Pressable>
+
+                      {/* The answer to "is this signed?", on the document, so
+                          it is not three taps and three reads away. The panel
+                          below still gives the names and the denominator —
+                          `standingLine` — which is the other half of the
+                          question and the half that needs a roster read.
+
+                          A `<Flag>` only for the case that wants acting on: a
+                          required document nobody has accepted. Never
+                          warn-coloured words; `t.warn` as ink is below AA on
+                          the light palettes. */}
+                      {(() => {
+                        const n = acceptedFor(d);
+                        const line = acceptedLine(n, d.required);
+                        if (!line) return null;
+                        return acceptedNeedsMark(n, d.required)
+                          ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{line}</Flag>
+                          : <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{line}</Text>;
+                      })()}
 
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
                         <Switch
@@ -493,7 +732,7 @@ export default function CoachDocumentsScreen() {
                       </View>
 
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                        <Ghost label={openId === d.id ? 'Hide' : 'Who’s accepted'} onPress={() => showStanding(d)} />
+                        <Ghost label={openId === d.id ? 'Hide' : 'Who’s Accepted'} onPress={() => showStanding(d)} />
                         <Ghost label={sendId === d.id ? 'Hide' : 'Send to a Client'} onPress={() => openSend(d)} />
                         <Ghost label="Retire" onPress={() => retire(d)} />
                       </View>
@@ -509,7 +748,8 @@ export default function CoachDocumentsScreen() {
                             const block = sendBlock({
                               retired: d.retired,
                               members: audience,
-                              read: audienceStatus === 'error' ? 'failed' : 'ok',
+                              read: audienceStatus === 'error' ? 'failed'
+                                : audienceStatus === 'partial' ? 'truncated' : 'ok',
                             });
                             if (audienceStatus === 'loading') {
                               return <Text style={{ ...ty.caption, color: t.ink3 }}>Reading who this is in front of.</Text>;
@@ -520,7 +760,7 @@ export default function CoachDocumentsScreen() {
                               // twelve clients told the second would go and
                               // re-add them.
                               return (
-                                <Flag tone={sendOff || block === 'unread' ? t.warn : t.ink3}>
+                                <Flag tone={sendOff || block === 'unread' || block === 'part-read' ? t.warn : t.ink3}>
                                   {sendOff ? sendFailureLine('unavailable') : sendBlockLine(block)}
                                 </Flag>
                               );
@@ -534,6 +774,12 @@ export default function CoachDocumentsScreen() {
                                   onPress={() => { if (m.sentAt == null) sendTo(d, m, addressed); }}
                                   disabled={m.sentAt != null || sendingTo != null}
                                   accessibilityRole="button"
+                                  /* Two reasons this can be refused and only
+                                     one of them was ever said: the label
+                                     covers "already has it", and a send in
+                                     flight to somebody else looked identical
+                                     to a live control. */
+                                  accessibilityState={{ disabled: m.sentAt != null || sendingTo != null, busy: sendingTo === m.clientId }}
                                   accessibilityLabel={m.sentAt != null
                                     ? `${m.name ?? 'A client'} already has ${d.title}`
                                     : `Send ${d.title} to ${m.name ?? 'this client'}`}
@@ -548,7 +794,7 @@ export default function CoachDocumentsScreen() {
                                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{memberLine(m, fmtDay)}</Text>
                                   </View>
                                   {m.sentAt == null ? (
-                                    <Text style={{ ...ty.caption, fontWeight: '600', color: sendingTo === m.clientId ? t.ink3 : t.brand }}>
+                                    <Text style={{ ...ty.caption, ...font('600'), color: sendingTo === m.clientId ? t.ink3 : t.brandText }}>
                                       {sendingTo === m.clientId ? 'Sending…' : 'Send'}
                                     </Text>
                                   ) : null}
@@ -563,15 +809,23 @@ export default function CoachDocumentsScreen() {
                         <View style={{ marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
                           {standingStatus === 'error' ? (
                             <Flag tone={t.warn}>
-                              That could not be read just now. Nobody’s acceptance has changed — this list simply isn’t it.
+                              That could not be read just now. Nobody’s acceptance has changed. This list simply isn’t it.
                             </Flag>
+                          ) : standingStatus === 'partial' ? (
+                            /* A mark, not coloured words: a truncated read is the
+                               one state on this panel where a coach must NOT take
+                               the sentence at a glance. */
+                            <Flag tone={t.warn}>{STANDING_TRUNCATED_NOTE}</Flag>
                           ) : (
                             <Text style={{ ...ty.caption, color: t.ink3 }}>
                               {standingStatus === 'loading' ? 'Reading who has accepted it.'
                                 : standingLine(accepted, standing?.length ?? 0) ?? 'You have no clients to ask yet.'}
                             </Text>
                           )}
-                          {standingStatus === 'ready' ? (standing ?? []).map((s) => (
+                          {/* The names are real under 'partial' and are still
+                              worth showing — it is the COUNT over them that
+                              cannot be stated. See src/ui/loadStatus.ts. */}
+                          {standingStatus === 'ready' || standingStatus === 'partial' ? (standing ?? []).map((s) => (
                             <View key={s.clientId} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
                               <Text style={{ ...ty.caption, color: t.ink }}>{s.name}</Text>
                               {/* "Not yet" is the words; warn is the dot beside them.
@@ -594,7 +848,7 @@ export default function CoachDocumentsScreen() {
 
             {retired.length ? (
               <Section>
-                <SectionHead title="RETIRED" note="still readable to whoever accepted them" />
+                <SectionHead title="Retired" note="Still Readable to Whoever Accepted Them" />
                 {retired.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}
@@ -604,6 +858,18 @@ export default function CoachDocumentsScreen() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         Withdrawn · added {fmtDay(d.createdAt)}
                       </Text>
+                      {/* Only when somebody did. A retired document is not in
+                          front of anybody any more, so "Nobody has accepted
+                          this yet" against one would be describing a question
+                          that is no longer being asked — and the acceptances it
+                          DID collect are the reason it stays readable to the
+                          people who gave them. */}
+                      {(() => {
+                        const n = acceptedFor(d);
+                        return n !== null && n > 0
+                          ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{acceptedLine(n, false)}</Text>
+                          : null;
+                      })()}
                     </Pressable>
                   </View>
                 ))}

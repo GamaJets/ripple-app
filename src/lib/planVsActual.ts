@@ -8,7 +8,7 @@
  * surfaces on two different screens and the reconciliation is performed by a
  * human being with a thumb, scrolling between them.
  *
- * The sentence that changes next week's programme — "they got through the upper
+ * The sentence that changes next week's program — "they got through the upper
  * days and dropped every leg day" — is arithmetic over those two tables and
  * nothing in this app has ever done it.
  *
@@ -16,7 +16,7 @@
  *
  * 1. IT WILL NOT SAY A SESSION WAS COMPLETED. A logged set carries no reference
  *    to a plan row: `workouts` is `(user_id, performed_at, exercise, sets)` and
- *    there is no programme id, no day index and no set index on it. Nothing
+ *    there is no program id, no day index and no set index on it. Nothing
  *    connects a squat somebody logged to the squat somebody prescribed except
  *    the NAME, matched by `exerciseSlug`. So "they did the Monday session" is
  *    not a fact this data supports; "the four movements Monday prescribes were
@@ -52,7 +52,7 @@
  * Per prescribed movement: was it logged in the window, when last, how many
  * separate days it was logged on, and the heaviest set logged against the load
  * the coach wrote. Per prescribed day: how many of its movements that is. And
- * separately, the movements the client logged that the programme does not
+ * separately, the movements the client logged that the program does not
  * contain — which is the other half of the conversation and the half a coach
  * currently has no way to see at all.
  *
@@ -63,6 +63,7 @@ import type { Program, ProgramDay } from './programs';
 import { exerciseSlug } from './exerciseId';
 import { expandSets } from './setRows';
 import { countsToVolume } from './setMethods';
+import { intensityOf, readTempo } from './setIntensity';
 import type { WorkoutEntry } from './mockData';
 import { dayKeyOf } from './entryEdit';
 import { type LoadStatus } from '../ui/loadStatus';
@@ -75,7 +76,7 @@ import { type LoadStatus } from '../ui/loadStatus';
  * had five days, and a movement they do fortnightly would read as dropped. A
  * quarter is too long: a movement logged eleven weeks ago is not evidence about
  * the block they are on now, and a coach reading "logged" would be reassured
- * about a session that happened before this programme was written.
+ * about a session that happened before this program was written.
  *
  * Four weeks is also the longest block most of the coaches on this platform
  * write, so the window is the same order of magnitude as the thing it is
@@ -153,15 +154,17 @@ export interface DayCoverage {
 
 export interface PlanVsActual {
   /** 'unreadable' when nothing below is a fact about this client — either read
-   *  failed, or there is no programme to compare against. */
-  state: 'unreadable' | 'no-programme' | 'ready';
+   *  failed, or there is no program to compare against. */
+  state: 'unreadable' | 'no-program' | 'ready';
   days: DayCoverage[];
   /** Every prescribed movement across the whole week, de-duplicated by slug —
    *  a squat on Monday and Friday is one movement the client either does or
-   *  does not do. */
+   *  does not do. `plannedTopKg` on these is the HEAVIEST the week prescribes
+   *  for that movement, across every day it appears on; the per-day figure is
+   *  on `days[].movements`, where the day is what the load belongs to. */
   movements: MovementCheck[];
   /**
-   * Movements LOGGED in the window that the programme does not contain.
+   * Movements LOGGED in the window that the program does not contain.
    *
    * The other half of the conversation, and the half a coach has had no way to
    * see. A client quietly swapping the prescribed row for a machine they prefer
@@ -189,7 +192,7 @@ export interface PlanVsActualInput {
   /** The week to compare. For a multi-week block the caller passes the week the
    *  client is standing in — `blockPosition` in src/lib/programStart.ts decides
    *  which, and passes week one when there is no start date to decide from.
-   *  Null is a client on no coach-assigned programme, which is a real state. */
+   *  Null is a client on no coach-assigned program, which is a real state. */
   days: readonly ProgramDay[] | null;
   /** How the read of the assignment went. A null `days` under anything but a
    *  landed read is "we did not find out", not "they are on nothing". */
@@ -261,13 +264,31 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
   const toDay = input.todayISO;
   const fromDay = backDays(toDay, windowDays - 1);
 
-  // No programme is one of three different answers and only one of them is
-  // 'no-programme'. A null under a read that has not landed is "we did not find
+  // No program is one of FOUR different answers and only one of them is
+  // 'no-program'. A null under a read that has not landed is "we did not find
   // out what they are on", which is exactly the confusion
   // src/ui/assignedPrograms.tsx exists to prevent.
+  //
+  // whole-ok: this line is the "did not land" half and it is right to stop at
+  // two — a truncated assignment read still hands back whole programs for the
+  // clients it reached, and refusing those a comparison would withhold a true
+  // answer from every client whose row was inside the page. What 'partial'
+  // cannot do is support the ABSENCE, and that is refused two lines down rather
+  // than here, because the two questions have different answers.
   if (input.programStatus === 'loading' || input.programStatus === 'error') return UNREADABLE;
   if (!input.days || !input.days.length) {
-    return { ...UNREADABLE, state: 'no-programme', fromDay, toDay };
+    // The fourth answer, and the one that was missing. `useAssignedPrograms`
+    // reads every client's assignment in one page ordered by `client_id`, so
+    // under 'partial' a client near the end of that ordering has no row here —
+    // and `getProgram` returns the same null it returns for a client genuinely
+    // on nothing. Saying 'no-program' off that told a coach, on
+    // app/(trainer)/client-training.tsx, that a client they had written a block
+    // for was on none, and told the member the same thing in their own words on
+    // app/(client)/week.tsx: "No coach has written you a program yet." A
+    // prefix of the assignments cannot say a client is absent from them.
+    return input.programStatus === 'partial'
+      ? { ...UNREADABLE, fromDay, toDay }
+      : { ...UNREADABLE, state: 'no-program', fromDay, toDay };
   }
 
   // Whether the record may be used to say a movement was NOT logged.
@@ -277,6 +298,15 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
   // last one is what lets a truncated read still answer: `capped()` returns the
   // newest rows, so a client with four thousand workouts has their last month
   // read in full and only their 2023 is missing.
+  // whole-ok: `landed` is not the whole gate and is not meant to be. It is
+  // ANDed with `reachesWindow` below, which is the condition that actually
+  // handles 'partial' — and handles it better than `isWhole` would, because it
+  // asks the question that matters rather than the blunt one. A capped read
+  // returns the newest rows, so a client with four thousand workouts still has
+  // their last month in full; `oldestDay <= fromDay` lets that answer, and
+  // refuses only when the truncation genuinely ate into the window asked about.
+  // `isWhole` here would refuse every such client a plan-versus-actual they
+  // have complete data for, which is a dash where an answer exists.
   const landed = input.log != null && input.logStatus !== 'error' && input.logStatus !== 'loading';
   const reachesWindow = input.logStatus === 'ready'
     || (input.oldestDay != null && fromDay != null && input.oldestDay <= fromDay);
@@ -343,7 +373,25 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
     for (const ex of d.exercises ?? []) {
       const c = check(ex.name ?? '', ex);
       movements.push(c);
-      if (c.slug) { planSlugs.add(c.slug); if (!bySlug.has(c.slug)) bySlug.set(c.slug, c); }
+      if (c.slug) {
+        planSlugs.add(c.slug);
+        // De-duplicated by slug — a squat on Monday and on Friday is ONE
+        // movement the client either does or does not do — but the PRESCRIPTION
+        // is not one fact. `plannedTopKg` is the heaviest working set the coach
+        // wrote for that day, and first-one-wins kept Monday's 100 and threw
+        // Friday's 140 away, so `loadCheck` compared a client's week against a
+        // load the coach had superseded and reported them as exceeding a
+        // prescription that was not theirs. The week's prescription for a
+        // movement is the heaviest of the days it appears on, which is the same
+        // rule `plannedTop` applies within one exercise and for the same
+        // reason. Everything else on the check is derived from the LOG by slug
+        // and is identical between the two, so only the load is merged.
+        const seen = bySlug.get(c.slug);
+        if (!seen) bySlug.set(c.slug, c);
+        else if (c.plannedTopKg != null && (seen.plannedTopKg == null || c.plannedTopKg > seen.plannedTopKg)) {
+          bySlug.set(c.slug, { ...seen, plannedTopKg: c.plannedTopKg });
+        }
+      }
       if (c.coverage === 'logged') logged += 1;
       else if (c.coverage === 'not-logged') notLogged += 1;
       else unknown += 1;
@@ -385,15 +433,15 @@ const s = (n: number) => (n === 1 ? '' : 's');
  */
 export function coverageLine(pva: PlanVsActual, windowDays: number, who: string): string {
   if (pva.state === 'unreadable') {
-    return `The programme or the training could not be read, so nothing here compares them. An empty list below is not a statement about ${who}.`;
+    return `The program or the training could not be read, so nothing here compares them. An empty list below is not a statement about ${who}.`;
   }
-  if (pva.state === 'no-programme') {
-    return `${who} is on no coach-assigned programme, so there is nothing to compare their training against.`;
+  if (pva.state === 'no-program') {
+    return `${who} is on no coach-assigned program, so there is nothing to compare their training against.`;
   }
   const all = pva.movements;
   const logged = all.filter((m) => m.coverage === 'logged').length;
   const unknown = all.filter((m) => m.coverage === 'unknown').length;
-  if (!all.length) return 'This programme names no movements, so there is nothing to compare.';
+  if (!all.length) return 'This program names no movements, so there is nothing to compare.';
   if (unknown === all.length) {
     // Two different failures land here — the log read was refused, or it came
     // back at the row cap before reaching the start of the window — and both
@@ -404,9 +452,9 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
       + `movement${all.length === 1 ? '' : 's'} can be answered for. That is about the read, and it is not a statement about ${who}.`;
   }
   const head = `${logged} of ${all.length} prescribed movement${s(all.length)} logged in the last ${windowDays} days.`;
-  const tail = unknown ? ` ${unknown} of them cannot be answered for — the read did not cover the whole window.` : '';
+  const tail = unknown ? ` ${unknown} of them cannot be answered for. The read did not cover the whole window.` : '';
   const off = pva.offPlan.length
-    ? ` ${pva.offPlan.length} movement${s(pva.offPlan.length)} logged that this programme does not name.`
+    ? ` ${pva.offPlan.length} movement${s(pva.offPlan.length)} logged that this program does not name.`
     : '';
   return head + tail + off;
 }
@@ -414,7 +462,7 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
 /* ── the load, not just the presence ───────────────────────────────────────
  *
  * P5. Everything above compares PRESENCE: which prescribed movements appear in
- * the log at all. That is not the sentence that changes next week's programme.
+ * the log at all. That is not the sentence that changes next week's program.
  * "They did four of six sessions" tells a coach almost nothing; "they hit every
  * prescribed load on upper and missed every one on legs" tells them what to
  * write.
@@ -554,4 +602,83 @@ export function loadLine(tally: LoadTally, who: string): string | null {
     out += ` ${tally.noPlan} name${tally.noPlan === 1 ? 's' : ''} no load at all, which is ordinary and is not a gap.`;
   }
   return out;
+}
+
+/* ── the tempo half of the same question ──────────────────────────────────
+ *
+ * `loadCheck` above asks whether the client hit the number the coach wrote.
+ * This asks whether they moved at the speed the coach wrote, which until
+ * `workouts.tempos` existed was a question the data could not answer at all.
+ *
+ * It resolves the PRESCRIPTION only. The comparison is `tempoVerdict` in
+ * src/lib/performedTempo.ts and is deliberately not repeated here: it already
+ * returns met / differed / unrecorded, already refuses to read silence as
+ * compliance, and already spells the four digits out in words — which is the
+ * whole defence against the minority convention that reads them the other way
+ * round. A second comparison in this file would be a second chance to get
+ * that wrong.
+ */
+
+/** Looks up the tempo prescribed for one set of one movement, canonical, or
+ *  null when the program asks for none — or when it asks for more than one and
+ *  the record cannot say which. */
+export type PrescribedTempo = (exercise: string | null | undefined, setIndex: number) => string | null;
+
+const canonicalTempo = (raw: string | null | undefined): string | null => {
+  const r = readTempo(raw);
+  return r.ok ? r.tempo : null;
+};
+
+/**
+ * What the program asks for, per movement and per set.
+ *
+ * PER SET, for the reason the member's own runner gives: set 1 can be a warm-up
+ * at no tempo inside an exercise whose top set is a four-second eccentric. Past
+ * the end of the written rows the movement's own tempo stands, because a client
+ * doing a fifth set of a four-set plan is still doing this movement. Both rules
+ * are `app/(client)/workouts.tsx`'s `prescribedTempoAt`, so the two sides of
+ * the conversation resolve a prescription the same way — and both canonicalise
+ * through `readTempo`, which is the only thing in this app allowed to decide
+ * that a coach's `311` and a member's `3-1-1-0` are one instruction.
+ *
+ * ── when the program says two different things ────────────────────────────
+ *
+ * A movement can appear on Monday at 3-1-1-0 and on Friday at 2-0-X-0. Nothing
+ * on a logged set says which day it belongs to — `workouts` carries no program
+ * id and no day index, which is refusal 1 at the top of this file — so a
+ * squat logged on the 14th cannot be attributed to either prescription. This
+ * answers null for that movement rather than picking one, and the screen then
+ * shows what was recorded without claiming it met or missed anything. Picking
+ * the first would report a client as having missed a tempo nobody asked them
+ * for that day, which is the load bug `bySlug` above already records.
+ */
+export function prescribedTempo(days: readonly ProgramDay[] | null | undefined): PrescribedTempo {
+  type Ask = { perSet: (string | null)[]; whole: string | null };
+  // `undefined` is a movement not yet seen; an explicit `null` is one the
+  // program asks two different things of. The two must not collapse.
+  const bySlug = new Map<string, Ask | null>();
+  for (const d of days ?? []) {
+    for (const ex of d?.exercises ?? []) {
+      const slug = exerciseSlug(ex?.name ?? '');
+      if (!slug) continue;
+      const ask: Ask = {
+        perSet: expandSets(ex).map((r) => canonicalTempo(r.intensity?.tempo)),
+        whole: canonicalTempo(intensityOf(ex, null).tempo),
+      };
+      if (!bySlug.has(slug)) { bySlug.set(slug, ask); continue; }
+      const seen = bySlug.get(slug);
+      if (seen == null) continue;                       // already ambiguous
+      const agrees = seen.whole === ask.whole
+        && seen.perSet.length === ask.perSet.length
+        && seen.perSet.every((x, i) => x === ask.perSet[i]);
+      if (!agrees) bySlug.set(slug, null);
+    }
+  }
+  return (exercise, setIndex) => {
+    const slug = exerciseSlug(exercise ?? '');
+    const ask = slug ? bySlug.get(slug) : null;
+    if (!ask) return null;
+    if (!Number.isInteger(setIndex) || setIndex < 0) return null;
+    return (setIndex < ask.perSet.length ? ask.perSet[setIndex] : ask.whole) ?? null;
+  };
 }

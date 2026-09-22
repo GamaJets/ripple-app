@@ -88,11 +88,19 @@ export function trainerHealth(tr: TrainerLike): Health {
   const plural = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 
   let risk: Risk, reason: string;
-  if (clients > 0 && evidenced === 0 && unmarked > 0) {
+  if (evidenced === 0 && unmarked > 0) {
     // The trap named above. Not "no sessions delivered" — that would assert
     // they delivered nothing, which is a different claim from not knowing.
+    //
+    // No `clients > 0` here, and that guard was the bug. A coach with an EMPTY
+    // roster and twenty finished-but-unmarked sessions fell past this branch to
+    // `clients === 0` and was described as "Delivering sessions but has no
+    // clients on the roster" — an assertion of delivery over twenty sessions
+    // not one of which anybody has confirmed. The unmarked branch is about the
+    // EVIDENCE, and the size of the roster has no bearing on whether the
+    // evidence exists.
     risk = 'high';
-    reason = `${plural(unmarked)} finished but unmarked — no evidence any were delivered, and no pay can be computed.`;
+    reason = `${plural(unmarked)} finished but unmarked. No evidence any were delivered, and no pay can be computed.`;
   } else if (clients > 0 && evidenced === 0) {
     risk = 'high';
     reason = `${clients} client${clients === 1 ? '' : 's'} but no sessions delivered in 30 days.`;
@@ -105,7 +113,7 @@ export function trainerHealth(tr: TrainerLike): Health {
   } else if (unmarked > 0) {
     // Delivering, but part of the month cannot be valued. Not healthy-green.
     risk = 'watch';
-    reason = `Delivering, but ${plural(unmarked)} still unmarked — that part cannot be valued.`;
+    reason = `Delivering, but ${plural(unmarked)} still unmarked. That part cannot be valued.`;
   } else {
     risk = 'ok';
     reason = 'Carrying clients and delivering sessions.';
@@ -156,8 +164,13 @@ export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): G
     sessions30,
     delivered30,
     unmarked30,
+    // Not `Math.round(delivered30 * sessionFee)`. Rounding money to a whole
+    // unit is a zero-decimal-places assumption, and there is no default number
+    // of places in this product — see the note on `payroll30For` in
+    // src/lib/gymTrainers.ts, which held the identical line and the identical
+    // defect. The formatters take the places from the gym's own currency.
     payroll30:
-      sessionFee == null || unmarked30 > 0 ? null : Math.round(delivered30 * sessionFee),
+      sessionFee == null || unmarked30 > 0 ? null : delivered30 * sessionFee,
     atRiskCount,
     atRiskClients,
     avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : null,

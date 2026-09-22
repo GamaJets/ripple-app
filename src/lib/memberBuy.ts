@@ -112,6 +112,7 @@ import { canTakeDirectCharges, type ConnectAccountRow } from './directCharges';
 import { expiryFor, type PassKind } from './gymPasses';
 import { minorMoney } from './coachMoney';
 import { localDate } from './localDate';
+import { capLimit, capped } from './rowCap';
 import { appLocale } from './locale';
 import type { MemberMembership, PlanInterval, Standing } from './memberRecord';
 
@@ -247,7 +248,14 @@ export { addDays, termEnd, termFrom, renewStart, parts, renewalIsContiguous, sup
 export interface GymPlan {
   id: string;
   name: string;
-  priceCents: number;
+  /** Minor units, or null for a price that could not be read as a number.
+   *
+   *  Nullable for the same reason `MemberPlan.priceCents` in
+   *  src/lib/memberRecord.ts is: `Number(null)` is 0, and 0 is a price a gym
+   *  could have set. A plan whose price did not come back is a plan at an
+   *  UNKNOWN price, and the difference between that and free is the whole of
+   *  what this screen is for. */
+  priceCents: number | null;
   currency: string | null;
   interval: PlanInterval;
 }
@@ -257,7 +265,9 @@ export interface GymPassOffer {
   id: string;
   name: string;
   kind: PassKind;
-  priceCents: number;
+  /** Minor units, or null. Same reasoning as `GymPlan.priceCents` above, and
+   *  the same five lines produce it. */
+  priceCents: number | null;
   currency: string | null;
   uses: number;
   validDays: number | null;
@@ -366,10 +376,25 @@ export function offerFor(
  * the neutral word. Calling a cheaper plan an upgrade is a small lie that reads
  * as a sales line; calling a dearer one a switch costs nothing.
  */
-export function switchLabel(held: GymPlan | { priceCents: number; currency: string | null } | null, next: GymPlan): string {
+export function switchLabel(held: GymPlan | { priceCents: number | null; currency: string | null } | null, next: GymPlan): string {
   const a = (held?.currency || '').trim().toUpperCase();
   const b = (next.currency || '').trim().toUpperCase();
-  if (held && a && b && a === b && next.priceCents > held.priceCents) return 'Upgrade to This Plan';
+  // `held.priceCents != null` is not defensive noise. `MemberPlan.priceCents`
+  // is nullable — a plan whose price the gym has not recorded — and
+  // `next.priceCents > null` coerces to `next.priceCents > 0`, so EVERY plan
+  // with a price on it would have read "Upgrade to This Plan" to a member whose
+  // own plan has no price. A word that claims a comparison nobody could make.
+  //
+  // `next.priceCents != null` is the other side of the same sentence, and it is
+  // now reachable: `GymPlan.priceCents` is nullable as of this pass too. Left
+  // to the coercion, `null > 20000` is false and the answer happens to come out
+  // right — but it comes out right by arithmetic on a value that is not a
+  // number, and one inverted comparison later it would come out wrong silently.
+  // An unknown price is not cheaper and it is not dearer. It is not comparable.
+  if (held && held.priceCents != null && next.priceCents != null
+      && a && b && a === b && next.priceCents > held.priceCents) {
+    return 'Upgrade to This Plan';
+  }
   return 'Switch to This Plan';
 }
 
@@ -409,6 +434,31 @@ export function passNote(p: GymPassOffer, today: string): string {
  *  when either half is missing, which the caller renders as a dash. */
 export const offerMoney = (cents: number | null | undefined, currency: string | null | undefined): string | null =>
   minorMoney(cents, currency);
+
+/**
+ * Whether this screen can put a figure on the thing before the button.
+ *
+ * Deliberately `offerMoney(...) != null` rather than `priceCents != null`,
+ * because there are TWO ways a row arrives without a sayable price and only one
+ * of them is the null this pass is about:
+ *
+ *   · `price_cents` did not read as a number — the null `minorOrNull` hands
+ *     back, latent until that column stops being `not null`.
+ *   · `currency` is not a currency. `membership_plans.currency` and
+ *     `gym_pass_types.currency` are `text not null` with NO format check —
+ *     src/lib/coachMoney.ts names both columns — so 'pounds', 'GB' and '£' all
+ *     satisfy the constraint and arrive here intact. `moneyIn` refuses to print
+ *     a made-up unit and returns null, which is right, and it has been right
+ *     the whole time: the screen already drew a dash for it and then offered
+ *     the Buy button under the dash anyway.
+ *
+ * Both are the same fact to a member: nobody told them what this costs. So the
+ * gate is the formatter's own answer, not a field test that would pass the
+ * second case straight through.
+ */
+export const priceIsQuotable = (
+  row: { priceCents: number | null; currency: string | null },
+): boolean => offerMoney(row.priceCents, row.currency) != null;
 
 /** The passes a member may buy in the app. A guest pass is deliberately not one
  *  of them: `gym_passes` needs a holder who is not the buyer, and there is no
@@ -484,6 +534,28 @@ const asInterval = (v: unknown): PlanInterval => (v === 'year' || v === 'once' ?
 const asKind = (v: unknown): PassKind => (v === 'guest' || v === 'pack' ? v : 'drop_in');
 
 /**
+ * Minor units, or null for anything that is not a number.
+ *
+ * The third copy of these five lines — src/lib/membershipOrder.ts has one and
+ * src/lib/memberRecord.ts has the other, both module-private, and this file may
+ * reach into neither. Stated here rather than left to look like an oversight,
+ * on the same terms memberRecord.ts states it.
+ *
+ * `Number(r.price_cents)` is what stood here, inline, at both call sites below,
+ * and it is the exact shape Lane 26 removed from the plan a member HOLDS.
+ * `Number(null)` is 0, so a price that did not come back rendered to a member
+ * as "AED 0.00" — a figure the gym never set, on the screen where pressing the
+ * button next to it opens Stripe. A bigint still arrives from PostgREST as a
+ * string, so the coercion itself stays; what it may not do is coerce an
+ * absence.
+ */
+const minorOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v.trim()) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
  * Whether the member's gym can take a card.
  *
  * Three outcomes and they are three different sentences: `ok: false` is a read
@@ -508,7 +580,14 @@ export async function fetchGymPaymentFacts(sb: Queryable): Promise<Read<GymAccou
 }
 
 /** Every plan the gym currently sells, cheapest first. `[]` means it sells
- *  none, which is a real state for a gym that runs on day passes. */
+ *  none, which is a real state for a gym that runs on day passes.
+ *
+ *  "Cheapest first" is what `order by price_cents asc` gives and it is now a
+ *  claim about the priced ones only: Postgres sorts nulls last on an ascending
+ *  order, so a plan whose price did not read sits at the end of the list rather
+ *  than at the top pretending to be the cheapest thing the gym sells. That is
+ *  the right end for it — an unknown price is not a low one — and the screen
+ *  says why beside the row rather than leaving the position to explain it. */
 export async function fetchGymPlans(sb: Queryable): Promise<Read<GymPlan[]>> {
   try {
     const { data, error } = await sb.from('membership_plans')
@@ -519,7 +598,7 @@ export async function fetchGymPlans(sb: Queryable): Promise<Read<GymPlan[]>> {
     return { ok: true, value: ((data as any[]) ?? []).map((r): GymPlan => ({
       id: r.id,
       name: typeof r.name === 'string' ? r.name : '',
-      priceCents: Number(r.price_cents),
+      priceCents: minorOrNull(r.price_cents),
       currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
       interval: asInterval(r.interval),
     })) };
@@ -542,7 +621,7 @@ export async function fetchGymPassOffers(sb: Queryable): Promise<Read<GymPassOff
       id: r.id,
       name: typeof r.name === 'string' ? r.name : '',
       kind: asKind(r.kind),
-      priceCents: Number(r.price_cents),
+      priceCents: minorOrNull(r.price_cents),
       currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
       uses: Number.isFinite(Number(r.uses)) ? Number(r.uses) : 1,
       validDays: r.valid_days == null ? null : Number(r.valid_days),
@@ -553,17 +632,47 @@ export async function fetchGymPassOffers(sb: Queryable): Promise<Read<GymPassOff
   }
 }
 
-/** The member's own orders, newest first. */
-export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read<GymOrder[]>> {
+/**
+ * How many of the member's own orders this screen reads.
+ *
+ * Fifty, as it always was — this is a phone screen and nobody scrolls a
+ * thousand receipts. What changed is that it is now asked for as `capLimit(50)`
+ * and the fifty-first row is used as a PROBE rather than shown, so a member
+ * with more than fifty can be told so.
+ */
+export const MY_ORDERS_CAP = 50;
+
+/** The member's own orders, newest first, and whether that is all of them.
+ *
+ *  `truncated` exists because of what this list feeds: the "Waiting On Stripe"
+ *  section of app/(client)/gym-plans.tsx, which is the one screen in the app
+ *  that tells somebody their card was charged and nothing was granted. A
+ *  drop-in buyer passes fifty orders inside a year, and before this the
+ *  fifty-first fell off the window with the header still printing a confident
+ *  count over the fifty that remained. A prefix rendered as a total is the
+ *  defect src/lib/rowCap.ts exists for; this is that module's rule applied to a
+ *  hand-set limit rather than to PostgREST's. */
+export interface MyGymOrders {
+  orders: GymOrder[];
+  /** True when the member has more orders than were read. The screen reports
+   *  'partial', never 'ready'. */
+  truncated: boolean;
+}
+
+export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read<MyGymOrders>> {
   if (!uid) return { ok: false, reason: 'Not signed in.' };
   try {
     const { data, error } = await sb.from('gym_orders')
       .select('id, kind, intent, status, amount_cents, currency, term_starts_on, term_ends_on, uses_total, expires_on, created_at, paid_at')
       .eq('member_id', uid)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(capLimit(MY_ORDERS_CAP));
     if (error) return { ok: false, reason: error.message || 'The read was refused.' };
-    return { ok: true, value: ((data as any[]) ?? []).map((r): GymOrder => ({
+    // `capped` rather than a slice and a boolean: the probe row is not data and
+    // must not reach the screen, and the flag must not be computed anywhere the
+    // slice is not.
+    const page = capped((data as any[]) ?? [], MY_ORDERS_CAP);
+    return { ok: true, value: { truncated: page.truncated, orders: page.rows.map((r): GymOrder => ({
       id: r.id,
       kind: r.kind === 'pass' ? 'pass' : 'membership',
       intent: r.intent === 'renew' || r.intent === 'upgrade' ? r.intent : 'new',
@@ -576,7 +685,7 @@ export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read
       expiresOn: r.expires_on ?? null,
       createdAt: r.created_at,
       paidAt: r.paid_at ?? null,
-    })) };
+    })) } };
   } catch (e) {
     return { ok: false, reason: (e as Error).message || 'The read failed.' };
   }

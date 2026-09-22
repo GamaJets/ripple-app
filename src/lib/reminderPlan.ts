@@ -70,17 +70,17 @@ export interface FixedReminder {
 
 export const FIXED_LABEL: Record<FixedKind, { title: string; body: string; route: string }> = {
   training: {
-    title: 'Time to train',
+    title: 'Time to Train',
     body: 'Your session is waiting. Even a short one keeps the week honest.',
     route: '/(client)/workouts',
   },
   weighin: {
     title: 'Weigh-in',
-    body: 'Step on the scale and log it — one reading a week is enough to see a trend.',
+    body: 'Step on the scale and log it. One reading a week is enough to see a trend.',
     route: '/(client)/scans',
   },
   photo: {
-    title: 'Progress photo',
+    title: 'Progress Photo',
     body: 'Same spot, same light, same time of day. That is what makes them comparable.',
     route: '/(client)/scans',
   },
@@ -222,7 +222,7 @@ export function plannedReminders(saved: SavedReminders): PlannedReminder[] {
       out.push({
         key: `hydration-${h}`,
         title: 'Time to hydrate',
-        body: 'Sip some water — small and often keeps you on target.',
+        body: 'Sip some water. Small and often keeps you on target.',
         route: '/(client)/recovery',
         days: [...saved.hydrationDays],
         hour: h,
@@ -282,4 +282,48 @@ export function daysLabel(days: readonly Weekday[]): string {
   // from `Date.getDay()` to the 1 = Sunday numbering this file works in.
   const order = Array.from({ length: 7 }, (_, i) => (jsDayForIndex(i) + 1) as Weekday);
   return order.filter((d) => set.has(d)).map((d) => DAY_LABEL[d]).join(', ');
+}
+
+/**
+ * Seven weekdays is not seven reminders — it is one daily reminder.
+ *
+ * ── Why this is worth a function ──────────────────────────────────────────
+ *
+ * expo-notifications has no "these days" trigger. It has `weekly`, which fires
+ * on ONE weekday, so a Monday/Wednesday/Friday reminder is three scheduled
+ * notifications — and a member who ticks every day gets SEVEN. They do arrive
+ * daily, so nothing looks wrong.
+ *
+ * What goes wrong is the budget. iOS holds at most 64 PENDING local
+ * notifications per app and silently drops the rest: ten all-days reminders is
+ * seventy, and the last six simply never exist. Nothing on any screen says so,
+ * because as far as this app is concerned it scheduled them.
+ *
+ * `daily` is one trigger for the same behaviour, so the all-days case costs one
+ * slot instead of seven — ten reminders become ten. `scheduleDailyReminder` has
+ * existed for exactly this since the beginning and nothing ever called it;
+ * scripts/check-dead-exports.mjs has been carrying it as an open offence with
+ * this defect written out in its note.
+ *
+ * Deliberately NOT a caller's decision. The count of scheduled notifications
+ * has to match the ids recorded for cancellation, and a caller that got this
+ * wrong would leave notifications firing for ever with nothing to cancel them
+ * by — which is the failure `scheduleWeeklyReminders` already guards against by
+ * returning the whole id list.
+ */
+export type ReminderTrigger =
+  | { mode: 'daily' }
+  | { mode: 'weekly'; days: number[] }
+  | { mode: 'none' };
+
+/** Which trigger a chosen set of weekdays should actually use.
+ *
+ *  `days` are 1–7 with 1 = Sunday, expo-notifications' convention and NOT
+ *  JavaScript's 0–6. Out-of-range values are dropped rather than clamped: a
+ *  clamp would silently move a reminder to a day nobody picked. */
+export function reminderTrigger(weekdays: readonly number[] | null | undefined): ReminderTrigger {
+  const days = [...new Set((weekdays ?? []).filter((w) => Number.isInteger(w) && w >= 1 && w <= 7))].sort((a, b) => a - b);
+  if (!days.length) return { mode: 'none' };
+  if (days.length === 7) return { mode: 'daily' };
+  return { mode: 'weekly', days };
 }

@@ -38,6 +38,8 @@ import { DAYS_AHEAD, DAYS_BEHIND, type CoachWeek } from './coachWeek';
 import { emptyReason, inboxNote, newestSharedFirst, stamp, type Inbox } from './photoInbox';
 import { dayLabel } from './adherence';
 import { type Drift } from './clientDrift';
+import { areaLabel } from './injuries';
+import { type IntakeState } from './intake';
 
 /** The span `coachWeek` covers, as a number this file may state out loud. Both
  *  ends come from the constants rather than from a sentence somebody wrote once
@@ -82,20 +84,20 @@ export function goalsLine(status: LoadStatus, board: GoalBoard, who: string, now
     return `Their goals could not be read. That is not the same as ${who} having set none.`;
   }
   if (board.state === 'none') {
-    return `${who} hasn't set a goal yet — the read came back and it was empty, which makes it worth raising.`;
+    return `${who} hasn't set a goal yet. The read came back and it was empty, which makes it worth raising.`;
   }
   if (board.state === 'reached') {
     // A count is safe here even under 'partial': "at least this many reached"
     // is the same good news either way, and the sentence says so.
     const n = board.achieved.length;
     return status === 'partial'
-      ? `Everything that came back has been reached — and their goals came back at the row limit, so there may be more.`
+      ? `Everything that came back has been reached, but their goals came back at the row limit, so there may be more.`
       : `All ${n} goal${s(n)} reached. Nothing outstanding, which is usually the moment to set the next one.`;
   }
   const open = board.open.length;
   const nearest = board.open[0];
   const head = status === 'partial'
-    ? `At least ${open} open — their goals came back at the row limit, so this is not all of them.`
+    ? `At least ${open} open. Their goals came back at the row limit, so this is not all of them.`
     : `${open} open.`;
   return `${head} Nearest: ${goalLabel(nearest)}${nearestBy(nearest, nowMs)}.`;
 }
@@ -113,7 +115,7 @@ function nearestBy(g: GoalTarget, nowMs: number): string {
   // right for `sharedAt` below, which is a real instant. See src/lib/localDate.ts.
   const when = dayLabel(g.targetDateISO);
   if (when === '—') return '';
-  return isOverdue(g, nowMs) ? ` — target date passed (${when})` : ` by ${when}`;
+  return isOverdue(g, nowMs) ? `, target date passed (${when})` : ` by ${when}`;
 }
 
 /**
@@ -134,15 +136,15 @@ export function weekLine(status: LoadStatus, week: CoachWeek, who: string): stri
   }
   const n = week.ahead.length;
   const head = status === 'partial'
-    ? `At least ${n} day${s(n)} marked from today on — the read came back at the row limit.`
+    ? `At least ${n} day${s(n)} marked from today on. The read came back at the row limit.`
     : n === 0
       ? 'Nothing marked from today on; what they marked is already behind them.'
       : `${n} day${s(n)} marked from today on.`;
   const c = week.conflicts.length;
   // A conflict is only ever claimed by `planConflict`, and only where the
-  // programme is actually known — a programme that did not come back produces
+  // program is actually known — a program that did not come back produces
   // no conflict rather than a silent agreement. See coachWeek.ts.
-  return c ? `${head} ${c} disagree${c === 1 ? 's' : ''} with the programme you set.` : head;
+  return c ? `${head} ${c} disagree${c === 1 ? 's' : ''} with the program you set.` : head;
 }
 
 /**
@@ -156,7 +158,7 @@ export function weekLine(status: LoadStatus, week: CoachWeek, who: string): stri
  */
 export function photosLine(inbox: Inbox | null, failed: boolean, who: string): string {
   if (failed) {
-    return `Could not read what they have sent you — which is not the same as ${who} having sent nothing.`;
+    return `Could not read what they have sent you, which is not the same as ${who} having sent nothing.`;
   }
   const why = emptyReason(inbox);
   if (why === 'unknown') return 'Reading what they have sent you…';
@@ -195,21 +197,21 @@ export function listLine(
   const ticks = seen == null
     ? 'Their ticks could not be read, so there is nothing here about how the month has gone.'
     : seen.seenDays === 0
-      ? `Nothing ticked at all in the last ${seen.windowDays} days — a miss and a phone in a drawer look the same from here.`
+      ? `Nothing ticked at all in the last ${seen.windowDays} days. A miss and a phone in a drawer look the same from here.`
       : `They ticked something on ${seen.seenDays} of the last ${seen.windowDays} days.`;
   return `${lines} ${ticks}`;
 }
 
 /**
- * The programme a coach assigned, or why there is no name to print.
+ * The program a coach assigned, or why there is no name to print.
  *
- * A null programme is three situations — none assigned, the read failed, and a
- * programme somebody else assigned, which `assigned_programs_coach_rw` will not
+ * A null program is three situations — none assigned, the read failed, and a
+ * program somebody else assigned, which `assigned_programs_coach_rw` will not
  * show this coach — and only the middle one is about the connection. The status
  * separates the first two; the third is why the "none" branch does not claim
  * the client is training to nothing.
  */
-export function programmeLine(
+export function programLine(
   status: LoadStatus,
   title: string | null,
   days: number | null,
@@ -217,7 +219,7 @@ export function programmeLine(
 ): string {
   if (status === 'loading') return 'Reading what you have assigned them…';
   if (status === 'error') return 'What you have assigned them could not be read.';
-  if (!title) return `No programme of yours is assigned to ${who} that this app can read.`;
+  if (!title) return `No program of yours is assigned to ${who} that this app can read.`;
   return days == null ? title : `${title} · ${days} day${s(days)} a week.`;
 }
 
@@ -237,10 +239,42 @@ export interface AttentionInput {
    *  be read — a count nobody has is not a count of none, and this screen's
    *  whole reason for existing is that the difference gets lost. */
   unread: number | null;
+  /**
+   * What this client has disclosed, off the roster row, and whether each is
+   * recent. NULL when the roster could not be read.
+   *
+   * A disclosure is the one thing on this screen that changes what a coach
+   * must not do next, and it was the one thing "Needs You" could not raise. It
+   * was already read and already rendered further down the same screen; the
+   * short list at the top — the part a coach reads before deciding whether to
+   * scroll — simply never looked at it. `isNew` is the roster's own recency
+   * flag, so this file does not get a second opinion about what "new" means.
+   *
+   * The NOTE is not taken and must never be added here: it is seeded from the
+   * line off an uploaded medical document (src/lib/injuryExtract.ts) and this
+   * sentence is prose the coach reads at a glance, not a document.
+   */
+  injuries: readonly { area: string; isNew?: boolean }[] | null;
   goalStatus: LoadStatus;
   board: GoalBoard;
   weekStatus: LoadStatus;
   week: CoachWeek;
+  /**
+   * The intake, as `intakeState` resolved it, and how many parts are left.
+   *
+   * 'unknown' is the read that did not land and contributes to `blind`, never
+   * to `items` — the same rule `intakePrompt` keeps, and for the same reason:
+   * "chase your client" generated by a failed read is an instruction the coach
+   * acts on and then finds out was wrong.
+   */
+  intake: IntakeState;
+  intakeLeft: number;
+  /** How the read of this client's invoices went, and how many of theirs are
+   *  past their due date. Under anything but a whole read the count is not a
+   *  count — `ageingBook` withholds its own figure for the same reason — so the
+   *  status is asked first and an unwhole one goes to `blind`. */
+  invoiceStatus: LoadStatus;
+  overdueInvoices: number;
   /** True when the drift read failed — the record cannot be judged at all. */
   driftFailed: boolean;
   nowMs: number;
@@ -258,6 +292,19 @@ export interface AttentionInput {
 export function attention(i: AttentionInput): Attention {
   const items: string[] = [];
   const missed: string[] = [];
+
+  // Injuries lead, and the order is the argument: this is the only item on the
+  // list about somebody getting hurt, and it is the only one that changes what
+  // the coach must not write next. src/lib/programReview.ts orders its findings
+  // on the same reasoning.
+  if (i.injuries == null) missed.push('anything they have disclosed');
+  else {
+    const fresh = i.injuries.filter((x) => x.isNew);
+    if (fresh.length) {
+      const areas = [...new Set(fresh.map((x) => areaLabel(x.area).toLowerCase()))];
+      items.push(`${i.who} has just disclosed ${list(areas)}. Read it before you write them anything.`);
+    }
+  }
 
   if (i.unread == null) missed.push('anything unread from them');
   else if (i.unread > 0) {
@@ -277,13 +324,30 @@ export function attention(i: AttentionInput): Attention {
   else if (i.weekStatus === 'partial') missed.push('the rest of the days they have marked');
   else if (i.week.conflicts.length) {
     const c = i.week.conflicts.length;
-    items.push(`${c} day${s(c)} they have marked ahead disagree${c === 1 ? 's' : ''} with your programme.`);
+    items.push(`${c} day${s(c)} they have marked ahead disagree${c === 1 ? 's' : ''} with your program.`);
+  }
+
+  // The intake. 'unknown' is a read that did not land, and it is the only one
+  // of the four states that is not a fact about the person.
+  if (i.intake === 'unknown') missed.push('whether they have filled in their intake');
+  else if (i.intake === 'none') {
+    items.push(`${i.who} has not started their intake. You cannot fill it in for them.`);
+  } else if (i.intake === 'started') {
+    items.push(`${i.intakeLeft} part${s(i.intakeLeft)} of ${i.who}'s intake still to come back.`);
+  }
+
+  // Money they owe. A count over a read that was not whole is a wrong number
+  // and not a small one — it is the number a coach would chase on.
+  if (i.invoiceStatus === 'error') missed.push('what they owe you');
+  else if (i.invoiceStatus === 'partial') missed.push('the rest of their invoices');
+  else if (i.invoiceStatus === 'ready' && i.overdueInvoices > 0) {
+    items.push(`${i.overdueInvoices} invoice${s(i.overdueInvoices)} of theirs ${i.overdueInvoices === 1 ? 'is' : 'are'} past ${i.overdueInvoices === 1 ? 'its' : 'their'} due date.`);
   }
 
   if (i.driftFailed) missed.push('their training record');
 
   const blind = missed.length
-    ? `This list does not account for ${list(missed)} — ${missed.length === 1 ? 'it' : 'they'} could not be read, so it is not a clear one.`
+    ? `This list does not account for ${list(missed)}: ${missed.length === 1 ? 'it' : 'they'} could not be read, so it is not a clear one.`
     : null;
   return { items, blind };
 }
@@ -306,7 +370,7 @@ function list(parts: string[]): string {
  * a client with no account has no rows to refuse.
  */
 export function unaskedNote(usingServer: boolean, queryable: boolean, who: string): string | null {
-  if (!usingServer) return 'Not read — this build is not talking to a server.';
+  if (!usingServer) return 'Not read. This build is not talking to a server.';
   if (!queryable) return `Nothing of ${who}'s can be read until they join Repple.`;
   return null;
 }

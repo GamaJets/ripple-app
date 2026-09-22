@@ -15,6 +15,7 @@ import {
   storeNotes, unseenReleases,
   type Audience, type Release,
   firstRunReleases,
+  stampWasNeverShown,
 } from './releaseNotes';
 
 const errors: string[] = [];
@@ -288,6 +289,37 @@ for (const aud of ALL) {
     'a version the list does not carry shows nothing');
   eq(firstRunReleases('2026-01-15T09:00:00Z', 'nonsense', 'client', REL).length, 0,
     'an unparseable current version shows nothing');
+}
+
+// ── the stamp nobody was ever shown ───────────────────────────────────────
+//
+// Reported twice, months apart: "Still not getting the What's New screen when
+// opening the Client or Coach apps. It appears on the Studio app." The apps
+// that fail are exactly the apps whose storage the pre-fix build wrote to.
+{
+  // The reported case, read off a real device: a position equal to the release
+  // the reader is running, with no dismissal beside it.
+  eq(stampWasNeverShown('1.3.0', null, '1.3.0'), true,
+    'a stamp at the current release with no dismissal beside it was never shown');
+
+  // Somebody who actually closed the sheet is not asked again.
+  eq(stampWasNeverShown('1.3.0', '1.3.0', '1.3.0'), false,
+    'a stamp with a matching dismissal was read by a person');
+
+  // A reader who is simply behind is the normal path, not this one.
+  eq(stampWasNeverShown('1.2.0', null, '1.3.0'), false,
+    'a position behind the current release is unseenReleases\u2019 job');
+
+  // And the one-time re-ask does not survive the next release: a dismissal
+  // recorded against 1.3.0 leaves 1.4.0 to the ordinary unseen path.
+  eq(stampWasNeverShown('1.3.0', null, '1.4.0'), false,
+    'the re-ask lasts only while that release is current');
+
+  // Junk on disk is not a claim in either direction.
+  eq(stampWasNeverShown(null, null, '1.3.0'), false, 'no position at all is the first-run path, not this one');
+  eq(stampWasNeverShown('corrupt', null, '1.3.0'), false, 'an unreadable position is not a silent stamp');
+  eq(stampWasNeverShown('1.3.0', 'corrupt', '1.3.0'), true, 'an unreadable dismissal is not a dismissal');
+  eq(stampWasNeverShown('1.3.0', null, 'nonsense'), false, 'an unreadable current version decides nothing');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

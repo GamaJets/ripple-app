@@ -28,7 +28,7 @@
 // the Undo button is a real button with a real label. The bar sits above the
 // tab bar rather than over it, because covering the app's own navigation for
 // six seconds is a worse interruption than the alert this replaces.
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useMemo, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './components';
@@ -179,8 +179,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
   }, [say]);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<ToastValue>(() => ({ say, remove }), [say, remove]);
   return (
-    <Ctx.Provider value={{ say, remove }}>
+    <Ctx.Provider value={value}>
       {children}
       {shown ? (
         <View

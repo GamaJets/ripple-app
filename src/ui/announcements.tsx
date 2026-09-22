@@ -38,7 +38,7 @@
 // policies; not null means the row is addressed to that coach's CURRENT roster,
 // through `is_my_coach()`, which reads the same `clients.trainer_id` that
 // `end_coaching()` clears. A client who leaves a coach stops seeing that
-// coach's announcements, deliberately and unlike a training programme: a plan
+// coach's announcements, deliberately and unlike a training program: a plan
 // somebody is following stays theirs when they change coach, but "the 6pm class
 // is cancelled tonight" from a coach they no longer train with is not news
 // addressed to them.
@@ -102,9 +102,14 @@
 // their coach sent. Under 'error' an empty list means we could not find out —
 // NOT that the coach has sent nothing — which is the distinction
 // src/ui/loadStatus.ts exists to keep.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is posting, and which of the two reasons nobody is. A `getSession()` that
+// could not reach the auth server answers `session: null`, exactly as a
+// signed-out device does — see src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
+import type { UidRead } from '../lib/authedUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
@@ -112,6 +117,7 @@ import { NOTICE_ROUTE, noticeNotification, type DeliveryReport, type NoticeKind 
 import { recordInbox, sendPushChecked } from './pushNotifications';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 export interface Announcement {
   id: string;
@@ -172,6 +178,16 @@ interface AnnValue {
   status: LoadStatus;
   /** How many of `announcements` have not reached the server. */
   unsent: number;
+  /**
+   * Read the list again.
+   *
+   * The effect below runs on the auth revision and on nothing else, so a read
+   * that failed stayed failed for the life of the session: app/(client)/notices.tsx
+   * printed "Try again in a moment" with nothing on the screen to try again
+   * with, and the only way to ask a second time was to kill the app. A notice
+   * is what a gym uses to say it is closed tomorrow.
+   */
+  reload: () => void;
 }
 const Ctx = createContext<AnnValue | null>(null);
 
@@ -190,6 +206,11 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const [announcements, setAnnsState] = useState<Announcement[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, and read by the one effect below alongside the auth
+  // revision. A counter rather than a re-entrant async function: the effect
+  // already has a `cancelled` flag and a cleanup, so re-running it is the one
+  // path that cannot leave two reads racing to set the same status.
+  const [readRev, setReadRev] = useState(0);
 
   // See the note in wellness.tsx: every mutation writes the ref and the state
   // together, so an insert resolving seconds later merges into the list as it
@@ -223,7 +244,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    * Null is returned for a failed read and an empty array for a real emptiness,
    * and the two stay apart all the way to the sentence the author is shown.
    */
-  const gymRecipients = async (): Promise<string[] | null> => {
+  const gymRecipients = async (): Promise<{ ids: string[]; truncated: boolean } | null> => {
     try {
       const { data, error } = await supabase.rpc('all_member_ids');
       if (error) return null;
@@ -231,17 +252,38 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       // returned `table(user_id)`. Both are accepted here for the same reason
       // promotions.tsx accepts both — reading `.user_id` off a string gave
       // undefined for every member and pushed to nobody.
-      return Array.isArray(data)
-        ? data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean).map(String)
-        : null;
+      if (!Array.isArray(data)) return null;
+      // `truncated: false` and not a `capped()` call, deliberately. This is an
+      // RPC with no `.limit()` on it, so there is no probe row to detect a
+      // ceiling with — the honest report is that this reader has no evidence
+      // either way, and inventing a truncation it cannot see would put a
+      // warning under every gym notice for ever. `all_member_ids` is the one
+      // to fix if a gym ever outgrows a PostgREST page; the flag is here so the
+      // sentence is ready when it does.
+      return {
+        ids: data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean).map(String),
+        truncated: false,
+      };
     } catch { return null; }
   };
 
-  const coachRecipients = async (owner: string): Promise<string[] | null> => {
+  /**
+   * The coach's own roster.
+   *
+   * `capped()` and not the raw rows. The read asked for `capLimit()` — one PAST
+   * the ceiling, which is the whole point of asking for it — and then handed
+   * every row it got to the fan-out, probe row included, and reported the
+   * length as the number of people addressed. So a roster at the ceiling
+   * produced a count that was one too many and a truncation nothing anywhere
+   * mentioned. `truncated` now rides out with the ids, and `deliverySummary`
+   * refuses to state a floor as a total.
+   */
+  const coachRecipients = async (owner: string): Promise<{ ids: string[]; truncated: boolean } | null> => {
     try {
       const { data, error } = await supabase.from('clients').select('id').eq('trainer_id', owner).limit(capLimit());
       if (error) return null;
-      return (data ?? []).map((r: any) => String(r.id)).filter(Boolean);
+      const page = capped(data);
+      return { ids: page.rows.map((r: any) => String(r.id)).filter(Boolean), truncated: page.truncated };
     } catch { return null; }
   };
 
@@ -259,32 +301,56 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    * so "it will go out in the morning" is a promise nothing could keep.
    */
   const fanOut = async (kind: NoticeKind, body: string, push: boolean): Promise<DeliveryReport> => {
-    const ids = kind === 'gym' ? await gymRecipients() : await coachRecipients((await currentUid()) ?? '');
+    // Both readers now answer in the same shape — the ids AND whether that is
+    // all of them — so the fan-out cannot lose the second half by treating the
+    // first as an array.
+    // `me.uid ?? ''` keeps what was here: `coachRecipients('')` finds nobody
+    // and the report below carries `recipients: null` — "we do not know who
+    // this reached" — which is already the right answer for an identity that
+    // could not be read. What changes is that the outage is now classified and
+    // reported rather than silently becoming an empty string.
+    const me = kind === 'gym' ? null : await currentUid();
+    const found = kind === 'gym' ? await gymRecipients() : await coachRecipients(me?.uid ?? '');
+    const ids = found?.ids ?? null;
+    const truncated = !!found?.truncated;
     const note = noticeNotification(kind, body, kind === 'gym' ? gymName.current : null);
     if (!note || !ids || !ids.length) {
       return { recipients: ids ? ids.length : null, recorded: ids && ids.length === 0 ? 0 : null, push: 'off' };
     }
     if (!push) {
-      const recorded = await recordInbox(ids, note.title, note.body, { route: NOTICE_ROUTE });
-      return { recipients: ids.length, recorded, push: 'off' };
+      const { recorded, atCap } = await recordInbox(ids, note.title, note.body, { route: NOTICE_ROUTE });
+      return { recipients: ids.length, recorded, push: 'off', recipientsTruncated: truncated, recordedAtCap: atCap };
     }
     // sendPushChecked writes the inbox row FIRST and reports both halves
     // separately, so a failed push cannot be reported as a failed notice.
+    // `partial` is the third half: the send was accepted and part of the
+    // recipient list could not be read, which `ok` alone cannot say.
     const res = await sendPushChecked(ids, note.title, note.body, { route: NOTICE_ROUTE });
     return {
       recipients: ids.length,
       recorded: res.recorded,
       push: res.ok ? 'queued' : 'failed',
       pushError: res.error ?? null,
+      pushPartial: res.partial === true,
+      recipientsTruncated: truncated,
+      recordedAtCap: res.recordedAtCap === true,
     };
   };
 
-  const currentUid = async (): Promise<string | null> => {
-    if (uid) return uid;
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      return sess?.session?.user?.id ?? null;
-    } catch { return null; }
+  /**
+   * Who is posting — and, when nobody is, which of the two reasons.
+   *
+   * It used to answer `string | null`, with the `error` from `getSession()`
+   * dropped and a `catch` that also answered null. Both callers below read that
+   * null as "no account": one addresses a coach notice with `''` and the other
+   * decides which gym a notice belongs to. An unreachable auth server produces
+   * exactly that null (src/lib/authReadFate.ts), so an outage did not stop
+   * either of them — it made them proceed on an identity nobody had
+   * established.
+   */
+  const currentUid = async (): Promise<UidRead> => {
+    if (uid) return { uid, fate: null };
+    return sessionUid('announcements.whoAmI');
   };
 
   /** Send one announcement. Returns false for every reason it is not on the
@@ -293,6 +359,20 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    *  account as their trainer. */
   const send = async (owner: string, a: Announcement): Promise<boolean> => {
     try {
+      // ── a gym notice with no tenant is not sent ───────────────────────────
+      //
+      // `myTenant()` answers null both for an account that owns no gym and for
+      // an auth read that did not land, and the second used to flow straight
+      // into the insert as `tenant_id: null`. `ann_write` checks
+      // `is_owner_of(tenant_id)`, so that row was always going to be refused —
+      // this only stops the request being made and makes the refusal say what
+      // it is. The important part is what it forecloses: an outage must never
+      // be one column-default away from posting a gym's notice into the wrong
+      // gym, or into none. `false` is already this function's "it is not on
+      // the server", the entry stays pending on the phone, and the flush on
+      // reconnect sends it.
+      const tenant = a.kind === 'coach' ? null : await myTenant();
+      if (a.kind !== 'coach' && !tenant) return false;
       // Typed as one shape rather than inferred from the branches: a union of
       // two object literals is inferred with `coach_id: string` on one side and
       // `null` on the other, which supabase-js's insert generic then refuses.
@@ -313,7 +393,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         // admits 'clients' or 'trainers' and nothing else, and a gym notice is
         // addressed to the people the schema calls clients. A third word here
         // is not a naming choice, it is a rejected insert.
-        : { author_id: owner, coach_id: null, audience: 'clients', body: a.body, tenant_id: await myTenant() };
+        : { author_id: owner, coach_id: null, audience: 'clients', body: a.body, tenant_id: tenant };
       const { data, error } = await supabase.from('announcements')
         .insert(row)
         .select('id').single();
@@ -332,8 +412,12 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    *  held, so an owner who is moved between tenants does not post into the one
    *  they were in when the app launched. */
   const myTenant = async (): Promise<string | null> => {
-    const id = await currentUid();
-    if (!id) return null;
+    const who = await currentUid();
+    // Null on both fates, as before — but the two are now told apart one level
+    // up, at `send`, which refuses a gym notice rather than posting one with no
+    // tenant on it. See the note there.
+    if (who.fate !== null) return null;
+    const id = who.uid;
     try {
       const { data, error } = await supabase.from('profiles').select('tenant_id, tenants(name)').eq('id', id).limit(1);
       if (error) return null;
@@ -348,20 +432,32 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let id: string | null = null;
-      try {
-        // No session is a true answer, not a failed check — getUser() REJECTS
-        // when nobody is signed in, and reading that as an error is how sibling
-        // providers used to latch into 'error' before anybody had signed in.
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
+      // No session is a true answer, not a failed check — reading "nobody is
+      // signed in" as an error is how sibling providers used to latch into
+      // 'error' before anybody had signed in.
+      //
+      // A session that could not be READ is the other answer, and it used to
+      // arrive down the same branch: `getSession()` resolves `session: null`
+      // when a refresh cannot reach the server (src/lib/authReadFate.ts), so
+      // `id` fell to null and the three lines below wiped the board to empty
+      // under 'ready'. That is a coach's notices and a gym's announcements
+      // both reported as "nothing has been posted" — and, exactly as in
+      // src/ui/foodLog.tsx, the same branch skips the device's own cache,
+      // because a cache key needs an account. So the offline copy that exists
+      // for this moment is discarded at this moment.
+      const who = await sessionUid('announcements.read');
       if (cancelled) return;
 
       cacheable.current = true;
       // Signed out, or a build with no backend: nothing is addressed to nobody,
       // and there is no absent server to misreport.
-      if (!id || !USE_SUPABASE) { setUid(null); setAnns([], null); setStatus('ready'); return; }
+      if (who.fate === 'signed-out' || !USE_SUPABASE) { setUid(null); setAnns([], null); setStatus('ready'); return; }
+      // Could not ask. The list on screen is left exactly as it is and the
+      // status says it was not confirmed — which is what the `catch` around the
+      // server read below already does, in its own words: "offline: the cached
+      // list stands, and now says so".
+      if (who.fate !== null) { setStatus('error'); return; }
+      const id = who.uid;
       setUid(id);
 
       let local: Announcement[] = [];
@@ -417,7 +513,15 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached list stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readRev]);
+
+  /** Ask again. Puts the status back to 'loading' first, so a screen showing a
+   *  failure says it is retrying rather than sitting on the old sentence while
+   *  the read runs. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setReadRev((n) => n + 1);
+  }, []);
 
   const post = async (kind: NoticeKind, body: string, push: boolean): Promise<PostResult> => {
     const b = body.trim().slice(0, MAX_BODY);
@@ -439,8 +543,32 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const latestGym = useMemo(() => announcements.find((a) => a.kind === 'gym' && !a.mine) ?? null, [announcements]);
   const mine = useMemo(() => announcements.filter((a) => a.mine), [announcements]);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('announcements', status, reload);
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useAnnouncements`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addAnnouncement(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addAnnouncement, addGymAnnouncement });
+  impl.current = { addAnnouncement, addGymAnnouncement };
+  const addAnnouncementStable = useCallback((...a: Parameters<typeof addAnnouncement>) => impl.current.addAnnouncement(...a), []);
+  const addGymAnnouncementStable = useCallback((...a: Parameters<typeof addGymAnnouncement>) => impl.current.addGymAnnouncement(...a), []);
+  const value = useMemo<AnnValue>(() => ({ announcements, latest, latestGym, mine, addAnnouncement: addAnnouncementStable, addGymAnnouncement: addGymAnnouncementStable, status, unsent, reload }), [announcements, latest, latestGym, mine, addAnnouncementStable, addGymAnnouncementStable, status, unsent, reload]);
   return (
-    <Ctx.Provider value={{ announcements, latest, latestGym, mine, addAnnouncement, addGymAnnouncement, status, unsent }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

@@ -36,8 +36,10 @@
 // On failure the caller is told `false` and keeps what the coach typed, so the
 // text is still in the box to try again with. See the Save handler in
 // app/(trainer)/dashboard.tsx.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
@@ -66,6 +68,9 @@ interface NotesValue {
   addNote: (clientId: string, body: string) => Promise<boolean>;
   /** True only once the row is gone from the server. */
   removeNote: (clientId: string, id: string) => Promise<boolean>;
+  /** Read the notes again. Under 'error' an empty list is unknown, and the
+   *  reading that gets a coach to write the same note twice. */
+  reload: () => void;
 }
 
 const Ctx = createContext<NotesValue | null>(null);
@@ -75,25 +80,52 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, Note[]>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
-        // Signed out is an answer, not a failure. getUser() REJECTS with no
-        // session, and a provider that mounts on the welcome screen and treats
-        // that as an error latches into 'error' before anybody has signed in —
-        // see src/ui/authRevision.tsx for the seventeen providers this
-        // happened to.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── signed out is an answer; an outage is not that answer ───────────
+        //
+        // Signed out is an answer, not a failure — a provider that mounts on
+        // the welcome screen and treats it as an error latches into 'error'
+        // before anybody has signed in (see src/ui/authRevision.tsx for the
+        // seventeen providers that happened to). That much was right. The
+        // reason written beside it was not: it said getUser() REJECTS with no
+        // session. It does not. src/lib/authReadFate.ts quotes the installed
+        // auth-js: both calls RESOLVE on a failure, and `getSession()` resolves
+        // with `{ data: { session: null }, error }` whenever the stored access
+        // token has expired and the refresh cannot reach the server.
+        //
+        // `error` was not named on that line, so the dropped connection and the
+        // welcome screen arrived here as the same `session: null` and this
+        // provider answered 'ready'. Under 'ready' an empty list is the
+        // sentence "you have written nothing about this client" — said to a
+        // coach who wrote a note about a shoulder injury a fortnight ago, over
+        // a read that never happened, and the note they are half-remembering
+        // gets written again or gets doubted.
+        //
+        // The call stays `getSession()`: it answers from device storage and
+        // therefore answers in a basement gym, which is where this app is used.
+        // What changes is that its error is read and classified, once, in
+        // src/lib/authReadFate.ts.
+        const who = await sessionUid('coachNotes.load');
         if (cancelled) return;
-        if (!sess?.session) { setUid(null); setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { reportError('coachNotes.auth', authErr); setStatus('error'); return; }
-        const id = auth?.user?.id ?? null;
-        if (!id) { setUid(null); setStatus('ready'); return; }
+        // Signed out is 'ready' — nobody is signed in, so this coach has
+        // written nothing and saying so is true. Unreadable is 'error': nothing
+        // was read, and an empty map under 'ready' is a claim about what this
+        // coach has written. The mapping lives in src/lib/authGateStatus.ts,
+        // where a test fails if the two arms are ever swapped; inline, that
+        // swap compiles and passes every gate in this repo.
+        //
+        // Discriminated on `fate` rather than on `!who.uid`, because `fate` is
+        // what the failure branch needs and `!who.uid` leaves it
+        // `AuthReadFate | null` there.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
 
         // Every note this coach has written, in one read, and grouped by client
@@ -125,7 +157,15 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** The read MERGES into the map rather than replacing it, so an entry
+   *  written optimistically while a refresh was in flight is not dropped by
+   *  the answer to a query that was sent before it. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const getNotes = (clientId: string) => map[clientId] ?? [];
 
@@ -202,8 +242,30 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCoachNotes`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.getNotes(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ getNotes, addNote, removeNote });
+  impl.current = { getNotes, addNote, removeNote };
+  const getNotesStable = useCallback((...a: Parameters<typeof getNotes>) => impl.current.getNotes(...a), []);
+  const addNoteStable = useCallback((...a: Parameters<typeof addNote>) => impl.current.addNote(...a), []);
+  const removeNoteStable = useCallback((...a: Parameters<typeof removeNote>) => impl.current.removeNote(...a), []);
+  const value = useMemo<NotesValue>(() => ({ getNotes: getNotesStable, status, addNote: addNoteStable, removeNote: removeNoteStable, reload }), [getNotesStable, status, addNoteStable, removeNoteStable, reload]);
   return (
-    <Ctx.Provider value={{ getNotes, status, addNote, removeNote }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

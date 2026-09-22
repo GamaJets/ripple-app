@@ -116,13 +116,13 @@ export function analyticsGapWarning(reads: AnalyticsReads): string | null {
   say(reads.history, 'your recorded months');
   if (!bad.length) return null;
   const list = bad.length === 1 ? bad[0] : `${bad.slice(0, -1).join(', ')} and ${bad[bad.length - 1]}`;
-  return `INCOMPLETE. When this was exported ${list}. Empty cells below mean the figure is UNKNOWN — they do not mean zero, and a total or an average built over them would be wrong rather than small.`;
+  return `INCOMPLETE. When this was exported ${list}. Empty cells below mean the figure is UNKNOWN. They do not mean zero, and a total or an average built over them would be wrong rather than small.`;
 }
 
 /** What the figures are, said in the file. A coach mails this on, and by then
  *  the screen's own caveats are not in the room. */
 export const EXPORT_BASIS =
-  'Sessions are the ones whose outcome you RECORDED as delivered in this calendar month. A booking whose time has passed is not one of them, and a session nobody has marked is counted neither as delivered nor as missed — it is on its own row. The revenue figure is the delivered count multiplied by the session rate on your own profile — it is not what anybody has paid you, it is not net of any fee, and nothing here has been reconciled against Stripe or a bank. Cash and transfers you have recorded are not in it, and neither are packages or subscription renewals: those are on the Money screen.';
+  'Sessions are the ones whose outcome you RECORDED as delivered in this calendar month. A booking whose time has passed is not one of them, and a session nobody has marked is counted neither as delivered nor as missed; it is on its own row. The revenue figure is the delivered count multiplied by the session rate on your own profile. It is not what anybody has paid you, it is not net of any fee, and nothing here has been reconciled against Stripe or a bank. Cash and transfers you have recorded are not in it, and neither are packages or subscription renewals: those are on the Money screen.';
 
 export interface AnalyticsExport {
   csv: string;
@@ -162,7 +162,7 @@ export function buildAnalyticsExport(
 
   const rows: Cell[][] = [
     ['Exported', on, ''],
-    ['Currency', cur || 'not set — amounts below have no unit', ''],
+    ['Currency', cur || 'not set; amounts below have no unit', ''],
     ['', '', ''],
     ['Sessions delivered this month', snap.sessionsThisMonth, ''],
     ['Sessions this month still to be marked', snap.sessionsUnmarked ?? null, ''],
@@ -209,7 +209,7 @@ export function analyticsExportBlocker(reads: AnalyticsReads): string | null {
     return 'Still reading your figures. Exporting now would write a file of empty cells.';
   }
   if (reads.roster === 'error' && reads.sessions === 'error') {
-    return 'Neither your roster nor your sessions came back, so there is no figure to export. That is unknown rather than zero — try again once you have signal.';
+    return 'Neither your roster nor your sessions came back, so there is no figure to export. That is unknown rather than zero. Try again once you have signal.';
   }
   return null;
 }

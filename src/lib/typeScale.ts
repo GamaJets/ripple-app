@@ -5,33 +5,26 @@
 // `src/theme/scale.ts` pinned seven point sizes and, beside each of them, a
 // LINE HEIGHT — and that second number is the defect.
 //
-// ── What React Native already does, and the one thing it does not ─────────
+// ── What React Native already does ─────────────────────────────────────
 //
-// `<Text allowFontScaling>` defaults to TRUE. So the app has always scaled its
-// FONT SIZES with the phone's text setting, on both platforms, without a line
-// of code. What React Native does not scale is `lineHeight`, which is a plain
-// point value and stays exactly where it was written. Every one of the seven
-// steps in scale.ts carries one:
+// `<Text allowFontScaling>` defaults to TRUE, and with it React Native scales
+// BOTH fontSize and lineHeight by the reader's text setting: iOS multiplies
+// the line height by the same factor as the font (RCTAttributedTextUtils.mm)
+// and Android reads it as SP (TextAttributes.kt). So `{ fontSize: 15,
+// lineHeight: 21 }` is correct at every size, as written.
 //
-//     body:  { fontSize: 15, lineHeight: 21 }
-//
-// A member on Larger Text at 200% gets 30pt glyphs laid out in a 21pt line. The
-// text does not get bigger, it gets CLIPPED — descenders cut off, consecutive
-// lines overlapping — and the bigger the reader asked for, the worse it reads.
-// That is the state this file ends, and it is why the roadmap could truthfully
-// say Dynamic Type is "not supported anywhere" while the font sizes were
-// scaling the whole time: half of the mechanism was fighting the other half.
+// This header once said the platform leaves lineHeight alone, and the scale
+// multiplied every line height here too. That scaled lines twice; at iOS
+// accessibility-large a two-line title split across half the screen (seen on
+// the simulator, 21 Sep 2026).
 //
 // ── The rule this file exists to hold ─────────────────────────────────────
 //
-//     React Native owns fontSize. We own every OTHER point measurement that
-//     has to track the text — line height, the height of a box drawn around
-//     one line, the diameter of a ring with a figure inside it.
+//     React Native owns fontSize and lineHeight. We own the point
+//     measurements that are LAYOUT but have to track the text: the height of
+//     a box drawn around one line, the diameter of a ring with a figure inside.
 //
-// Multiplying fontSize here as well would scale it TWICE: once by us and again
-// by the platform, so an accessibility size would land somewhere near 9×. That
-// is the mistake a maintainer will reach for, which is why the rule is written
-// at the top of the file rather than in a comment beside one call.
+// Multiplying a font size or a line height here would scale it twice.
 //
 // ── Nothing here is capped, and that is deliberate ────────────────────────
 //
@@ -139,5 +132,5 @@ export function fontScaleNote(scale: number): string | null {
   const pct = Math.round(s * 100);
   return s > 1
     ? `Your phone is set to ${pct}% text size and this app is following it.`
-    : `Your phone is set to ${pct}% text size — smaller than standard — and this app is following it.`;
+    : `Your phone is set to ${pct}% text size, smaller than standard, and this app is following it.`;
 }

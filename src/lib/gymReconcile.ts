@@ -37,6 +37,7 @@
 // month later nothing on screen could tell them apart.
 
 import { assertWhole, capLimit } from './rowCap';
+import { readByIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -79,7 +80,7 @@ export function markBlocker(state: MarkState, note: string): string | null {
     return 'Say why this is expected. An exception taken off a reconciliation with no reason recorded is exactly the row somebody asks about later, and "it was fine" is not an answer anybody can check.';
   }
   if (note.trim().length > 500) {
-    return 'That is longer than a note on one line of a reconciliation — 500 characters at most.';
+    return 'That is longer than a note on one line of a reconciliation: 500 characters at most.';
   }
   return null;
 }
@@ -135,13 +136,33 @@ export async function fetchMarks(sb: Queryable, tenantId: string): Promise<MarkI
  * to choose between. The conflict target is named explicitly because PostgREST
  * will otherwise pick the primary key, which never collides, and every change
  * of mind would silently become a new row.
+ *
+ * The COUNT is checked, like `clearMark` below it and like `saveTrainerPay` in
+ * src/lib/gymPay.ts, which carries the long form of this argument.
+ *
+ * The narrow defence for `error` alone was sound as far as it went, and it is
+ * worth writing down rather than deleting, because it is the reason
+ * scripts/check-writes.mjs never reported this line: an upsert is outside that
+ * gate's count rule on the stated grounds that neither half of one can silently
+ * match nothing. An INSERT refused by `gym_reconcile_marks_owner`'s WITH CHECK
+ * raises 42501, and the `ON CONFLICT DO UPDATE` path raises too rather than
+ * skipping when the policy's USING clause fails the existing row. So the
+ * ordinary RLS refusal does arrive as an `error` here.
+ *
+ * It is not the whole set of ways nothing gets written. A policy later rewritten
+ * as a filter, a trigger returning NULL, a conflict target that stops naming the
+ * constraint it was written for: each is a 2xx with no row touched and a null
+ * `error`. On this screen that is an exception moving to "Explained" — off the
+ * reconciliation, with the owner's typed reason beside it — because the call
+ * came back. A row the gym then believes is settled, in the register an auditor
+ * reads. Counting costs one word and removes the whole class.
  */
 export async function markException(
   sb: Queryable,
   tenantId: string,
   m: { subjectKind: MarkSubject; subjectId: string; state: MarkState; note: string; markedBy: string | null },
 ): Promise<void> {
-  const { error } = await sb
+  const r = await sb
     .from('gym_reconcile_marks')
     .upsert({
       tenant_id: tenantId,
@@ -151,8 +172,9 @@ export async function markException(
       note: m.note.trim() || null,
       marked_by: m.markedBy,
       marked_at: new Date().toISOString(),
-    }, { onConflict: 'tenant_id,subject_kind,subject_id' });
-  if (error) throw error;
+    }, { onConflict: 'tenant_id,subject_kind,subject_id', count: 'exact' });
+  if (r.error) throw r.error;
+  assertWrote(m.state === 'accepted' ? 'That explanation' : 'That flag', r);
 }
 
 /**
@@ -201,12 +223,33 @@ export function partitionByMark<T extends { id: string }>(
   return { open, explained, flagged };
 }
 
+/**
+ * Who marked each answer, by id.
+ *
+ * CHUNKED, about the REQUEST LINE rather than the row ceiling. `fetchMarks`
+ * reads up to `capLimit()` marks, so up to a thousand `marked_by` ids reach
+ * here; at about 39 bytes per uuid inside `in.("…","…")` that is a ~39KB query
+ * string against the 8KB request line nginx and most CDNs enforce by default.
+ * Refused at roughly two hundred ids with a **414** that supabase-js does not
+ * reject on and that arrives as `data: null`.
+ *
+ * no-error-ok (about the ROW ceiling — one row per id, 150 ids a chunk): an
+ * unreadable name renders as a dash beside the answer; the answer itself is
+ * still there. The 414 is the case that argument does not cover: every marker
+ * unnamed at once, on the screen an owner uses to see which questions somebody
+ * has already dealt with and who to ask about them.
+ */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash beside the answer; the answer itself is still there
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
+  let rows: any[] = [];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      (chunk, from, to) => sb.from('profiles').select('id, full_name')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names of the people who answered these',
+    );
+  } catch { return new Map(); }
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]: [string, string]) => !!n));
 }

@@ -65,18 +65,22 @@
 // chart is bars rather than a line — a polyline from February to May paints ink
 // across two months nobody trained and invents a trajectory through them.
 import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Cta, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig, FigureCard, ActionBlock, Expandable, Meter, Segmented } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { previewLiftingImport, liftingImportNote, type LiftingImportPreview } from '../../src/lib/liftingImport';
+import { pickDocument } from '../../src/ui/nativeModules';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, volumeHeadline, est1RMIn, liftLabel, weightDeltaIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
@@ -87,18 +91,23 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import {
   monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
   gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals,
-  prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
+  prTimeline, volumeArc, peakEstimateMonth, MAX_MONTHS, monthLabels,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
 import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
+import { useNow } from '../../src/ui/today';
 import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // Volume by muscle group — the first question anybody asks of a training
 // history and the one nothing in this app could answer. See
 // src/lib/muscleVolume.ts for why it is a join against the catalogue rather
 // than a column on the workout row.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+// The one map of which colour a muscle GROUP is, shared with the library's chips.
+import { groupTone } from '../../src/ui/ExerciseMuscles';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 /* ── the read ─────────────────────────────────────────────────────────────
  * Three states, never two. See the header.
@@ -122,9 +131,20 @@ type Load =
  *  leaving it in kilograms would convert the picture and not the description
  *  of it, which is the one place the two must not disagree. */
 function describeMonth(c: MonthCell, unit: WeightUnit): string {
-  if (!c.trained) return 'no sessions logged';
+  if (!c.trained) return 'nothing logged';
   if (c.volumeKg == null) return 'trained, no weights logged';
-  return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.sessions} session${c.sessions === 1 ? '' : 's'}`;
+  // DAYS. `c.sessions` is distinct `performed_at`, which is saves rather than
+  // sessions — a member logging as they go turns one visit into seven of them.
+  // See MonthCell.sessions in src/lib/longView.ts.
+  return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.days} day${c.days === 1 ? '' : 's'}`;
+}
+
+/** One column of "Then and Now" as a sentence: the month, then the tonnage in
+ *  the reader's own unit. `fig` draws an em dash where the volume is unknown,
+ *  and an em dash read out on its own is not an answer — so this says so. */
+function monthSpoken(month: string, volumeKg: number | null | undefined, unit: WeightUnit): string {
+  const v = volumeIn(volumeKg, unit);
+  return v == null ? `${month}, not known` : `${month}, ${v.toLocaleString()} ${unit}`;
 }
 
 /**
@@ -184,7 +204,7 @@ function YearGrid({ rows, peak, t, unit }: { rows: YearRow[]; peak: number | nul
         <View style={{ width: 32 }} />
         <View style={{ flex: 1 }}>
           <Svg width="100%" height={12} viewBox={`0 0 ${W} 12`} preserveAspectRatio="xMinYMid meet">
-            {MONTH_LABELS.map((m, i) => (
+            {monthLabels().map((m: string, i: number) => (
               <SvgText key={m} x={xOf(i) + CELL / 2} y={9} fontSize={9} fill={t.ink3} textAnchor="middle">
                 {m[0]}
               </SvgText>
@@ -193,8 +213,11 @@ function YearGrid({ rows, peak, t, unit }: { rows: YearRow[]; peak: number | nul
         </View>
       </View>
       {rows.map((row) => {
+        // Read once per row rather than once per cell: `monthLabels()` resolves
+        // the reader's locale on every call, and a spoken year is twelve cells.
+        const names = monthLabels();
         const spoken = `${row.year}. ` + row.cells
-          .map((c, m) => (c ? `${MONTH_LABELS[m]}, ${describeMonth(c, unit)}` : null))
+          .map((c, m) => (c ? `${names[m]}, ${describeMonth(c, unit)}` : null))
           .filter(Boolean).join('. ') + '.';
         return (
           <View key={row.year} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
@@ -231,11 +254,11 @@ function GridLegend({ t }: { t: Theme }) {
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <View style={{ width: 11, height: 11, borderRadius: 3, borderWidth: hairline, borderColor: t.ring }} />
-        <Text style={{ ...ty.caption, color: t.ink3 }}>Nothing logged</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>Nothing Logged</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <View style={{ width: 11, height: 11 }} />
-        <Text style={{ ...ty.caption, color: t.ink3 }}>Before you started</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>Before You Started</Text>
       </View>
     </View>
   );
@@ -243,6 +266,10 @@ function GridLegend({ t }: { t: Theme }) {
 
 export default function History() {
   const t = useTheme();
+  // Both boards below name movements out of the LOG, where the name is the
+  // English identity. This screen already read the catalogue in the reader's
+  // language for its muscle board and showed English names beside it.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const { log: localLog } = useWorkoutLog();
   // Every figure below is a lifted load or a sum of them. The bars, the grid
@@ -255,7 +282,13 @@ export default function History() {
   // weighed ON OR BEFORE the day of it — never at today's figure carried back
   // over three years of history, which would redraw every month on this page
   // the morning somebody steps on a scale. See src/lib/bodyweightSets.ts.
-  const { weightSeries } = useClientData();
+  const cd = useClientData();
+  const { weightSeries } = cd;
+  // And whether that read answered. An empty `weightSeries` under a failed
+  // scans read is indistinguishable from a member who has never been weighed —
+  // so the lifetime tonnage silently under-reports and `tonnageNote` tells
+  // somebody with two years of weigh-ins to "add your weight and they count".
+  const bodyKnown = isWhole(cd.scansStatus);
 
   // Read through a ref so the fetch is not re-created (and re-run) every time
   // the shared log changes underneath the screen.
@@ -263,6 +296,22 @@ export default function History() {
   localRef.current = localLog;
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
+
+  /* The clock the whole page is windowed against.
+   *
+   * `monthlyHistory(log, Date.now(), …)` sat in the render body below. A render
+   * body is not a memo, so it is not frozen at mount — but it is only right at
+   * the moment something else happens to redraw, and this screen is reached
+   * from a tab and is never unmounted. Nothing on it re-renders on its own: the
+   * read runs on focus, and a member who leaves History open overnight on the
+   * last of the month is looking at a 36-month window that ends in the month
+   * before the one they are in. `monthsSinceLast` is counted off the end of
+   * that window, so the Breaks line below would be a month out with it.
+   * `useNow` re-settles on the local day rolling over and on the app coming
+   * back to the foreground, which are the two moments it can go wrong.
+   * See src/ui/today.ts — the MuscleSection at the foot of this file already
+   * reached this conclusion about its own seven-day window. */
+  const now = useNow();
 
   const read = useCallback(async () => {
     setLoad({ state: 'loading' });
@@ -302,12 +351,36 @@ export default function History() {
       // The oldest month of a truncated read is a part-month and is dropped
       // rather than charted short. See src/lib/historyWindow.ts.
       const whole = wholeMonths(entries, page.truncated);
+      // ── the month the banner is allowed to name ──────────────────────────
+      //
+      // The oldest month the page can honestly claim to reach, which is the
+      // oldest month STILL IN `whole.log` — `entries` is ascending, so that is
+      // the first of them with a parseable timestamp.
+      //
+      // This was `whole.droppedMonth`, and `droppedMonth` is the month
+      // `wholeMonths` REMOVED. Naming it here put the banner one month early in
+      // both of its sentences: "Read back as far as Mar 2024" about a chart
+      // whose first bar is Apr 2024, and "anything before Mar 2024 is on record
+      // and not counted here" while March itself was not counted either — a
+      // whole month of somebody's training disowned by the sentence that exists
+      // to account for it. The Hero below, off `cells[0].key`, said "Lifted
+      // since Apr 2024, at least" three inches underneath it.
+      //
+      // The other arm of the old expression is now unnecessary rather than
+      // wrong: `droppedMonth` is null when the truncated page is all ONE month,
+      // which `wholeMonths` keeps whole deliberately — and then the oldest kept
+      // month IS that month, which is what the fallback was reaching for.
+      let oldestKept: string | null = null;
+      for (const e of whole.log) {
+        const k = monthKey(e.t);
+        if (k != null) { oldestKept = k; break; }
+      }
       // No rows is a genuinely empty history. It is not a failure, and it is
       // not the same render as one.
       setLoad({
         state: 'ready',
         log: whole.log,
-        partialBefore: page.truncated ? whole.droppedMonth ?? monthKey(entries[0]?.t ?? '') : null,
+        partialBefore: page.truncated ? oldestKept : null,
       });
     } catch (e) {
       reportError('history.read', e);
@@ -331,19 +404,18 @@ export default function History() {
   // the long view keeps agreeing with the log it is drawn from.
   useFocusEffect(useCallback(() => { read(); }, [read]));
 
+  // The server-side history is `read`; the weight curve drawn beside it is the
+  // profile's scan record, which is a separate read and was not refreshed by
+  // anything on this screen.
+  const pull = usePullToRefresh(useCallback(() => { void read(); cd.reload(); }, [read, cd.reload]));
+
   const G = layout.gutter;
-  const header = (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>How far you have come</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your History</Text>
-      </View>
-      <Ghost icon="back" onPress={() => router.back()} />
-    </View>
-  );
+  // The board's pushed-page head: back, the title centred, and none of the
+  // eyebrow prose the first viewport used to open with.
+  const header = <PageHead title="Your History" />;
   const frame = (children: ReactNode) => (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         {header}
         {children}
       </ScrollView>
@@ -353,7 +425,7 @@ export default function History() {
   /* ── 1 of 3: still asking ─────────────────────────────────────────────── */
   if (load.state === 'loading') {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <Text style={{ ...ty.label, color: t.ink3 }}>Reading your history…</Text>
       </Section></>
     );
@@ -362,10 +434,10 @@ export default function History() {
   /* ── 2 of 3: the read broke ───────────────────────────────────────────── */
   if (load.state === 'failed') {
     return frame(
-      <><Rule /><Section>
-        <SectionHead title="Could not read your history" />
+      <><Section>
+        <SectionHead title="Could Not Read Your History" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-          {load.reason} Nothing has been lost — this screen only failed to read what is there, so it
+          {load.reason} Nothing has been lost. This screen only failed to read what is there, so it
           cannot tell you what is in it either way.
         </Text>
         <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={read} /></View>
@@ -388,25 +460,49 @@ export default function History() {
   // here means the read landed whole and there is genuinely nothing in it.
   if (stage === 'empty' || !span) {
     return frame(
-      <><Rule /><Section>
-        <SectionHead title="Nothing Logged Yet" />
-        <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-          {historyNote(log)} Log one session and this page starts keeping the score for you —
-          month by month, for as long as you train.
-        </Text>
-        <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
-      </Section></>
+      <>
+      {/* The kit's ActionBlock: on a page with nothing on it the next action
+          IS the page, so it gets the title, the reason and the one button. */}
+      <ActionBlock title="Nothing Logged Yet"
+        reason={`${historyNote(log)} Log one session and this page starts keeping the score for you, month by month, for as long as you train.`}
+        cta={{ label: 'Log a Workout', onPress: () => router.push(trainIntent('/(client)/workouts') as any) }} />
+      {/* The import belonged here first and I put it only at the bottom of the
+          loaded screen, where somebody who has never logged in Repple never
+          reaches it. This empty state IS the arrival screen for a lifter with
+          three years in Hevy: "log one session and this page starts keeping
+          score" is the wrong and only answer to give them. Below the Cta, not
+          above it — logging tonight's session is still the shorter path for
+          everybody who has nothing to bring. OPEN here, for the same reason:
+          folded, it is a heading a lifter with three years to bring has to
+          guess at. */}
+      <ImportFromAnotherApp open onImported={() => { void read(); }} /></>
     );
   }
 
-  const cells = monthlyHistory(log, Date.now(), MAX_MONTHS, weightSeries);
+  const cells = monthlyHistory(log, now.getTime(), MAX_MONTHS, weightSeries);
   const life = lifetimeTotals(log, weightSeries)!;
   const peak = peakVolume(cells);
   const best = bestMonth(cells);
+  // A separate pick from `best`, not a field off it: the heaviest month by
+  // tonnage and the month holding the best estimated single are answers to two
+  // different questions and are routinely two different months. See
+  // `peakEstimateMonth` in src/lib/longView.ts.
+  const peakEst = peakEstimateMonth(cells);
   const active = trainedMonths(cells).length;
   const breaks = gaps(cells);
   const worstGap = longestGap(cells);
-  const quiet = monthsSinceLast(cells) ?? 0;
+  /* Whole months since the last logged session, or NULL when the charted
+   * window holds no training at all.
+   *
+   * It was `?? 0`, which turns "nothing in this window to measure from" into a
+   * confident "you trained this month". `cells` is the last MAX_MONTHS months,
+   * not the member's history, so a member whose last session was more than
+   * three years ago reaches here with every cell untrained — and the Breaks
+   * section, whose whole job is to say how long the silence has run, rendered
+   * nothing at all for the one person it is most about. Null is carried and
+   * answered in its own arm below, off `life.lastAt`, which is the real last
+   * session and not the end of a window. */
+  const quiet = monthsSinceLast(cells);
   const arc = volumeArc(cells);
   const records = prTimeline(log, weightSeries).slice().reverse().slice(0, 12);
   const rows = yearRows(cells);
@@ -416,6 +512,19 @@ export default function History() {
   // hero figure printed over it looks exactly as measured as one that is whole.
   const lifeNote = tonnageNote({ kg: life.volumeKg ?? 0, unknownSets: life.unpricedSets });
   const earlier = span.months - cells.length;      // months clipped by MAX_MONTHS
+  /* The month the HERO's figure actually starts from.
+   *
+   * It was `cells[0].key` — the oldest month on the CHART, which is capped at
+   * MAX_MONTHS. The figure beside it is `life.volumeKg`, summed by
+   * `lifetimeTotals` over the whole of `log` and not over `cells`. So a member
+   * five years in read "Lifted since Sep 2022 · 214 tonnes" over a total that
+   * included 2020 and 2021: the right figure, dated to a start it was not
+   * measured from, and understating the period by two years in the one place
+   * the page puts a lifetime in words. `life.firstAt` is the first session the
+   * total actually counted. The fallback is the old expression and is only
+   * reached on a timestamp `monthKey` cannot parse, which `historySpan` has
+   * already refused once to produce `life` at all. */
+  const sinceKey = monthKey(life.firstAt) ?? cells[0].key;
   const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
   return frame(<>
@@ -428,9 +537,9 @@ export default function History() {
       <View style={{ marginTop: sp.lg }}>
         <Notice
           tone={t.warn}
-          kicker="Not your whole history"
+          kicker="Not Your Whole History"
           title={`Read back as far as ${monthLabel(partialBefore)}`}
-          note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here — so the lifetime totals are left blank rather than added up short.`}
+          note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here, so the lifetime totals are left blank rather than added up short.`}
         />
       </View>
     ) : null}
@@ -445,16 +554,49 @@ export default function History() {
         part of a lifetime that fitted in one query is not a smaller number, it
         is a wrong one — the same rule `money()` follows for a currency nobody
         chose. `historyNote` goes with it: it counts days and sessions. */}
-    <Hero
-      label={whole ? `Lifted since ${monthLabel(cells[0].key)}` : `Lifted since ${monthLabel(cells[0].key)}, at least`}
-      figure={whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
+    {/* The board's figure card where the Hero was: the label as the head,
+        one big figure with its unit, the sentence under it. */}
+    <FigureCard
+      title={whole ? `Lifted Since ${monthLabel(sinceKey)}` : `Lifted Since ${monthLabel(sinceKey)}, at Least`}
+      figure={whole ? headline?.figure.toLocaleString() : null}
       unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
-      note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
-    />
-    {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
-    {whole && lifeNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{lifeNote}</Text> : null}
+      detail={whole ? historyNote(log) : 'More than this page can add up in one read. See above.'}>
+    {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
+    {/* The note blames the member's record when the fault is this read: it
+        says "your own weight is not recorded for the day you did them". Only
+        say that when we actually know it. */}
+    {whole && lifeNote ? (
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+        {bodyKnown
+          ? lifeNote
+          : cd.scansStatus === 'loading'
+          ? 'Some bodyweight sets are not in this total yet. Your weight history is still being read.'
+          : 'Some bodyweight sets are not in this total because your weight history could not be read just now. That is this screen rather than a gap in your record, and nothing has been lost.'}
+      </Text>
+    ) : null}
+    </FigureCard>
 
-    <Rule />
+    {/* Three tiles on the ground under the lifetime figure, where they were a
+        strip inside the chart's card two screens down: the figure, then what
+        it is made of, then the chart. */}
+    {/* Days Trained and Lifts are lifetime counts and go blank with the hero.
+        Best Month does not: it is the heaviest of the months ON THIS CHART,
+        which is a true statement about the months on this chart whether or
+        not there are older ones behind them — the label names the month, so
+        the reader can see the window it was picked from. */}
+    {/* Why a dash is a dash goes where the unit would, so it is SEEN on the
+        tile and not only spoken: a tile draws no delta line. */}
+    <KpiRow tiles items={[
+      // Was 'Sessions', showing `life.sessions` with a days delta beside it.
+      // That figure is distinct `performed_at` — saves, not sessions — so a
+      // member who logs as they go read a number several times their real
+      // one, with the true count sitting underneath it as the delta. The
+      // delta was the honest half, so it is now the figure.
+      { label: 'Days Trained', tone: 'blue', value: whole ? fig(life.days) : fig(null), unit: whole ? undefined : 'not all read' },
+      { label: best ? `Best Month · ${monthLabel(best.key)}` : 'Best Month', tone: 'orange', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined },
+      { label: 'Lifts with Weights', tone: 'purple', value: whole ? fig(life.lifts) : fig(null), unit: whole ? undefined : 'not all read' },
+    ]} />
+
 
     {/* ── the shape of it ────────────────────────────────────────────────── */}
     <Section>
@@ -462,24 +604,60 @@ export default function History() {
         {/* A short history gets no year grid. Eleven blank months around one
             thin bar is a picture of failure drawn for somebody who has done
             nothing wrong — so this says what is actually true instead. */}
-        <SectionHead title="The start of your history" note={`Day ${span.days}`} />
+        <SectionHead title="The Start of Your History" note={`Day ${span.days}`} />
+        {/* `life.days` is a lifetime count and is NOT gated on `whole` here,
+            unlike the Days Trained column further down. That is deliberate
+            rather than missed: this branch is `stage === 'starting'`, which
+            needs `span.days < 28` over the KEPT log, and the kept log under
+            truncation is a thousand-odd rows minus the oldest month. Reaching
+            it therefore takes about 26 exercise-rows a day, every day, for the
+            five weeks the window can stretch to — three or four full sessions
+            a day without a rest day. There is no import path that writes a
+            member's history into a single recent month either. So the branch
+            and the truncation cannot both be true, and gating this would print
+            an em dash into the middle of a sentence for nobody. */}
         <Text style={{ ...ty.body, color: t.ink2 }}>
           You started on {dstr(span.firstAt)} and have trained on {fig(life.days)} day
-          {life.days === 1 ? '' : 's'} since. There is not a year to look at yet — there will be,
+          {life.days === 1 ? '' : 's'} since. There is not a year to look at yet. There will be,
           and this page is where it goes.
         </Text>
       </>) : (<>
-        <SectionHead title="Your Years" note={`${active} month${active === 1 ? '' : 's'} trained`} />
+        {/* `active` is `trainedMonths(cells).length`, and `cells` is built from
+            `log` — which under truncation is the newest thousand `workouts`
+            rows and not the member's training. One row is one EXERCISE, so at
+            four sessions a week of six lifts the cap is reached inside ten
+            months: a member of five years' standing was told "9 months
+            trained" under a heading called Your Years, and a floor printed
+            without a qualifier reads as a total.
+            The line at the foot of this section already refuses `earlier` on
+            exactly this reasoning, in those words. Withheld rather than
+            qualified, because the Notice at the top of the screen already says
+            how far back the read reached and says it better than a four-word
+            note could. */}
+        {/* …and `earlier`, which is the OTHER way this count is not a lifetime.
+            `cells` is capped at MAX_MONTHS, so for anybody with more history
+            than that `active` is the trained months IN THE CHART and the bare
+            words "months trained" claim it is all of them: five years of
+            unbroken training read "36 months trained" under a heading called
+            Your Years, and a member whose last session predates the window read
+            "0 months trained" over a grid of their own years. The figure is
+            kept — it is true about the chart it sits on — and it now says which
+            window it was counted over. `earlier` is 0 or less for everybody
+            whose whole history is charted, so that reader sees exactly what
+            they saw before. */}
+        <SectionHead title="Your Years"
+          note={!whole ? undefined
+            : earlier > 0 ? `${active} of the Last ${cells.length} Months`
+            : `${active} Month${active === 1 ? '' : 's'} Trained`} />
         <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}
     </Section>
 
-    <Rule />
 
     {/* ── month by month ─────────────────────────────────────────────────── */}
     <Section>
-      <SectionHead title="Month by Month" note={`Total ${wu} lifted`} />
+      <SectionHead title="Month by Month" note={`Total ${wu} Lifted`} />
       {peak != null ? (<>
         <MonthBars cells={cells} t={t} unit={wu} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
@@ -487,7 +665,7 @@ export default function History() {
           <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(cells[cells.length - 1].key)}</Text>
         </View>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-          A month with nothing logged carries a mark on the line and no bar — the app knows you
+          A month with nothing logged carries a mark on the line and no bar. The app knows you
           logged nothing, not that you lifted nothing.
         </Text>
       </>) : (
@@ -496,17 +674,90 @@ export default function History() {
           sessions still count towards the months above.
         </Text>
       )}
+      {/* ── the three figures the library already returned and nothing drew ──
+          `topLift`, `best1RM` and `kcal` are computed for every month in
+          `cellFrom` (src/lib/longView.ts) and a lifetime `kcal` in
+          `lifetimeTotals`. Only the coach's screen rendered any of them —
+          app/(trainer)/client-training.tsx names the top lift of the biggest
+          month — so a member's own history threw all three away. Nothing below
+          recomputes anything: each figure is read straight off the MonthCell or
+          Lifetime the calls above already returned.
+
+          The month named is the heaviest ON THIS CHART, which is what the KPI
+          above already says, and it survives a truncated read: `wholeMonths`
+          drops the part-month the read stopped inside, so every month left is a
+          whole month and its figures are totals rather than floors. */}
+      {best && best.volumeKg != null && best.days != null ? (
+        <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
+          Your heaviest month on this chart is {monthLabel(best.key)}: {num(volumeIn(best.volumeKg, wu))} {wu} over{' '}
+          {best.days} day{best.days === 1 ? '' : 's'}
+          {best.topLift ? `, most of it ${movement(best.topLift)}` : ''}.
+        </Text>
+      ) : null}
+
       <View style={{ height: sp.lg }} />
-      {/* Sessions and Lifts are lifetime counts and go blank with the hero.
-          Best Month does not: it is the heaviest of the months ON THIS CHART,
-          which is a true statement about the months on this chart whether or
-          not there are older ones behind them — the delta names the month, so
-          the reader can see the window it was picked from. */}
       <KpiRow items={[
-        { label: 'Sessions', value: whole ? fig(life.sessions) : fig(null), delta: whole ? `${fig(life.days)} day${life.days === 1 ? '' : 's'}` : 'not all read' },
-        { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
-        { label: 'Lifts', value: whole ? fig(life.lifts) : fig(null), delta: whole ? 'with weights' : 'not all read' },
+        {
+          // The wording the coach's panel uses for the same arithmetic —
+          // "Best Est. 1RM", and `set` / `best read` beneath it — because
+          // src/ui/ExerciseHistoryPanel renders that on
+          // app/(trainer)/client-training.tsx and it is at the bottom of THIS
+          // screen too. One estimate, one name for it.
+          label: 'Best Est. 1RM',
+          value: fig(est1RMIn(peakEst?.best1RM, wu)),
+          unit: peakEst?.best1RM != null ? wu : undefined,
+          // "set" claims this is the best there has ever been, which only a
+          // whole read supports; under truncation it is the best of the months
+          // this page could reach, and that is a different sentence.
+          delta: peakEst ? `${whole ? 'set' : 'best read'} ${monthLabel(peakEst.key)}` : undefined,
+        },
+        {
+          // A lifetime sum, so it goes blank with the hero and the two lifetime
+          // counts above it for the same reason they do: a total added up over
+          // the part of a lifetime that fitted in one query is not a smaller
+          // truth, it is a wrong number.
+          label: 'Energy Logged',
+          value: whole ? num(life.kcal) : fig(null),
+          unit: whole && life.kcal != null ? 'kcal' : undefined,
+          delta: whole ? 'where a figure was recorded' : 'not all read',
+        },
       ]} />
+      {/* What each of the two figures above is NOT, one tap away. Both
+          sentences are kept whole; they are the small print of two figures and
+          were eleven lines between them and the next card. */}
+      <View style={{ marginTop: sp.md }}>
+      <Expandable title="About These Two Figures">
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+        {/* An estimate, and it says so — the same thing src/ui/ExerciseHistory.tsx
+            says beside its own copy of this figure. This app holds no tested
+            max anywhere: `est1RM` in src/lib/streaks.ts is Epley over a set
+            somebody actually logged, and `MonthCell.best1RM` is the best single
+            such set in the month across every movement — so the lift behind it
+            is whichever one is loaded heaviest, and it is not necessarily the
+            top lift named above, which is picked by volume. */}
+        Worked out from your best single set of that month, across every lift: an estimate from the reps
+        you logged and never a max you tested. It is not always the movement named above: that one carried
+        the most volume, this one was the heaviest single effort.
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+        {/* Deliberately weaker than the tonnage beside it, and the weakest
+            sentence on the page. `cellFrom` sums `e.kcal` and nothing else: a
+            session with no figure adds nothing rather than a zero (see the note
+            on MonthCell.kcal), which keeps "no watch" apart from "no effort"
+            and makes the total a floor. Where the figures come from is written
+            in app/(client)/workouts.tsx: a watch's, a machine's, one typed in,
+            or MET × bodyweight × hours from `cardioKcal` — a model, not a
+            measurement — and the strength runner writes none at all, because
+            the expression that used to invent one had no bodyweight, no heart
+            rate and no measurement of any kind in it. */}
+        Energy adds up only the sessions that carried a calorie figure: from a watch, from a machine, one
+        you typed in, or one worked out from your weight and how long the activity ran. A session without
+        one adds nothing rather than a zero, and lifting records reps and weight rather than a burn, so
+        this is less than you have burned and not a measurement of it.
+      </Text>
+      </Expandable>
+      </View>
+
       {/* `earlier` is derived from `span`, which under truncation is the span
           of what was READ rather than of the member's training — so the count
           would be wrong and the notice at the top already says more than this
@@ -521,21 +772,32 @@ export default function History() {
 
     {/* ── then and now ───────────────────────────────────────────────────── */}
     {arc ? (<>
-      <Rule />
       <Section>
-        <SectionHead title="Then and Now" note={`${arc.months} months apart`} />
+        <SectionHead title="Then and Now" note={`${arc.months} Months Apart`} />
+        {/* Each column is one FACT and is marked as one. Drawn, these are a
+            month over a figure over a unit, read in that order by the eye in
+            about a second. Left as three sibling <Text>s they are three
+            separate stops for a screen reader — "March", then "1,240", then
+            "kg" — and the figure, which is the only one of the three worth
+            anything, is the one that arrives on its own. `monthSpoken` is the
+            same sentence the chart above already speaks (see `label` at the
+            top of this file): figure, unit, in that order, with "not known"
+            where `fig` would draw a dash. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.lg }}>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={monthSpoken(monthLabel(arc.fromKey), arc.fromVolumeKg, wu)}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.fromKey)}</Text>
             <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.fromVolumeKg, wu)?.toLocaleString())}</Text>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={monthSpoken(monthLabel(arc.toKey), arc.toVolumeKg, wu)}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.toKey)}</Text>
             <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.toVolumeKg, wu)?.toLocaleString())}</Text>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={arc.pct == null ? 'Change, not known' : `Change, ${arc.pct}%`}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Change</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: arc.deltaKg >= 0 ? t.brand : t.ink3 }} />
@@ -557,23 +819,40 @@ export default function History() {
     </>) : null}
 
     {/* ── the breaks, kept ───────────────────────────────────────────────── */}
-    {(breaks.length > 0 || quiet > 0) ? (<>
-      <Rule />
+    {/* `quiet` is null when the charted window has no training in it at all —
+        somebody whose last session is older than MAX_MONTHS. That is the
+        longest silence this page can be about and it used to open no section
+        at all, because `?? 0` had already turned it into "trained this month".
+        `dormant` is the same sentence said off `life.lastAt`, which is the real
+        last session rather than the end of a window. */}
+    {(breaks.length > 0 || (quiet != null && quiet > 0) || quiet == null) ? (<>
       <Section>
-        <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} month${worstGap.months === 1 ? '' : 's'}` : undefined} />
+        <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} Month${worstGap.months === 1 ? '' : 's'}` : undefined} />
         {breaks.map((g) => (
           <View key={g.afterKey} style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              Nothing logged for {g.months} month{g.months === 1 ? '' : 's'} after {monthLabel(g.afterKey)} —
+              Nothing logged for {g.months} month{g.months === 1 ? '' : 's'} after {monthLabel(g.afterKey)},
               and you came back in {monthLabel(g.returnKey)}.
             </Text>
           </View>
         ))}
-        {quiet > 0 ? (
+        {quiet != null && quiet > 0 ? (
           <View style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Nothing logged since {monthLabel(cells[cells.length - 1 - quiet].key)}, {quiet} month
-              {quiet === 1 ? '' : 's'} ago. That one is still open — everything above is still yours.
+              {quiet === 1 ? '' : 's'} ago. That one is still open, and everything above is still yours.
+            </Text>
+          </View>
+        ) : quiet == null ? (
+          <View style={{ paddingVertical: sp.sm }}>
+            {/* No month count beside it: the distance is longer than the chart
+                and counting it off `cells` is what produced the zero this
+                replaces. The month is named, which is the fact, and the reader
+                can see for themselves how far back it is. */}
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              Nothing logged since {monthLabel(monthKey(life.lastAt) ?? cells[cells.length - 1].key)},
+              longer ago than this chart reaches back. That one is still open, and everything above is
+              still yours.
             </Text>
           </View>
         ) : null}
@@ -586,18 +865,17 @@ export default function History() {
     </>) : null}
 
     {/* ── personal bests over time, not just the current best ────────────── */}
-    <Rule />
     <Section>
-      <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest first' : undefined} />
+      <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest First' : undefined} />
       {records.length === 0 ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>
-          No records set yet — the first weighted set you log becomes one.
+          No records set yet. The first weighted set you log becomes one.
         </Text>
       ) : records.map((m, i) => (
         <View key={`${m.exercise}-${m.at}`}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{m.exercise}</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(m.exercise)}</Text>
             <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
               {fig(liftLabel(m.weight, wu))} × {m.reps} · {dstr(m.at)}
             </Text>
@@ -628,7 +906,6 @@ export default function History() {
     </Section>
 
     {/* ── what you have actually trained ─────────────────────────────────── */}
-    <Rule />
     <MuscleSection log={log} unit={wu} weightSeries={weightSeries} />
 
     {/* ── one movement, followed ─────────────────────────────────────────── */}
@@ -642,14 +919,151 @@ export default function History() {
         and the status passed with it says so: under a truncated read nothing
         below claims to be a first or a lifetime, only the earliest day on this
         page. The notice at the top of the screen names the month. */}
-    <Rule />
     <ExerciseHistoryPanel
       log={log}
       status={whole ? 'ready' : 'partial'}
+      /* The read above has no date bound on it at all — it asks for this
+         member's whole `workouts` table and the row cap is the only thing that
+         can shorten it. So the window is null, which is what licenses "on
+         record" and "the first day" here, and truncation is still carried by
+         the status beside it. */
+      windowDays={null}
       unit={wu}
+      /* The member's own weight over time, which is what prices a bodyweight
+         set (src/lib/bodyweightSets.ts). It was never passed, so the prop fell
+         to its `[]` default and this panel alone on this screen read a pull-up
+         as a set with no load: no est. 1RM, no volume, no trend — while the
+         lifetime tonnage, the PR timeline and the muscle board three sections
+         above all priced the very same sets from `weightSeries`. One screen,
+         one log, two answers for one movement. app/(client)/exercise.tsx
+         already passes it to the same module's <ExerciseTrail>, which is why
+         the movement's own page and this one disagreed too.
+         Unconditional, like every other consumer of it here: a failed scans
+         read leaves `weightSeries` empty, and empty is exactly the prop's
+         documented default — a bodyweight set with no load rather than an
+         invented one. The hero's note above already says when that has
+         happened. */
+      history={weightSeries}
       voice={{ they: 'You', their: 'your', have: 'have' }}
+      /* The panel already draws a read stamp; without this it said WHEN and
+         offered nothing to do about it, which is half an answer — see the prop's
+         own comment. `read` is this screen's own reload, the one pull-to-refresh
+         calls, so the button and the gesture do the same thing. */
+      onRefresh={() => { void read(); }}
     />
+
+    {/* ── three years somebody already has, in another app ───────────────
+        A lifter with history in Hevy or Strong will not retype it, and Hevy
+        reads Strong's export for exactly that reason. `csvImport.ts` is the
+        gym owner's importer and reads none of this; `watchImport.ts` brings
+        in what a watch recorded, which is a duration and a heart rate with no
+        sets in it.
+
+        Here rather than on Train, because this is the screen about how far
+        back the record goes — which is precisely the thing an import
+        changes, and the reason somebody would want one. */}
+    <ImportFromAnotherApp onImported={() => { void read(); }} />
   </>);
+}
+
+/**
+ * Bring a Strong or Hevy export in.
+ *
+ * Three states and no fourth: nothing picked, a preview to confirm, or a
+ * result. The preview is the point — it says how many sessions and sets were
+ * read AND how many rows will not be, with the reason, before anything is
+ * written. An importer that writes first and reports afterwards is one a member
+ * cannot refuse.
+ */
+function ImportFromAnotherApp({ onImported, open }: {
+  onImported: () => void;
+  /** Start unfolded — the empty state, where this may be the reason they came. */
+  open?: boolean;
+}) {
+  const t = useTheme();
+  const { logWorkouts } = useWorkoutLog();
+  const [preview, setPreview] = useState<LiftingImportPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+
+  const pick = async () => {
+    setDone(null);
+    // Not pinned to text/csv: both apps hand the file over with a different
+    // mime type depending on the OS and the share route it took, and a filter
+    // that rejects the member's own export is worse than one that accepts a
+    // file this reader then refuses by its header.
+    const got = await pickDocument({ type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'] });
+    if (got.outcome === 'unavailable') {
+      setDone('This build cannot open a file picker yet. That needs a new version of the app rather than anything you can change here.');
+      return;
+    }
+    if (got.outcome !== 'picked') return;
+    setBusy(true);
+    try {
+      const res = await fetch(got.file.uri);
+      setPreview(previewLiftingImport(await res.text()));
+    } catch {
+      setDone('That file could not be opened. Export it again from the other app and try once more.');
+    } finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    if (!preview || !preview.entries.length) return;
+    setBusy(true);
+    // Through `logWorkouts` like every other write on this screen, so an
+    // import made on a train queues and goes up later rather than failing —
+    // and reports what actually happened instead of what was sent.
+    const outcome = await logWorkouts(preview.entries);
+    setBusy(false);
+    setPreview(null);
+    // The three outcomes are three different facts and get three sentences.
+    // 'unsent' is NOT a failure — the rows are real, they are on this phone and
+    // they go up on the next launch that reaches a server — and telling somebody
+    // to try again would be how they end up importing twice.
+    const n = preview.entries.length;
+    const sessions = `${n} session${n === 1 ? '' : 's'}`;
+    setDone(outcome === 'stored'
+      ? `${sessions} added to your history.`
+      : outcome === 'unsent'
+        ? `${sessions} saved on this phone and waiting for signal. They go up on their own. Do not import the file again.`
+        : 'The server declined that, so nothing was added. Waiting will not change it. Check the file came from Strong or Hevy and try once more.');
+    if (outcome === 'stored') onImported();
+  };
+
+  return (
+    /* Folded, at the foot of a loaded history: it is used once, by somebody
+       arriving from another app, and never again — the review's rule 7, and
+       the kit's Expandable. The picked file, the preview and the result are
+       this component's own state, above the fold, so none of them is lost by
+       folding it. */
+    <Expandable title="Bring In Another App's History" note="A Strong or Hevy export" defaultOpen={open}>
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+        Export your log from Strong or Hevy and open it here. Sets come in as sets, one session per day per
+        lift. Anything the file does not say clearly is left out rather than guessed at, and you see the count
+        before anything is saved.
+      </Text>
+
+      {preview ? (
+        <>
+          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>{liftingImportNote(preview)}</Text>
+          <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
+            {preview.entries.length ? (
+              <Cta label={busy ? 'Saving…' : 'Add to My History'} onPress={() => { void confirm(); }} />
+            ) : null}
+            <Ghost label="Cancel" onPress={() => setPreview(null)} />
+          </View>
+        </>
+      ) : (
+        <View style={{ alignSelf: 'flex-start' }}>
+          <Ghost label={busy ? 'Reading…' : 'Choose a File'} onPress={() => { void pick(); }} />
+        </View>
+      )}
+
+      {done ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{done}</Text>
+      ) : null}
+    </Expandable>
+  );
 }
 
 /**
@@ -670,11 +1084,25 @@ function MuscleSection({ log, unit, weightSeries }: {
   log: WorkoutEntry[]; unit: WeightUnit; weightSeries: { t: string; v: number }[];
 }) {
   const t = useTheme();
+  const router = useRouter();
   const [days, setDays] = useState<7 | 28>(7);
   const { rows, status, signedOut } = useExerciseCatalogue();
+  // muscleBoard() groups by the log's own English names, so the list of
+  // movements under each group is English even though the catalogue rows this
+  // section reads carry a `.display`.
+  const { textOf: movement } = useMovementName();
+  /* `useNow()`, and it is IN the dependency list. `Date.now()` in the memo body
+   * with `[log, rows, days, weightSeries, status]` around it is a window whose
+   * start is fixed at the moment this section first mounted: History is reached
+   * from a tab and nothing here unmounts it, so "last 7 days" — which is what
+   * the heading says, in those words — went on meaning the seven days ending
+   * whenever the member first opened the screen. The question it exists to
+   * answer is "have I trained legs this week", and it was answering it about
+   * some other week. See src/ui/today.ts. */
+  const now = useNow();
   const board = useMemo(
     () => muscleBoard(log, rows, {
-      sinceMs: Date.now() - days * 86_400_000,
+      sinceMs: now.getTime() - days * 86_400_000,
       history: weightSeries,
       // Only a whole read may support "you have not trained this". A truncated
       // or failed catalogue is a list we have not seen the end of, and naming
@@ -682,7 +1110,7 @@ function MuscleSection({ log, unit, weightSeries }: {
       // from a query that did not finish.
       catalogueWhole: status === 'ready',
     }),
-    [log, rows, days, weightSeries, status],
+    [log, rows, days, weightSeries, status, now],
   );
   const note = unmatchedNote(board);
   const trained = board.groups.reduce((a, g) => a + g.sets, 0);
@@ -690,20 +1118,11 @@ function MuscleSection({ log, unit, weightSeries }: {
 
   return (
     <Section>
-      <SectionHead title="By Muscle Group" note={status === 'ready' ? `last ${days} days` : undefined} />
-      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-        {([7, 28] as const).map((d) => {
-          const on = days === d;
-          return (
-            <Pressable key={d} onPress={() => setDays(d)}
-              accessibilityRole="button" accessibilityState={{ selected: on }}
-              accessibilityLabel={`Last ${d} days`}
-              style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? t.brand : t.surface2 }}>
-              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <SectionHead title="By Muscle Group" note={status === 'ready' ? `Last ${days} Days` : undefined} />
+      <Segmented style={{ marginBottom: sp.md }}
+        value={String(days) as '7' | '28'}
+        onChange={(k) => setDays(Number(k) as 7 | 28)}
+        options={[{ key: '7', label: '7 Days', a11yLabel: 'Last 7 Days' }, { key: '28', label: '28 Days', a11yLabel: 'Last 28 Days' }] as const} />
 
       {/* The catalogue read has three answers and only one of them is a board.
           "Nothing trained" off a failed read is the sentence that would send
@@ -724,23 +1143,20 @@ function MuscleSection({ log, unit, weightSeries }: {
         </Text>
       ) : (<>
         {board.groups.map((g) => (
-          <View key={g.group} style={{ marginTop: sp.md }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                {g.sets} set{g.sets === 1 ? '' : 's'}
-                {g.volumeKg != null ? ` · ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
-              </Text>
-            </View>
+          <View key={g.group}>
             {/* The bar is a share of the most-trained group, so it compares
                 muscles against each other and never against a target nobody
                 set. There is no right number of sets for a back, and drawing
-                one would be this screen inventing a programme. */}
-            <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-              <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
-            </View>
+                one would be this screen inventing a program. The colour is
+                the GROUP's — the one map the library's chips use — so Chest
+                is the same blue here as on the exercise it was trained with. */}
+            <Meter label={g.group} tone={groupTone(g.group)} val={g.sets} target={most || 1}
+              note={`${num(g.sets)} set${g.sets === 1 ? '' : 's'}${g.volumeKg != null ? ` · ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}`} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-              {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+              {/* The names translate; the JOIN does not. A list stitched with a German
+                  conjunction inside an English sentence is worse than either —
+                  see namesOf() in src/lib/wearables/liveNotes.ts. */}
+              {g.exercises.slice(0, 3).map(movement).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
             </Text>
             {g.unpricedSets > 0 ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -753,7 +1169,7 @@ function MuscleSection({ log, unit, weightSeries }: {
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           {trained} set{trained === 1 ? '' : 's'} across {board.groups.length} muscle group
           {board.groups.length === 1 ? '' : 's'} in the last {days} days. Bars compare the groups
-          with each other, not with a target — there is no right number of sets and this screen
+          with each other, not with a target. There is no right number of sets and this screen
           does not pretend to know one.
         </Text>
 
@@ -769,6 +1185,24 @@ function MuscleSection({ log, unit, weightSeries }: {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text>
         ) : null}
       </>)}
+
+      {/* ── the finer grain, and the only way into it ─────────────────────
+          The board above keys on the catalogue's `muscle_group`: eleven
+          display strings, one per movement, of which 200 of the 608 rows are
+          'Full body'. It is the right answer to "have I trained legs this
+          week" and it cannot draw a body. app/(client)/muscles.tsx joins the
+          same log against `primary_muscles` and `secondary_muscles` on the
+          same rows — thirty muscle names instead of eleven groups — which is
+          what the diagram, the rankings and the Recovery Map all stand on. See
+          the header of src/lib/muscleWork.ts for why the two boards are two
+          modules and why the finer one may not be summed like this one.
+
+          Outside every branch above on purpose. The reason to go and look is
+          strongest exactly when this section has nothing to show, and a link
+          that appears only on a good week is a link nobody finds. */}
+      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+        <Ghost label="See It on the Body" onPress={() => router.push('/(client)/muscles')} />
+      </View>
     </Section>
   );
 }

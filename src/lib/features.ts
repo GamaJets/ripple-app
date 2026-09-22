@@ -1,7 +1,13 @@
 // Single source of truth for the client app's secondary features. Drives the
-// Explore/search directory. Each feature is "owned" by the primary tab it
-// belongs under (rebalanced IA):
+// Explore/search directory AND the Me hub. Each feature is "owned" by the
+// primary tab it belongs under (rebalanced IA):
 //   train · meals · progress · me
+//
+// A feature that also belongs on the Me screen carries a `meGroup`, which is
+// the second axis: `area` is which tab owns it, `meGroup` is which of the six
+// Me cards it is filed under. The two are independent on purpose — "Your body"
+// holds screens the Progress tab owns, and that is the correct answer to "where
+// do I find my measurements" from both directions.
 //
 // ── This file used to say "and the slimmed Me hub" ─────────────────────────
 //
@@ -25,12 +31,27 @@
 // eighth — on the hub, and missing from here, so it existed on the Me screen
 // and not in search. All eight are listed below.
 //
-// The hub is still its own hand-written list and this file still does not drive
-// it. That is the standing hazard: the fix for a missing screen goes HERE, and
-// a row added to the hub instead is how the two lists disagreed in the first
-// place.
+// ── The second list is gone ────────────────────────────────────────────────
+//
+// Both incidents above have the same shape and it is not "somebody forgot a
+// row". It is that there were TWO hand-written lists — this one and HUB_GROUPS
+// in app/(client)/profile.tsx — and a screen was reachable only if it appeared
+// in one of them, so the set of unreachable screens was the gap between two
+// lists nobody diffed. Eighteen screens fell into that gap across two
+// incidents.
+//
+// HUB_GROUPS has been deleted. The Me hub renders from `meGroup` below, so
+// there is one list, adding a row to it does both jobs, and the two cannot
+// disagree because there is no second thing to disagree with.
+//
+// scripts/check-client-index.mjs is the gate that keeps it that way: a screen
+// in app/(client)/ that is neither a tab, nor listed here, nor named in
+// CLIENT_UNLISTED with a reason, fails the build.
 //
 // ── What is deliberately NOT listed ────────────────────────────────────────
+//
+// Every exclusion is now written down in CLIENT_UNLISTED below, with its
+// reason, because the gate reads it. The prose here is the long form.
 //
 // Explore pushes `route` with no params. So a screen that NEEDS one cannot go in
 // this list, however useful it is — the row would open a screen with nothing in
@@ -57,6 +78,9 @@ import type { IconName } from '../ui/Icon';
 
 export type FeatureArea = 'train' | 'meals' | 'progress' | 'me';
 
+/** The six cards the Me screen is. A feature with no `meGroup` is not on Me. */
+export type MeGroupKey = 'coaching' | 'body' | 'gym' | 'money' | 'health' | 'settings';
+
 export interface Feature {
   key: string;
   label: string;
@@ -64,9 +88,82 @@ export interface Feature {
   route: string;
   icon: IconName;
   area: FeatureArea;
+  /** Which of the six Me cards this sits under. See ME_GROUPS. */
+  meGroup?: MeGroupKey;
   keywords?: string;   // extra search terms
   soloHide?: boolean;  // hidden for self-managed (solo) clients
 }
+
+/**
+ * The Me screen, in the order the cards are drawn.
+ *
+ * Forty-six destinations were a flat column of rows on one screen. These are
+ * six, each opening a list of what is in it — the same total, two taps instead
+ * of one scroll, and a name on every group so a member can guess where a thing
+ * lives before they have found it.
+ *
+ * `tone` is a kit Tone, so the spine colour is the data palette and never a
+ * hex — 'brand' is the app's green and 'neutral' is the grey.
+ */
+export const ME_GROUPS: { key: MeGroupKey; title: string; note: string; tone: 'brand' | 'neutral' | 'blue' | 'purple' | 'amber' | 'red' }[] = [
+  { key: 'coaching', title: 'Your Coaching', note: 'Your coach, your messages, your sessions and their paperwork', tone: 'brand' },
+  { key: 'body', title: 'Your Body', note: 'Measurements, records, trends and what you have earned', tone: 'blue' },
+  { key: 'gym', title: 'Your Gym', note: 'Getting in, classes, bookings, plans and what your gym posts', tone: 'purple' },
+  { key: 'money', title: 'Money', note: 'Invoices, packs, credits and what you have paid', tone: 'amber' },
+  { key: 'health', title: 'Health and Safety', note: 'Injuries, your intake and the documents you sign', tone: 'red' },
+  { key: 'settings', title: 'App Settings', note: 'Appearance, reminders, devices, your account and help', tone: 'neutral' },
+];
+
+/** Features on one Me card, in the order they are listed in CLIENT_FEATURES. */
+export function meGroupFeatures(key: MeGroupKey, list: Feature[] = CLIENT_FEATURES): Feature[] {
+  return list.filter((f) => f.meGroup === key);
+}
+
+/**
+ * The three shortcuts under the group cards.
+ *
+ * ── Why this is a fixed list and not "You open these most" ─────────────────
+ *
+ * The design asked for the member's most-opened screens. Nothing in this app
+ * records which screens a member opens: there is no screen-view table, no
+ * local counter and no analytics client — `src/lib/analyticsExport.ts` is a
+ * coach exporting business figures, not member telemetry. So there are exactly
+ * two honest options and one dishonest one.
+ *
+ * The dishonest one is to rank these by a guess and put "You open these most"
+ * over it. That sentence is a claim about the member's own history, and a
+ * member who has never opened Membership would be told, by their own app, that
+ * they open it constantly. Wrong, and wrong in a way that quietly teaches them
+ * not to believe anything else the screen says.
+ *
+ * Starting to record it is the other option, and it is not a small one: it is
+ * a decision to log what every member looks at and when. That is a privacy
+ * decision with a retention question and a disclosure question attached, and
+ * nobody has made it. It is not something to slip in under a shortcuts row.
+ *
+ * So: three fixed destinations, and the heading says what they are — the three
+ * things people come to Me for — rather than claiming to know what this member
+ * does. If screen-opens are ever recorded, on purpose and with the member
+ * told, replace this array and the heading together.
+ */
+export const ME_QUICK: string[] = ['/(client)/my-coach', '/(client)/membership', '/(client)/settings'];
+export const ME_QUICK_TITLE = 'Most People Start Here';
+
+/**
+ * Screens in app/(client)/ that are deliberately absent from CLIENT_FEATURES,
+ * and why. Read by scripts/check-client-index.mjs, which fails on any client
+ * screen that is neither a tab, nor listed above, nor named here — so an
+ * exclusion is now a sentence somebody wrote, not a gap nobody noticed.
+ *
+ * Adding a key here is how you say "on purpose". Leaving a screen out of both
+ * is the bug that cost eighteen screens twice.
+ */
+export const CLIENT_UNLISTED: Record<string, string> = {
+  exercise: 'Needs `name`. Explore pushes routes with no params, so the row would open an exercise with no title, no muscles and no clip. The Exercise Library is the way in and it IS listed.',
+  onboarding: 'The first-run intake. It WRITES goal, stats, diet and allergens straight into the client record and its last step marks onboarding complete, so a member who tapped it out of a search result would be walked through overwriting their own profile. Reached from the dashboard banner when it is actually due.',
+  explore: 'Is this list. A search result that opens the search screen is a row that does nothing. Reached from the search field at the top of Me and from every tab header.',
+  'me-group': 'The second level of the Me hub. It renders one `meGroup` of this same list. Reached from the six cards on Me, and with no group it falls back to showing all six. A search row for it would be a row whose destination is the search results themselves.',
+};
 
 export const AREA_LABEL: Record<FeatureArea, string> = {
   train: 'Training',
@@ -79,11 +176,38 @@ export const CLIENT_FEATURES: Feature[] = [
   // ── Training ──────────────────────────────────────────────
   { key: 'week', label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week', icon: 'calendar', area: 'train', keywords: 'plan schedule' },
   { key: 'library', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library', icon: 'video', area: 'train', keywords: 'videos how to form' },
+  // Directly under the Exercise Library, because the two answer the halves of
+  // one question and a member who found only the first has been handed six
+  // hundred movements with no order to do them in. `workout_templates` had been
+  // live and populated since supabase/parts/2600 and was read by nothing, so
+  // this row is the whole difference between fifteen programs existing and
+  // fifteen programs being reachable.
+  //
+  // Not `soloHide`. A member training themselves is the person these are FOR;
+  // the note is what keeps them from reading as a coach's work.
+  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow, not written by your coach', route: '/(client)/programs', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
+  // A member's own words, through the owner: "i want to train triceps and the
+  // app builds a workout for triceps". Keywords carry the muscle vocabulary a
+  // member actually types — 'tricep', 'lats', 'abs', 'quads' — because the
+  // search is how somebody with one muscle in mind finds this screen, and
+  // 'triceps' matches nothing else in this app.
+  { key: 'buildWorkout', label: 'Build a Workout', note: 'Pick a muscle or muscle group and have a session built', route: '/(client)/build-workout', icon: 'dumbbell', area: 'train', keywords: 'build workout builder generate generator make create my own target targeted muscle muscles muscle group triceps tricep biceps bicep chest back lats shoulders delts abs core obliques glutes quads quadriceps hamstrings hams calves forearms traps arm day leg day push pull bodyweight no equipment nothing home' },
   { key: 'tools', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools', icon: 'settings', area: 'train', keywords: 'calculator 1rm plates macros' },
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },
-  { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment', soloHide: true },
-  { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
+  { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment book cancel cancelling cancellation reschedule move change my session rearrange pt personal training slot', soloHide: true },
+  // Listed beside Book a Session rather than folded into it, because they are
+  // two different situations and a member in the second one has already looked
+  // at the first and found nothing. Book a Session shows the hours a coach has
+  // opened; this is for when none of them suit, or there are none at all —
+  // which, until this week, was every coach on the platform.
+  //
+  // It was reachable ONLY from three hardcoded pushes: no row here meant it was
+  // unsearchable and absent from the Me hub, so a member who had dismissed the
+  // prompt on the booking screen had no way back to it. That is the same defect
+  // item 49 is about, recurring on the newest screen in the app.
+  { key: 'request-session', label: 'Ask for a Time', note: 'Ask your coach for an hour they have not opened', route: '/(client)/request-session', icon: 'clock', area: 'train', keywords: 'request ask booking session appointment time slot propose suggest', soloHide: true },
+  { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries with safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', meGroup: 'health', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
   // Listed separately from Injuries rather than folded into it: somebody
   // holding a physio report in their hand is looking for "upload", "scan" or
   // "report", not for the manual entry screen, and the two do genuinely
@@ -93,14 +217,19 @@ export const CLIENT_FEATURES: Feature[] = [
   // to finish it, and went looking for it in search, found nothing. It sits
   // beside Injuries because they are the same kind of thing: what a coach needs
   // to know about your body, written only by you.
-  { key: 'intake', label: 'Your Intake', note: 'What your coach should know before they train you', route: '/(client)/intake', icon: 'pencil', area: 'train', keywords: 'intake form questionnaire par-q parq health history medical conditions medication surgery before we start finish it what my coach needs to know about me answers' },
-  { key: 'injury-doc', label: 'Read an Injury From a Document', note: 'Photograph a physio or scan report', route: '/(client)/injury-doc', icon: 'camera', area: 'train', keywords: 'injury document physio report scan letter mri x-ray upload photo ocr extract' },
+  { key: 'intake', label: 'Your Intake', note: 'What your coach should know before they train you', route: '/(client)/intake', icon: 'pencil', area: 'train', meGroup: 'health', keywords: 'intake form questionnaire par-q parq health history medical conditions medication surgery before we start finish it what my coach needs to know about me answers' },
+  { key: 'injury-doc', label: 'Read an Injury From a Document', note: 'Photograph a physio or scan report', route: '/(client)/injury-doc', icon: 'camera', area: 'train', meGroup: 'health', keywords: 'injury document physio report scan letter mri x-ray upload photo ocr extract' },
   { key: 'scan-machine', label: 'Scan a Machine', note: 'Point at a gym machine and log the set', route: '/(client)/scan-machine', icon: 'camera', area: 'train', keywords: 'scan machine qr barcode code gym equipment log set cardio rower bike' },
-  { key: 'reminders', label: 'Reminders', note: 'Hydration, training, weigh-in and your own nudges', route: '/(client)/reminders', icon: 'bell', area: 'train', keywords: 'reminder reminders water hydration supplement training weigh-in photo nudge alarm notification daily weekday' },
+  { key: 'reminders', label: 'Reminders', note: 'Hydration, training, weigh-in and your own nudges', route: '/(client)/reminders', icon: 'bell', area: 'train', meGroup: 'settings', keywords: 'reminder reminders water hydration supplement training weigh-in photo nudge alarm notification daily weekday' },
   // Listed separately from Reminders, because the two answer different
   // questions and somebody looking to stop a 6am class alert will search for
   // "notifications" and "quiet", not for "reminders".
-  { key: 'notification-prefs', label: 'Notifications', note: 'Which kinds reach you, and quiet hours', route: '/(client)/notification-prefs', icon: 'bell', area: 'train', keywords: 'notification notifications push quiet hours silence mute class session badge streak turn off' },
+  // "Notification Settings", not "Notifications". /(client)/notifications is
+  // a different screen — what your gym HAS sent you — and it is one card away
+  // under Your Coaching. Two rows on one hub reading "Notifications" and
+  // going to different places is the kind of thing a member taps twice before
+  // deciding the app is broken.
+  { key: 'notification-prefs', label: 'Notification Settings', note: 'Which kinds reach you, and quiet hours', route: '/(client)/notification-prefs', icon: 'bell', area: 'train', meGroup: 'settings', keywords: 'notification notifications push quiet hours silence mute class session badge streak turn off' },
 
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
@@ -110,9 +239,9 @@ export const CLIENT_FEATURES: Feature[] = [
   // the phrase a member uses; 'cgm', 'libre' and 'dexcom' are the words the
   // person who actually wears one will type.
   { key: 'glucose', label: 'Blood Sugar', note: 'CGM readings from Health, against your meals', route: '/(client)/glucose', icon: 'water', area: 'meals', keywords: 'blood sugar glucose cgm libre dexcom diabetes diabetic health continuous monitor' },
-  { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking gym schedule hiit spin yoga crossfit waitlist branch' },
-  { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
-  { key: 'access', label: 'Gym Access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
+  { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking book cancel cancelling cancellation waitlist gym schedule timetable hiit spin yoga crossfit pilates branch drop out cant make it' },
+  { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', meGroup: 'gym', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
+  { key: 'access', label: 'Gym Access', note: 'Entry barcode', route: '/(client)/access', icon: 'lock', area: 'me', meGroup: 'gym', keywords: 'access barcode entry scan gym door turnstile membership' },
   // Under Membership, which could READ a plan and offered no action of any
   // kind. This is the first screen in the client app from which a member can
   // buy anything their gym sells — and the price is always in the currency the
@@ -122,9 +251,9 @@ export const CLIENT_FEATURES: Feature[] = [
   // somebody types when they want to DO something about their plan, and until
   // this screen existed those searches landed on the one that could only
   // describe it.
-  { key: 'gym-plans', label: 'Plans & Passes', note: 'What your gym sells, and buying it', route: '/(client)/gym-plans', icon: 'grid', area: 'me', keywords: 'plan plans pass passes price prices cost how much membership join sign up buy purchase pay renew renewal upgrade downgrade change plan day pass month monthly term contract what my gym sells' },
-  { key: 'pt-sessions', label: 'Personal Training', note: 'Approve delivered PT sessions', route: '/(client)/pt-sessions', icon: 'people', area: 'me', keywords: 'personal training pt sessions approve delivered package trainer' },
-  { key: 'bookings', label: 'My Bookings', note: 'Classes & PT in one place', route: '/(client)/bookings', icon: 'check', area: 'me', keywords: 'my bookings booked classes pt sessions upcoming cancel schedule' },
+  { key: 'gym-plans', label: 'Plans & Passes', note: 'What your gym sells, and buying it', route: '/(client)/gym-plans', icon: 'target', area: 'me', meGroup: 'gym', keywords: 'plan plans pass passes price prices cost how much membership join sign up buy purchase pay renew renewal upgrade downgrade change plan day pass month monthly term contract what my gym sells' },
+  { key: 'pt-sessions', label: 'Personal Training', note: 'Approve delivered PT sessions', route: '/(client)/pt-sessions', icon: 'people', area: 'me', meGroup: 'coaching', keywords: 'personal training pt sessions approve delivered package trainer' },
+  { key: 'bookings', label: 'My Bookings', note: 'Classes & PT in one place', route: '/(client)/bookings', icon: 'check', area: 'me', meGroup: 'gym', keywords: 'my bookings booked classes pt sessions upcoming cancel schedule' },
   // Under My Bookings, because that screen lists the OCCURRENCES and this one
   // is the arrangement behind them. A member with a standing Tuesday at seven
   // watched sessions appear on their calendar from a thing they could not see,
@@ -135,11 +264,11 @@ export const CLIENT_FEATURES: Feature[] = [
   // Hidden from a self-managed member, like Book a Session and Messages: a
   // standing appointment is an agreement with a coach, and somebody with no
   // coach cannot have one.
-  { key: 'standing', label: 'Standing Appointments', note: 'Your repeating slot, and the way out of it', route: '/(client)/standing', icon: 'calendar', area: 'me', keywords: 'standing appointment appointments recurring repeat repeating every week weekly same time regular slot series ongoing arrangement stop end cancel all future stop the sessions', soloHide: true },
+  { key: 'standing', label: 'Standing Appointments', note: 'Your repeating slot, and the way out of it', route: '/(client)/standing', icon: 'calendar', area: 'me', meGroup: 'coaching', keywords: 'standing appointment appointments recurring repeat repeating every week weekly same time regular slot series ongoing arrangement stop end cancel all future stop the sessions', soloHide: true },
 
   // ── Progress & Insights ───────────────────────────────────
-  { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', keywords: 'summary' },
-  { key: 'consistency', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency', icon: 'flame', area: 'progress', keywords: 'heatmap streak' },
+  { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', meGroup: 'body', keywords: 'summary' },
+  { key: 'consistency', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency', icon: 'flame', area: 'progress', meGroup: 'body', keywords: 'heatmap streak' },
   // Beside Consistency, and they are not the same thing: that one is drawn from
   // what was LOGGED, this is the gym's own two registers — the class register a
   // coach ticks and the door log. The gym has held both since the beginning and
@@ -147,7 +276,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // through a door was readable by everyone except them. The note says
   // "recorded" rather than "attended" for the reason the screen does: an
   // unticked register is not an absence.
-  { key: 'attendance', label: 'Attendance', note: 'Every time your gym recorded you in', route: '/(client)/attendance', icon: 'check', area: 'progress', keywords: 'attendance attended attend visits visit been in went in check in checkin checked in register door entry swipe scan turned up showed up class register how often do i go my visits history' },
+  { key: 'attendance', label: 'Attendance', note: 'Every time your gym recorded you in', route: '/(client)/attendance', icon: 'check', area: 'progress', meGroup: 'gym', keywords: 'attendance attended attend visits visit been in went in check in checkin checked in register door entry swipe scan turned up showed up class register how often do i go my visits history' },
   // The label answers the question a member actually has. 'Deload' and
   // 'training load' both stay in the keywords: a coach or an experienced
   // lifter will search for those words, and a rename that makes a screen
@@ -155,14 +284,15 @@ export const CLIENT_FEATURES: Feature[] = [
   // jargon was. The label is for the person who does not know the term; the
   // keywords are for the person who does.
   { key: 'restday', label: 'When to Rest', note: 'When to rest or back off, read from your log', route: '/(client)/restday', icon: 'moon', area: 'train', keywords: 'rest day deload recovery fatigue overtraining overreaching planner training load back off easy week' },
-  { key: 'records', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records', icon: 'trophy', area: 'progress', keywords: 'pr prs best lifts' },
-  { key: 'progression', label: 'Next-session Targets', note: 'Auto progression from your lifts', route: '/(client)/progression', icon: 'trending', area: 'train', keywords: 'progression overload progressive weight increase targets next' },
-  { key: 'standards', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards', icon: 'chart', area: 'progress', keywords: 'benchmark bodyweight' },
-  { key: 'goal', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal', icon: 'target', area: 'progress', keywords: 'target projection' },
-  { key: 'measurements', label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements', icon: 'ruler', area: 'progress', keywords: 'waist chest arms tape' },
-  { key: 'achievements', label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements', icon: 'trophy', area: 'progress', keywords: 'badges milestones' },
+  { key: 'records', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records', icon: 'trophy', area: 'progress', meGroup: 'body', keywords: 'pr prs best lifts' },
+  { key: 'progression', label: 'Next-Session Targets', note: 'Auto progression from your lifts', route: '/(client)/progression', icon: 'trending', area: 'train', keywords: 'progression overload progressive weight increase targets next' },
+  { key: 'standards', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards', icon: 'chart', area: 'progress', meGroup: 'body', keywords: 'benchmark bodyweight' },
+  { key: 'goal', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal', icon: 'target', area: 'progress', meGroup: 'body', keywords: 'target projection' },
+  { key: 'measurements', label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements', icon: 'ruler', area: 'progress', meGroup: 'body', keywords: 'waist chest arms tape' },
+  { key: 'achievements', label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements', icon: 'trophy', area: 'progress', meGroup: 'body', keywords: 'badges milestones' },
+  { key: 'community', label: 'Community', note: 'Your gym’s private board: posts, likes and comments', route: '/(client)/community', icon: 'chat', area: 'me', meGroup: 'gym', keywords: 'community feed post posts social board wall group members gym friends comment like share chat forum' },
   { key: 'challenges', label: 'Challenges', note: 'Join challenges · climb the leaderboard', route: '/(client)/challenges', icon: 'trophy', area: 'progress', keywords: 'challenge leaderboard competition streak rankings compete' },
-  { key: 'cards', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards', icon: 'share', area: 'progress', keywords: 'share card' },
+  { key: 'cards', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards', icon: 'share', area: 'progress', meGroup: 'body', keywords: 'share card' },
   // Takes `before` and `after` and is listed anyway, which the rule at the top
   // of this file allows and this is the shape it allows it for: both params are
   // OPTIONAL, and with neither the screen renders its own thumbnail strip and
@@ -172,19 +302,28 @@ export const CLIENT_FEATURES: Feature[] = [
   // 'before and after' and 'transformation' are what a member types; 'compare'
   // is what the route is called and almost nobody searches for it.
   { key: 'compare', label: 'Before & After', note: 'Two progress photos side by side, with the readings from those days', route: '/(client)/compare', icon: 'camera', area: 'progress', keywords: 'compare comparison before and after before after side by side progress photos photo transformation how far have i come then and now difference change' },
-  { key: 'checkin', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin', icon: 'pencil', area: 'progress', keywords: 'weight mood energy coach', soloHide: true },
-  { key: 'activity', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity', icon: 'bell', area: 'progress', keywords: 'feed updates' },
+  { key: 'checkin', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin', icon: 'pencil', area: 'progress', meGroup: 'coaching', keywords: 'weight mood energy coach', soloHide: true },
+  { key: 'assessments', label: 'My Assessments', note: 'Tests your coach recorded, and how you have moved since', route: '/(client)/assessments', icon: 'target', area: 'progress', meGroup: 'coaching', keywords: 'assessment assessments test tests movement screen fms strength test 1rm mobility check baseline retest results improvement coach', soloHide: true },
+  { key: 'activity', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity', icon: 'bell', area: 'progress', meGroup: 'body', keywords: 'feed updates' },
   { key: 'trends', label: 'Trends', note: 'Weekly volume & estimated 1RM over time', route: '/(client)/trends', icon: 'trending', area: 'progress', keywords: 'trend trends graph chart volume tonnage 1rm estimated over time progress' },
   { key: 'body-trends', label: 'Composition Trends', note: 'Weight, body fat, muscle & InBody score over time', route: '/(client)/body-trends', icon: 'trending', area: 'progress', keywords: 'body composition trend weight body fat skeletal muscle inbody score graph over time' },
   // The long view, and the only screen in the app that shows more than ten
   // weeks. 'year' and 'months' are in the keywords because that is what the
   // question sounds like when a member asks it.
   { key: 'history', label: 'Your History', note: 'Months and years, not weeks', route: '/(client)/history', icon: 'clock', area: 'progress', keywords: 'history long view year years months all time how far have i come past archive' },
+  // The finer half of History's own muscle-group board: the same log joined
+  // against the catalogue's `primary_muscles` / `secondary_muscles` rather than
+  // its eleven display groups, so it can light a body. 'heatmap', 'recovery'
+  // and 'rest' are in the keywords because that is what the question sounds
+  // like — "which muscles have I not trained", "is my chest recovered" — even
+  // though the screen itself will not use the third of those words about a
+  // body. See src/lib/muscleRecovery.ts.
+  { key: 'muscles', label: 'Your Muscles', note: 'The body, what you worked, and how long it has rested', route: '/(client)/muscles', icon: 'dumbbell', area: 'progress', keywords: 'muscle muscles heatmap heat map body diagram anatomy recovery map rest rested days since last trained which muscles have i not trained neglected chest back legs shoulders arms most trained least trained ranking' },
 
   // ── Coaching & Account ────────────────────────────────────
-  { key: 'trainers', label: 'Find a Trainer', note: 'Browse coaches · online or in-person', route: '/(client)/trainers', icon: 'people', area: 'me', keywords: 'coach hire book' },
-  { key: 'coach', label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach', icon: 'chat', area: 'me', keywords: 'ai assistant chat' },
-  { key: 'messages', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages', icon: 'message', area: 'me', keywords: 'chat dm coach', soloHide: true },
+  { key: 'trainers', label: 'Find a Trainer', note: 'Browse coaches · online or in-person', route: '/(client)/trainers', icon: 'people', area: 'me', meGroup: 'coaching', keywords: 'coach hire book' },
+  { key: 'coach', label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach', icon: 'chat', area: 'me', meGroup: 'coaching', keywords: 'ai assistant chat' },
+  { key: 'messages', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages', icon: 'message', area: 'me', meGroup: 'coaching', keywords: 'chat dm coach', soloHide: true },
   // The note used to read "Post progress to Instagram / TikTok". It never did.
   // social.tsx has one `Share.share()` call and nothing else — the NETWORKS
   // list whose Connect button flipped a local boolean and relabelled itself
@@ -196,50 +335,61 @@ export const CLIENT_FEATURES: Feature[] = [
   // somebody types when they want to put a result on Instagram, and this screen
   // is what gets them there, via the share sheet Instagram appears in. Searching
   // for a word must not be the same thing as being promised a feature.
-  { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share social post story sheet' },
-  { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
+  { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', meGroup: 'settings', keywords: 'instagram tiktok share social post story sheet' },
+  { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', meGroup: 'money', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
   // Listed separately from Memberships & Packs, because the two answer
   // different questions: that screen says how many are left, this one says
   // which hours used the rest and which booked hours are going to use these.
-  { key: 'session-credits', label: 'Session Credits', note: 'Which sessions used a credit, and when', route: '/(client)/session-credits', icon: 'calendar', area: 'me', keywords: 'credit credits session sessions pack pass drawn used left remaining balance ledger history gym pass pt entitlement covered' },
+  { key: 'session-credits', label: 'Session Credits', note: 'Which sessions used a credit, and when', route: '/(client)/session-credits', icon: 'calendar', area: 'me', meGroup: 'money', keywords: 'credit credits session sessions pack pass drawn used left remaining balance ledger history gym pass pt entitlement covered' },
   // The gym's side of the money, and the one record a member wants when a
   // charge looks wrong. `gym_payments` says of itself that a row means somebody
   // took money — and until now the only people who could read it were the gym's
   // owners. Listed separately from Memberships & Packs because that screen is
   // what a member HAS and this is what they were CHARGED, and somebody
   // disputing a payment is not looking for a list of credits.
-  { key: 'receipts', label: 'Payments', note: 'What your gym has recorded taking from you', route: '/(client)/receipts', icon: 'grid', area: 'me', keywords: 'payment payments paid charge charged charges receipt receipts invoice bill money taken took my money how much have i paid history statement direct debit card refund wrong charge double charged dispute' },
-  { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'grid', area: 'me', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
+  // Directly under Payments, and the reason it is here at all is the defect
+  // this whole file is about, arriving a third time. app/(client)/invoices.tsx
+  // was named by exactly two things: a `Ghost` button at the bottom of
+  // receipts.tsx, and a push notification. So a member who had not been sent a
+  // push, and had not scrolled to the end of Payments, had no way to see what
+  // their gym had BILLED them — only what it had recorded taking. It passed
+  // check:reachable the whole time, because "named somewhere" is the floor that
+  // gate holds and not the one a member stands on.
+  { key: 'invoices', label: 'Invoices', note: 'What your gym has billed you, paid and unpaid', route: '/(client)/invoices', icon: 'info', area: 'me', meGroup: 'money', keywords: 'invoice invoices bill bills billed billing owe owed outstanding unpaid due statement what do i owe charge' },
+  { key: 'receipts', label: 'Payments', note: 'What your gym has recorded taking from you', route: '/(client)/receipts', icon: 'clock', area: 'me', meGroup: 'money', keywords: 'payment payments paid charge charged charges receipt receipts invoice bill money taken took my money how much have i paid history statement direct debit card refund wrong charge double charged dispute' },
+  { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'sparkle', area: 'me', meGroup: 'gym', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
   // The coach you HAVE, which Explore did not list at all while listing that
   // coach's DOCUMENTS one line down — so searching "coach" found the paperwork
   // and not the person. The Me hub has had the row since part 130 made the
   // screen possible; this is the other way in, and the keywords are what
   // somebody types when they are looking for a name, a qualification or a way
   // to reach them rather than for a form.
-  { key: 'my-coach', label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach', icon: 'people', area: 'me', keywords: 'coach trainer pt my coach personal trainer who qualification qualifications insurance credentials review message contact reach bio' },
+  { key: 'my-coach', label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach', icon: 'people', area: 'me', meGroup: 'coaching', keywords: 'coach trainer pt my coach personal trainer who qualification qualifications insurance credentials review message contact reach bio' },
   // Your coach's own paperwork, not Repple's. The release signed on joining is
   // a different document belonging to a different party and is not on this
   // screen — see the header of coach-documents.tsx. 'waiver', 'par-q' and
   // 'consent' are in the keywords because those are the words printed on the
   // thing the member is holding when they come looking for it.
-  { key: 'coach-documents', label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents', icon: 'pencil', area: 'me', keywords: 'document documents waiver par-q parq form consent house rules paperwork sign accept read coach studio' },
+  { key: 'coach-documents', label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents', icon: 'pencil', area: 'me', meGroup: 'coaching', keywords: 'document documents waiver par-q parq form consent house rules paperwork sign accept read coach studio' },
+  { key: 'marketplace', label: 'Marketplace', note: 'Programs your gym’s coaches sell, and the ones you bought', route: '/(client)/marketplace', icon: 'grid', area: 'me', meGroup: 'coaching', keywords: 'marketplace shop store buy program programs plan purchase coach sell' },
+  { key: 'resources', label: 'Resources', note: "Your coach's documents, the exercise library and every screen", route: '/(client)/resources', icon: 'grid', area: 'me', meGroup: 'coaching', keywords: 'resources resource library documents videos guides reading material hub' },
   // The bell in the dashboard header still opens the message thread, so this
   // row and the hub row are the only ways in. Listed as an inbox rather than as
   // "notifications", which in this app is also the name of a settings toggle —
   // 'push', 'alerts' and 'inbox' all land here.
-  { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything your gym has sent you', route: '/(client)/notifications', icon: 'bell', area: 'me', keywords: 'notification notifications inbox alerts push updates announcements bookings cancellations unread bell' },
+  { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything your gym has sent you', route: '/(client)/notifications', icon: 'bell', area: 'me', meGroup: 'coaching', keywords: 'notification notifications inbox alerts push updates announcements bookings cancellations unread bell' },
   // Directly under Notifications, and they are different things: that is the
   // inbox addressed to this member, this is what the gym POSTED to everybody.
   // The dashboard showed the latest announcement and nothing else, so the day
   // after "we are closed Monday" was pushed out of that one slot it was
   // readable nowhere in the product — including by the members who never opened
   // the app on the day it was up.
-  { key: 'notices', label: 'Notices', note: 'Everything your gym has posted, the older ones too', route: '/(client)/notices', icon: 'message', area: 'me', keywords: 'notice notices announcement announcements posted post news bulletin board update updates closed closure opening hours bank holiday what did they say earlier previous older missed it' },
-  { key: 'referral', label: 'Invite Friends', note: 'Share the app with a friend', route: '/(client)/referral', icon: 'share', area: 'me', keywords: 'refer referral invite friend share code' },
-  { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', keywords: 'apple watch wearable heart rate' },
-  { key: 'music', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music', icon: 'play', area: 'me', keywords: 'spotify playlist songs' },
-  { key: 'appearance', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance', icon: 'palette', area: 'me', keywords: 'theme dark light colour' },
-  { key: 'settings', label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings', icon: 'settings', area: 'me', keywords: 'notifications units legal about sign out signout log out logout account' },
+  { key: 'notices', label: 'Notices', note: 'Everything your gym has posted, the older ones too', route: '/(client)/notices', icon: 'message', area: 'me', meGroup: 'gym', keywords: 'notice notices announcement announcements posted post news bulletin board update updates closed closure opening hours bank holiday what did they say earlier previous older missed it' },
+  { key: 'referral', label: 'Invite Friends', note: 'Share the app with a friend', route: '/(client)/referral', icon: 'share', area: 'me', meGroup: 'gym', keywords: 'refer referral invite friend share code' },
+  { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', meGroup: 'settings', keywords: 'apple watch wearable heart rate whoop oura ring garmin fitbit strap band google fit health connect healthkit apple health connect my watch sync device' },
+  { key: 'music', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music', icon: 'play', area: 'me', meGroup: 'settings', keywords: 'spotify playlist songs' },
+  { key: 'appearance', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance', icon: 'palette', area: 'me', meGroup: 'settings', keywords: 'theme dark light colour' },
+  { key: 'settings', label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings', icon: 'settings', area: 'me', meGroup: 'settings', keywords: 'notifications units legal about sign out signout log out logout account' },
   // Directly under Settings, which offered sign-out and account deletion and
   // nothing in between. Both of these have been supported by the backend from
   // the start and neither was reachable: a member who wanted to change their
@@ -250,8 +400,13 @@ export const CLIENT_FEATURES: Feature[] = [
   //
   // 'hacked', 'someone else' and 'security' are in the keywords because that is
   // what somebody types at the moment this matters most.
-  { key: 'account', label: 'Password & Email', note: 'Change the password or the address you sign in with', route: '/(client)/account', icon: 'lock', area: 'me', keywords: 'password change password new password reset email change email email address sign in signin login credentials security account hacked someone else knows my password forgot old email new address' },
-  { key: 'feedback', label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback', icon: 'message', area: 'me', keywords: 'feedback bug idea report suggest' },
+  // The gym's own paperwork, which was the ONE non-tab client screen absent
+  // from this registry. Its only way in was a single row on the Me hub, so the
+  // screen a member signs their gym waiver on was one deletion from gone, and
+  // searching "waiver" found nothing. `WaiverGate` does not link to it either.
+  { key: 'agreements', label: "Your Gym's Paperwork", note: 'Waivers and consents your gym asks you to sign', route: '/(client)/agreements', icon: 'check', area: 'me', meGroup: 'health', keywords: 'waiver waivers gym waiver paperwork agreement agreements consent consents sign signature terms liability release par-q parq health questionnaire membership terms' },
+  { key: 'account', label: 'Password & Email', note: 'Change the password or the address you sign in with', route: '/(client)/account', icon: 'lock', area: 'me', meGroup: 'settings', keywords: 'password change password new password reset email change email email address sign in signin login credentials security account hacked someone else knows my password forgot old email new address' },
+  { key: 'feedback', label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback', icon: 'message', area: 'me', meGroup: 'settings', keywords: 'feedback bug idea report suggest' },
   // Reported as "Repple Coach has a Getting Started, however Client doesn't."
   // It is listed here and NOT excluded the way /(client)/onboarding is, because
   // the two are different things: onboarding is a wizard that overwrites goal,
@@ -259,7 +414,12 @@ export const CLIENT_FEATURES: Feature[] = [
   // curiosity, and this is a read-only list of what has and has not been done.
   // Opening it costs nothing. 'tutorial', 'how do i' and 'help' are all here
   // because they are what somebody types when they are lost.
-  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(client)/getting-started', icon: 'sparkle', area: 'me', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused' },
+  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(client)/getting-started', icon: 'sparkle', area: 'me', meGroup: 'settings', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused' },
+  // Not under app/(client)/ — app/guide.tsx is shared with the coach and owner
+  // apps. It was a hardcoded row on the Me screen, which is the same hazard as
+  // every entry above: the hub was the only thing that named it, so it was
+  // unsearchable. Listed here it is both.
+  { key: 'guide', label: 'User Guide', note: 'What each tab does, any time', route: '/guide', icon: 'search', area: 'me', meGroup: 'settings', keywords: 'guide user guide help manual how does this work what does this tab do instructions docs documentation tutorial explain' },
 ];
 
 export function searchFeatures(list: Feature[], q: string): Feature[] {
@@ -290,9 +450,18 @@ export interface NavItem {
 // thirty-two: Explore pushes `route` with no params, so a screen that needs one
 // is not listed. Deliberately absent for that reason —
 //
-//   · client, client-body, client-week, client-photos, chat  — all need
-//     `clientId`; they are reached by tapping the person on the roster, which is
-//     the only place the id exists.
+//   · client, chat  — both need `clientId`; they are reached by tapping the
+//     person on the roster, which is the only place the id exists.
+//
+// client-body, client-week, client-photos, client-training and client-intake
+// were on that list and are not any more, because the reason they were on it
+// stopped being true. Every one of them acquired a roster picker — each reads
+// `clientId` if it is given one and falls back to its own list if it is not —
+// and none was added here, so a coach searching "body fat", "photos", "their
+// week", "what have they logged" or "intake" found nothing at all while five
+// working screens sat behind those exact words. That is the same failure the
+// paragraph above this list describes about log-session, arriving five more
+// times.
 //   · exercise            — needs `name`; the Exercise Library is the way in.
 //   · explore             — is this list. A search result that opens the search
 //     screen is a row that does nothing.
@@ -348,11 +517,28 @@ export const TRAINER_NAV: NavItem[] = [
   // beats landing them nowhere.
   { key: 'my-register', label: 'Your Register', note: 'What the registers you took actually say', route: '/(trainer)/my-register', icon: 'check', keywords: 'register attendance check in checkin checked in turned up showed up show rate fill rate headcount how many came walk in walkins waitlist my classes classes i taught taught teaching pay payroll per attendee per head paid right am i owed numbers from my check ins' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
-  { key: 'library', label: 'Exercise Library', note: 'What you can programme, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'library', label: 'Exercise Library', note: 'What you can program, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'marketplace', label: 'Marketplace', note: 'Sell your programs to members of your gym', route: '/(trainer)/marketplace', icon: 'grid', keywords: 'marketplace shop store sell program programs template listing price sales' },
+  { key: 'resources', label: 'Resources', note: 'Templates, videos, forms and the exercise library in one place', route: '/(trainer)/resources', icon: 'grid', keywords: 'resources resource hub library templates videos documents forms guides material' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
   { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
   { key: 'client-report', label: 'Client Report', note: 'The handover document at the end of a block', route: '/(trainer)/client-report', icon: 'pencil', keywords: 'report handover document summary end of block twelve week pdf share export client progress what we did' },
+  // ── the five per-client screens that had no way in but a client's page ──
+  //
+  // Each takes an optional clientId and falls back to its own roster picker, so
+  // a bare push from search opens something usable — the same test
+  // client-nutrition and client-report already passed. Keyworded with what a
+  // coach TYPES rather than what the screen is called: "body fat" and "inbody"
+  // find the scans screen, "photos" and "progress pics" find the inbox, "what
+  // have they logged" finds their training, "par-q" and "readiness" find the
+  // intake.
+  { key: 'client-body', label: "A Client's Body", note: 'Their scans, their measurements and which way they are going', route: '/(trainer)/client-body', icon: 'scale', keywords: 'body composition scan scans inbody dexa body fat bodyfat percent muscle mass skeletal lean weight kg lbs measurements tape waist trend gaining losing progress' },
+  { key: 'client-assessments', label: 'Assessments', note: 'Record movement, strength, mobility and your own tests, and compare to last time', route: '/(trainer)/assessments', icon: 'target', keywords: 'assessment assessments test tests testing movement screen fms strength test 1rm one rep max mobility check baseline retest results compare progress' },
+  { key: 'client-training', label: 'What They Have Logged', note: 'Their sessions against the program you wrote', route: '/(trainer)/client-training', icon: 'dumbbell', keywords: 'training log logged workouts sessions what have they done did they train volume sets reps weights lifted plan vs actual adherence stuck to the plan off plan swapped exercises' },
+  { key: 'client-week', label: 'Their Week', note: 'The days they have marked, against what you programmed', route: '/(trainer)/client-week', icon: 'calendar', keywords: 'their week planned days rest day deload travelling holiday marked ahead clash conflict schedule what are they doing this week day plan' },
+  { key: 'client-photos', label: 'Photos They Sent', note: 'Progress photographs a client shared with you', route: '/(trainer)/client-photos', icon: 'camera', keywords: 'photos photographs progress pics pictures shared sent me front back side comparison before after gallery images' },
+  { key: 'client-intake', label: 'Their Intake', note: 'What they told you before you trained them', route: '/(trainer)/client-intake', icon: 'pencil', keywords: 'intake onboarding form questionnaire par q parq readiness health screening history injuries surgery medication availability when can they train emergency contact next of kin what did they tell me' },
   // Beside Quiet Clients on purpose: both are read before ringing somebody, and
   // this is the one that says whether there is anything to ring about. The
   // member has been able to see this record since part 136 and the coach could
@@ -364,6 +550,22 @@ export const TRAINER_NAV: NavItem[] = [
   // screen exists to tell them that the record cannot answer that question —
   // landing them on the honest answer beats landing them on nothing.
   { key: 'client-attendance', label: 'Their Attendance', note: 'Every time your gym recorded a client coming in', route: '/(trainer)/client-attendance', icon: 'check', keywords: 'attendance attended visits been in came in turned up showed up register door entry swipe scan class register how often do they come missed no show absent stopped coming retention drop off client history' },
+  // Directly under Their Attendance, because the two are read in the same
+  // moment and about the same decision — whether to keep holding a slot for
+  // somebody. That one is the record of them turning up and this is the record
+  // of the hours that were booked and then were not.
+  //
+  // 'cancellation rate' and 'how often do they cancel' are here deliberately,
+  // and they are the searches this screen ANSWERS BY REFUSING: there is no
+  // denominator to compute a rate from, because cancelling recycles the hour,
+  // and the screen says so above the figures rather than leaving a coach to
+  // conclude the app simply has not got round to it. Landing them on the honest
+  // answer beats landing them on nothing — the same argument the row above
+  // makes about 'missed' and 'no show'.
+  //
+  // Takes an optional clientId and falls back to its own roster picker, so a
+  // bare push from search opens something usable.
+  { key: 'client-cancellations', label: 'Sessions They Cancelled', note: 'Hours a client had with you that were cancelled, and how much notice', route: '/(trainer)/client-cancellations', icon: 'calendar', keywords: 'cancel cancelled cancellation cancellations called off pulled out bailed dropped out late cancel short notice no notice how often do they cancel cancellation rate messing me about rearranged again standing appointment paused holiday released slot freed up' },
   // The screen that does something with the drift figure. 'quiet', 'ghosting'
   // and 'churn' are the words a coach uses for this; 'drift' is the word the
   // code uses, and both have to find it.
@@ -424,7 +626,7 @@ export const TRAINER_NAV: NavItem[] = [
   // "graphic". Nobody searches "brand"; they search "my logo" or "my colour".
   { key: 'share-kit', label: 'Share Kit', note: 'Your real numbers as a card you can post', route: '/(trainer)/share-kit', icon: 'share', keywords: 'share kit card graphic poster image story post instagram facebook social marketing promo advert testimonial results numbers screenshot' },
   { key: 'brand', label: 'Your Branding', note: 'The name and colour your clients see around your coaching', route: '/(trainer)/brand', icon: 'sparkle', keywords: 'brand branding logo colour color accent trading name business name my brand white label look identity theme' },
-  { key: 'group', label: 'Program Groups', note: 'One programme, assigned to a whole group at once', route: '/(trainer)/group', icon: 'people', keywords: 'group groups bootcamp cohort squad team program programme assign many bulk class block eight week challenge' },
+  { key: 'group', label: 'Program Groups', note: 'One program, assigned to a whole group at once', route: '/(trainer)/group', icon: 'people', keywords: 'group groups bootcamp cohort squad team program program assign many bulk class block eight week challenge' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   // Under Analytics, because it answers the same figures in sentences. Reached
   // from one card at the bottom of that screen and from nowhere else, while the
@@ -453,6 +655,19 @@ export const TRAINER_NAV: NavItem[] = [
   // 'discount' because they are what a coach searches, and the screen's whole
   // job is to say that this app has not decided any of them.
   { key: 'referrals', label: 'Who Brings You Clients', note: 'The clients bringing you other clients, and how far they got', route: '/(trainer)/referrals', icon: 'people', keywords: 'referral referrals referred refer a friend word of mouth recommend recommendation brought in introduced invite code who is sending me clients reward credit discount thank you loyalty advocate' },
+  // The answer to "where is my code?", which had none. The six characters lived
+  // on a modal sheet on the Clients tab titled Invite a Client, and nothing on
+  // any screen said the sheet held them; /(trainer)/money and /(trainer)/ad-spend
+  // show the same codes answering a different question — what each one returned.
+  //
+  // Keyworded with what a coach says out loud rather than what the field is
+  // called. "my code", "coach code", "trainer code", "join code" and "invite
+  // code" are the same thing to five different people; "how do clients find me"
+  // and "sign up with me" are what somebody types who does not know a code
+  // exists at all. 'qr' is deliberately here and the screen has none — landing
+  // that search on the screen that offers the link and the share sheet beats
+  // landing it nowhere.
+  { key: 'join-code', label: 'Your Code', note: 'The code and link you hand somebody standing in front of you', route: '/(trainer)/join-code', icon: 'share', keywords: 'code my code coach code coaching code trainer code join code invite code join link invite link share code give out hand out sign up with me add me how do clients find me how do they join onboard new client six characters qr' },
   // Searched for with the words a coach actually types when they are worried
   // about money — "how much did I make", "profit", "income" — none of which
   // matched anything before this screen existed. It carries 'profit' and 'net'
@@ -477,6 +692,13 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'my-training', label: 'My Training', note: 'Your own workout log', route: '/(trainer)/my-training', icon: 'train', keywords: 'my training own workout log lift my workouts personal record myself' },
   { key: 'my-nutrition', label: 'My Nutrition', note: 'Your own food log, calories & macros', route: '/(trainer)/my-nutrition', icon: 'meals', keywords: 'my nutrition own food log calories macros diet eating myself' },
   { key: 'my-progress', label: 'My Progress', note: 'Your own body stats, weight trend & scans', route: '/(trainer)/my-progress', icon: 'trending', keywords: 'my progress own body weight scan inbody stats trend myself' },
+  // The fourth of the coach's own screens, and the one that feeds the other
+  // three. Until it existed the only way a coach could connect anything was
+  // the single Apple Health button inside My Nutrition, so a coach wearing a
+  // WHOOP searched 'whoop', found nothing, and had no reason to think the app
+  // could read it — while the client build had read WHOOP for months. The
+  // keywords carry the brand names for exactly that search.
+  { key: 'devices', label: 'Watch & Devices', note: 'Connect your own watch, ring or strap', route: '/(trainer)/devices', icon: 'clock', keywords: 'watch devices wearable apple watch healthkit health whoop oura ring garmin fitbit google fit health connect heart rate hrv resting steps calories strap band connect my watch myself' },
   { key: 'feedback', label: 'Send Feedback', note: 'Report a bug or share an idea', route: '/(trainer)/feedback', icon: 'message', keywords: 'feedback bug idea report suggest' },
   // 'how i coach', 'online', 'in person' and 'hybrid' are here because Profile
   // is where the answer is CHANGED (part 410), and a coach who wants their
@@ -485,6 +707,24 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'profile', label: 'Profile', note: 'Your bio, offers, rate & how you coach', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile how i coach how you coach online in person inperson hybrid remote delivery mode both change how i work set up' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
+  // ── the screen a locked-out coach needs, and could not search for ──────
+  //
+  // `app/(trainer)/account.tsx` had ONE inbound link in the whole app —
+  // Profile → Settings → "Change Password or Email", three levels down — and no
+  // row here at all, so searching Explore for "password", "change email",
+  // "locked out" or "account hacked" returned nothing to a coach.
+  //
+  // Its own call site says what it is for: a coach previously "had to sign out
+  // and trigger a reset email for a password they had not forgotten — and had
+  // no route at all to a new address, which is the only way back in if they
+  // lose it." The person in that situation is exactly the person who searches,
+  // and `settings` above carries only the word "account".
+  //
+  // The client app has had this entry since the beginning (see 'account' in
+  // CLIENT_FEATURES); the coach's was simply never written. scripts/
+  // check-reachable.mjs names the shape in its own error text: a screen in the
+  // hub but not in search is half-reachable; do both.
+  { key: 'account', label: 'Password & Email', note: 'Change the password or the address you sign in with', route: '/(trainer)/account', icon: 'lock', keywords: 'password change password new password reset email change email email address sign in signin login credentials security two factor 2fa locked out cannot sign in account hacked someone else knows my password forgot old email new address' },
   // The coach's own Getting Started, and it is listed for the same reason the
   // client's is: the dashboard row disappears the moment the list is finished,
   // and a screen reachable only from a row that removes itself is a screen that
@@ -505,11 +745,12 @@ export const TRAINER_NAV: NavItem[] = [
   // conversation with somebody, which is the wrong moment to be editing a
   // template — see the header of templates-messages.tsx.
   //
-  // Not keyworded 'template' alone: that word already belongs to the PROGRAMME
+  // Not keyworded 'template' alone: that word already belongs to the PROGRAM
   // library two rows from the top, and a coach who types it wants whichever of
   // the two they were thinking of. Both rows carry it and their notes are what
   // separate them.
   { key: 'templates-messages', label: 'Saved Messages', note: 'The replies you write once and send again', route: '/(trainer)/templates-messages', icon: 'message', keywords: 'saved messages message template templates canned reply quick reply snippet shortcut boilerplate welcome message check in message write once reuse again standard wording' },
+  { key: 'community', label: 'Coach Community', note: 'Members and Coaches boards, and reports to moderate', route: '/(trainer)/community', icon: 'chat', keywords: 'community feed post posts board discussion forum members coaches staff moderate moderation report reports hide block social' },
 ];
 
 export const OWNER_NAV: NavItem[] = [
@@ -545,6 +786,7 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'feedback', label: 'Feedback Inbox', note: 'What testers are saying', route: '/(owner)/feedback', icon: 'message', keywords: 'feedback testers bugs ideas reviews' },
   { key: 'settings', label: 'Settings', note: 'Who you are signed in as, your data, and deleting your account', route: '/(owner)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export data delete account' },
   { key: 'notifications', label: 'Notifications', note: 'What the gym has been told, in one list', route: '/(owner)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
+  { key: 'community', label: 'Community', note: 'Reports to moderate, and your members’ board', route: '/(owner)/community', icon: 'chat', keywords: 'community feed post posts board forum members moderate moderation report reports hide block social ugc' },
 ];
 
 export function searchNav(list: NavItem[], q: string): NavItem[] {

@@ -13,7 +13,17 @@ import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
+// The same repair as the block at the top of src/lib/connect.ts, over the four
+// auth reads in this file. `supabase.auth.getUser()` resolves rather than
+// rejects when the auth server is down, so the discarded `error` was the only
+// thing that could have told an outage from a sign-out — and on this file that
+// is the difference between "we could not check" and telling somebody their
+// recurring payment to their coach does not exist. See src/lib/authReadFate.ts
+// for the library source and src/lib/authedUid.ts for the classification.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
 import { capLimit, capped } from './rowCap';
+import { readByIds } from './idLookup';
 import { minorMoney } from './coachMoney';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -97,7 +107,38 @@ export function pkgPriceLine(minorUnits: number | null | undefined, currency: st
   return i ? `${m} / ${i}` : m;
 }
 
-const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
+/**
+ * Open a Stripe-issued URL, and SAY whether it opened.
+ *
+ * It used to swallow the failure — an empty catch and no return value — so
+ * every caller here could only ever learn that a URL had come back,
+ * never that a browser had taken it. `Linking.openURL` rejects when nothing on
+ * the device can handle the URL, and on some platforms it resolves `false`
+ * instead of throwing; both are the same failure and both come back false.
+ *
+ * This is `openUrl` in src/lib/connect.ts, verbatim, for the reason that file
+ * gives at length: the member is left staring at a screen that says their
+ * purchase will appear once Stripe confirms it, waiting on a checkout that was
+ * never reached. The one-off arm has answered honestly since; the subscription
+ * arm in this file did not, and app/(client)/packages.tsx says so in a comment
+ * naming this module.
+ */
+const openUrl = async (url?: string | null): Promise<boolean> => {
+  if (!url) return false;
+  try {
+    const r = await Linking.openURL(url);
+    return r !== false;
+  } catch { return false; }
+};
+
+/** What a member is told when the URL was issued and nothing opened. Their
+ *  money has not moved: the checkout was never reached. */
+const BROWSER_DID_NOT_OPEN = 'Your browser did not open, so nothing has been started and nothing has been charged. Try again in a moment.';
+
+/** The same, for the billing portal — where there was nothing to charge in the
+ *  first place, so saying "nothing has been charged" would answer a question
+ *  nobody asked and imply one had been in prospect. */
+const PORTAL_DID_NOT_OPEN = 'Your browser did not open, so your billing page could not be shown. Nothing about your subscription has changed. Try again in a moment.';
 
 /**
  * The currency the signed-in user's gym charges in — ISO 4217, uppercase, from
@@ -112,23 +153,46 @@ const openUrl = async (url?: string | null) => { if (url) { try { await Linking.
  * `error` and a null currency are different again — one is "your gym has not
  * told us", the other is "we could not find out" — because the first is fixed
  * by an owner in settings and the second is fixed by trying again.
+ *
+ * ── This function answers about a GYM, and only about a gym ───────────────
+ *
+ * It is not the whole answer any more and it is deliberately unchanged.
+ * `{ currency: null, error: null }` here means "this account is attached to no
+ * gym", which used to be the end of the road: there was no other place a
+ * currency could live, so every screen correctly withheld every figure and told
+ * the coach to go and find a gym owner who did not exist.
+ *
+ * Part 940 gives a coach with no gym a currency of their own on
+ * `trainers.currency`, and `fetchMyCurrency()` in src/lib/myCurrency.ts is the
+ * read that puts the two in order — the gym first, always, and the coach's own
+ * ONLY when there is provably no gym. A screen that needs to know what this
+ * coach is priced in should call that one.
+ *
+ * This is left as it is rather than widened because widening it would change
+ * what five existing callers are being told, silently, in the direction of
+ * "there is always an answer". `assistant.tsx`, `analytics.tsx` and
+ * `src/ui/coachSetup.ts` still ask this question and still get the gym's
+ * answer; moving them is a separate, visible edit.
  */
-export async function myTenantCurrency(): Promise<{ currency: string | null; error: string | null }> {
-  try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { currency: null, error: 'Not signed in.' };
-    const { data: prof, error: profErr } = await supabase.from('profiles').select('tenant_id').eq('id', uid).maybeSingle();
-    if (profErr) { reportError('subscriptions.myTenantCurrency.profile', profErr); return { currency: null, error: profErr.message }; }
-    const tid = (prof as { tenant_id: string | null } | null)?.tenant_id ?? null;
-    // No gym is not a failure, and it is not a currency either.
-    if (!tid) return { currency: null, error: null };
-    const { data, error } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
-    if (error) { reportError('subscriptions.myTenantCurrency.tenant', error); return { currency: null, error: error.message }; }
-    const c = (data as { currency: string | null } | null)?.currency ?? null;
-    return { currency: c ? c.toUpperCase() : null, error: null };
-  } catch (e) { return { currency: null, error: (e as Error).message }; }
-}
+// ── myTenantCurrency() lived here, and is gone ────────────────────────────
+//
+// It answered "what does this coach's GYM charge in", and for as long as that
+// was the only place a currency could live it was the whole answer. Part 940
+// gave a coach with no gym a currency of their own, and `resolveMyCurrency` in
+// src/lib/currencySource.ts is now the read that puts the two in order — the
+// gym first, always, and the coach's own ONLY when there is provably no gym.
+//
+// Its own doc comment used to end by naming `assistant.tsx`, `analytics.tsx`
+// and `src/ui/coachSetup.ts` as callers it had deliberately not moved. All
+// three have moved, and it was left with no caller outside its own test — which
+// `check:dead-exports` then failed on, correctly.
+//
+// Deleted rather than marked `unused-ok:`, because there was no reason to keep
+// it that survived being written down: an unwired function whose every remaining
+// mention is a comment explaining what replaced it is not a spare part, it is a
+// second answer waiting for somebody to call it. The name is left here so the
+// comments in currencySource.ts and currencyGap.ts that still cite it by name
+// have something to point at.
 
 /**
  * The coach the signed-in client is linked to, so they can be shown what that
@@ -141,9 +205,15 @@ export async function myTenantCurrency(): Promise<{ currency: string | null; err
  */
 export async function myCoachId(): Promise<{ coachId: string | null; error: string | null }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { coachId: null, error: 'Not signed in.' };
+    const who = await signedInUid('subscriptions.myCoachId');
+    // The one caller renders the same flag for either fate, so this string is
+    // not what the member reads today — but it is what the NEXT caller reads,
+    // and 'Not signed in.' was a claim about a person that an outage had said
+    // nothing about.
+    //
+    // Guarded on `fate`, not on `!uid` — see the note in src/lib/signedInUid.ts.
+    if (who.fate !== null) return { coachId: null, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const { data, error } = await supabase.from('clients').select('trainer_id').eq('id', uid).maybeSingle();
     if (error) { reportError('subscriptions.myCoachId', error); return { coachId: null, error: error.message }; }
     return { coachId: (data as { trainer_id: string | null } | null)?.trainer_id ?? null, error: null };
@@ -160,8 +230,7 @@ export async function myCoachId(): Promise<{ coachId: string | null; error: stri
  */
 export async function fetchMySubscriptions(): Promise<ClientSubscription[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('subscriptions.fetchMySubscriptions'); if (!uid) return null;
     const { data, error } = await supabase.from('client_subscriptions').select('*')
       .eq('client_id', uid).order('created_at', { ascending: false });
     if (error) { reportError('subscriptions.fetchMySubscriptions', error); return null; }
@@ -186,20 +255,38 @@ export interface Subscriber extends ClientSubscription {
  */
 export async function fetchMySubscribers(): Promise<{ rows: Subscriber[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('subscriptions.fetchMySubscribers'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_subscriptions').select('*')
       .eq('trainer_id', uid).order('created_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('subscriptions.fetchMySubscribers', error); return { rows: [], status: 'error' }; }
     const page = capped((data as ClientSubscription[]) ?? []);
     const ids = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (ids.length) {
-      // Bounded by `ids`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the subscription it labels is still real and still charging
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked, and the limit being argued about here is the REQUEST LINE, not
+      // the row cap. `ids` is bounded by the `capLimit()` read above, so a coach
+      // with a full page of subscribers sends a thousand uuids; at ~39 bytes
+      // each inside `in.("…","…")` that is ~39KB against the 8KB request line
+      // nginx and most CDNs enforce by default. Past roughly two hundred ids
+      // the proxy answers 414, supabase-js does not reject on it, and it
+      // arrives as `data: null` — which reads exactly like no names.
+      //
+      // no-error-ok (about the ROW ceiling, which one row per id across chunks
+      // of 150 cannot reach): a name we cannot read stays null and renders as a
+      // dash; the subscription it labels is still real and still charging. The
+      // 414 is a different event and that argument never covered it — it is
+      // EVERY name at once, so a coach's recurring-income list becomes a column
+      // of dashes and there is nobody on it to cancel, chase or thank.
+      const profs = await readByIds<any>(
+        ids,
+        // `.order('id')` on a primary-key lookup is total, which is the
+        // contract `readAll` requires of every page it is handed.
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients subscribed to you',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the subscription is still listed */ }
     const rows: Subscriber[] = page.rows.map((r) => ({ ...r, client_name: (r.client_id && names.get(r.client_id)) || null }));
     return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('subscriptions.fetchMySubscribers', e); return { rows: [], status: 'error' }; }
@@ -282,8 +369,7 @@ export interface SubscriptionPayment {
  */
 export async function fetchMySubscriptionPayments(): Promise<{ rows: SubscriptionPayment[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('subscriptions.fetchMySubscriptionPayments'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_subscription_payments').select('*')
       .eq('trainer_id', uid).order('paid_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('subscriptions.fetchMySubscriptionPayments', error); return { rows: [], status: 'error' }; }
@@ -297,12 +383,26 @@ export async function fetchMySubscriptionPayments(): Promise<{ rows: Subscriptio
     // name rather than a renewal that did not happen.
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the renewal it labels was still paid and can still be refunded
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked for the request line, exactly as in `fetchMySubscribers` above:
+      // a thousand `capLimit()`-bounded ids is a ~39KB `in.(…)` against an 8KB
+      // request line, refused at roughly two hundred with a 414 that arrives as
+      // `data: null`.
+      //
+      // no-error-ok (about the ROW ceiling — one row per id, chunks of 150): a
+      // name we cannot read stays null and renders as a dash; the renewal it
+      // labels was still paid and can still be refunded. The 414 is the case
+      // that argument does not reach: this is the list a coach refunds FROM,
+      // and every row unnamed at once means picking between three invoice ids
+      // with money attached to them.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients these renewals were charged to',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the renewal is still listed */ }
     const rows: SubscriptionPayment[] = page.rows.map((r) => ({
       ...r,
       client_name: (r.client_id && names.get(r.client_id)) || null,
@@ -342,7 +442,12 @@ export async function subscribeToPackage(packageId: string, code?: string): Prom
       },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    // `ok` means a browser opened, not that a URL came back. It used to mean
+    // the second, and app/(client)/packages.tsx clears the typed discount code
+    // on `ok` — so a member whose browser refused the URL was shown no alert,
+    // watched the button stop saying "Opening…", saw nothing open, and lost
+    // the code they had typed. src/lib/connect.ts `buyPackage` is this line.
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start checkout.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -450,7 +555,11 @@ export async function openSubscriptionPortal(subscriptionId: string): Promise<{ 
       body: { action: 'portal', subscription_id: subscriptionId, return_url: appLink('packages') },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    // The same as `subscribeToPackage` above and for the same reason: a portal
+    // URL that no browser took is not an opened portal, and a screen told `ok`
+    // shows nothing at all while the member waits for a page that is not
+    // coming.
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: PORTAL_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not open billing.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }

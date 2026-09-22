@@ -15,13 +15,23 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, weightDeltaIn,
   kgToLb, lbToKg, cmToIn, inToCm, convertedNote, plain,
   liftIn, liftLabel, liftToKg, liftDeltaIn, est1RMIn, volumeIn, volumeHeadline, readLift,
-  readNumber,
+  readBodyWeight,
+  readNumber, plainExact,
 } from './units';
 // The documents a client SHARES are the last thing TF-37 reached, and they are
 // asserted here rather than in a file of their own because what is being
 // checked is the conversion, not the prose: a report and a summary that print
 // kilograms to a pounds reader, and a CSV that must not follow them.
-import { progressChangeLines, progressSummary, progressCsv, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
+import { progressChangeLines, progressSummary, progressCsv, PROGRESS_CSV_HEADER, figure, type ProgressRow } from './progressExport';
+// `plain` now writes the READER's decimal separator, so every assertion below
+// that names a figure is an assertion about a locale. Stated here rather than
+// inherited from the runner: `appLocale()` falls back to whatever
+// `Intl.DateTimeFormat().resolvedOptions().locale` says, which is the machine
+// this happens to run on, and a suite that asserts "82.4" while passing on a
+// British laptop and failing on a German one is testing the laptop. The
+// comma-decimal block near the bottom re-seeds and puts this back.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -171,7 +181,8 @@ ok(weightToKg(' 82.4 ', 'kg') === 82.4, 'surrounding spaces are not part of the 
 // ── presentation ──
 ok(plain(82) === '82', 'a whole number does not grow a ".0"');
 ok(plain(82.4) === '82.4', 'and a tenth is kept');
-ok(weightLabel(82.0, 'kg') === '82 kg', `82 kg reads as "82 kg", got "${weightLabel(82.0, 'kg')}"`);
+ok(weightLabel(82.0, 'kg') === '82.0 kg', `a whole kilogram keeps its decimal so a list lines up, got "${weightLabel(82.0, 'kg')}"`);
+ok(weightLabel(lbToKg(180), 'lb') === '180 lb', 'and a pound stays whole');
 // The honesty note, which is the difference between a converted figure and a
 // figure presented as a measurement.
 ok(convertedNote('kg') === null, 'a client reading their record in its own unit needs no caveat');
@@ -449,10 +460,186 @@ ok(readNumber('-5') === -5, 'a minus sign is read, so the caller can refuse it i
 ok(readNumber('16.') === 16, 'a field mid-keystroke still reads, so the point does not vanish as it is typed');
 ok(readNumber('16,') === 16, 'including on a comma keyboard');
 
+/* ── a body weight has a bound, and it is named in the unit on screen ──────
+ *
+ * app/(client)/profile.tsx — the main place a member edits their own weight —
+ * read it through `weightToKg`, which has no bound at all. 1800 for 180 went
+ * onto the health record permanently and from there into the calorie target,
+ * every chart, and the pricing of every bodyweight set in the log.
+ */
+{
+  const empty = readBodyWeight('', 'kg');
+  ok(empty.ok && empty.kg === null, 'an empty box is no weight typed, not a refusal and not a zero');
+  ok(readBodyWeight(null, 'lb').ok, 'and so is nothing at all');
+
+  const good = readBodyWeight('82.4', 'kg');
+  ok(good.ok && good.kg === 82.4, 'an ordinary weight goes through as typed');
+
+  const slipped = readBodyWeight('1800', 'kg');
+  ok(!slipped.ok, 'and 1,800 kg does not');
+  ok(!slipped.ok && /20 and 400 kg/.test(slipped.reason), `the range is quoted in kilograms, got ${!slipped.ok ? slipped.reason : ''}`);
+
+  // The bound is checked BEFORE conversion, against the number on screen. 180 lb
+  // is an ordinary weight and must not be judged against a metric range; 900 lb
+  // is not, and must be refused in pounds.
+  const lbOk = readBodyWeight('180', 'lb');
+  ok(lbOk.ok, '180 lb is a perfectly ordinary weight');
+  ok(lbOk.ok && lbOk.kg != null && Math.abs(lbOk.kg - 81.6) < 0.1, `and is stored as ~81.6 kg, got ${lbOk.ok ? lbOk.kg : ''}`);
+  const lbBad = readBodyWeight('2000', 'lb');
+  ok(!lbBad.ok, '2,000 lb is not');
+  ok(!lbBad.ok && /lb/.test(lbBad.reason) && !/kg/.test(lbBad.reason),
+    'and the refusal is worded in pounds, never in a metric range they never see');
+
+  // The other end. 15 kg is not a person.
+  ok(!readBodyWeight('15', 'kg').ok, 'a weight below the human range is refused too');
+  ok(readBodyWeight('20', 'kg').ok && readBodyWeight('400', 'kg').ok, 'and the bounds themselves are inside it');
+  ok(!readBodyWeight('abc', 'kg').ok, 'text that is not a number is refused rather than coerced');
+  ok(!readBodyWeight('-80', 'kg').ok, 'and so is a negative');
+}
+
+
+/* ── the decimal separator, which is a DISPLAY question and a TYPING one ──── */
+//
+// A reader whose language writes 3,42 was shown 3.42, because `plain` was
+// `String(roundTo(n, 3))` and `String` writes a full stop in every locale there
+// has ever been. That is the same defect `num2` in src/lib/format.ts was
+// written against, and this app already treats it as one.
+//
+// Both halves are asserted, because the fix is only correct if BOTH hold: the
+// separator has to follow the reader, and the figure has to survive being typed
+// back. `plain` fills <TextInput value=…> on the log sheet, the check-in, the
+// tape boxes and the profile sheet, and `readNumber` reads every one of them
+// out again — so a thousands separator or a non-ASCII digit here is not a
+// cosmetic difference, it is a saved weight going null or moving by a factor of
+// a thousand.
+//
+// One thing here is NOT proved, and saying so is the point: the shape guard
+// inside `spell` covers a runtime that accepts `numberingSystem` and then
+// ignores it — an older Hermes without full ICU — and this suite runs on a node
+// that honours it, so removing the guard does not turn any assertion below red.
+// It is a belt beside the braces, and a mutation of it is invisible here. What
+// IS proved is the claim it exists to hold: nothing this function returns is
+// ever anything but ASCII digits and one separator.
+{
+  setAppLocale('de-DE');
+  ok(plain(82.4) === '82,4', `a comma-decimal reader is shown a comma, got "${plain(82.4)}"`);
+  ok(plain(82) === '82', `a whole number still has nothing to separate, got "${plain(82)}"`);
+  ok(plain(102.06) === '102,06', `and a hundredth of a kilogram keeps both places, got "${plain(102.06)}"`);
+  ok(weightLabel(82.4, 'kg') === '82,4 kg', `the label carries it too, got "${weightLabel(82.4, 'kg')}"`);
+  ok(liftLabel(102.06, 'kg') === '102,06 kg', `and so does a lifted load, got "${liftLabel(102.06, 'kg')}"`);
+  ok(lengthLabel(84.5, 'cm') === '84,5 cm', `and a tape measurement, got "${lengthLabel(84.5, 'cm')}"`);
+  // The half that must NOT follow the reader.
+  ok(plain(1204.5) === '1204,5', `no thousands separator, ever — got "${plain(1204.5)}"`);
+  ok(readNumber(plain(1204.5)) === 1204.5, 'a four-figure load written out reads back as itself');
+  ok(readNumber(plain(82.4)) === 82.4, 'and so does the weight in the profile box');
+  // The sign, which Intl writes as U+2212 in some locales and parseFloat does
+  // not read as one. `plain` puts it back by hand for that reason.
+  ok(plain(-1.5) === '-1,5', `a negative keeps an ASCII sign, got "${plain(-1.5)}"`);
+  ok(readNumber(plain(-1.5)) === -1.5, 'and reads back as a negative rather than as null');
+
+  // A handset whose locale writes its own digits. `Intl` would spell 16.5 as
+  // "١٦٫٥" here, and `readNumber` is parseFloat — a member who opened Edit
+  // profile on this phone would find their weight had become nothing.
+  setAppLocale('ar-EG');
+  ok(plain(16.5) === '16.5', `Arabic-Indic digits are refused in a typeable figure, got "${plain(16.5)}"`);
+  ok(readNumber(plain(16.5)) === 16.5, 'because this is a number the app is handed back');
+
+  // Pashto is the case that shows why the Latin numbering system is ASKED for
+  // rather than left to the shape guard alone. This handset's own spelling of
+  // 16.5 is ۱۶٬۵ — digits `readNumber` cannot parse — and its Latin-digit
+  // spelling is "16,5". The guard on its own would refuse the native digits and
+  // fall back to `String`, which hands a Pashto reader the ENGLISH separator;
+  // asking for latn keeps their own. Skipped where ICU has never heard of the
+  // locale, because that is a fact about the runner and not about this module.
+  if (Intl.NumberFormat.supportedLocalesOf(['ps-AF']).length) {
+    setAppLocale('ps-AF');
+    ok(plain(16.5) === '16,5', `their own separator on ASCII digits, got "${plain(16.5)}"`);
+    ok(readNumber(plain(16.5)) === 16.5, 'and it still reads back out of the box it was typed in');
+  }
+
+  setAppLocale('en-GB');
+  ok(plain(82.4) === '82.4', 'and a full-stop reader is unaffected by any of it');
+}
+
+/* ── plainExact: the SEPARATOR, and nothing else ─────────────────────────── */
+//
+// `plain` is a spelling and a rounding, and it is right for the boxes and
+// labels that call it — every one of them a body weight, a load or a tape
+// measurement whose grain is known. `plainExact` exists for the two generic
+// printers, `fig` in src/ui/kit.tsx and `figure` in src/lib/progressExport.ts,
+// which stand in front of around 190 call sites carrying values whose grain
+// they have never been told. Rounding there would be a printer deciding the
+// precision of a figure it has never seen.
+//
+// So the contract is narrow and the assertions are about the narrowness: the
+// digits are `String`'s own, and the separator is the reader's. If those two
+// ever come apart — if this starts rounding, grouping, or writing the locale's
+// own digits — a figure changes meaning somewhere no test is looking, and the
+// block below is what stops that.
+{
+  setAppLocale('de-DE');
+  ok(plainExact(3.42) === '3,42', `a comma-decimal reader gets a comma, got "${plainExact(3.42)}"`);
+  ok(plainExact(82) === '82', `a whole number has nothing to separate, got "${plainExact(82)}"`);
+  ok(plainExact(-1.5) === '-1,5', `a negative keeps its ASCII sign, got "${plainExact(-1.5)}"`);
+  // No grouping. `fig` fills Hero and Kpi slots that sit beside `plain` output
+  // in the same row, and `plain` may never group either — see the header.
+  ok(plainExact(1204.5) === '1204,5', `no thousands separator, got "${plainExact(1204.5)}"`);
+
+  // The claim that separates this from `plain`, and the reason it is a second
+  // function rather than `plain(n, 20)`: the digits are byte-identical to what
+  // `String` writes, however many there are. `plain` rounds 1/3 to three
+  // places; this must not round it at all.
+  const third = 1 / 3;
+  ok(plainExact(third) === String(third).replace('.', ','),
+    `every digit String would have written survives, got "${plainExact(third)}"`);
+  ok(plain(third) === '0,333', `where plain deliberately rounds, got "${plain(third)}"`);
+  ok(plainExact(0.1 + 0.2) === '0,30000000000000004',
+    `including the ones binary floating point produces, got "${plainExact(0.1 + 0.2)}"`);
+
+  // What it declines to touch. Each of these has no bare decimal point in it,
+  // and a separator substituted into one would produce a string that is not a
+  // figure at all.
+  ok(plainExact(NaN) === 'NaN', `NaN is passed through, got "${plainExact(NaN)}"`);
+  ok(plainExact(Infinity) === 'Infinity', `and so is an infinity, got "${plainExact(Infinity)}"`);
+  ok(plainExact(1e21) === String(1e21), `and an exponent form, got "${plainExact(1e21)}"`);
+  ok(plainExact(1.5e-7) === String(1.5e-7), `at either end of the range, got "${plainExact(1.5e-7)}"`);
+
+  // The printer this was written for. `figure` puts the same figures into the
+  // progress document and the share text.
+  ok(figure(82.4, ' kg') === '82,4 kg', `figure() carries it, got "${figure(82.4, ' kg')}"`);
+  ok(figure(null, ' kg') === '\u2014', 'and an absent reading is still a dash, never a nought');
+
+  // The separator is asked for with `numberingSystem: 'latn'`, the same way
+  // `spell` asks, so the two can never disagree about one figure. On Egyptian
+  // Arabic that means a FULL STOP and Western digits: latn carries latn's
+  // symbols, which is the property that keeps `plain`'s round trip through
+  // `readNumber` alive on that handset. Asserted against `plain` rather than
+  // against a character, so the pair stay locked together whatever ICU says.
+  setAppLocale('ar-EG');
+  ok(plainExact(16.5) === plain(16.5),
+    `the two spellings agree on one locale, got "${plainExact(16.5)}" and "${plain(16.5)}"`);
+  ok(!/[\u0660-\u0669]/.test(plainExact(16.5)),
+    `and never Arabic-Indic digits, got "${plainExact(16.5)}"`);
+
+  // The locale is LATCHED and the separator is cached against the tag it was
+  // asked for, so the switch has to re-derive it. A cache that did not would
+  // hand this reader Cairo's full stop after Berlin's comma, or the reverse.
+  setAppLocale('de-DE');
+  ok(plainExact(16.5) === '16,5', `switching back re-derives it, got "${plainExact(16.5)}"`);
+  setAppLocale('en-GB');
+  ok(plainExact(16.5) === '16.5', `and a full-stop reader is unaffected, got "${plainExact(16.5)}"`);
+}
+
+// The exit-on-failure epilogue belongs LAST. It used to sit further up this
+// file, and everything appended below it ran with its failures collected into
+// `errors` and never read — the suite printed "ok" and exited 0 while real
+// assertions were failing. Found in sessionCredits.test.ts and swept for; this
+// file was one of three. Append new sections ABOVE this block.
 if (errors.length) {
   console.error(`units.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
   for (const e of errors.slice(0, 20)) console.error('  · ' + e);
   if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
   process.exit(1);
 }
+
 console.log('units.test.ts — ok');

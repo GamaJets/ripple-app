@@ -8,15 +8,31 @@
 // hairline-separated list rows that still open the same detail sheet, and the
 // three stacked bordered card stacks became sections separated by a rule.
 //
+// Re-ordered to the approved board (client page 17, "Wearables"): the
+// catalogue of apps comes first, one hairline row each with the app's brand
+// mark on its own plate (src/ui/wearables/ProviderMark.tsx), its name and a
+// chip — green "Connected" only where THIS build can read the device, grey
+// "Connect" otherwise — and the hero, the import list, the coach
+// switch, the sleep provenance and the Health write-back follow it in their
+// old order. Nothing was removed; the sections are the board's cards now, so
+// the rules that used to separate them are gone with the air they divided.
+//
+// Round five (the approved look): with a readable device the page now OPENS on
+// today's figure — a figure card, then heart rate, steps and HRV as toned tiles
+// — and the catalogue follows it. A row's state is a toned chip (Connected
+// green, Not Readable amber, Unavailable neutral), a connected row's own
+// figures are chips in each metric's hue, and the two paragraphs of "how this
+// works" are behind Expandables. Every sentence that states a sync state or a
+// withheld figure's reason is where it was.
+//
 // Also removed: the footnote claiming cloud devices "arrive with the backend
 // rollout". They connect today — `makeCloudProvider` runs the vendor OAuth and
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
 import { useState, useEffect, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { num } from '../../src/lib/format';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
-import { Icon } from '../../src/ui/Icon';
+import { num, num1 } from '../../src/lib/format';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Switch } from 'react-native';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -24,12 +40,15 @@ import { useTheme } from '../../src/ui/components';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
+// The brand's own mark on the brand's own plate, the way the board draws each
+// row of Connected Apps. See the file for why its colours are literals.
+import { ProviderMark } from '../../src/ui/wearables/ProviderMark';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
-import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
+import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote, type RecentRead } from '../../src/ui/watchImport';
 import { isWhole } from '../../src/ui/loadStatus';
 import type { WriteOutcome } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, TonedChip, Expandable, ListRow, Cta, Ghost, PageHead, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
 import {
   planWrite, readLedger, writeSessions, summariseResult, writeUnavailableReason,
@@ -37,16 +56,48 @@ import {
   type Ledger, type WriteResult,
 } from '../../src/lib/wearables/appleHealthWrite';
 import { reportError } from '../../src/lib/reportError';
+// Storage-first — it answers offline, which is what this screen needs — and it
+// keeps a dropped connection apart from a sign-out. It replaces a local helper
+// of the same name whose doc comment asserted that `getSession()` "REJECTS for
+// nobody signed in". It does not. See src/lib/authReadFate.ts and the note at
+// the disconnect below for what that mistake was holding up.
+import { sessionUid } from '../../src/lib/sessionUid';
+
 import { readSleepFromDevices } from '../../src/lib/wearables/sleep';
 import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
 // One answer to "is this connected", shared with Recovery. See
 // src/lib/wearableLink.ts — this screen and that one used to compute it
 // separately and contradict each other in front of the same client.
 import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
-import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { formatSleepHours, recentNights, type SleepRead, type SleepReading } from '../../src/lib/sleepMerge';
+// Unlinking a watch used to destroy every night it had measured. See
+// src/lib/retiredSleep.ts and supabase/parts/2650 — the nights are copied to a
+// shelf BEFORE `w.disconnect` runs its delete, and copied back on reconnect.
+import {
+  keepNightsBeforeDisconnect, restoreRetiredNights, discardKept,
+  disconnectNightsLine, keepFailedLine, restoredNightsLine,
+} from '../../src/lib/retiredSleep';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { fmtDay, fmtTime } from '../../src/lib/format';
+// The one switch in front of the sleep and water the member TYPES IN. It lives
+// on this screen and not on Recovery because it is the same question this
+// screen already answers about a watch — who sees what my body did — and
+// because a member with no wearable must still be able to find it. See
+// supabase/parts/2670 for why there is one switch and not two.
+import { useWellnessShare } from '../../src/ui/wellnessShare';
+// Distance in the member's own unit. See src/lib/distance.ts for why it is
+// derived from the length unit rather than being a third pill in Settings.
+import { distanceLabel, distanceUnitFor, metresLabel } from '../../src/lib/distance';
+import { useSettings } from '../../src/ui/settings';
+// HRV as a trend against the member's own baseline, which is the only way this
+// app is allowed to print it — src/lib/wearables/types.ts states that rule on
+// the field itself, and this screen was breaking it.
+import { useDeviceHrv } from '../../src/ui/deviceHrv';
+import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 
-type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
+type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
 
 /**
  * What to say about an import that did not land in the log.
@@ -68,7 +119,7 @@ type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
  */
 const importNote = (what: string, out: WriteOutcome, many: boolean): string =>
   out === 'unsent'
-    ? `${what} ${many ? 'have' : 'has'} not reached your log yet — there is no connection. Nothing is lost: ${many ? 'they are' : 'it is'} saved on this phone and ${many ? 'go' : 'goes'} up on ${many ? 'their' : 'its'} own next time you have signal.`
+    ? `${what} ${many ? 'have' : 'has'} not reached your log yet because there is no connection. Nothing is lost: ${many ? 'they are' : 'it is'} saved on this phone and ${many ? 'go' : 'goes'} up on ${many ? 'their' : 'its'} own next time you have signal.`
     : `${what} ${many ? 'were' : 'was'} rejected by your log, so nothing was imported and nothing is waiting to send. Your watch still has ${many ? 'them' : 'it'}.`;
 
 function ago(ts?: number): string {
@@ -79,22 +130,42 @@ function ago(ts?: number): string {
  const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
  return Math.floor(h / 24) + 'd ago';
 }
-function wkDate(iso: string): string {
- const d = new Date(iso);
- return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-}
-/** "Mon 25/8 · 18:30" — a session needs its time of day, not just its date:
- *  two sessions on one day are two different things to write. */
+/** "Mon 25 Aug · 18:30" — a session needs its time of day, not just its date:
+ *  two sessions on one day are two different things to write.
+ *
+ *  This was a private `wkDate` that built the weekday out of a hardcoded
+ *  English array and then wrote `${d.getDate()}/${d.getMonth() + 1}`, which is
+ *  the exact pattern src/lib/format.ts records removing from five other files:
+ *  the weekday is in a language the reader may not have, and "25/8" is 25
+ *  August here and nothing at all in the United States, where it reads as a
+ *  month of 25. It is interpolated into the list of sessions about to be
+ *  written into Apple Health and into every failure line under it, so being
+ *  wrong about which day it is means writing a workout onto the wrong one.
+ *
+ *  `fmtDay` and `fmtTime` are the shared answer, in the reader's own locale and
+ *  their own clock. The NaN guard stays: it is the only thing between an
+ *  unparseable timestamp and the string "Invalid Date · NaN:NaN" appearing in
+ *  the middle of a list of things about to be written. */
 function sessionWhen(iso: string): string {
  const d = new Date(iso);
  if (!isFinite(d.getTime())) return '—';
- return `${wkDate(iso)} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+ return `${fmtDay(iso)} · ${fmtTime(iso)}`;
 }
 
 export default function Devices() {
  const t = useTheme();
  const router = useRouter();
  const w = useWearables();
+ // The unit every distance on this screen is read out in. Derived from the
+ // length unit rather than asked for again — see src/lib/distance.ts.
+ const du = distanceUnitFor(useSettings().lengthUnit);
+ // Tonight's HRV and the member's own baseline for it.
+ const hrv = useDeviceHrv();
+ // Whether this member's coach may read the nights and glasses they type in.
+ // Read here, changed here, and enforced in Postgres — the switch on this
+ // screen is the only thing that moves it, and a coach cannot (part 2670's
+ // clients_wellness_consent_guard).
+ const wellnessShare = useWellnessShare();
  // Re-render whenever the server proves something new about any device — a
  // token dying, a scope being refused, or a reconnect clearing both. Without
  // this the screen would go on showing whatever it decided on mount, which is
@@ -114,7 +185,7 @@ export default function Devices() {
  //     said "Your training log has no sessions yet, so there is nothing to
  //     write" — a flat claim about the member's whole log, from a read that had
  //     failed.
- const { log, status: logStatus, logWorkouts, setSessionMins } = useWorkoutLog();
+ const { log, status: logStatus, logWorkouts, setSessionMins, reload: reloadLog } = useWorkoutLog();
  const logWhole = isWhole(logStatus);
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
@@ -128,29 +199,60 @@ export default function Devices() {
  const [lookback, setLookback] = useState<number>(14);
  const lookbackLabel = (d: number) => (d >= 365 ? '1 year' : d >= 90 ? '90 days' : `${d} days`);
  const importLabel = sources.length === 1 ? sources[0].meta.name : 'your devices';
- const [wk, setWk] = useState<WorkoutSample[] | null>(null);
+ // The whole outcome of the read, not just the rows it produced.
+ //
+ // This used to be `WorkoutSample[] | null`, and that shape is exactly the
+ // defect: it has two states where there are three. An empty array meant both
+ // "every device answered and none of them had anything" and "the device that
+ // had your session refused to hand it over", and this screen printed the first
+ // sentence over the second. `RecentRead` keeps the three apart, and
+ // `emptyAndWhole` is the only one of them that may be called "no workouts
+ // found" — see src/ui/watchImport.ts.
+ const [wkRead, setWkRead] = useState<RecentRead | null>(null);
+ // Still null before the first Find; the rows once there has been one.
+ const wk: WorkoutSample[] | null = wkRead ? wkRead.samples : null;
+ // The one sentence about this read, or null when there is nothing to say.
+ // Safe to word with the CURRENT lookback because changing the lookback clears
+ // `wkRead`, so a note never outlives the window it describes.
+ const wkNoteFor = (r: RecentRead) => readNote(r, lookbackLabel(lookback), importLabel);
+ const wkNote = wkRead ? wkNoteFor(wkRead) : null;
  const [wkBusy, setWkBusy] = useState(false);
  const { ids: importedIds, mark: markImported } = useImportedIds();
  // Every figure on this screen comes off a device that can stop answering, and
  // the only way to ask again was to leave the screen and come back. Pull to
  // refresh is the gesture people already try; see src/ui/pullToRefresh.tsx.
- const pull = usePullToRefresh(useCallback(() => { w.syncAll(); }, [w]));
+ // The watch sync was the whole of it. The HRV panel is its own read of
+ // `hrv_nights`, and whether an imported session is already in the log is read
+ // off the training log — so a member could pull this screen, watch the sync
+ // spinner, and still be shown last night's HRV and a session marked
+ // un-imported that they imported an hour ago.
+ const pull = usePullToRefresh(useCallback(() => {
+   void w.syncAll(); void hrv.reload(); reloadLog();
+ }, [w, hrv.reload, reloadLog]));
  // Null, not false, when the log is not whole: "we cannot tell" is a third
  // answer and the row below renders it as one rather than as "not logged yet".
  const alreadyLogged = (sm: WorkoutSample): boolean | null =>
   logWhole ? isLogged(sm, importedIds, log) : (importedIds.has(sm.id) ? true : null);
  const findWorkouts = async () => {
    if (!canImport) {
-     Alert.alert('Import workouts', 'Connect Apple Health or WHOOP first (in Available Devices below), then tap Find my workouts.');
+     Alert.alert('Import Workouts', 'Connect Apple Health or WHOOP first (in Connected Apps above), then tap Find my workouts.');
      return;
    }
    setWkBusy(true);
    try {
-     const merged = await fetchRecent(w.states, lookback);
-     setWk(merged);
-     if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last ${lookbackLabel(lookback)} from ${importLabel}.`);
+     const r = await readRecent(w.states, lookback);
+     setWkRead(r);
+     // The alert used to fire on `!merged.length` and say "No workouts found",
+     // which is a claim about the member's training made out of a read that may
+     // have failed. `readNote` writes whichever of the sentences is true —
+     // "no workouts found" ONLY under `emptyAndWhole` — and it is raised here
+     // only when there are no rows to look at, because with rows on screen the
+     // same sentence sits under the list where it can be read against them
+     // rather than over the top of them.
+     const note = wkNoteFor(r);
+     if (!r.samples.length && note) Alert.alert('Import Workouts', note);
    } catch (e: any) {
-     Alert.alert('Import workouts', e?.message || 'Could not read your workouts.');
+     Alert.alert('Import Workouts', e?.message || 'Could not read your workouts.');
    } finally {
      setWkBusy(false);
    }
@@ -169,7 +271,7 @@ export default function Devices() {
  const importOne = async (sm: WorkoutSample) => {
   if (alreadyLogged(sm)) return;
   const out = await logWorkouts([await withHr(sm)]);
-  if (out !== 'stored') { Alert.alert('Import workouts', importNote(sm.activity, out, false)); return; }
+  if (out !== 'stored') { Alert.alert('Import Workouts', importNote(sm.activity, out, false)); return; }
   markImported([sm.id]);
   tapLight();
  };
@@ -177,7 +279,7 @@ export default function Devices() {
   const fresh = (wk || []).filter((sm) => !alreadyLogged(sm));
   if (!fresh.length) return;
   const out = await logWorkouts(await Promise.all(fresh.map(withHr)));
-  if (out !== 'stored') { Alert.alert('Import workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
+  if (out !== 'stored') { Alert.alert('Import Workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
   markImported(fresh.map((sm) => sm.id));
   tapLight();
  };
@@ -252,7 +354,7 @@ export default function Devices() {
   const raw = (minsDraft[key] || '').trim();
   const n = Number(raw);
   if (!raw || !Number.isFinite(n) || n <= 0) {
-   Alert.alert('Session length', 'Enter how many minutes this session ran. There is no default: left blank, it stays out of Apple Health rather than going in with a made-up length.');
+   Alert.alert('Session Length', 'Enter how many minutes this session ran. There is no default: left blank, it stays out of Apple Health rather than going in with a made-up length.');
    return;
   }
   setSessionMins(sessionT, Math.round(n));
@@ -278,23 +380,224 @@ export default function Devices() {
  await w.connect(p.meta.id);
  } catch (e: any) {
  Alert.alert(p.meta.name, e?.message || 'Could not connect.');
+ return;
  }
+ // Connected. Anything this device measured before it was last unlinked is
+ // sitting on the shelf supabase/parts/2650 describes, and this is the moment
+ // the screen promised it back: `disconnectNightsLine` told the member
+ // "reconnect and they go back", and a promise kept only on the next launch is
+ // a promise they cannot see being kept.
+ //
+ // Deliberately AFTER the connection is confirmed and never before it. A
+ // restore run against a connect that then failed would put a disconnected
+ // device's nights back into a week nothing is feeding.
+ //
+ // A failed restore is reported and not surfaced: the connection itself
+ // succeeded, the nights are still on the shelf, and the next reconnect — or
+ // the next time this runs — tries again. Telling somebody their watch did not
+ // connect because a second read failed would be false.
+ await restoreNights(p);
  };
+
+ /** Put back what this device measured before it was unlinked. Separate from
+  *  `onConnect` only so the try/catch above cannot swallow it. */
+ const restoreNights = async (p: WearableProvider) => {
+  if (!USE_SUPABASE) return;
+  try {
+   // Narrowed on `fate`, never on `!who.uid`: `string` includes ''. Both fates
+   // return, and here that is genuinely the same thing: there is nothing to
+   // restore for somebody signed out, and nothing that can be restored when we
+   // could not find out who they are. The difference is only that the second
+   // one is now reported — `sessionUid` hands the fault to `reportError` under
+   // this context — instead of a restore that never ran looking like a member
+   // with no shelf. The comment above already says a failed restore is not
+   // surfaced and the next reconnect tries again; that still holds.
+   const who = await sessionUid('devices.restoreSleep');
+   if (who.fate !== null) return;
+   const res = await restoreRetiredNights(supabase, who.uid, p.meta.id);
+
+   if (!res.ok) { reportError('devices.restoreSleep', new Error(res.reason), { provider: p.meta.id }); return; }
+   const line = restoredNightsLine(res.nights, p.meta.name);
+   // Only when something actually came back. `restoredNightsLine` returns null
+   // for none, which is the ordinary answer for a first connection and is not
+   // worth an alert.
+   if (line) Alert.alert(p.meta.name, line);
+  } catch (e) {
+   reportError('devices.restoreSleep', e, { provider: p.meta.id });
+  }
+ };
+
+ // ── a helper that was deleted, and the claim in it that was wrong ────────
+ //
+ // There was a local `signedInUid()` here, documented as: "`getSession` reads
+ // local storage rather than the network and REJECTS for nobody signed in,
+ // which is a true answer and not a failed read". Both halves of that are
+ // false, and they were the licence for the `catch { return null }` under them.
+ //
+ //   · `getSession()` does NOT reject for nobody signed in. It resolves with
+ //     `{ data: { session: null }, error: null }`. Nothing rejected, so the
+ //     catch never ran for the case it was written for.
+ //   · it does NOT stay off the network. It is storage-first, which is why this
+ //     screen is right to prefer it, but when the stored access token has
+ //     EXPIRED it refreshes over the wire — and a refresh that cannot reach the
+ //     server resolves with `session: null` and an `AuthRetryableFetchError`
+ //     beside it, which this helper discarded on its way to returning null.
+ //
+ // So "or null" had two meanings and the callers below could not tell them
+ // apart. `sessionUid` from src/lib/sessionUid.ts makes the same storage-first
+ // call and keeps the reason.
+
 
  // Disconnecting has to drop what the server proved about the token as well as
  // the token itself. A verdict left behind outlives its subject, and would put
  // "reconnect WHOOP" in front of somebody who has just removed WHOOP on
  // purpose. `disconnectVendor` does this for the cloud providers; Apple Health
  // does not go through it, so it is done here for all of them.
+ //
+ // And it can fail. `disconnectVendor` deletes a row, the server can refuse
+ // that, and until recently nothing here could tell — supabase-js resolves on a
+ // database error, so a refused delete arrived looking exactly like a
+ // successful one. The member was shown Disconnected over a watch that was
+ // still connected to their account and that reappeared on the next launch.
+ // `forgetLink` is deliberately inside the success path: forgetting the link
+ // locally while the token survives is what makes the two disagree.
  const onDisconnect = async (p: WearableProvider) => {
-  await w.disconnect(p.meta.id);
+  // ── the nights are copied BEFORE anything is unlinked ───────────────────
+  //
+  // `w.disconnect` runs a `.delete()` against `device_sleep_nights` for this
+  // provider, and until now that was the end of them. The copy is
+  // non-destructive — the live rows are still there while it runs — so a copy
+  // that fails costs nothing and this returns without disconnecting, which is
+  // the only safe order: after the delete there is nothing left to save.
+  //
+  // Refusing rather than asking "disconnect anyway?" is deliberate. The second
+  // question is one a member taps through, and the thing behind it is
+  // permanent. The failure here is almost always a lost signal, and waiting a
+  // moment costs them nothing at all.
+  //
+  // See src/lib/retiredSleep.ts for the whole argument and supabase/parts/2650
+  // for the shelf itself.
+  // ── the false sign-out that walked straight past the copy ────────────────
+  //
+  // `const uid = await signedInUid()` and then `if (uid) { …keep the nights… }`
+  // — so a null uid did not refuse, it SKIPPED THE BACKUP AND CARRIED ON to
+  // `w.disconnect`, which deletes every `device_sleep_nights` row this provider
+  // measured. The entire "copy before you unlink" order that the paragraphs
+  // above call "the only safe order" was gated on a read that cannot fail
+  // loudly: `getSession()` resolves with `session: null` and a retryable error
+  // when the refresh cannot reach the auth host, and the old helper threw that
+  // error away. An outage did not stop the destruction; it removed the thing
+  // standing in front of it.
+  //
+  // 'unreadable' now refuses, and it borrows `keepFailedLine` because that is
+  // exactly what happened: the nights were not put somewhere safe, so nothing
+  // was disconnected. Its own doc comment asks that "try again in a moment" be
+  // said only of the transient failure, and a dropped connection is the
+  // transient failure.
+  //
+  // 'signed-out' keeps the old path and does not refuse. There is no account,
+  // so there are no server-side nights to shelve and nothing to lose; a cloud
+  // provider's disconnect will fail on its own and Apple Health's local unlink
+  // is the member's to make.
+  let kept = false;
+  const who = USE_SUPABASE ? await sessionUid('devices.disconnect') : null;
+  if (who?.fate === 'unreadable') {
+   Alert.alert(p.meta.name, keepFailedLine(p.meta.name));
+   return;
+  }
+  // Narrowed on `fate` above, never on `!who.uid`: `string` includes ''.
+  const uid = who?.uid ?? null;
+  if (uid) {
+
+   const keep = await keepNightsBeforeDisconnect(supabase, uid, p.meta.id);
+   if (!keep.ok) {
+    reportError('devices.keepSleep', new Error(keep.reason), { provider: p.meta.id });
+    Alert.alert(p.meta.name, keepFailedLine(p.meta.name));
+    return;
+   }
+   kept = keep.nights > 0;
+  }
+  try {
+   await w.disconnect(p.meta.id);
+  } catch (e: any) {
+   // The disconnect that the copy was made for did not happen, so the copy is
+   // rubbish. Cleared rather than left: every night on it is still live, so a
+   // later restore would skip them all anyway, but a shelf nobody asked for is
+   // a thing somebody has to reason about later. Its own failure is reported
+   // and not surfaced — the member's problem here is the watch, not the shelf.
+   if (kept && uid) {
+    const cleared = await discardKept(supabase, uid, p.meta.id);
+    if (!cleared.ok) reportError('devices.discardKeptSleep', new Error(cleared.reason), { provider: p.meta.id });
+   }
+   Alert.alert(
+    p.meta.name,
+    e?.message || `${p.meta.name} could not be disconnected just now, so it is still connected. Try again in a moment.`,
+   );
+   return;
+  }
   forgetLink(p.meta.id);
+ };
+
+ /**
+  * Ask first, because this changes what the member's record shows.
+  *
+  * The control that called `onDisconnect` was labelled "Connected". It read as
+  * a status pill — that is what the word is, everywhere else on this screen and
+  * in the rest of the app — and it was one tap, with no question, into
+  * `w.disconnect`, which runs a `.delete()` against `device_sleep_nights` for
+  * that provider. So a member tapping what looked like a state indicator to see
+  * what it said destroyed every night that device had measured, with no
+  * warning, no confirmation and no undo. `app/(client)/injuries.tsx` states the
+  * house rule: "Delete now has an <Alert> in front of it, like every other
+  * destructive action in this app."
+  *
+  * The alert names what happens, because "are you sure?" over a row of six
+  * devices does not say which one and does not say what is at stake. It stays
+  * specific about the two different things that happen — the connection ends
+  * AND the sleep week loses those nights — since only the first is what the
+  * word "disconnect" promises.
+  *
+  * ── what changed, and why the sentence had to ───────────────────────────
+  *
+  * This used to end "reconnecting starts a fresh record rather than bringing
+  * these nights back", and that was an accurate warning about a permanent
+  * deletion. It is no longer accurate: `onDisconnect` copies the nights to the
+  * shelf in supabase/parts/2650 before unlinking, and `onConnect` puts them
+  * back. An alert that still warned of a destruction the code does not perform
+  * would be its own defect — the one sentence on this screen most likely to
+  * stop somebody unplugging a watch they have every right to unplug.
+  *
+  * The wording lives in src/lib/retiredSleep.ts, beside the behaviour it
+  * describes, so the next change to one cannot leave the other standing. That
+  * is exactly how this sentence came to be false.
+  *
+  * Still an `Alert` and still not a toast: src/ui/toast.tsx is for a thing that
+  * can be undone by doing it again, and while reconnecting DOES now bring the
+  * nights back, it does not bring back the days of readings the device never
+  * took while it was unlinked.
+  */
+ const confirmDisconnect = (p: WearableProvider) => {
+  Alert.alert(
+   `Disconnect ${p.meta.name}?`,
+   disconnectNightsLine(BRAND.label, p.meta.name),
+   [
+    { text: 'Keep It', style: 'cancel' },
+    { text: 'Disconnect', style: 'destructive', onPress: () => { void onDisconnect(p); } },
+   ],
+  );
  };
 
  // Connected means the shared state machine says so — never the remembered flag
  // on its own. A device whose token the server has told us is dead does not
  // belong in this list, however firmly AsyncStorage remembers connecting it.
  const connected = PROVIDERS.filter((p) => linkFor(p.meta.id, p.meta.name, w.states[p.meta.id] || 'disconnected').connected);
+ // The ones this build can actually read, which is what the list's head
+ // counts. `connected` is the account's answer and is the right list for the
+ // sleep provenance and the live roll-up below — but a remembered Apple Health
+ // on a binary with no HealthKit in it is in that list too, and "1 connected"
+ // over a row whose chip has to say Not Readable is the stored preference
+ // counted as a live link. See `unreadable` in the rows.
+ const readable = connected.filter((p) => p.isAvailable());
 
  // Which of the connected devices sleep actually comes from (TF-01).
  //
@@ -304,16 +607,43 @@ export default function Devices() {
  // report sleep says so in its own words; it is not left blank, because blank
  // reads as "nothing recorded".
  const [sleepReads, setSleepReads] = useState<SleepRead[] | null>(null);
+ /**
+  * The WALK failing, which is not the same as the walk finding nothing.
+  *
+  * `readSleepFromDevices` catches per provider and hands back one row each, so
+  * reaching the catch below means the walk itself broke and there are no rows
+  * of any kind. That used to be written to state as `[]` — and `[]` renders as
+  * a Sleep Sources section with a heading, a paragraph promising that sleep is
+  * read from every device, and not one device under it. A read that never
+  * happened, drawn as a list of devices that said nothing.
+  *
+  * It is the same hole src/lib/sleepMerge.ts grew `markNightsUnread` for one
+  * screen along, arriving the same way: the failure reaches the screen as an
+  * ABSENCE of failures. Kept as its own flag rather than folded into
+  * `sleepReads`, so the list and the reason it is missing cannot be confused
+  * for each other.
+  */
+ const [sleepWalkFailed, setSleepWalkFailed] = useState(false);
  const connectedKey = connected.map((p) => p.meta.id).join(',');
  useEffect(() => {
   let cancelled = false;
   (async () => {
    try {
-    const reads = await readSleepFromDevices(w.states, 2);
-    if (!cancelled) setSleepReads(reads);
+    // Seven nights, not two. Two nights can only ever answer "did it record
+    // last night", and the sentence that came out of a no was "Readable —
+    // nothing recorded for last night" — which is what a ring left on the
+    // charger looks like AND what a ring that stopped feeding us three weeks
+    // ago looks like. See `lastRecorded` below: with a week to look at, the
+    // row can name the last night the device actually recorded, which is the
+    // one fact that tells those two apart. Seven is what
+    // src/ui/deviceSleep.tsx already reads for the same devices.
+    const reads = await readSleepFromDevices(w.states, 7);
+    if (!cancelled) { setSleepReads(reads); setSleepWalkFailed(false); }
    } catch (e) {
     reportError('devices.sleepSources', e);
-    if (!cancelled) setSleepReads([]);
+    // Not an empty list. `[]` here would be this screen stating that no device
+    // answered, out of a read that nobody got an answer to.
+    if (!cancelled) { setSleepReads([]); setSleepWalkFailed(true); }
    }
   })();
   return () => { cancelled = true; };
@@ -328,10 +658,46 @@ export default function Devices() {
  // Apple Health can contribute several rows here, because it holds whatever
  // every watch and app on the phone wrote into it.
  const lastNightKey = recentNights(1)[0];
+ /**
+  * The most recent night this source actually recorded, or null for none in
+  * the window.
+  *
+  * ── The fact the row could not state, and what it cost ───────────────────
+  *
+  * "Readable — nothing recorded for last night" is one sentence covering two
+  * situations a member would act on differently: a ring that was on the
+  * charger overnight, and a ring that stopped feeding us a fortnight ago and
+  * will go on not feeding us until somebody notices. WHOOP, Oura and Garmin
+  * all answer this on their own device screens — the last time anything came
+  * through — because a link that has quietly stopped is the failure their
+  * users cannot see. This app had the opposite: `linkFor` catches a token the
+  * server has declared dead, and a live token that simply stops returning
+  * nights was invisible on every screen.
+  *
+  * Only ever a night a named source reported, and `null` when there is none in
+  * the week. A window with nothing in it is not evidence of anything beyond
+  * the window, so the sentence built from a null says how far we looked rather
+  * than how long it has been.
+  *
+  * The nights are compared as bare `YYYY-MM-DD` strings, which sort
+  * lexicographically as dates and are never parsed into a UTC instant.
+  */
+ const lastRecorded = (r: SleepRead): SleepReading | null => {
+  let best: SleepReading | null = null;
+  for (const rd of r.readings) {
+   if (!rd?.night || !(rd.minutesAsleep > 0)) continue;
+   if (!best || rd.night > best.night) best = rd;
+  }
+  return best;
+ };
  // totalKcal counts as a live reading too. WHOOP publishes only that, so
  // testing activeKcal alone hid the whole panel from every WHOOP user the
  // moment its energy stopped being filed under the wrong name.
- const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
+ // HRV counts as a live reading too, and for the same reason totalKcal was
+ // added: a WHOOP-only member whose day has not been scored yet still has last
+ // night's variability, and hiding the whole panel would hide the one figure
+ // their device actually published.
+ const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null || hrv.tonight != null);
 
  const devicesWord = connected.length === 1 ? 'device' : 'devices';
  // The panel below is gated on ANY provider being connected, and its empty
@@ -346,11 +712,42 @@ export default function Devices() {
  // Derived from the catalogue now — see src/lib/wearables/liveNotes.ts, which
  // is where the reasoning and the test live.
  const connectedMeta = connected.map((p) => p.meta);
+ /**
+  * Which device a figure on the Live row came from.
+  *
+  * Hoisted out of the energy block below, where it used to live, because every
+  * figure on that row needs it and not only the calories. `w.today` picks ONE
+  * device per field — see the notes on the roll-up in src/ui/wearables.tsx —
+  * and a figure whose source has been dropped cannot be checked against the
+  * vendor's own app by the person it is about, which is the complaint the sleep
+  * section four rules down already answers in as many words.
+  */
+ //
+ // `w.todayFrom`, not "the first connected provider that publishes this field".
+ // That guess named `appleHealth` — element zero of the registry — for every
+ // figure, so a member wearing an Apple Watch in the day and a WHOOP overnight
+ // saw WHOOP's number captioned with the Apple Watch. They open Apple Health to
+ // check it, find something else, and disbelieve the whole screen. The promise
+ // four rules below this one is that a figure is "the figure one device
+ // actually reported" and is NAMED; the figure kept that promise and the name
+ // did not.
+ const named = (key: 'activeKcal' | 'totalKcal' | 'heartRateAvg' | 'steps') => {
+  const id = w.todayFrom[key];
+  return (id ? PROVIDERS.find((p) => p.meta.id === id)?.meta.name : null) ?? 'your device';
+ };
+ /**
+  * The line above the Live row when what is on it is not a current reading.
+  *
+  * Null while everything is answering, so an ordinary day carries no banner.
+  * 'loading' is not warned about — a first read still in flight is not a stale
+  * figure, and the row is empty under it anyway.
+  */
+ const staleNote = w.todayStatus === 'error'
+  ? `These are the last figures we had, not a current reading: ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
+  : null;
  // Active where a device gives it, whole-day otherwise, and never one label on
  // the other's number.
  const energy: { kcal: number | null; kind: 'active' | 'total'; from: string } = (() => {
-  const named = (key: 'activeKcal' | 'totalKcal') =>
-   connected.find((p) => typeof w.metrics[p.meta.id]?.[key] === 'number')?.meta.name ?? 'your device';
   if (typeof w.today.activeKcal === 'number') return { kcal: w.today.activeKcal, kind: 'active', from: named('activeKcal') };
   if (typeof w.today.totalKcal === 'number') return { kcal: w.today.totalKcal, kind: 'total', from: named('totalKcal') };
   return { kcal: null, kind: 'active', from: 'your device' };
@@ -368,69 +765,481 @@ export default function Devices() {
   blurb: energy.kcal == null
    ? `No connected device has reported today's energy yet.`
    : energy.kind === 'total'
-    ? `Your whole day's energy from ${energy.from}, resting metabolism included — which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
-    : `Energy above resting from ${energy.from} — the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
+    ? `Your whole day's energy from ${energy.from}, resting metabolism included, which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
+    : `Energy above resting from ${energy.from}: the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
  },
- hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: 'The mean of today’s heart-rate samples from your watch. During a workout, live heart rate is written into that session.' },
- steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: 'Total steps today across your connected devices. A simple daily-movement signal that complements your training.' },
+ // "from your watch", singular and named, because that is now what it is. The
+ // roll-up used to average this field across every connected device and this
+ // blurb described the result as "the mean of today's samples" — of two
+ // devices' means, which is a number neither watch recorded and neither
+ // vendor's app will agree with.
+ hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: `The mean of today’s heart-rate samples from ${named('heartRateAvg')}. Where two devices both measured today, this is the fuller of the two readings and not an average of them, since no device recorded an average. During a workout, live heart rate is written into that session.` },
+ hrv: {
+  ico: 'heart',
+  title: 'Heart Rate Variability',
+  value: hrv.tonight ? `${hrv.tonight.ms} ms` : fig(null),
+  // The whole content of this figure is the comparison, so the blurb leads
+  // with why a bare number was worth nothing.
+  blurb: hrv.tonight == null
+   ? 'No connected device has reported HRV. WHOOP and Oura publish it; Apple Health carries it only if something on your phone writes it there.'
+   : `${hrv.trend
+     ? hrvTrendLine(hrv.trend)
+     : hrv.status === 'error'
+      ? 'Your earlier nights could not be read just now, so there is nothing to compare tonight with.'
+      : hrvBuildingLine(hrv.nightsKept)}\n\nHRV is not comparable between people (40 ms is an excellent night for one person and a warning for another), so ${BRAND.label} only ever shows yours against your own nights. Measured by ${hrv.tonight.sourceName}, as RMSSD in milliseconds, which is what your vendor's own app shows.`,
+ },
+ steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: `Today's steps from ${named('steps')}, the device that counted the most of them, not the sum of two devices counting the same walk twice. A simple daily-movement signal that complements your training.` },
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
+ // ── pull-to-refresh here was reported dead, and the keyboard props are NOT why ──
+ //
+ // The report was precise: pulling this screen down did nothing, while the
+ // coach's Watch & Devices refreshed. The two screens share the hook
+ // (src/ui/pullToRefresh.tsx), the machine (src/lib/pullRefresh.ts), the store
+ // (`useWearables`) and an equivalent reload callback, so the only structural
+ // difference is the three keyboard props on the ScrollView below — which made
+ // `automaticallyAdjustKeyboardInsets` the obvious culprit.
+ //
+ // It is not, and this is written down because the theory is convincing enough
+ // to be re-derived by the next person. React Native's own implementation
+ // settles it (node_modules/react-native/React/Views/ScrollView/RCTScrollView.m):
+ //
+ //   · `_registerKeyboardListener` is called UNCONDITIONALLY in
+ //     `initWithEventDispatcher`, for every ScrollView in the app. The prop is
+ //     read nowhere at mount — only inside `_keyboardWillChangeFrame:`, as an
+ //     early return. With no keyboard on screen the prop has never run a line.
+ //
+ //   · That handler, for a non-inverted list, writes `newEdgeInsets.bottom`
+ //     and nothing else. It never touches `.top`, which is where the
+ //     RefreshControl lives. The "standing top inset swallows the pull" story
+ //     describes something the code does not do.
+ //
+ //   · And it self-heals: on dismissal `endFrame` is off the bottom of the
+ //     screen, so the inset computes back to zero.
+ //
+ // So the props are inert until a keyboard appears and harmless after it goes.
+ // They are left exactly as the other sixty-seven screens have them.
+ //
+ // ── What it actually was: the difference is not on this screen ─────────────
+ //
+ // It was never in this file. app/(client)/_layout.tsx set `headerShown: false`
+ // on the five bar tabs and nowhere else, so this screen — and every other
+ // `href: null` screen in the client app — took the navigator's default and got
+ // a bottom-tabs header on top of the one it draws itself. That header is
+ // `44 + statusBarHeight` tall, and `elements/Screen` does not reset the safe
+ // area under it, so the `<SafeAreaView edges={['top']}>` below then added the
+ // top inset again: about 160 points between the top of the screen and the top
+ // of the ScrollView, none of it belonging to the ScrollView.
+ //
+ // A RefreshControl belongs to its scroller. A pull started in that strip is not
+ // a pull at all — no spinner, no error, nothing — while the coach's Watch &
+ // Devices, in a group whose layout has always carried `headerShown: false`,
+ // starts its list at the top of the screen and refreshes on the same code.
+ // "Connected but not updating" is the same fault from the data side: the pull
+ // never fired, so `syncAll` never ran.
+ //
+ // Fixed in the layout, for all sixty-six of those screens at once.
+
  const G = layout.gutter;
+
+ // A switch that moved on screen and nowhere else is worse than one that
+ // refused: the member would believe they had stopped sharing. `setShared`
+ // checks the ROW COUNT rather than the absence of an error — PostgREST does
+ // not fail an update that RLS narrows to nothing — and the state is only
+ // adopted when the server holds the new value.
+ const toggleWellnessShare = async (on: boolean) => {
+  const ok = await wellnessShare.setShared(on);
+  if (!ok) Alert.alert('Not Saved', 'That could not be changed. Your coach still sees what they saw before. Try again in a moment.');
+ };
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+ {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+     is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+     KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+     already fills the container it pads.
+     The padding stays at 40: the field sits well above the end of this screen, and the
+     inset iOS adds already gives the focused row the room it needs to rise. Padding it
+     out to a keyboard's height here would only scroll into empty space. */}
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
+   keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+   keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
-   </View>
-   <Ghost icon="back" onPress={() => router.back()} />
-  </View>
+  {/* The board's page head — back at the leading edge, the title on the
+      centre line — the way board page 17 opens this screen. */}
+  <PageHead title="Wearables" />
 
-  {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
+  {/* ── the figure: today's live burn, when a device is feeding it ──────
+      FIRST now (round five): a pushed page opens on its figure, then the
+      evidence, then the rows. It sat under the catalogue, so a member with a
+      watch on opened this screen to six rows of logos before one number. With
+      nothing readable there is no figure to lead with and the catalogue is
+      the first thing on the page, as before. The retired `Hero` became the
+      figure card every other screen uses. */}
   {showLive ? (<>
-   <Hero
-    label={energy.kind === 'total' ? 'Energy Today' : 'Active Today'}
-    figure={num(energy.kcal)}
-    unit="kcal"
-    note={energy.kcal == null
-     ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-     : energy.kind === 'total'
-      ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
-      : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
-    onPress={() => setDetail('kcal')}
-   />
+   <Section>
+    <Pressable onPress={() => setDetail('kcal')} accessibilityRole="button"
+     accessibilityLabel={`${energy.kind === 'total' ? 'Energy today' : 'Active today'}, ${energy.kcal == null ? 'no figure yet' : `${num(energy.kcal)} kilocalories`}. Opens the detail.`}>
+     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>
+      <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>{energy.kind === 'total' ? 'Energy Today' : 'Active Today'}</Text>
+      <TonedChip label={staleNote ? 'Not Current' : 'Live'} tone={staleNote ? 'amber' : 'brand'} />
+     </View>
+     <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginTop: sp.xs }}>
+      <Text style={{ ...ty.hero, color: t.data.orangeInk }}>{fig(energy.kcal == null ? null : num(energy.kcal))}</Text>
+      <Text style={{ ...ty.label, color: t.ink3, marginStart: sp.xs }}>kcal</Text>
+     </View>
+     {/* The staleness goes in the hero's own note as well as in the flag below,
+         because this is the figure the label calls "Active Today" — the one a
+         member reads and closes the screen on. A four-hour-old number under that
+         label, with the admission a section further down, is the admission in the
+         wrong place.
+         The FAILED read is asked about first, and it was asked about second —
+         which put it behind a null test it can never get past. `sync()` leaves
+         `metrics[id]` untouched when the first read throws, so a device that
+         could not be reached produces `energy.kcal == null` AND
+         `todayStatus === 'error'` together, and the chain answered "Wear your
+         watch": our own failed read, stated back to the member as something they
+         did not do. Two connected providers where one answers and the other does
+         not is enough to reach it — `showLive` is true, `todayStatus` is
+         `worstStatus(...)`, and the energy figure is still missing. */}
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+      {w.todayStatus === 'error'
+     ? (energy.kcal == null
+      ? `We couldn’t read today’s energy from your ${connected.length} connected ${devicesWord}, so there is no figure here yet. That is our read, not a day you did not move.`
+      : `Last figure we had from ${energy.from}. It has not synced since, so it is not today's total yet.`)
+     : energy.kcal == null
+      ? `Wear your watch. Energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+      : energy.kind === 'total'
+       ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
+       : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
+     </Text>
+    </Pressable>
+   </Section>
 
-   <Rule />
+   {/* The three other live figures as tiles, each in the hue it has across
+       the app — heart rate pink, steps purple, HRV teal. A figure the device
+       has not sent is a dash, never a nought; WHY is on its row in Live Today
+       below, which is also where each figure names the device it came from.
+       `route` carries the detail sheet's key: the tile opens what its row
+       opens. HRV is tonight's reading and is a tile only when there is one. */}
+   <KpiRow tiles onPress={(k) => setDetail(k.route as MetricKey)} items={[
+    { label: 'Avg Heart Rate', value: fig(w.today.heartRateAvg == null ? null : num(w.today.heartRateAvg)), unit: w.today.heartRateAvg == null ? undefined : 'bpm', tone: 'pink', route: 'hr' },
+    { label: 'Steps', value: fig(w.today.steps == null ? null : num(w.today.steps)), tone: 'purple', route: 'steps' },
+    ...(hrv.tonight ? [{ label: 'HRV Tonight', value: fig(num(hrv.tonight.ms)), unit: 'ms', tone: 'teal' as const, route: 'hrv' }] : []),
+   ]} />
+  </>) : null}
 
+  {/* ── connected apps ──────────────────────────────────────────────────
+      First, as board page 17 draws it: one row per app in the catalogue,
+      the app's brand mark on its plate, its name, and a chip at the end that
+      says where it stands. Everything this screen used to open with — the
+      live burn, the import list, the coach switch, the sleep provenance and
+      the Health write-back — is still here, under the list, in its old
+      order. The list moved up because it is the thing a member opens this
+      screen FOR, and because a disconnected watch was being explained three
+      sections above the row that would reconnect it. */}
+  <Section>
+   <SectionHead title="Connected Apps" note={readable.length ? `${readable.length} Connected` : undefined} />
+   {PROVIDERS.map((p, i) => {
+    const st = w.states[p.meta.id] || 'disconnected';
+    // The account question and the sleep question, asked separately and
+    // answered by the same function. Asking them separately is the fix: the
+    // second one used to be allowed to change the answer to the first.
+    const link = linkFor(p.meta.id, p.meta.name, st);
+    const sleepLink = linkFor(p.meta.id, p.meta.name, st, 'sleep');
+    const on = link.connected;
+    const busy = !!w.busy[p.meta.id];
+    const reason = p.unavailableReason();
+    const blocked = !p.isAvailable() && !on;
+    // ── connected, and not readable on this phone ────────────────────────────
+    //
+    // The third state, and it had no words anywhere. `blocked` is deliberately
+    // `&& !on`, so the reason a provider cannot be read was printed only for
+    // devices that are NOT connected — and `sync()` in src/ui/wearables.tsx
+    // opens with `if (!p || !p.isAvailable()) return;`, before it sets a status,
+    // a timestamp or a metric. So a device that is connected on the account but
+    // unavailable in this binary sat here saying Connected, with a live green
+    // dot, a Sync Now button that returned instantly and did nothing, no
+    // "Synced" timestamp, no figures, and not one sentence explaining any of it.
+    // Every sixty-second refresh skipped it in the same silence.
+    //
+    // Both of the devices this screen is about can land here. Apple Health is
+    // unavailable in any build without HealthKit compiled in (Expo Go, or a
+    // binary older than the shim), and a cloud vendor is unavailable in a build
+    // whose client id is missing — while the token it was connected with is
+    // still perfectly good on the server, so nothing upstream calls it
+    // disconnected and nothing should.
+    //
+    // The figures are still whatever was last read, which is right and is what
+    // the roll-up in src/ui/wearables.tsx says about a failed read too. What
+    // changes is that the row now says they have stopped moving and why.
+    //
+    // ── and the chip must not say Connected over it ──────────────────────
+    //
+    // The restore loop in src/ui/wearables.tsx marks every REMEMBERED id
+    // connected before it asks whether this build can read it, so Apple
+    // Health on the 9 Sep simulator binary — which has no HealthKit in it at
+    // all — arrives here as `on`. A green "Connected" chip on that row would
+    // be a stored preference wearing the colour of a live link. The chip
+    // says Connected only where `on` AND `isAvailable()` both hold; this row
+    // gets a grey one and the flag under it says what happened.
+    const unreadable = on && !p.isAvailable();
+    return (
+     <View key={p.meta.id} style={{
+      paddingVertical: sp.md,
+      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+     }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+       {/* The brand's mark on the brand's plate, as the board colours each
+           app's icon its own way. This was the catalogue's emoji in a grey
+           circle — two watches, a red dot and a ring, which nobody read as
+           Garmin, Fitbit, WHOOP or Oura. The plate is decorative and hides
+           itself from assistive tech; the name beside it does the speaking,
+           and no status colour is spent on decoration. */}
+       <ProviderMark id={p.meta.id} size={40} />
+       <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.head, color: t.ink }}>{p.meta.name}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
+       </View>
+       {busy ? (
+        <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel={`Working on ${p.meta.name}…`} />
+       ) : link.action === 'reconnect' ? (
+        // Offered as the primary control, because it is the one thing that
+        // fixes this and the client has to be able to find it. It is offered
+        // ONLY where re-authorising genuinely helps: a gap in this build
+        // ('metric-blocked' with no action) does not get a button, because
+        // pressing it changes nothing and pressing it repeatedly is what this
+        // tester spent four reports doing.
+        <Cta label="Reconnect" onPress={() => onConnect(p)} />
+       ) : on && !unreadable ? (
+        // The board's green "Connected" chip — and a STATE, not a button.
+        // The control that used to sit here was labelled "Connected" and was
+        // one tap, with no question, into a delete of every night the device
+        // had measured; see `confirmDisconnect`. So the word is drawn as the
+        // status it is, in the same shape as the Connect chip beside its
+        // neighbours, and the button that ends the connection is below,
+        // labelled with what pressing it does.
+        <View accessible accessibilityLabel={`${p.meta.name} is connected`}>
+         <TonedChip label="Connected" tone="brand" icon="check" />
+        </View>
+       ) : on ? (
+        // Remembered, and unreadable here. Amber — slipping, in the app's
+        // one colour language — so a stored flag with nothing behind it never
+        // wears the live green; the flag under the row says why, and
+        // Disconnect below is how the member clears it.
+        <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}>
+         <TonedChip label="Not Readable" tone="amber" />
+        </View>
+       ) : blocked ? (
+        // A neutral chip, because it is a state; still pressable, because
+        // re-attempting the connect is the only thing there is to do about
+        // it and that is what this control has always done.
+        <Pressable onPress={() => onConnect(p)} accessibilityRole="button" hitSlop={12}
+         accessibilityLabel={`${p.meta.name} is unavailable. Try connecting it`}>
+         <TonedChip label="Unavailable" tone="neutral" />
+        </Pressable>
+       ) : (
+        // The board's grey "Connect" chip. It was the green primary; the one
+        // green thing on this list is now the state that has been reached.
+        <Ghost label="Connect" onPress={() => onConnect(p)} />
+       )}
+      </View>
+
+      {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
+
+      {/* Connected, and this build cannot read it — see `unreadable`. A warn
+          flag rather than a caption, because the figures underneath are stale
+          and nothing else on the row says so. The first sentence is the one
+          fact the member cannot get anywhere else: what they did is remembered
+          and it is this build that is short. `reason` carries the rest where
+          the provider has one; where it has none, saying so is still better
+          than the silence this replaces, and does not invent a cause. */}
+      {unreadable ? (
+       <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+        {`${p.meta.name} was connected here, but this version of ${BRAND.label} cannot read it on this phone, so nothing is coming from it and any figures below have stopped updating. `}
+        {reason ?? `${BRAND.label} has not named the reason, which is a fault on our side rather than anything to do with your device.`}
+       </Flag>
+      ) : null}
+
+      {/* The state in words, wherever it is not simply working.
+          'live' says nothing here — the figures below it are the evidence, and
+          a line saying "connected" over a row of live numbers is noise. Every
+          other state gets its full sentence, because the complaint was one word
+          standing in for four different situations. */}
+      {link.state !== 'live' && link.state !== 'never' ? (
+       link.tone === 'warn'
+        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{link.detail}</Flag>
+        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{link.detail}</Text>
+      ) : null}
+
+      {/* And the metric-level answer, kept visibly separate from the account
+          one. This is the line that used to be absent here and present on
+          Recovery as "needs reconnecting", which is how the two screens came to
+          disagree about the same device in the same session. */}
+      {sleepLink.state === 'metric-blocked' ? (
+       sleepLink.tone === 'warn'
+        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{sleepLink.detail}</Flag>
+        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sleepLink.detail}</Text>
+      ) : null}
+
+      {on ? (
+       <View style={{ marginTop: sp.md }}>
+        {(() => {
+         const m = w.metrics[p.meta.id];
+         // "Tap Sync" is an instruction, and it must not be given to somebody
+         // for whom Sync cannot work: `sync()` returns at its first line for an
+         // unavailable provider. The flag above this block has already said
+         // why, so this only has to stop contradicting it.
+         // …and a read that FAILED, or has not come back, is not a device with
+         // nothing to say. `sync()` calls `setMetrics` on success and on a
+         // `WearableNotConnectedError` only; every other throw leaves the key
+         // undefined, so a token that 500s, a network that dropped and a first
+         // read still in flight all arrived here as "no data for today yet" —
+         // an absence claim over a question nobody got an answer to, with an
+         // instruction to tap the button that had just failed. `syncStatus` is
+         // on the context and is per provider, which is what makes the three
+         // sentences separable.
+         const st = w.syncStatus[p.meta.id];
+         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>{
+          unreadable ? 'Nothing has been read from this device on this phone.'
+           : st === 'loading' ? 'Connected. Reading today from this device…'
+           : st === 'error' ? 'Connected, but today could not be read from this device. That is our read failing rather than a day with nothing in it. Try Sync again in a moment.'
+           : 'Connected. Tap Sync; no data for today yet.'}</Text>;
+         // A read that answered with every field empty rendered as an EMPTY ROW
+         // — no figures, no message, and a "Synced just now" beside it. That is
+         // the same silence the flag above exists to break, arriving by the
+         // other route: a vendor that answered and holds nothing for today yet
+         // (WHOOP publishes no cycle score until it has scored one), or a
+         // metric endpoint refusing on a token that is otherwise fine. Saying so
+         // is not a claim about which — only that we asked and got no numbers.
+         if (m.activeKcal == null && m.totalKcal == null && m.heartRateAvg == null
+          && m.heartRateResting == null && m.steps == null && m.workoutMins == null
+          && m.recoveryPct == null && m.strain == null && m.hrv == null) {
+          return <Text style={{ ...ty.caption, color: t.ink3 }}>Read, and {p.meta.name} has no figures for today yet.</Text>;
+         }
+         return (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.xs }}>
+           {m.activeKcal != null ? <TonedChip tone="orange" label={`${num(m.activeKcal)} active kcal`} />
+            : m.totalKcal != null ? <TonedChip tone="orange" label={`${num(m.totalKcal)} kcal all day`} /> : null}
+           {m.heartRateAvg != null ? <TonedChip tone="pink" label={`${num(m.heartRateAvg)} bpm avg`} /> : null}
+           {m.heartRateResting != null ? <TonedChip tone="pink" label={`${num(m.heartRateResting)} resting`} /> : null}
+           {m.steps != null ? <TonedChip tone="purple" label={`${num(m.steps)} steps`} /> : null}
+           {m.workoutMins != null ? <TonedChip tone="brand" label={`${num(m.workoutMins)} min`} /> : null}
+           {/* The three the catalogue above this row has always advertised.
+               WHOOP's card sells "Strain, recovery, sleep & heart rate" and
+               Oura's sells "Readiness, HRV & sleep", and until now a member who
+               connected either one read those words and then found four rows of
+               calories, heart rate and steps underneath — no recovery, no
+               strain, no HRV anywhere in the app. Each is printed only when the
+               device actually sent a number, so an undeployed wearable-day
+               leaves them absent rather than showing a recovery of zero.
+
+               The recovery figure is attributed. WHOOP calls it recovery and
+               Oura calls it readiness, both 0–100 and both meaning the same
+               thing, and a member cross-checking against the vendor's own app
+               needs to know which word they are looking for. */}
+           {m.recoveryPct != null ? <TonedChip tone="teal" label={`${num(Math.round(m.recoveryPct))}% ${m.recoverySource === 'oura' ? 'readiness' : 'recovery'}`} /> : null}
+           {/* One decimal, because WHOOP's own app shows one and a rounded 14
+               and a rounded 15 are a meaningfully different day on a 0–21
+               logarithmic scale. */}
+           {m.strain != null ? <TonedChip tone="amber" label={`${num1(m.strain)} strain`} /> : null}
+           {m.hrv != null ? <TonedChip tone="blue" label={`${num(Math.round(m.hrv))} ms HRV`} /> : null}
+          </View>
+         );
+        })()}
+        {/* No Sync button where syncing is a no-op. It returned instantly,
+            changed nothing, wrote no timestamp and reported nothing, which
+            teaches somebody to keep pressing it — the same loop
+            src/lib/wearableLink.ts was written to end for reconnecting.
+
+            "Disconnect", not "Connected", on the button. A button says what
+            pressing it does; the state is already on this row, in the chip at
+            the end of it. Labelling a destructive action with the state it
+            undoes is how somebody taps it to find out what it means — see
+            `confirmDisconnect`. It stays on an unreadable row too: it is the
+            one way to clear a remembered connection this build cannot use. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md, flexWrap: 'wrap' }}>
+         {unreadable ? null : <Ghost label="Sync Now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />}
+         <Ghost label="Disconnect"
+          a11yLabel={`Disconnect ${p.meta.name}, and remove the nights it measured`}
+          onPress={() => confirmDisconnect(p)} />
+         {!unreadable && w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
+        </View>
+       </View>
+      ) : null}
+     </View>
+    );
+   })}
+   {/* This footnote named four cloud vendors and said all four "connect
+       through their own APIs — sign in once and the day syncs on its own."
+       Two of them cannot be signed into at all: Fitbit has no client id in any
+       build profile and Garmin needs a partnership Repple does not have, so
+       both render as Unavailable three rows above the sentence claiming they
+       work. It now names only the two that do, and says what the other two
+       need — which is the same thing their rows say, rather than the opposite. */}
+   {/* Prose, so it is behind a control (round five) — the rows above say
+       each app's state on their own. */}
+   <View style={{ marginTop: sp.md }}>
+    <Expandable title="How Each App Connects">
+     <Text style={{ ...ty.caption, color: t.ink3, }}>
+      Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs: sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
+     </Text>
+    </Expandable>
+   </View>
+  </Section>
+
+  {showLive ? (<>
    <Section>
     <SectionHead title="Live Today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
-    <ListRow icon="heart" title="Average Heart Rate"
-     note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples`}
+    {/* Whether these figures are today's, or the last ones we had.
+        `src/ui/wearables.tsx` kept the metrics through a failed sync — which is
+        right, a watch that could not be reached did not un-burn the morning —
+        and said nothing, so a stalled figure and a quiet afternoon looked
+        identical. It says now. Nothing is withheld: the numbers are real, they
+        are just not current, and that is a different sentence from either
+        "live" or "unknown". */}
+    {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
+    <ListRow icon="heart" tone="pink" title="Average Heart Rate"
+     note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples, from ${named('heartRateAvg')}`}
      onPress={() => setDetail('hr')} />
-    <ListRow icon="trending" title="Steps"
-     note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today`}
+    {/* HRV, as a trend against the member's own nights and never as a bare
+        number. src/lib/wearables/types.ts states that rule on the field itself
+        — "40 ms is excellent for one member and a red flag for another" — and
+        this screen used to print `62 ms HRV` off the last sync and keep
+        nothing, so there was no history for it to be a trend against and could
+        not have been. The nights are kept now (supabase/parts/720). */}
+    {hrv.tonight ? (
+     <ListRow icon="heart" tone="teal" title="Heart Rate Variability"
+      note={hrv.trend
+       ? `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvTrendLine(hrv.trend)}`
+       : hrv.status === 'error'
+        // The reading is real; what could not be read is the history behind it.
+        // Said plainly, because "no baseline yet" would be a claim about the
+        // member's own record made off a read that failed.
+        ? `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · your earlier nights could not be read, so there is nothing to compare it with just now.`
+        : `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvBuildingLine(hrv.nightsKept)}`}
+      onPress={() => setDetail('hrv')} />
+    ) : null}
+    <ListRow icon="trending" tone="purple" title="Steps"
+     note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today, from ${named('steps')}`}
      onPress={() => setDetail('steps')} />
-    <ListRow icon="clock" title="Connected Sources"
+    <ListRow icon="clock" tone="neutral" title="Connected Sources"
      note={connected.map((p) => p.meta.name).join(' · ')}
      onPress={() => setDetail('source')} />
-    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-     {liveFootnote(connectedMeta)}
-    </Text>
+    <Expandable title="About These Figures">
+     <Text style={{ ...ty.caption, color: t.ink3 }}>{liveFootnote(connectedMeta)}</Text>
+    </Expandable>
    </Section>
   </>) : null}
 
   {/* ── import workouts ─────────────────────────────────────────────── */}
   {canImport ? (<>
-   <Rule />
    <Section>
     <SectionHead title="Import Workouts" note={importLabel} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
-     Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.
+     Pull sessions from your connected devices (runs, cycling, lifting, Pilates) straight into your training log. No manual entry.
     </Text>
     {/* How far back to look. Changing it clears the current list so the shown
         results always match the selected window. */}
@@ -440,7 +1249,7 @@ export default function Devices() {
       return (
        <Pressable
         key={d}
-        onPress={() => { setLookback(d); setWk(null); }}
+        onPress={() => { setLookback(d); setWkRead(null); }}
         accessibilityRole="button"
         accessibilityState={{ selected: on }}
         accessibilityLabel={`Look back ${lookbackLabel(d)}`}
@@ -448,7 +1257,7 @@ export default function Devices() {
          paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill,
          backgroundColor: on ? t.brand : t.surface2,
         }}>
-        <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>
+        <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>
          {lookbackLabel(d)}
         </Text>
        </Pressable>
@@ -457,12 +1266,39 @@ export default function Devices() {
     </View>
     {wk == null ? (
      wkBusy
-      ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} /></View>
+      ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Looking for your workouts…" /></View>
       : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find My Workouts" onPress={findWorkouts} /></View>
     ) : wk.length === 0 ? (
-     <Text style={{ ...ty.label, color: t.ink3 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
+     /* No rows. Which of the three reasons decides what may be said.
+        `emptyAndWhole` — every device asked answered and none held anything —
+        is the ONLY one that is a fact about the member's training, and the only
+        one this screen is allowed to state flatly. Anything else is a fact
+        about the READ, so it gets the warn mark and a way to ask again: the
+        control that would fetch the session used to disappear behind a sentence
+        claiming it had already answered. */
+     wkRead?.emptyAndWhole ? (
+      <Text style={{ ...ty.label, color: t.ink3 }}>{wkNote ?? `No workouts found in the last ${lookbackLabel(lookback)}.`}</Text>
+     ) : (
+      <Notice
+       tone={t.warn}
+       kicker="Import Workouts"
+       title="Nothing to show, and not because there is nothing"
+       note={wkNote ?? 'Your workouts could not be read.'}>
+       <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={findWorkouts} /></View>
+      </Notice>
+     )
     ) : (
      <View>
+      {/* Rows, and a device that did not hand any over. Said ABOVE the list,
+          because the list is the thing the sentence qualifies — these are real
+          and they are not all of them. */}
+      {wkNote ? (
+       <Notice
+        tone={t.warn}
+        kicker="Import Workouts"
+        title="This is not all of your training"
+        note={wkNote} />
+      ) : null}
       {wk.map((sm, i) => {
        const done = alreadyLogged(sm);
        return (
@@ -471,8 +1307,13 @@ export default function Devices() {
          borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
         }}>
          <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sm.activity}</Text>
+          {/* The distance a watch recorded, in the unit the member measures
+              distance in. It arrives from every provider in kilometres — that
+              is what `WorkoutSample.distanceKm` means — and was printed with
+              "km" after it whatever the phone was set to, so a runner in Dallas
+              read their five miles as 8.05. */}
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[fmtDay(sm.start), `${sm.mins} min`, sm.distanceKm ? distanceLabel(sm.distanceKm, du) : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
          </View>
          {/* Three answers, not two. `done === null` means the training log
              could not be read whole, so we do not know whether this workout is
@@ -508,16 +1349,74 @@ export default function Devices() {
    </Section>
   </>) : null}
 
+  {/* ── what your coach may see of the sleep and water you type ─────────
+      OUTSIDE the `connected.length` guard below, and that is the whole point
+      of it. The nights a member types by hand are the only sleep a member
+      with no wearable has, so a control that appeared once a watch was
+      connected would be missing for exactly the people it exists for.
+
+      One switch, for the nights AND the glasses, because the member is
+      answering one question — may my coach see what I log about myself. Two
+      controls over two tables written by one screen is how somebody comes to
+      believe they have stopped sharing because they turned off the one they
+      remembered. See supabase/parts/2670. */}
+  <Section>
+   <SectionHead title="Your Coach" note={wellnessShare.shared === true ? 'Sharing' : undefined} />
+   <Text style={{ ...ty.label, color: t.ink2 }}>
+    The sleep and water you type in yourself are yours. Off by default: nothing of it reaches your coach until you say so here.
+   </Text>
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+    <View style={{ flex: 1 }}>
+     <Text style={{ ...ty.body, color: t.ink }}>Let My Coach See These</Text>
+     <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+      Turning it off again hides the nights and glasses you have already logged, as well as the next ones. Only your current coach can see them, and only while they are your coach.
+     </Text>
+    </View>
+    <Switch
+     value={wellnessShare.shared === true}
+     onValueChange={toggleWellnessShare}
+     // Null means the flag could not be read. Disabled rather than drawn as
+     // "off", which would invite somebody to turn ON what may already be on
+     // and would have the control asserting a state nobody confirmed.
+     disabled={wellnessShare.shared === null}
+     // The words beside this are a SIBLING of it, not a parent, so a screen
+     // reader arriving here would otherwise announce a switch and its state
+     // with no name at all — on the control that decides who reads a member's
+     // sleep. The visible line says "these"; the spoken name says what they are.
+     accessibilityLabel="Let my coach see the sleep and water I log myself"
+     accessibilityHint={
+      wellnessShare.shared === null
+       ? 'Unavailable: whether this is on could not be read just now.'
+       : 'Turning it off again hides what you have already logged as well as what comes next.'
+     }
+     accessibilityState={{ disabled: wellnessShare.shared === null }}
+    />
+   </View>
+   {wellnessShare.shared === null ? (
+    // Not "off". A flag we could not read is not a decision the member made,
+    // and a screen that draws one as the other has answered for them.
+    <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+     Whether this is on could not be read just now, so it is shown as it is rather than guessed at. Nothing has changed either way.
+    </Flag>
+   ) : null}
+  </Section>
+
   {/* ── where sleep comes from ──────────────────────────────────────── */}
   {connected.length ? (<>
-   <Rule />
    <Section>
-    <SectionHead title="Sleep Sources" note={`last night`} />
+    <SectionHead title="Sleep Sources" note={`Last Night`} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
-     Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it — it never averages them into a number no device recorded.
+     Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it. It never averages them into a number no device recorded.
     </Text>
     {sleepReads == null ? (
      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Checking your devices…</Text>
+    ) : sleepWalkFailed ? (
+     // The read never happened. An empty list under this heading would be the
+     // screen saying that none of the devices above answered, which is a
+     // statement about them made out of a failure of ours.
+     <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+      Your devices could not be asked about sleep just now, so nothing is listed here. That is this app failing to ask rather than your {devicesWord} having nothing to say. Pull down to try again.
+     </Flag>
     ) : (
      <View style={{ marginTop: sp.lg }}>
       {sleepReads.map((r, i) => {
@@ -525,7 +1424,7 @@ export default function Devices() {
        const lastNight = r.readings.filter((rd) => rd.night === lastNightKey);
        return (
         <View key={r.provider} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{provider?.meta.name ?? r.provider}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{provider?.meta.name ?? r.provider}</Text>
          {r.status !== 'ready' ? (
           // 'error' is louder than 'unsupported' because one of them means we
           // do not know what happened last night and the other means we never
@@ -539,9 +1438,27 @@ export default function Devices() {
             {r.reason || `Cannot report sleep to ${BRAND.label} yet.`}
            </Text>
           )
-         ) : lastNight.length === 0 ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable — nothing recorded for last night.</Text>
-         ) : (
+         ) : lastNight.length === 0 ? (<>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable, but nothing recorded for last night.</Text>
+          {/* And when it last DID record one, which is the difference between
+              a night off the wrist and a link that has quietly stopped. See
+              `lastRecorded`. Neither sentence is a diagnosis: the first says
+              what the device last gave us and the second says how far back we
+              looked, because a week with nothing in it is not evidence of
+              anything beyond the week. */}
+          {(() => {
+           const seen = lastRecorded(r);
+           return seen ? (
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+             Last night it recorded was {fmtDay(seen.night)}: {formatSleepHours(seen.minutesAsleep)} from {seen.sourceName}.
+            </Text>
+           ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+             Nothing from it in the last seven nights either. It is still connected, so this is a device that has stopped sending nights rather than one that has been unlinked. Check it is syncing in its own app.
+            </Text>
+           );
+          })()}
+         </>) : (
           lastNight.map((rd) => (
            <Text key={rd.sourceId} style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 2 }}>
             {formatSleepHours(rd.minutesAsleep)} · {rd.sourceName}{rd.basis === 'in-bed' ? ' (time in bed)' : ''}
@@ -560,9 +1477,8 @@ export default function Devices() {
   </>) : null}
 
   {/* ── write sessions back to Apple Health ─────────────────────────── */}
-  <Rule />
   <Section>
-   <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'allowed' : undefined} />
+   <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'Allowed' : undefined} />
    <Text style={{ ...ty.label, color: t.ink2 }}>
     Send the sessions you logged in {BRAND.label} to the Health app, so a gym session sits beside everything your watch recorded. One workout per session: a push day with eight exercises goes in as one entry, not eight.
    </Text>
@@ -578,7 +1494,7 @@ export default function Devices() {
       <Notice
        kicker="Permission"
        title={`Health is not letting ${BRAND.label} add workouts`}
-       note={`You said no, and that stands — nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ ${BRAND.label} ▸ turn on Workouts.`}
+       note={`You said no, and that stands. Nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ ${BRAND.label} ▸ turn on Workouts.`}
       />
      </View>
     ) : null}
@@ -595,7 +1511,7 @@ export default function Devices() {
     ) : hkPlan == null ? (
      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
       {hkBusy
-       ? <ActivityIndicator color={t.brand} />
+       ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Working out what is ready to write…" />
        : <Cta label="See What's Ready" onPress={reviewHk} />}
      </View>
     ) : hkPlan.writable.length === 0 && hkPlan.skipped.length === 0 ? (
@@ -609,13 +1525,18 @@ export default function Devices() {
      {/* Ready — every one of these has a length that came from somewhere real. */}
      {hkPlan.writable.length ? (
       <View style={{ marginTop: sp.lg }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to write</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to Write</Text>
        {hkPlan.writable.map((p, i) => (
         <View key={p.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.activityLabel}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.activityLabel}</Text>
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
           {[sessionWhen(p.t), `${fig(Math.round(p.seconds / 60))} min`,
-            p.distanceMeters != null ? `${(p.distanceMeters / 1000).toFixed(2)} km` : null,
+            // The plan carries metres, because that is what HealthKit takes.
+            // What is PRINTED here is the member's own unit: this line is the
+            // preview of what is about to be written into their Health app, and
+            // "8.05 km" over a run they logged as five miles reads as the app
+            // about to write down something they did not do.
+            p.distanceMeters != null ? metresLabel(p.distanceMeters, du) : null,
             p.kcal != null ? `${num(p.kcal)} kcal` : null,
            ].filter(Boolean).join(' · ')}
          </Text>
@@ -633,10 +1554,10 @@ export default function Devices() {
      {/* Blocked — stated plainly, with the one thing that would unblock it. */}
      {hkPlan.skipped.length ? (
       <View style={{ marginTop: sp.xl }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No length recorded — not written</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No Length Recorded · Not Written</Text>
        {hkPlan.skipped.map((sk, i) => (
         <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{sessionWhen(sk.t)} · {fig(null)} min</Text>
          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sk.reason}</Text>
          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
@@ -661,11 +1582,11 @@ export default function Devices() {
      ) : null}
 
      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xl }}>
-      {hkBusy ? <ActivityIndicator color={t.brand} /> : (<>
+      {hkBusy ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Writing to Apple Health…" /> : (<>
        <Cta
         label={hkPlan.writable.length
-         ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'session' : 'sessions'}`
-         : 'Nothing to write'}
+         ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'Session' : 'Sessions'}`
+         : 'Nothing to Write'}
         disabled={hkPlan.writable.length === 0}
         onPress={writeHk}
        />
@@ -684,14 +1605,14 @@ export default function Devices() {
      <View style={{ marginTop: sp.lg }}>
       <Notice
        tone={hkResult.state === 'done' && hkResult.failed.length === 0 ? undefined : t.warn}
-       kicker="Last write"
+       kicker="Last Write"
        title={summariseResult(hkResult)}
       >
        {hkResult.state === 'done' && hkResult.failed.length ? (
         <View style={{ marginTop: sp.sm }}>
          {hkResult.failed.map((f) => (
           <Text key={f.key} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
-           • {f.activityLabel}, {sessionWhen(f.t)} — {f.reason}
+           • {f.activityLabel}, {sessionWhen(f.t)}: {f.reason}
           </Text>
          ))}
         </View>
@@ -702,136 +1623,11 @@ export default function Devices() {
    </>)}
   </Section>
 
-  {/* ── available devices ───────────────────────────────────────────── */}
-  <Rule />
-  <Section>
-   <SectionHead title="Available Devices" note={connected.length ? `${connected.length} connected` : undefined} />
-   {PROVIDERS.map((p, i) => {
-    const st = w.states[p.meta.id] || 'disconnected';
-    // The account question and the sleep question, asked separately and
-    // answered by the same function. Asking them separately is the fix: the
-    // second one used to be allowed to change the answer to the first.
-    const link = linkFor(p.meta.id, p.meta.name, st);
-    const sleepLink = linkFor(p.meta.id, p.meta.name, st, 'sleep');
-    const on = link.connected;
-    const busy = !!w.busy[p.meta.id];
-    const reason = p.unavailableReason();
-    const blocked = !p.isAvailable() && !on;
-    return (
-     <View key={p.meta.id} style={{
-      paddingVertical: sp.md,
-      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-     }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-       <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name="clock" size={17} color={on ? t.brand : t.ink3} />
-       </View>
-       <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-         {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /> : null}
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
-        </View>
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
-       </View>
-       {busy ? (
-        <ActivityIndicator color={t.brand} />
-       ) : link.action === 'reconnect' ? (
-        // Offered as the primary control, because it is the one thing that
-        // fixes this and the client has to be able to find it. It is offered
-        // ONLY where re-authorising genuinely helps: a gap in this build
-        // ('metric-blocked' with no action) does not get a button, because
-        // pressing it changes nothing and pressing it repeatedly is what this
-        // tester spent four reports doing.
-        <Cta label="Reconnect" onPress={() => onConnect(p)} />
-       ) : on || blocked ? (
-        <Ghost label={on ? 'Connected' : 'Unavailable'} onPress={() => (on ? onDisconnect(p) : onConnect(p))} />
-       ) : (
-        <Cta label="Connect" onPress={() => onConnect(p)} />
-       )}
-      </View>
-
-      {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
-
-      {/* The state in words, wherever it is not simply working.
-          'live' says nothing here — the figures below it are the evidence, and
-          a line saying "connected" over a row of live numbers is noise. Every
-          other state gets its full sentence, because the complaint was one word
-          standing in for four different situations. */}
-      {link.state !== 'live' && link.state !== 'never' ? (
-       link.tone === 'warn'
-        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{link.detail}</Flag>
-        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{link.detail}</Text>
-      ) : null}
-
-      {/* And the metric-level answer, kept visibly separate from the account
-          one. This is the line that used to be absent here and present on
-          Recovery as "needs reconnecting", which is how the two screens came to
-          disagree about the same device in the same session. */}
-      {sleepLink.state === 'metric-blocked' ? (
-       sleepLink.tone === 'warn'
-        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{sleepLink.detail}</Flag>
-        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sleepLink.detail}</Text>
-      ) : null}
-
-      {on ? (
-       <View style={{ marginTop: sp.md }}>
-        {(() => {
-         const m = w.metrics[p.meta.id];
-         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>;
-         return (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
-           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} active kcal</Text>
-            : m.totalKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.totalKcal)} kcal all day</Text> : null}
-           {m.heartRateAvg != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateAvg} bpm avg</Text> : null}
-           {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
-           {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}
-           {m.workoutMins != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.workoutMins} min</Text> : null}
-           {/* The three the catalogue above this row has always advertised.
-               WHOOP's card sells "Strain, recovery, sleep & heart rate" and
-               Oura's sells "Readiness, HRV & sleep", and until now a member who
-               connected either one read those words and then found four rows of
-               calories, heart rate and steps underneath — no recovery, no
-               strain, no HRV anywhere in the app. Each is printed only when the
-               device actually sent a number, so an undeployed wearable-day
-               leaves them absent rather than showing a recovery of zero.
-
-               The recovery figure is attributed. WHOOP calls it recovery and
-               Oura calls it readiness, both 0–100 and both meaning the same
-               thing, and a member cross-checking against the vendor's own app
-               needs to know which word they are looking for. */}
-           {m.recoveryPct != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.recoveryPct)}% {m.recoverySource === 'oura' ? 'readiness' : 'recovery'}</Text> : null}
-           {/* One decimal, because WHOOP's own app shows one and a rounded 14
-               and a rounded 15 are a meaningfully different day on a 0–21
-               logarithmic scale. */}
-           {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.strain.toFixed(1)} strain</Text> : null}
-           {m.hrv != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.hrv)} ms HRV</Text> : null}
-          </View>
-         );
-        })()}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-         <Ghost label="Sync Now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
-         {w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
-        </View>
-       </View>
-      ) : null}
-     </View>
-    );
-   })}
-   {/* This footnote named four cloud vendors and said all four "connect
-       through their own APIs — sign in once and the day syncs on its own."
-       Two of them cannot be signed into at all: Fitbit has no client id in any
-       build profile and Garmin needs a partnership Repple does not have, so
-       both render as Unavailable three rows above the sentence claiming they
-       work. It now names only the two that do, and says what the other two
-       need — which is the same thing their rows say, rather than the opposite. */}
-   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-    Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
-   </Text>
-  </Section>
  </ScrollView>
 
  <Modal visible={detail != null} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
-  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)} />
+  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
   <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
    {detail ? (
     <>

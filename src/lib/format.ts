@@ -88,6 +88,64 @@ export function fmtRelativeDay(iso: string, now: Date = new Date()): string {
  * all — a Hermes build without ICU — for the same reason `FALLBACK_LOCALE`
  * exists: something must be written, and this is what the app already wrote.
  */
+/**
+ * A weekday name in the reader's own language — "Tuesday", "Dienstag",
+ * "martedì".
+ *
+ * `dow` is 0 = Sunday, the same convention `Date.getDay()` and Postgres's
+ * `extract(dow)` use, which is what `DOW_NAMES` in src/lib/recurring.ts is
+ * indexed by. Built from a fixed UTC date whose UTC weekday is known —
+ * 2024-01-07 was a Sunday — and formatted in UTC, so the reader's own zone
+ * cannot shift it by a day.
+ *
+ * Falls back to English on a runtime with no Intl, for the same reason
+ * `fmtClock` does: a fallback should not also be a blank.
+ */
+const EN_DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export function weekdayName(dow: number): string {
+  const i = ((Math.trunc(dow) % 7) + 7) % 7;
+  try {
+    return new Intl.DateTimeFormat(appLocale(), { weekday: 'long', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(2024, 0, 7 + i)));
+  } catch { return EN_DOW[i]; }
+}
+
+/**
+ * The same, abbreviated — "Tue", and whatever the reader's language writes for
+ * it.
+ *
+ * Built the same way as `weekdayName` above and indexed the same way, because
+ * the screens that need one need the other: app/(trainer)/calendar.tsx had a
+ * hardcoded `['Sun', 'Mon', …]` read at roughly twenty sites, four of which are
+ * pushes that leave the coach's phone for a client's.
+ */
+const EN_DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export function weekdayNameShort(dow: number): string {
+  const i = ((Math.trunc(dow) % 7) + 7) % 7;
+  try {
+    return new Intl.DateTimeFormat(appLocale(), { weekday: 'short', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(2024, 0, 7 + i)));
+  } catch { return EN_DOW_SHORT[i]; }
+}
+
+/**
+ * The twelve month names in full, in the reader's own language.
+ *
+ * The long twin of `monthNamesShort`. A calendar header reading "September
+ * 2026" needs the whole word, and slicing three characters off the short one is
+ * not the same thing in any language that does not abbreviate that way.
+ */
+const EN_MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export function monthNames(locale: string = appLocale()): string[] {
+  try {
+    const f = new Intl.DateTimeFormat(locale, { month: 'long' });
+    // Day 15, for the reason `monthNamesShort` gives below.
+    return Array.from({ length: 12 }, (_, m) => f.format(new Date(2026, m, 15)));
+  } catch {
+    return EN_MON;
+  }
+}
+
 export function monthNamesShort(locale: string = appLocale()): string[] {
   try {
     const f = new Intl.DateTimeFormat(locale, { month: 'short' });
@@ -251,4 +309,43 @@ export function num(n: number | null | undefined): string {
 export function num1(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toLocaleString(appLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+/**
+ * The same, keeping two — for a rate, a ratio or a multiple, where the
+ * hundredth is what distinguishes one answer from the next.
+ *
+ * The sites this was written for all read `x.toFixed(2)`, and `toFixed` is not
+ * a formatter: it is `Number.prototype`'s own decimal spelling and it writes a
+ * FULL STOP in every locale there has ever been. So a coach in Berlin read
+ * "0.25 kg/wk" on the goal pace line and "1,204.5 kg" from `num1` four lines
+ * above it — two different decimal separators, in the same paragraph, both
+ * printed by this app. In German the first of those is not a quarter of a
+ * kilogram; a full stop is the THOUSANDS separator, so a slow cut reads as
+ * twenty-five kilograms a week to anybody who parses it the way their own
+ * language taught them.
+ */
+export function num2(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return n.toLocaleString(appLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * A figure with AT MOST `places` decimals — trailing zeros dropped.
+ *
+ * The difference from `num1`/`num2` is whether a whole number is allowed to
+ * look whole. "8 hours" and "1 serving" are right; "8.0 hours" and "1.00
+ * servings" read as a machine talking. Two screens wrote this by hand as
+ * `.toFixed(2).replace(/0$/, '').replace(/\.$/, '')`, which is both an English
+ * decimal point and a trim that cannot find a comma — so on a German handset
+ * the trim silently stopped working as well as the point being wrong.
+ *
+ * `places` is clamped to Intl's own 0-20 range rather than trusted, because the
+ * constructor throws a RangeError outside it and a throw inside a formatter
+ * takes out whichever screen was drawing a figure.
+ */
+export function numUpTo(n: number | null | undefined, places: number): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const dp = Math.min(20, Math.max(0, Math.trunc(places) || 0));
+  return n.toLocaleString(appLocale(), { maximumFractionDigits: dp });
 }

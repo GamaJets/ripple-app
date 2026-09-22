@@ -8,7 +8,7 @@
 // `goal_targets` was that somebody else could see them. The console got a
 // "Working toward" column on the roster; the coach app got nothing. So the one
 // thing a coach most needs to know about a client, the thing that decides what
-// their programme should even be for, was visible on a laptop and invisible on
+// their program should even be for, was visible on a laptop and invisible on
 // the phone they actually coach from.
 //
 // ── It reads and it does not write ─────────────────────────────────────────
@@ -55,9 +55,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, Ring, IconPlate, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { supabase } from '../../src/lib/supabase';
@@ -67,6 +68,7 @@ import { capLimit, capped } from '../../src/lib/rowCap';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue,
+  deadlineTally, deadlineNote,
   GOAL_METRIC, MIN_TREND_DAYS,
   type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
@@ -82,6 +84,12 @@ import {
 import { isoToday } from '../../src/lib/dayPlan';
 import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
+import { localDate } from '../../src/lib/localDate';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useNow } from '../../src/ui/today';
+import { num2 } from '../../src/lib/format';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -90,14 +98,32 @@ const MEAS_COLS = 'taken_at, kind, value';
 
 const EMPTY_SERIES: ClientSeries = { weight: [], bodyfat: [], muscle: [] };
 
-const shortDate = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+/**
+ * A goal's date as a short day, read as the day it says.
+ *
+ * `new Date(iso)` was wrong for the value this is called with. Both callers
+ * below pass `goal_targets.target_date`, which is a bare Postgres `date`, and
+ * `new Date('2026-09-01')` is UTC midnight — which every local getter and
+ * `toLocaleDateString` then reads back in the coach's own zone, so a coach in
+ * Los Angeles was shown "Aug 31" over a target their client typed as the 1st,
+ * and the overdue line read "Target date passed (Aug 31)" about a date that
+ * does not exist anywhere in this record.
+ *
+ * `localDate` builds a bare date at LOCAL midnight and leaves a real timestamp
+ * — `achievedAtISO` is a timestamptz — as the instant it is. One function for
+ * both because the two callers below pass one of each. src/lib/clientBrief.ts
+ * fixed exactly this for exactly this column; this screen was the other half.
+ */
+const shortDate = (iso: string) => {
+  const d = localDate(iso);
+  return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
+};
 
 /** The client's trend in a sentence, addressed to their coach, or null when
  *  there is no honest one to write. Every branch here is a named member of
  *  `Projection`; none of them is inferred on this screen. */
-function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: string): string | null {
-  const p = projectionOf(goal, series, Date.now());
+function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: string, nowMs: number): string | null {
+  const p = projectionOf(goal, series, nowMs);
   if (!p) return null;
   const kind = goal.kind as MeasuredKind;
   const unit = goalUnit(kind, wu);
@@ -113,11 +139,11 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: 
   // coach as the basis of a finish date for somebody else's body.
   const pace = (v: number) => {
     const r = rate(v);
-    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${Math.abs(r).toFixed(2)} ${unit}/wk)` : '';
+    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${num2(Math.abs(r))} ${unit}/wk)` : '';
   };
   switch (p.kind) {
     case 'reached':
-      return `${who} has reached this one. It is theirs to mark done — worth a message.`;
+      return `${who} has reached this one. It is theirs to mark done, so it is worth a message.`;
     case 'tooshort':
       return `Only ${p.days === 1 ? 'a day' : `${p.days} days`} between their readings so far. A finish date needs about ${MIN_TREND_DAYS} days of them; a shorter gap is noise, not a trend.`;
     case 'flat':
@@ -153,7 +179,17 @@ export default function ClientGoals() {
   // nobody can tell which number belongs to which system.
   const lu = useSettings().lengthUnit;
 
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
   // Null is "we do not know", never "there are none". Each read carries its own
   // status because they fail independently: a refused check_ins read must not
@@ -171,6 +207,9 @@ export default function ClientGoals() {
   // a screen left open over midnight cannot quietly age a reading under the
   // coach's eyes while they are looking at it. Same as client-week.tsx.
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
+  /** The instant every judgement about a target DATE is made against. Kept
+   *  current for the life of the mount — see the note at `goalCard`. */
+  const nowMs = useNow().getTime();
 
   // The client whose reads are allowed to reach the screen. Tapping through a
   // book of clients starts a read per tap and they do not come back in order,
@@ -179,13 +218,48 @@ export default function ClientGoals() {
   // another, which is worse than showing nothing at all.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setGoalStatus('loading'); setScanStatus('loading'); setWeighStatus('loading');
     setMeasStatus('loading');
     setGoals(null); setUnreadableGoals(0); setSeries(EMPTY_SERIES);
     setSites(null); setUnreadableMeas(0);
     const today = isoToday(new Date());
+
+    /* A client the coach typed in by hand has a `coach_clients` row and no user
+     * account, so nothing server-backed is asked for them.
+     *
+     * This screen asked anyway. `coach_clients.id` is `uuid DEFAULT
+     * gen_random_uuid()` — client-report.tsx and client-body.tsx both carry the
+     * note — so the id passes every shape test, all four reads ran, and
+     * `goal_targets_coach_read` / `scans_trainer_read` / `checkins_trainer_read`
+     * / `measurements_coach_read` all hang off `is_my_client()`, which is an
+     * EXISTS over `clients` and is false for a `coach_clients` row. RLS
+     * therefore answered every one of them with zero rows and NO error, and
+     * this screen printed that as:
+     *
+     *     "{who} hasn't set a goal yet. The read came back and it was empty,
+     *      so this is about them rather than about the connection — which
+     *      makes it worth raising."
+     *
+     * A sentence about somebody's own ambition, invented out of the absence of
+     * an account, and it ends by telling the coach to go and raise it with
+     * them. The tape section said the same thing about a tape they have no way
+     * to log with.
+     *
+     * The statuses go to 'error' so that nothing downstream — `goalBoard`,
+     * `measureBoard`, `progressOf`, `projectionOf` — can compute a figure over
+     * an empty list it would otherwise call whole. The render does not print
+     * those as a failed read: `askable` has its own branch up there, because
+     * "they have no account" is a THIRD answer and collapsing it into "the read
+     * failed" is the same flattening src/lib/coachWellness.ts keeps a
+     * `not-asked` kind apart from `unreadable` for.
+     */
+    if (!askable) {
+      setGoalStatus('error'); setScanStatus('error');
+      setWeighStatus('error'); setMeasStatus('error');
+      return;
+    }
 
     // RLS already limits all four of these to clients this coach actually
     // coaches (goal_targets_coach_read, scans_trainer_read,
@@ -291,6 +365,16 @@ export default function ClientGoals() {
     }
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  const who = client?.name.split(' ')[0] ?? 'They';
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving four empty sections standing as facts about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. See src/lib/clientRecord.ts. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useEffect(() => {
     if (!USE_SUPABASE) return;
     if (!picked) {
@@ -303,11 +387,18 @@ export default function ClientGoals() {
       setMeasStatus('ready');
       return;
     }
-    void load(picked);
-  }, [picked, load]);
+    void load(picked, askable);
+  }, [picked, askable, load]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
-  const who = client?.name.split(' ')[0] ?? 'They';
+  // `load` is one call over four reads — the goals, the scans, the weigh-ins
+  // and the tape — and they are asked for together on purpose: every delta on
+  // this screen crosses two of them, and a refresh that moved one would date
+  // a change from one read against a starting point from another. The roster
+  // is the picker and the name at the top.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, picked, askable, load]));
 
   // 'error' hands `goalBoard` a null, which is the only way it can answer
   // 'unreadable'. Under any other status the list is the server's own answer.
@@ -353,7 +444,7 @@ export default function ClientGoals() {
     const unit = goalUnit(g.kind, wu);
     const left = Math.abs(goalDelta(prog.remaining, g.kind, wu));
     return prog.reached
-      ? `Reached — ${fig(goalValue(prog.current, g.kind, wu))} ${unit} against a target of ${fig(goalValue(prog.target, g.kind, wu))}.`
+      ? `Reached: ${fig(goalValue(prog.current, g.kind, wu))} ${unit} against a target of ${fig(goalValue(prog.target, g.kind, wu))}.`
       : `${prog.pct}% of the way · ${fig(left)} ${unit} to go · now ${fig(goalValue(prog.current, g.kind, wu))} ${unit}`;
   };
 
@@ -376,17 +467,74 @@ export default function ClientGoals() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there are no goals to look at" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        /* An empty chip row while the roster lands reads as a coach
+           with nobody on their book — the same claim `EmptyRoster`
+           above is gated on `isWhole` to avoid making. Said in words
+           instead, exactly as app/(trainer)/client-week.tsx says it. */
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   const goalCard = (g: GoalTarget, i: number) => {
     const measured = isMeasured(g);
     const kind = measured ? (g.kind as MeasuredKind) : null;
     const unit = kind ? goalUnit(kind, wu) : '';
-    const overdue = isOverdue(g, Date.now());
+    /* `nowMs` from `useNow`, never a bare `Date.now()` here.
+     *
+     * This line, and the `projectionOf` behind the one under it, both read the
+     * clock in a render body. A render body is not a safe place for one on this
+     * screen: app/(trainer)/_layout.tsx registers client-goals `href: null`
+     * inside <Tabs>, so it mounts once and is never torn down — not by
+     * navigating away and not by backgrounding the app — and nothing on it
+     * re-renders on a timer. A coach who opened a client's goals on Sunday
+     * evening and came back to the app on Wednesday was still being told "By
+     * Sep 13" about a target date that had passed on the Monday, with no warn
+     * dot and the pale ink that means nothing needs them.
+     *
+     * `useNow` moves on the two moments that matter and on no others: the local
+     * day rolling over, and the app coming back to the foreground. See
+     * src/ui/today.ts — the same fix credentials.tsx took for expiry dates. */
+    const overdue = isOverdue(g, nowMs);
     const proj = kind && isWhole(readingStatus(kind))
-      ? projectionLine(g, seriesFor(series, kind), wu, who)
+      ? projectionLine(g, seriesFor(series, kind), wu, who, nowMs)
       : null;
+    // The ring beside the goal: how far along it is, and ONLY where
+    // `measuredLine` below would print a percentage — a measured goal, a whole
+    // read of its series, and a reading to hold it against. Everything else
+    // gets a plate and its sentence; an empty ring beside "could not be read"
+    // would look like a goal nobody has started.
+    const ringProg = kind && !g.achievedAtISO && isWhole(readingStatus(kind)) ? progressOf(g, seriesFor(series, kind)) : null;
+    const ringPct = ringProg ? Math.round(Math.max(0, Math.min(100, ringProg.pct))) : null;
     return (
-      <View key={g.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, color: g.achievedAtISO ? t.ink3 : t.ink, fontWeight: '600' }}>
+      <View key={g.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+        {ringPct != null
+          ? <Ring size={64} tone={overdue ? 'amber' : 'brand'} value={ringPct / 100} figure={`${ringPct}%`} spoken={`${goalLabel(g)}, ${ringPct} percent of the way`} />
+          : <IconPlate icon={g.achievedAtISO ? 'check' : 'target'} tone={g.achievedAtISO ? 'brand' : overdue ? 'amber' : 'blue'} />}
+        <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.body, color: g.achievedAtISO ? t.ink3 : t.ink, ...font('600') }}>
           {goalLabel(g)}
           {kind && g.targetValue != null ? ` · ${fig(goalValue(g.targetValue, kind, wu))} ${unit}` : ''}
         </Text>
@@ -412,6 +560,7 @@ export default function ClientGoals() {
             : `In their words, and nothing measures it. Only ${who} can say when this one is done.`}
         </Text>
         {proj ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{proj}</Text> : null}
+        </View>
       </View>
     );
   };
@@ -432,8 +581,8 @@ export default function ClientGoals() {
     return (
       <View key={h.key} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-          <Text style={{ ...ty.body, color: t.ink, fontWeight: '600' }}>{h.label}</Text>
-          <Text style={{ ...ty.body, ...numeric, color: t.ink, fontWeight: '500' }}>
+          <Text style={{ ...ty.body, color: t.ink, ...font('600') }}>{h.label}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink, ...font('500') }}>
             {fig(lengthLabel(h.latest.cm, lu))}
           </Text>
         </View>
@@ -448,55 +597,50 @@ export default function ClientGoals() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Working Toward</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          What each client is aiming at, in their own words and numbers, how far along they are,
-          and what the tape says. You can read these; you can&rsquo;t change them — a goal is theirs
-          to set and theirs to call done, and a measurement is theirs to take.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Goals" subtitle={client?.name || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Goals live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have not set any." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>
-                  Nobody is on your book yet, so there are no goals to look at.
-                </Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ────────────────────────────────────────
+                 Not "they have set none" and not "the read failed". This
+                 person is a name the coach typed into their own book: there is
+                 a `coach_clients` row and no account behind it, so there is no
+                 goal to read, no scan, no weigh-in and no tape — and nothing
+                 was ever refused, because nothing was ever entitled to be
+                 asked. Four sections of "could not be read" would tell a coach
+                 to try again on a connection that is working perfectly.
+
+                 The same distinction `wellnessPanel`'s `not-asked` kind keeps
+                 apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
+                    note={`You added ${who} to your book by hand, so there is nothing of theirs on the server to read: no goals, no scans, no weigh-ins and no tape. That is not an empty record and not a failed read: goals are set in the app, and ${who} does not have it. Invite them from your client list and this screen fills in from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
@@ -506,22 +650,22 @@ export default function ClientGoals() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their goals…</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their goals could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has set none — that is a different screen and a different conversation.`} />
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Goals Could Not Be Read"
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has set none. That is a different screen and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Goals'} note="none set" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="None Set" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t set a goal yet. The read came back and it was empty, so this
-                      is about them rather than about the connection — which makes it worth raising.
+                      is about them rather than about the connection, which makes it worth raising.
                     </Text>
                   </Section>
                 ) : board.state === 'reached' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Goals'} note="all reached" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="All Reached" />
                     <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>
-                      Everything {who} set has been reached and marked done. Nothing is outstanding —
+                      Everything {who} set has been reached and marked done. Nothing is outstanding,
                       which is not the same as nothing being set, and is usually the moment to agree
                       the next one.
                     </Text>
@@ -529,22 +673,85 @@ export default function ClientGoals() {
                   </Section>
                 ) : (
                   <>
-                    {lead ? (
-                      <View>
-                        <Hero
-                          label={`${who} · ${goalLabel(lead.goal)}`}
-                          figure={fig(goalValue(lead.prog.current, lead.kind, wu))}
-                          unit={goalUnit(lead.kind, wu)}
-                          arc={lead.prog.pct / 100}
-                          arcLabel="of the way to the goal"
-                          note={`${lead.prog.pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${goalUnit(lead.kind, wu)} to go`}
-                        />
-                        <Rule />
-                      </View>
-                    ) : null}
+                    {lead ? (() => {
+                      /* ── the board's figure card ─────────────────────────
+                         The goal to lead with, as one card: the goal's name
+                         over the current reading at the board's figure size,
+                         how far along it is as a ring beside it, and what is
+                         left. It was a bar for a round; the approved look
+                         draws progress against a target as a ring. `lead`
+                         is already gated on a WHOLE read of the series, so
+                         the percentage is never a figure off a truncated
+                         page. */
+                      const unit = goalUnit(lead.kind, wu);
+                      const figure = fig(goalValue(lead.prog.current, lead.kind, wu));
+                      const left = `${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${unit} to go`;
+                      const pct = Math.round(Math.max(0, Math.min(100, lead.prog.pct)));
+                      return (
+                        <Section>
+                          <SectionHead title={goalLabel(lead.goal)} note={`${pct}% of the Way`} />
+                          {/* One stop for the ear: goal, reading, how far, what
+                              is left. Four Texts were four unrelated facts. */}
+                          <View accessible accessibilityLabel={`${goalLabel(lead.goal)}, ${figure} ${unit}. ${pct}% of the way to the goal, ${left}.`}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                            {/* The approved look's ring, where the bar was: the
+                                same percentage, off the same whole read. */}
+                            <Ring size={108} value={pct / 100} figure={`${pct}%`} sub="of the way" spoken={`${pct} percent of the way`} />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <Text style={{ ...ty.hero, color: t.ink }}>{figure}</Text>
+                              <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{unit}</Text>
+                            </View>
+                            {/* The same strip of figures the goal rows print —
+                                "58% of the way · 4 kg to go" — off a progress
+                                object `lead` has already built whole. */}
+                            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+                              {`${pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${unit} to go`}
+                              {lead.goal.targetValue != null ? ` · target ${fig(goalValue(lead.goal.targetValue, lead.kind, wu))} ${unit}` : ''}
+                            </Text>
+                            </View>
+                          </View>
+                        </Section>
+                      );
+                    })() : null}
 
                     <Section>
-                      <SectionHead title={client?.name ?? 'Their Goals'} note={`${board.open.length} open`} />
+                      {/* `isWhole(goalStatus)`, not the bare length. A count is
+                          a figure, and under 'partial' this one was a subtotal
+                          of a truncated page presented as the whole of what
+                          somebody is working toward — "3 open" over a client
+                          with eleven. The Flag further down already says the
+                          read was cut; it cannot un-say a number a coach has
+                          already read as a total. app/(trainer)/client-week.tsx
+                          gates its own "N marked" on exactly this, and
+                          app/(trainer)/checklists.tsx its "N showing". */}
+                      <SectionHead title={client?.name ?? 'Their Goals'}
+                        note={isWhole(goalStatus) ? `${board.open.length} Open` : undefined} />
+                      {/* Deadline pressure, said once at the top.
+                       *
+                       * The overdue mark was on the individual cards and nowhere
+                       * else, so on a client with eleven goals "has anything
+                       * slipped" was a question a coach answered by scrolling.
+                       * TrueCoach, Trainerize, Everfit and PT Distinction all
+                       * lead their goal board with this; it needs no read this
+                       * screen was not already making.
+                       *
+                       * Gated on `isWhole(goalStatus)`, the same gate as the
+                       * "N open" note beside the title and for the same reason:
+                       * under 'partial' these counts are of a truncated page,
+                       * and "nothing is late" drawn from a prefix is the worst
+                       * sentence on the screen. The Flag further down says the
+                       * read was cut; it cannot un-say an all-clear.
+                       *
+                       * `deadlineNote` names the open goals it could not judge
+                       * and how many, so the figures are never an all-clear over
+                       * an empty set. `nowMs` is `useNow()` — see goalCard. */}
+                      {isWhole(goalStatus) ? (() => {
+                        const line = deadlineNote(deadlineTally(board.open, nowMs));
+                        return line ? (
+                          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>{line}</Text>
+                        ) : null;
+                      })() : null}
                       {board.open.map(goalCard)}
                     </Section>
 
@@ -552,7 +759,11 @@ export default function ClientGoals() {
                       <>
                         <Rule />
                         <Section>
-                          <SectionHead title="Reached" note={`${board.achieved.length}`} />
+                          {/* Same gate. The list stands under 'partial' — the
+                              goals in it are real — but the number over it
+                              cannot. */}
+                          <SectionHead title="Reached"
+                            note={isWhole(goalStatus) ? `${board.achieved.length}` : undefined} />
                           {board.achieved.map(goalCard)}
                         </Section>
                       </>
@@ -592,21 +803,31 @@ export default function ClientGoals() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their measurements…</Text></Section>
                 ) : tape.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their measurements could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured — the goals above came from a different read and are unaffected either way.`} />
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Measurements Could Not Be Read"
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured. The goals above came from a different read and are unaffected either way.`} />
                   </Section>
                 ) : tape.state === 'none' ? (
                   <Section>
-                    <SectionHead title="Tape" note="none recorded" />
+                    <SectionHead title="Tape" note="None Recorded" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t logged a tape measurement. The read came back and it was
-                      empty, so this is about them rather than about the connection — and it is the
+                      empty, so this is about them rather than about the connection, and it is the
                       one record that moves when the scale doesn&rsquo;t.
                     </Text>
                   </Section>
                 ) : (
                   <Section>
-                    <SectionHead title="Tape" note={`${tape.sites.length} ${tape.sites.length === 1 ? 'site' : 'sites'}`} />
+                    {/* And the same for the tape. `measStatus === 'partial'`
+                        means the oldest rows fell off the read, and a SITE
+                        whose only readings are old is then missing from
+                        `tape.sites` altogether — so this count is not merely
+                        short, it is a different set from the one the coach
+                        thinks they are being given the size of. The caveat
+                        under the list already says the read was cut. */}
+                    <SectionHead title="Tape"
+                      note={isWhole(measStatus)
+                        ? `${tape.sites.length} ${tape.sites.length === 1 ? 'site' : 'sites'}`
+                        : undefined} />
                     <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>{DIRECTION_CAVEAT}</Text>
                     {tape.sites.map(siteRow)}
                     {/* Only under a whole read. Under 'partial' a site is
@@ -615,7 +836,7 @@ export default function ClientGoals() {
                         naming it as never measured would pick the wrong one. */}
                     {measStatus === 'ready' && unmeasuredSites(tape.sites).length ? (
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
-                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()} — the
+                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()}. The
                         client&rsquo;s own screen offers those boxes and they have been left empty.
                       </Text>
                     ) : null}
@@ -643,8 +864,18 @@ export default function ClientGoals() {
                 ) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          What each client is aiming at, in their own words and numbers, how far along they are,
+          and what the tape says. You can read these; you can&rsquo;t change them. A goal is theirs
+          to set and theirs to call done, and a measurement is theirs to take.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

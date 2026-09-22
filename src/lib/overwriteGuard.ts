@@ -14,8 +14,8 @@
 // it is somebody's training. `useAssignedPrograms` returns null from
 // `getProgram` both for a client who has never been assigned anything and for a
 // client whose row could not be read. A builder that cannot tell those apart
-// loads the generic auto-generated plan, presents it as the client's programme,
-// and offers a button that replaces the bespoke programme it never saw. The
+// loads the generic auto-generated plan, presents it as the client's program,
+// and offers a button that replaces the bespoke program it never saw. The
 // coach has no way to know: the screen looked normal.
 //
 // ── Why a guard rather than a banner ───────────────────────────────────────
@@ -23,16 +23,16 @@
 // A banner is the right answer when the only cost is a misreading — the coach
 // reads it, discounts what is on screen, and nothing is lost. It is the wrong
 // answer here, because a banner does not stop a thumb. An overwrite of a
-// training programme has no undo, no history table and no notification to the
+// training program has no undo, no history table and no notification to the
 // client, so the only honest response to "we do not know what is currently
 // saved" is to withhold the control until we do.
 //
 // ── Why 'partial' is refused too ───────────────────────────────────────────
 //
-// A truncated read of `assigned_programs` returns real programmes for the
+// A truncated read of `assigned_programs` returns real programs for the
 // clients whose rows arrived and nothing at all for the rest — and "nothing at
 // all" is indistinguishable from "never assigned" at every call site. So under
-// 'partial' a specific client's programme is exactly as unknown as it is under
+// 'partial' a specific client's program is exactly as unknown as it is under
 // 'error'. The status is gentler; what it licenses is not.
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -52,7 +52,7 @@ const ALLOWED: OverwriteGuard = { allowed: true, reason: null, label: null };
  * May this screen save over `subject`, given how the read of it went?
  *
  * `subject` is a plain-English noun phrase naming the thing that would be
- * replaced — "Priya's current programme", "the programmes these clients are
+ * replaced — "Priya's current program", "the programs these clients are
  * on" — because the sentence this returns is rendered to a coach, and a coach
  * needs to know what they are being stopped from overwriting rather than which
  * provider was unhappy.
@@ -65,7 +65,7 @@ export function guardOverwrite(status: LoadStatus, subject: string): OverwriteGu
       return {
         allowed: false,
         label: 'Checking What Is Saved…',
-        reason: `Still reading ${subject}. Saving now could replace something this screen has not seen yet — this takes a moment.`,
+        reason: `Still reading ${subject}. Saving now could replace something this screen has not seen yet. This takes a moment.`,
       };
     case 'partial':
       return {
@@ -77,7 +77,7 @@ export function guardOverwrite(status: LoadStatus, subject: string): OverwriteGu
       return {
         allowed: false,
         label: 'Cannot save over an unread plan',
-        reason: `${subject} could not be read, so this screen does not know what is currently saved. Saving would replace it with what is on this screen and there is no undo — try again once you have signal.`,
+        reason: `${subject} could not be read, so this screen does not know what is currently saved. Saving would replace it with what is on this screen and there is no undo. Try again once you have signal.`,
       };
   }
 }

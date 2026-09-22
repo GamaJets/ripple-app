@@ -1,6 +1,6 @@
 // The crash queue's rules. Compile with tsc, run with node.
 //
-// Four failures are guarded here, and each one is a way the table could go on
+// Five failures are guarded here, and each one is a way the table could go on
 // under-reporting the conditions the app is used in while looking full:
 //
 //   1. AN UNREADABLE QUEUE READ AS AN EMPTY ONE. Same rule, same reason, as
@@ -15,9 +15,14 @@
 //      the message or the whole exercise reports the wrong conditions.
 //   4. A SIGNED-OUT CRASH REFUSED. A crash during launch or sign-in has no uid,
 //      and those are the ones anybody wants; app_errors takes a null user_id.
+//   5. A REPORT THE INSERT POLICY REFUSES, KEPT AND RETRIED FOR EVER. The queue
+//      is not per account and `app_errors_insert` compares `user_id` against
+//      `auth.uid()`, so a shared phone produces refusals as a matter of course.
+//      A refused row at the head of an oldest-first pass blocks every crash
+//      behind it; `attributableTo` is what stops the row being refused at all.
 import {
   CRASH_CAP, CRASH_KEY, MAX_MESSAGE, MAX_STACK,
-  addCrash, crashRow, dropCrash, inCrashOrder, newCrash, readCrashQueue, type CrashReport,
+  addCrash, attributableTo, crashRow, dropCrash, inCrashOrder, newCrash, readCrashQueue, type CrashReport,
 } from './crashQueue';
 
 const errors: string[] = [];
@@ -92,7 +97,7 @@ const crash = (n: number, over: Partial<CrashReport> = {}): CrashReport => newCr
   const row = crashRow(newCrash({
     id: 'x', at: '2026-09-01T22:14:00.000Z', message: 'Cannot read property of undefined',
     stack: 'at Screen', platform: 'android', appVersion: '2.0.0', userId: 'u9',
-  }));
+  }), 'u9');
   ok(row.message.includes('2026-09-01T22:14:00.000Z'),
     `A QUEUED CRASH MUST NOT ARRIVE AS TODAY'S CRASH — got "${row.message}"`);
   ok(row.message.includes('Cannot read property of undefined'), 'and the message itself is still in it');
@@ -107,7 +112,8 @@ const crash = (n: number, over: Partial<CrashReport> = {}): CrashReport => newCr
 {
   const anon = newCrash({ id: 'n', at: '2026-09-01T00:00:00.000Z', message: 'crashed on launch' });
   eq(anon.userId, null, 'no uid is null rather than a refusal');
-  eq(crashRow(anon).user_id, null, 'and the row carries the null through');
+  eq(crashRow(anon, null).user_id, null, 'and the row carries the null through');
+  eq(crashRow(anon, 'u1').user_id, null, 'a crash nobody was signed in for is not attributed to whoever signs in later');
   const added = addCrash([], anon);
   eq(added.result, 'added', 'A LAUNCH CRASH IS KEPT — it is the one nobody else can report');
 }
@@ -122,6 +128,35 @@ const crash = (n: number, over: Partial<CrashReport> = {}): CrashReport => newCr
   eq(big.message.length, MAX_MESSAGE, 'the message is trimmed on the way in');
   eq(big.stack!.length, MAX_STACK, 'and so is the stack');
   eq(newCrash({ id: 'q', at: 'x', message: 'm', stack: '' }).stack, null, 'an empty stack is null, not an empty string');
+}
+
+/* ── 5. a report the policy would refuse is unattributed, not lost ───────── */
+//
+// `app_errors_insert` is `with check (user_id = auth.uid() or user_id is null)`
+// and CRASH_KEY is deliberately not per account, so a crash recorded under one
+// account and flushed under another names a uid that is not `auth.uid()`. That
+// row is refused every time it is offered — and, before this, sat at the head
+// of an oldest-first pass blocking every crash behind it until CRASH_CAP was
+// reached and the device stopped reporting altogether.
+
+{
+  eq(attributableTo('u1', 'u1'), 'u1', 'the ordinary phone keeps its attribution');
+  eq(attributableTo('u1', 'u2'), null,
+    'A CRASH FLUSHED UNDER ANOTHER ACCOUNT IS UNATTRIBUTED, NOT REFUSED — the policy takes null');
+  eq(attributableTo('u1', null), null, 'and so is one flushed with nobody signed in');
+  eq(attributableTo(null, 'u2'), null, 'a launch crash is never attributed to whoever signed in afterwards');
+  eq(attributableTo(null, null), null, 'and stays the null the table was designed to hold');
+
+  // Everything a person debugs from survives the lost attribution.
+  const c = newCrash({
+    id: 'z', at: '2026-09-02T06:30:00.000Z', message: 'boom', stack: 'at Basement',
+    platform: 'ios', appVersion: '3.1.0', userId: 'u1',
+  });
+  const row = crashRow(c, 'u2');
+  eq(row.user_id, null, 'the uid the policy would refuse is dropped');
+  ok(row.message.includes('2026-09-02T06:30:00.000Z'), 'the moment still travels');
+  eq(row.stack, 'at Basement', 'and the stack');
+  eq(row.app_version, '3.1.0', 'and the build');
 }
 
 /* ── the key is not per account, and that is the point ───────────────────── */

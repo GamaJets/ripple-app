@@ -33,34 +33,47 @@
 // list — and this is a screen a coach comes to when a client has asked whether
 // they are insured. Both reads carry a LoadStatus and both empties are gated on
 // it.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable, Modal } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, KpiRow, IconPlate, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   fetchCoachCredentials, addCredential, updateCredential, deleteCredential,
-  fetchReviews, replyToReview, todayKey,
+  fetchReviews, replyToReview,
 } from '../../src/ui/reviews';
+// The day this screen judges every expiry against, kept current for as long as
+// the screen is open rather than fixed at the moment it mounted.
+import { useToday } from '../../src/ui/today';
 import {
-  credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
+  credentialBadge, credentialLine, credentialState, credentialCounts, expiryLine, sortCredentials,
   validateDraft, draftProblemText, referenceAllowed, insuranceClaim,
   CLAIM_NOTE_COACH, MAX_TITLE, MAX_ISSUER, MAX_REFERENCE,
   type Credential, type CredentialDraft, type CredentialKind,
 } from '../../src/lib/coachCredentials';
+// The one sentence at the top of this screen that answers "has anything
+// lapsed?" without reading the list. Pure, and it holds no date logic of its
+// own — see src/lib/credentialExpiry.ts on why a second opinion about what
+// "expired" means is how two screens come to disagree about whether somebody
+// may be on a gym floor.
+import {
+  expirySummary, expirySummaryLine, expirySummaryNeedsMark,
+} from '../../src/lib/credentialExpiry';
 import {
   reviewListState, reviewerLabel, gymLine, unansweredCount, validateReply,
   askMomentNote, reviewAskDraft, askListNote, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
-  MAX_RATING, MAX_REPLY, REPLY_NOTE, type Review,
+  MAX_RATING, MAX_REPLY, REPLY_NOTE, reviewScoreLabel, reviewScorePhrase, type Review,
 } from '../../src/lib/reviews';
 import { useReviewAsks, type AskRow } from '../../src/ui/reviewAsks';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { useThread } from '../../src/ui/messaging';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 const EMPTY: CredentialDraft = {
   kind: 'certification', title: '', issuer: '', reference: '', issuedOn: '', expiresOn: '',
@@ -74,13 +87,24 @@ function when(iso: string): string {
     : '—';
 }
 
+/** A credential's colour by its state. `no-expiry` is a lifetime qualification
+ *  and stands like a current one; only a lapsed row is red. */
+const STATE_TONE: Record<ReturnType<typeof credentialState>, Tone> = {
+  current: 'brand', 'no-expiry': 'brand', expiring: 'amber', expired: 'red',
+};
+
 export default function TrainerCredentials() {
   const t = useTheme();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const uid = user?.id ?? null;
   const G = layout.gutter;
-  const today = useMemo(() => todayKey(), []);
+  // NOT `useMemo(() => todayKey(), [])`, which is what this was. An empty
+  // dependency array freezes the day at MOUNT, and backgrounding a phone does
+  // not remount a screen — so a coach who opened this on Sunday and came back on
+  // Wednesday had every expiry below judged against Sunday, and insurance that
+  // lapsed on Monday still read as current. See src/ui/today.ts.
+  const today = useToday();
 
   const [creds, setCreds] = useState<Credential[] | null>(null);
   const [credStatus, setCredStatus] = useState<LoadStatus>('loading');
@@ -129,6 +153,10 @@ export default function TrainerCredentials() {
   }, [uid, authLoading]);
 
   useEffect(() => { void load(); }, [load, attempt]);
+  // Two reads in one call: the coach's own credentials, and the reviews their
+  // clients wrote. The second arrives entirely from other people, so nothing
+  // the coach does on this screen brings a new one in.
+  const pull = usePullToRefresh(load);
 
   const openNew = () => { setEditing(null); setDraft(EMPTY); setFormOpen(true); };
   const openEdit = (c: Credential) => {
@@ -162,7 +190,7 @@ export default function TrainerCredentials() {
     if (!r.ok) {
       // Never "saved" over a write the server did not make. A zero-row write is
       // not an error in PostgREST, which is why addCredential counts rows.
-      Alert.alert('Not saved', r.reason ?? 'Nothing was written. Try again in a moment.');
+      Alert.alert('Not Saved', r.reason ?? 'Nothing was written. Try again in a moment.');
       return;
     }
     setFormOpen(false);
@@ -173,15 +201,15 @@ export default function TrainerCredentials() {
 
   const remove = (c: Credential) => {
     Alert.alert(
-      'Remove this?',
+      'Remove This?',
       `"${c.title}" comes off your profile for everyone who can see it. You can add it again later.`,
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Remove', style: 'destructive', onPress: () => {
             void (async () => {
               const r = await deleteCredential(c.id);
-              if (!r.ok) { Alert.alert('Not removed', r.reason ?? 'Nothing changed.'); return; }
+              if (!r.ok) { Alert.alert('Not Removed', r.reason ?? 'Nothing changed.'); return; }
               setAttempt((n) => n + 1);
             })();
           },
@@ -192,11 +220,11 @@ export default function TrainerCredentials() {
 
   const sendReply = async () => {
     if (!replyTo || replying) return;
-    if (validateReply(replyText) !== 'ok') { Alert.alert('Too long', `Keep your reply under ${MAX_REPLY} characters.`); return; }
+    if (validateReply(replyText) !== 'ok') { Alert.alert('Too Long', `Keep your reply under ${MAX_REPLY} characters.`); return; }
     setReplying(true);
     const ok = await replyToReview(replyTo.id, replyText);
     setReplying(false);
-    if (!ok) { Alert.alert('Not posted', 'Your reply was not saved. Nothing has changed on your profile — try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Posted', 'Your reply was not saved. Nothing has changed on your profile. Try again in a moment.'); return; }
     setReplyTo(null);
     setReplyText('');
     setAttempt((n) => n + 1);
@@ -206,43 +234,91 @@ export default function TrainerCredentials() {
   const listState = reviewListState(revStatus, reviews);
   const waiting = unansweredCount(reviews, revStatus);
   const insurance = insuranceClaim(creds, today);
+  // `isWhole(credStatus)`, not `credStatus !== 'error'`. The reassuring branch
+  // of this summary is "Nothing has lapsed", and under 'loading' that would be
+  // computed over the empty array this screen initialises with — a coach whose
+  // insurance ran out in March told, for the length of a gym-network read, that
+  // everything is in date. `expirySummary` refuses to reassure on anything but
+  // a whole read; passing the flag honestly is the other half of that.
+  const expiry = expirySummary(creds, today, isWhole(credStatus));
+  const expiryLineText = expirySummaryLine(expiry);
+  // Null unless the list was READ: see the tiles this feeds.
+  const counts = credStatus === 'ready' ? credentialCounts(creds, today) : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Credentials & Reviews</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-              What you are qualified to do, and what your clients have said.
-            </Text>
-          </View>
-        </View>
+        {/* The header the board gives the Profile family: a back chevron at
+            the leading edge and the title centred. */}
+        <PageHead title="Credentials & Reviews" subtitle="What you hold, and what clients said" />
 
-        {/* ── the honesty notice, first, before anything is typed ───────── */}
-        <View style={{ marginTop: sp.lg }}>
-          <Notice tone={t.ink3} kicker="Read this first" title="Repple does not check these"
-            note={CLAIM_NOTE_COACH} />
-        </View>
+        {/* ── the honesty notice, first, before anything is typed ─────────
+            Still first, and its first fact is still on the page: the fold's
+            own two lines say that Repple does not check these and that
+            clients see them as the coach's statement. The paragraph is behind
+            the fold, where the approved look puts every paragraph. */}
+        <Expandable title="Repple Does Not Check These" note="Clients see them as your own statement">
+          <Text style={{ ...ty.label, color: t.ink2 }}>{CLAIM_NOTE_COACH}</Text>
+        </Expandable>
+
+        {/* ── what is on the profile, as three tiles ──────────────────────────
+            `credentialCounts` is the directory row's own arithmetic, so the
+            figures here are the ones a stranger's summary is built from. It
+            answers null for an unread list and the tiles then draw the dash:
+            a failed read is not a coach with no insurance. Red is spent on
+            Expired only when something HAS expired, because that is the tile
+            that needs the coach; the word is under the figure, so the colour
+            never stands alone. */}
+        <KpiRow tiles items={[
+          { label: 'Qualifications', value: counts ? String(counts.certifications) : fig(null), tone: 'blue' },
+          { label: 'Insurance', value: counts ? String(counts.insurance) : fig(null), tone: 'teal' },
+          { label: 'Expired', value: counts ? String(counts.expired) : fig(null), tone: counts && counts.expired > 0 ? 'red' : 'neutral' },
+        ]} />
+
+        {/* ── has anything lapsed? ───────────────────────────────────────
+            Above the list, because the list is sorted with the expired ones
+            LAST (`sortCredentials`, and deliberately — a lapsed certification
+            is not hidden, it just stops sitting at the top). Between that and
+            the per-row `expiryLine`, the fact that matters most was the fact
+            furthest down the screen: a coach with six qualifications and a
+            policy had to read seven rows to find out their cover ran out in
+            March. The screen already knew.
+
+            Below the honesty notice rather than above it: that notice is first
+            "before anything is typed" by an argued decision in this file's
+            header, and this is a status line, not a claim about verification.
+
+            A `<Flag>` when it needs urgency, never warn-coloured words —
+            `t.warn` as ink is 3.87–4.08:1 on the three light palettes. */}
+        {expiryLineText ? (
+          expirySummaryNeedsMark(expiry) ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{expiryLineText}</Flag>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{expiryLineText}</Text>
+          )
+        ) : null}
 
         {/* ── credentials ───────────────────────────────────────────────── */}
         <Section>
           <SectionHead
-            title="What You Are Qualified To Do"
+            title="What You Are Qualified to Do"
             note={credStatus === 'ready' && creds ? String(creds.length) : undefined}
           />
 
           {credStatus === 'loading' ? (
-            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            /* A spinner is drawn, not spoken. With no name it is not in the
+               accessibility tree at all, so the section reads as EMPTY — the
+               one conclusion the error branch below exists to refuse. */
+            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
+              <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your credentials…" />
+            </View>
           ) : credStatus === 'error' ? (
             /* Not "you have added none". A coach reading that would add the
                same qualification a second time, and a coach checking whether
                their insurance is on their profile would be told it is not. */
             <Notice tone={t.warn} kicker="Credentials" title="We couldn’t load your credentials"
-              note="This is our end. Don’t read it as your profile being empty — until it loads we can’t tell you what is on it.">
+              note="This is our end. Don’t read it as your profile being empty. Until it loads we can’t tell you what is on it.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>
@@ -260,15 +336,22 @@ export default function TrainerCredentials() {
               <View key={c.id}>
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                  {/* A circle at the leading edge, as the board draws every
+                      row's icon (page 13) and as `ListRow` draws it. Lapsed
+                      cover is a mark in the Flag below, not a red icon. */}
+                  {/* The medal, in the state's colour: green stands, amber is
+                      inside the expiring window, red has lapsed. The chip beside
+                      it says the same thing in `expiryLine`'s words. */}
+                  <IconPlate icon="trophy" tone={STATE_TONE[state]} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>{c.title}</Text>
                     {detail ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{detail}</Text> : null}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6, flexWrap: 'wrap' }}>
-                      <Flag tone={state === 'expired' ? t.warn : t.ink3}>{expiryLine(c, today)}</Flag>
+                      <TonedChip tone={STATE_TONE[state]} label={expiryLine(c, today)} />
                       {/* Shown to the coach as well, so nobody is surprised by
                           what a client sees next to their certificate. */}
                       <Text style={{ ...ty.caption, color: t.ink3 }}>
-                        {badge.checked ? badge.label : 'Stated by you'}
+                        {badge.checked ? badge.label : 'Stated by You'}
                       </Text>
                     </View>
                   </View>
@@ -301,7 +384,6 @@ export default function TrainerCredentials() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── asking for one ─────────────────────────────────────────────────
             The shelf was built and nothing ever offered to fill it: a coach
@@ -325,7 +407,6 @@ export default function TrainerCredentials() {
             who is likely to rate well. See `ASK_IS_UNFILTERED`. */}
         <ReviewAsks />
 
-        <Rule />
 
         {/* ── reviews, and the answer back ───────────────────────────────── */}
         <Section>
@@ -343,7 +424,9 @@ export default function TrainerCredentials() {
           ) : null}
 
           {listState === 'loading' ? (
-            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
+              <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your reviews…" />
+            </View>
           ) : listState === 'unreadable' ? (
             <Notice tone={t.warn} kicker="Reviews" title="We couldn’t load your reviews"
               note="This is our end, not an empty profile. Until it loads we can’t tell you what clients have written or whether anything is waiting on a reply.">
@@ -353,7 +436,7 @@ export default function TrainerCredentials() {
             </Notice>
           ) : listState === 'none' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nobody has reviewed you yet. Only people you have actually coached — now or in the past —
+              Nobody has reviewed you yet. Only people you have actually coached, now or in the past,
               can, so this fills up slowly and on its own.
             </Text>
           ) : reviews.map((r, i) => {
@@ -363,7 +446,10 @@ export default function TrainerCredentials() {
                 {i > 0 ? <Rule /> : null}
                 <View style={{ paddingVertical: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.rating} / {MAX_RATING}</Text>
+                    {/* `reviewScoreLabel`, not `{r.rating} / {MAX_RATING}`: the rating can come
+                        back unreadable, and the old form printed "0 / 5" against this
+                        coach — a score no client is allowed to give. */}
+                    <TonedChip tone={r.rating == null ? 'neutral' : 'amber'} label={reviewScoreLabel(r)} />
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {reviewerLabel(r)} · {when(r.createdAt)}{r.edited ? ' · edited' : ''}
                     </Text>
@@ -372,15 +458,15 @@ export default function TrainerCredentials() {
                   {r.body ? <Text style={{ ...ty.body, color: t.ink2, marginTop: 6 }}>{r.body}</Text> : null}
 
                   {r.coachReply ? (
-                    <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>YOUR REPLY</Text>
+                    <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Your Reply</Text>
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{r.coachReply}</Text>
                     </View>
                   ) : null}
 
                   <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
                     <Ghost
-                      label={r.coachReply ? 'Change your reply' : 'Reply'}
+                      label={r.coachReply ? 'Change Your Reply' : 'Reply'}
                       onPress={() => { setReplyTo(r); setReplyText(r.coachReply ?? ''); }}
                     />
                   </View>
@@ -392,160 +478,190 @@ export default function TrainerCredentials() {
       </ScrollView>
 
       {/* ── the credential form ─────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: every field below the first one is behind it, and this form has seven.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
-          <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>
-              {editing ? 'Edit' : 'Add'} a credential
-            </Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '88%' }}>
+            <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
+              <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>
+                {editing ? 'Edit' : 'Add'} a credential
+              </Text>
 
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              {(['certification', 'insurance'] as const).map((k) => (
-                <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button"
-                  style={{
-                    flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center',
-                    backgroundColor: draft.kind === k ? t.brand : t.surface2,
-                  }}>
-                  <Text style={{ ...ty.caption, color: draft.kind === k ? t.bg : t.ink2 }}>
-                    {k === 'certification' ? 'Qualification' : 'Insurance'}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+                {(['certification', 'insurance'] as const).map((k) => (
+                  <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button"
+                    style={{
+                      flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center',
+                      backgroundColor: draft.kind === k ? t.brand : t.surface2,
+                    }}>
+                    <Text style={{ ...ty.caption, color: draft.kind === k ? t.bg : t.ink2 }}>
+                      {k === 'certification' ? 'Qualification' : 'Insurance'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
-              {draft.kind === 'certification' ? 'QUALIFICATION' : 'COVER'}
-            </Text>
-            <TextInput
-              value={draft.title}
-              onChangeText={(v) => setDraft((d) => ({ ...d, title: v }))}
-              placeholder={draft.kind === 'certification' ? 'Level 3 Personal Trainer' : 'Public liability'}
-              placeholderTextColor={t.ink3}
-              maxLength={MAX_TITLE}
-              accessibilityLabel="What the credential is"
-              style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
-            />
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
-              {draft.kind === 'certification' ? 'AWARDING BODY' : 'INSURER'}
-            </Text>
-            <TextInput
-              value={draft.issuer}
-              onChangeText={(v) => setDraft((d) => ({ ...d, issuer: v }))}
-              placeholder={draft.kind === 'certification' ? 'CIMSPA' : 'Insure4Sport'}
-              placeholderTextColor={t.ink3}
-              maxLength={MAX_ISSUER}
-              accessibilityLabel="Who issued it"
-              style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
-            />
-
-            {/* Only for a qualification, and the reason is on the screen. A
-                registration number is the one thing that lets a reader check
-                the claim themselves; a policy number is checkable by nobody and
-                identifies a live policy, so it is not collected at all. */}
-            {referenceAllowed(draft.kind) ? (<>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>REGISTRATION NUMBER (OPTIONAL)</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                {draft.kind === 'certification' ? 'QUALIFICATION' : 'COVER'}
+              </Text>
               <TextInput
-                value={draft.reference}
-                onChangeText={(v) => setDraft((d) => ({ ...d, reference: v }))}
-                placeholder="R123456"
+                value={draft.title}
+                onChangeText={(v) => setDraft((d) => ({ ...d, title: v }))}
+                placeholder={draft.kind === 'certification' ? 'Level 3 Personal Trainer' : 'Public liability'}
                 placeholderTextColor={t.ink3}
-                maxLength={MAX_REFERENCE}
-                autoCapitalize="characters"
-                accessibilityLabel="Registration or certificate number"
-                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                maxLength={MAX_TITLE}
+                accessibilityLabel="What the credential is"
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
               />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginBottom: sp.md }}>
-                Shown on your profile. It is what lets a client look you up on the register themselves —
-                which is worth more than anything we could put next to it.
-              </Text>
-            </>) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                Policy numbers are not published. Nobody outside your insurer can check one, and it
-                identifies a live policy — the insurer and the renewal date are what a client needs.
-              </Text>
-            )}
 
-            <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>ISSUED (OPTIONAL)</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                {draft.kind === 'certification' ? 'AWARDING BODY' : 'INSURER'}
+              </Text>
+              <TextInput
+                value={draft.issuer}
+                onChangeText={(v) => setDraft((d) => ({ ...d, issuer: v }))}
+                placeholder={draft.kind === 'certification' ? 'CIMSPA' : 'Insure4Sport'}
+                placeholderTextColor={t.ink3}
+                maxLength={MAX_ISSUER}
+                accessibilityLabel="Who issued it"
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
+              />
+
+              {/* Only for a qualification, and the reason is on the screen. A
+                  registration number is the one thing that lets a reader check
+                  the claim themselves; a policy number is checkable by nobody and
+                  identifies a live policy, so it is not collected at all. */}
+              {referenceAllowed(draft.kind) ? (<>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>REGISTRATION NUMBER (OPTIONAL)</Text>
                 <TextInput
-                  value={draft.issuedOn}
-                  onChangeText={(v) => setDraft((d) => ({ ...d, issuedOn: v }))}
-                  placeholder="2019-06-01"
+                  value={draft.reference}
+                  onChangeText={(v) => setDraft((d) => ({ ...d, reference: v }))}
+                  placeholder="R123456"
                   placeholderTextColor={t.ink3}
-                  maxLength={10}
-                  accessibilityLabel="Issue date, year dash month dash day"
+                  maxLength={MAX_REFERENCE}
+                  autoCapitalize="characters"
+                  accessibilityLabel="Registration or certificate number"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>EXPIRES (OPTIONAL)</Text>
-                <TextInput
-                  value={draft.expiresOn}
-                  onChangeText={(v) => setDraft((d) => ({ ...d, expiresOn: v }))}
-                  placeholder="2027-06-01"
-                  placeholderTextColor={t.ink3}
-                  maxLength={10}
-                  accessibilityLabel="Expiry date, year dash month dash day"
-                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
-                />
-              </View>
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-              Leave the expiry blank only if it genuinely never runs out. Blank is shown as "no expiry
-              date given", which is a different thing from a date in the past.
-            </Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginBottom: sp.md }}>
+                  Shown on your profile. It is what lets a client look you up on the register themselves,
+                  which is worth more than anything we could put next to it.
+                </Text>
+              </>) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  Policy numbers are not published. Nobody outside your insurer can check one, and it
+                  identifies a live policy. The insurer and the renewal date are what a client needs.
+                </Text>
+              )}
 
-            {problem !== 'ok' ? (
-              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{draftProblemText(problem)}</Flag>
-            ) : null}
+              <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>ISSUED (OPTIONAL)</Text>
+                  <TextInput
+                    value={draft.issuedOn}
+                    onChangeText={(v) => setDraft((d) => ({ ...d, issuedOn: v }))}
+                    placeholder="2019-06-01"
+                    placeholderTextColor={t.ink3}
+                    maxLength={10}
+                    accessibilityLabel="Issue date, year dash month dash day"
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>EXPIRES (OPTIONAL)</Text>
+                  <TextInput
+                    value={draft.expiresOn}
+                    onChangeText={(v) => setDraft((d) => ({ ...d, expiresOn: v }))}
+                    placeholder="2027-06-01"
+                    placeholderTextColor={t.ink3}
+                    maxLength={10}
+                    accessibilityLabel="Expiry date, year dash month dash day"
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                  />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                Leave the expiry blank only if it genuinely never runs out. Blank is shown as "no expiry
+                date given", which is a different thing from a date in the past.
+              </Text>
 
-            <Cta label={saving ? 'Saving…' : editing ? 'Save Changes' : 'Add It'} wide
-              disabled={saving || problem !== 'ok'} onPress={() => { void save(); }} />
-            <View style={{ marginTop: sp.md }}>
-              <Ghost label="Cancel" onPress={() => setFormOpen(false)} />
-            </View>
-          </ScrollView>
-        </View>
+              {problem !== 'ok' ? (
+                <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{draftProblemText(problem)}</Flag>
+              ) : null}
+
+              <Cta label={saving ? 'Saving…' : editing ? 'Save Changes' : 'Add It'} wide
+                disabled={saving || problem !== 'ok'} onPress={() => { void save(); }} />
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label="Cancel" onPress={() => setFormOpen(false)} />
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── the reply sheet ─────────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the reply box and the button that posts it are both under it.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!replyTo} transparent animationType="slide" onRequestClose={() => setReplyTo(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
-          {replyTo ? (
-            <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-                To {reviewerLabel(replyTo)}’s {replyTo.rating} of {MAX_RATING} review, {when(replyTo.createdAt)}.
-              </Text>
-              {replyTo.body ? (
-                <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{replyTo.body}</Text>
-              ) : null}
-              <TextInput
-                value={replyText}
-                onChangeText={setReplyText}
-                placeholder="Answer it the way you would in the gym."
-                placeholderTextColor={t.ink3}
-                multiline
-                maxLength={MAX_REPLY}
-                accessibilityLabel="Your public reply"
-                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, minHeight: 120, ...ty.body, color: t.ink, textAlignVertical: 'top' }}
-              />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
-                Clearing the box removes your reply. If this client rewrites their review later, your reply
-                goes with it — it answered what they wrote before.
-              </Text>
-              <Cta label={replying ? 'Posting…' : 'Post Reply'} wide disabled={replying}
-                onPress={() => { void sendReply(); }} />
-              <View style={{ marginTop: sp.md }}>
-                <Ghost label="Cancel" onPress={() => setReplyTo(null)} />
-              </View>
-            </ScrollView>
-          ) : null}
-        </View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '88%' }}>
+            {replyTo ? (
+              <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
+                <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
+                  To {reviewerLabel(replyTo)}’s {reviewScorePhrase(replyTo)}, {when(replyTo.createdAt)}.
+                </Text>
+                {replyTo.body ? (
+                  <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{replyTo.body}</Text>
+                ) : null}
+                <TextInput
+                  value={replyText}
+                  onChangeText={setReplyText}
+                  placeholder="Answer it the way you would in the gym."
+                  placeholderTextColor={t.ink3}
+                  multiline
+                  maxLength={MAX_REPLY}
+                  accessibilityLabel="Your public reply"
+                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, minHeight: 120, ...ty.body, color: t.ink, textAlignVertical: 'top' }}
+                />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+                  Clearing the box removes your reply. If this client rewrites their review later, your reply
+                  goes with it, because it answered what they wrote before.
+                </Text>
+                <Cta label={replying ? 'Posting…' : 'Post Reply'} wide disabled={replying}
+                  onPress={() => { void sendReply(); }} />
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label="Cancel" onPress={() => setReplyTo(null)} />
+                </View>
+              </ScrollView>
+            ) : null}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -569,7 +685,36 @@ function ReviewAsks() {
   const [drafting, setDrafting] = useState<AskRow | null>(null);
 
   const rows = asks.rows;
-  if (asks.status === 'loading' || rows == null) return null;
+  if (asks.status === 'loading') return null;
+  /* ── a book we could not read is not a book with nobody in it ───────────
+   *
+   * This was `asks.status === 'loading' || rows == null`, and `rows == null`
+   * is not what a failed read looks like here. `useReviewAsks` folds the
+   * ROSTER's status into the one it returns (src/ui/reviewAsks.ts, at the
+   * bottom of the hook), and a roster that could not be read is an EMPTY ARRAY
+   * with 'error' beside it — src/ui/roster.tsx sets 'error' and leaves the
+   * list as it found it. So the hook answers `{ rows: [], status: 'error' }`,
+   * `rows == null` was false, and this section rendered `askListNote([])`:
+   *
+   *   "Nobody on the part of your book that was read is at a moment worth
+   *    asking at. That is a real answer — this list is not a monthly sweep…"
+   *
+   * A coach whose roster read had just failed was told, in those words, that
+   * the answer was real. Reviews are the one thing on this screen a coach is
+   * meant to go and act on, and "there is nobody worth asking" is the sentence
+   * that stops them looking. The two facts are opposite and the screen now
+   * says which one it has. */
+  if (asks.status === 'error' || rows == null) {
+    return (
+      <Section>
+        <SectionHead title="Worth Asking" />
+        <Flag tone={t.warn}>
+          Your clients could not be read just now, so nobody is suggested here. That is a read that failed, not
+          a book with nobody worth asking in it. Nothing has been sent either way.
+        </Flag>
+      </Section>
+    );
+  }
   const worth = rows.filter((r) => r.moment !== 'none');
 
   return (
@@ -583,7 +728,7 @@ function ReviewAsks() {
       {asks.askedUnread ? (
         <View style={{ marginTop: sp.md }}>
           <Flag tone={t.warn}>
-            Who you have already asked could not be read on this phone, so nobody is suggested — this is not a book
+            Who you have already asked could not be read on this phone, so nobody is suggested. This is not a book
             with nobody worth asking in it. Nothing has been sent either way.
           </Flag>
         </View>
@@ -602,7 +747,7 @@ function ReviewAsks() {
           {worth.map((r, i) => (
             <View key={r.clientId}
               style={{ paddingVertical: sp.md, borderTopWidth: i ? 1 : 0, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{r.name ?? 'Unnamed client'}</Text>
+              <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{r.name ?? 'Unnamed client'}</Text>
               <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{askMomentNote(r.moment, r.candidate)}</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                 <Ghost label="Write the Ask"
@@ -650,6 +795,7 @@ function AskSheet({ row, onClose, onSent }: {
   onSent: () => Promise<void>;
 }) {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const { name: coachName } = useMyTrainerProfile();
   const { send } = useThread(row.clientId, 'coach');
   const [body, setBody] = useState(reviewAskDraft(row.moment, row.name, coachName));
@@ -662,7 +808,7 @@ function AskSheet({ row, onClose, onSent }: {
     const r = await send(text);
     setSending(false);
     if (!r.ok) {
-      Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
+      Alert.alert('Not Sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
       return;
     }
     await onSent();
@@ -670,11 +816,19 @@ function AskSheet({ row, onClose, onSent }: {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the message body is what this screen is for, and Send is
+          directly under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
+          <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft · Nothing Sent Yet</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{row.name ?? 'Client'}</Text>
           </View>
         </View>
@@ -684,7 +838,7 @@ function AskSheet({ row, onClose, onSent }: {
         </Section>
 
         <Section>
-          <SectionHead title="Your Message" note="edit before sending" />
+          <SectionHead title="Your Message" note="Edit Before Sending" />
           <TextInput
             value={body}
             onChangeText={setBody}
@@ -698,7 +852,7 @@ function AskSheet({ row, onClose, onSent }: {
           />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             This goes to {row.name ?? 'them'} from you, in your ordinary chat thread. It is not sent until you press
-            Send, and what they write goes up exactly as they write it — at every rating.
+            Send, and what they write goes up exactly as they write it, at every rating.
           </Text>
         </Section>
 

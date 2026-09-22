@@ -39,32 +39,45 @@
 //    to be paid comes from invoices it actually issued, or it comes from
 //    nowhere and the answer is a dash.
 
+import { isoDay } from './weekStart';
+import { monthNames } from './format';
 import type { GymPayment, Membership, InvoiceStatus } from './gymRecord';
 // The one rule about what a set of rows is denominated in, and the one
 // normalisation behind it. Imported rather than restated: this module used to
 // group money by method alone and had no opinion about currency at all.
 import { sharedCurrency, normaliseCurrency } from './gymRecord';
 import type { PtSession, PayrollLine, PayrollTotal, PayPolicy } from './gymSessions';
-import { payrollByTrainer, payrollTotal, settlementBlocker } from './gymSessions';
+import { payrollByTrainer, payrollTotal, settlementBlocker, payableRate } from './gymSessions';
+// What money a payroll total is actually in. The one place that rule lives —
+// /sessions, /payroll and /coach/earnings all ask it before printing a total,
+// and /close asked nothing and labelled the figure with `tenants.currency`.
+import { runCurrency, runLabel, totalNote } from './gymRateCurrency';
 import type { GymPass } from './gymPasses';
 import { passRevenueCents } from './gymPasses';
 import type { Slice } from './memberView';
 import { rowsOf } from './memberView';
-import { reconcile, type Reconciliation } from './finReconcile';
+import { reconcile, unreadable, type Reconciliation } from './finReconcile';
 
 /* ── the month itself ──────────────────────────────────────────────────────── */
 
 /** 'YYYY-MM'. */
 export type MonthKey = string;
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+/**
+ * The twelve months, written out, in the language of whoever is closing.
+ *
+ * Asked per call rather than held in a module constant: `monthNames()` reads
+ * `appLocale()`, which is latched lazily — a constant built at import time
+ * would pin every month label in the console to whatever the locale was before
+ * the app had resolved one.
+ */
+const monthWords = () => monthNames();
 
 export interface MonthWindow {
   key: MonthKey;
-  /** 'August 2026'. Fixed English, not locale-dependent, so a test can pin it. */
+  /** 'August 2026', in the reader's own language. `key` is the fixed thing —
+   *  'YYYY-MM' — and it is what everything is stored, matched and pinned on.
+   *  This is the sentence on the screen, and it belongs to whoever reads it. */
   label: string;
   /** First instant of the month. */
   fromIso: string;
@@ -99,7 +112,7 @@ export function monthWindow(key: MonthKey): MonthWindow | null {
 
   return {
     key,
-    label: `${MONTHS[mo - 1]} ${y}`,
+    label: `${monthWords()[mo - 1]} ${y}`,
     fromIso: from.toISOString(),
     toIso: to.toISOString(),
     firstDay: `${key}-01`,
@@ -227,9 +240,22 @@ export interface Income {
   count: number;
   /** How the money arrived: card, cash, transfer, direct debit, other. */
   byMethod: Line[];
-  /** Every distinct currency seen. More than one and no total is offered,
-   *  because adding dirhams to pounds is not a sum, it is a fabrication. */
+  /** Every distinct currency the rows actually STATE, normalised and sorted.
+   *  More than one and no total is offered, because adding dirhams to pounds is
+   *  not a sum, it is a fabrication. A row stating nothing is not in here — it
+   *  has no code to name — but it still counts as a disagreement; ask
+   *  `mixedCurrency`, never `currencies.length`, for that. */
   currencies: string[];
+  /** True when these payments are not all in one money.
+   *
+   *  Not `currencies.length > 1`. `gym_payments.currency` is NOT NULL but has
+   *  no ISO check on it, so a row holding '' states no currency at all — and a
+   *  set of {GBP, unstated} has one entry in `currencies` while being exactly
+   *  as unsummable as {GBP, EUR}. Every gate in this module reads this field so
+   *  that the withheld total and the sentence explaining it can never come
+   *  apart: a null `takenCents` with nothing saying why is the silent blank
+   *  this file exists to refuse. */
+  mixedCurrency: boolean;
   /** Payments with nobody's name on them. Reported, never hidden in the total. */
   unattributed: number;
   unattributedCents: number;
@@ -257,13 +283,20 @@ const METHOD_LABEL: Record<string, string> = {
  */
 export function incomeOf(payments: GymPayment[]): Income {
   const byMethod = new Map<string, Line>();
-  const currencies = new Set<string>();
+  const currencies = new Set<string | null>();
   const unattributedRows: GymPayment[] = [];
   let cents = 0;
   let unattributedCents = 0;
 
   for (const p of payments) {
-    currencies.add(p.currency);
+    // Normalised, exactly as the `byMethod` key three lines below already was.
+    // This compared the RAW column while everything around it normalised, so a
+    // single-currency gym holding one row written 'gbp' — nothing in the schema
+    // forbids it; `gym_payments.currency` carries no ISO check — read as two
+    // currencies, lost its month's total and was handed a mixed-currency
+    // blocker over a set of payments that agree. `null` is the code for a row
+    // that states none, and it is a member of this set like any other.
+    currencies.add(normaliseCurrency(p.currency));
     cents += p.amountCents;
     if (!p.memberId) {
       unattributedRows.push(p);
@@ -288,7 +321,11 @@ export function incomeOf(payments: GymPayment[]): Income {
     takenCents: payments.length === 0 || mixed ? null : cents,
     count: payments.length,
     byMethod: [...byMethod.values()].sort((a, b) => b.cents - a.cents || a.key.localeCompare(b.key)),
-    currencies: [...currencies].sort(),
+    // The codes that were actually stated. A row saying nothing has no code to
+    // put in a sentence, so it is left out of the list and carried by
+    // `mixedCurrency` instead.
+    currencies: statedCodes(currencies),
+    mixedCurrency: mixed,
     unattributed,
     unattributedCents,
   };
@@ -373,19 +410,48 @@ export interface Owed {
    *  money it took either — it belongs on its own line or it distorts both. */
   droppedCents: number | null;
   dropped: number;
+  /** Every distinct currency the invoices actually STATE. See `Income` for why
+   *  this is not the field a gate reads. */
   currencies: string[];
+  /** True when these invoices are not all in one money, including the case
+   *  where one of them states no currency at all. Every figure above is null
+   *  when this is true. */
+  mixedCurrency: boolean;
 }
 
 /** The receivables picture for a month. Rows must already be narrowed to it. */
 export function owedOf(invoices: GymInvoice[], today: string): Owed {
-  const currencies = new Set<string>();
+  const currencies = new Set<string | null>();
   let settled = 0, settledCents = 0;
   let outstanding = 0, outstandingCents = 0;
   let overdue = 0, overdueCents = 0;
   let dropped = 0, droppedCents = 0;
 
   for (const inv of invoices) {
-    currencies.add(inv.currency);
+    // ── an invoice nobody sent cannot make the figure unanswerable ────────
+    //
+    // The currency was collected from EVERY invoice, including drafts — which
+    // the branches below deliberately leave out of every figure. So a single
+    // unsent draft in another currency, or with a blank one (the column is NOT
+    // NULL and carries no ISO check), put a second entry in this set, and
+    // `mixed` then withheld the lot: settled, outstanding, overdue and dropped
+    // all became null behind a sentence about two currencies the gym never
+    // billed in.
+    //
+    // Worse in `arrears`, which reaches back over every invoice ever issued —
+    // one stale blank-currency draft blanks "what is still owed" on every
+    // future month close, and `buildClose` refuses to sign a month off over an
+    // invoice nobody sent.
+    //
+    // Only rows that REACH a figure may withhold one. `payrollOf` and
+    // `ClosePasses` already apply that rule; this is the same rule, and the
+    // `continue` is what keeps the two halves of this loop honest — a status
+    // that contributes nothing contributes no currency either.
+    if (inv.status === 'draft') continue;
+    // Normalised, for the reason `incomeOf` is: this side is compared against
+    // that one below, and two sets built by different rules cannot be compared
+    // at all. `gym_invoices.currency` carries no ISO check either.
+    currencies.add(normaliseCurrency(inv.currency));
     if (inv.status === 'paid') {
       settled += 1; settledCents += inv.amountCents;
     } else if (inv.status === 'void' || inv.status === 'written_off') {
@@ -394,8 +460,9 @@ export function owedOf(invoices: GymInvoice[], today: string): Owed {
       outstanding += 1; outstandingCents += inv.amountCents;
       if (isOverdue(inv, today)) { overdue += 1; overdueCents += inv.amountCents; }
     }
-    // 'draft' is deliberately in none of them: an invoice nobody sent is not
-    // owed by anybody.
+    // 'draft' reaches none of these branches — it is skipped above, currency
+    // and all, because an invoice nobody sent is not owed by anybody and must
+    // not be able to silence what is.
   }
 
   const mixed = currencies.size > 1;
@@ -406,8 +473,24 @@ export function owedOf(invoices: GymInvoice[], today: string): Owed {
     outstandingCents: total(outstanding, outstandingCents), outstanding,
     overdueCents: total(overdue, overdueCents), overdue,
     droppedCents: total(dropped, droppedCents), dropped,
-    currencies: [...currencies].sort(),
+    currencies: statedCodes(currencies),
+    mixedCurrency: mixed,
   };
+}
+
+/**
+ * The currency codes a set of rows actually STATED, sorted, with the "nobody
+ * said" member dropped.
+ *
+ * Null is a real answer about a row and it belongs in the set that decides
+ * whether a total may be summed. It is not a word, so it cannot go into
+ * "recorded in X and Y" — a sentence assembled from a null renders "recorded in
+ * and GBP", which is what scripts/check-prose.mjs exists to catch. The two
+ * questions are therefore answered by two fields, and every caller in this file
+ * asks `mixedCurrency` for the gate and this for the words.
+ */
+function statedCodes(codes: Set<string | null>): string[] {
+  return [...codes].filter((c): c is string => c != null).sort();
 }
 
 /* ── what does not reconcile ───────────────────────────────────────────────── */
@@ -420,7 +503,29 @@ export interface MoneyCheck {
   gapCents: number | null;
   /** A sentence naming the gap, or null when the two sides agree. */
   note: string | null;
+  /**
+   * Why the two sides could not be COMPARED at all, or null when they could.
+   *
+   * A different fact from `note`'s ordinary content, and the reason this field
+   * exists rather than a fourth `Agreement`: a gap is a finding about the gym's
+   * records, and this is the reconciliation declining to run because the two
+   * numbers are not numbers of the same thing. `r.state` is 'unreadable' in
+   * every one of these cases, so nothing downstream reads a comparison out of
+   * a comparison that never happened.
+   */
+  uncomparable: Uncomparable | null;
 }
+
+/** The three ways a month's two money records cannot be held against each
+ *  other. All three are about DENOMINATION, never about a failed read — that is
+ *  `Slice`'s job and it is handled before this function is reached. */
+export type Uncomparable =
+  /** The payments are not all in one currency, so there is no taken figure. */
+  | 'taken_mixed'
+  /** The invoices are not all in one currency, so there is no settled figure. */
+  | 'owed_mixed'
+  /** Each side agrees with itself and the two disagree with each other. */
+  | 'sides_differ';
 
 /**
  * Money taken against money the invoice register says arrived.
@@ -442,15 +547,92 @@ export function moneyCheck(
   const derived = owed.settledCents;
   const taken = income.takenCents;
 
+  // ── A NULL SIDE IS NOT A ZERO SIDE, AND IT HAS TWO CAUSES ───────────────
+  //
+  // `income.takenCents` is null for two reasons and `owed.settledCents` is too:
+  // nobody recorded anything, or the rows are in more than one currency. Every
+  // line below used to fold both into `taken ?? 0` and then report the result
+  // as if only the first had happened. A gym with thirty GBP payments and one
+  // EUR walk-in raised `money_gap`, reading "Invoices mark 12,400.00 as paid
+  // this month, and not one payment was recorded against them" — beside a
+  // mixed-currency blocker saying thirty-one payments were recorded, on the one
+  // screen an owner signs a month off on. The register side had the identical
+  // fault from the other direction: mixed invoices null the settled figure, so
+  // a month whose invoices genuinely were marked paid was told "no invoice in
+  // this month is marked paid, so there is nothing to check it against".
+  //
+  // So the currency question is asked FIRST, and where the answer stops a
+  // comparison the comparison does not happen. `unreadable()` is the state for
+  // that — every derived field null, nothing asserted about either record —
+  // and the sentence says which of the three it was.
+  if (income.mixedCurrency || owed.mixedCurrency) {
+    const which: Uncomparable = income.mixedCurrency ? 'taken_mixed' : 'owed_mixed';
+    return {
+      r: unreadable(0),
+      gapCents: null,
+      note: uncomparableNote(which, income, owed),
+      uncomparable: which,
+    };
+  }
+
   // Both sides silent: no invoices marked paid and no payments recorded. There
   // is nothing to reconcile and nothing wrong; say so rather than manufacturing
   // a zero-against-zero agreement.
   if (derived == null && taken == null) return null;
 
+  // ── AND THE TWO SIDES MUST BE IN THE SAME MONEY AS EACH OTHER ───────────
+  //
+  // Latent, not live: this was checked against the operating record and no
+  // tenant is currently taking payments in one currency while invoicing in
+  // another. It is a missing guard rather than a wrong figure on anybody's
+  // screen today, and it is here because each side only ever guarded its own
+  // internal uniformity — `incomeOf` asks whether the payments agree,
+  // `owedOf` asks whether the invoices agree, and NOTHING asked whether the
+  // two answers were the same word. A gym that invoices in EUR and banks in
+  // GBP would have had 12,400 held against 12,400 and been told its month
+  // reconciles, which is the one outcome worse than a named gap: a green tick
+  // over two unrelated numbers.
+  const takenCcy = income.currencies.length === 1 ? income.currencies[0] : null;
+  const owedCcy = owed.currencies.length === 1 ? owed.currencies[0] : null;
+  if (takenCcy && owedCcy && takenCcy !== owedCcy) {
+    return {
+      r: unreadable(0),
+      gapCents: null,
+      note: uncomparableNote('sides_differ', income, owed),
+      uncomparable: 'sides_differ',
+    };
+  }
+
   const r = reconcile(taken ?? 0, derived);
   const gapCents = r.delta;
 
-  return { r, gapCents, note: gapNote(r, taken, fmt) };
+  return { r, gapCents, note: gapNote(r, taken, fmt), uncomparable: null };
+}
+
+/**
+ * The sentence for a reconciliation that could not be run.
+ *
+ * It names the currencies rather than the tables, because "the payments are
+ * mixed" is a fact about a query and "your August takings are in GBP and EUR"
+ * is a fact about the gym. No amount appears in any of the three: every figure
+ * these sentences could quote is precisely the one that has been withheld.
+ */
+function uncomparableNote(which: Uncomparable, income: Income, owed: Owed): string {
+  const list = (codes: string[]): string =>
+    codes.length > 1
+      ? `${codes.slice(0, -1).join(', ')} and ${codes[codes.length - 1]}`
+      : codes.length === 1
+        ? `${codes[0]}, and at least one states no currency at all`
+        : 'currencies none of them states';
+  switch (which) {
+    case 'taken_mixed':
+      return `The payments recorded this month are in ${list(income.currencies)}, so there is no single figure for what came in and nothing to hold the invoice register against. This is not a month with no payments in it: ${income.count} ${income.count === 1 ? 'was' : 'were'} recorded.`;
+    case 'owed_mixed':
+      return `The invoices issued this month are in ${list(owed.currencies)}, so there is no single figure for what the register says arrived and nothing to hold the payments against. This is not a month with nothing marked paid: ${owed.settled} invoice${owed.settled === 1 ? ' is' : 's are'}.`;
+    case 'sides_differ':
+    default:
+      return `Payments this month are in ${income.currencies[0]} and the invoices are issued in ${owed.currencies[0]}. The two records agree with themselves and not with each other, so they cannot be reconciled: the difference between them would not be an amount of either money. Nothing here has been converted, because the rate would be one nobody chose.`;
+  }
 }
 
 function gapNote(
@@ -485,6 +667,31 @@ export interface PayrollView {
   total: PayrollTotal;
   /** From `settlementBlocker` — why this figure is not safe to settle on. */
   blocker: string | null;
+  /**
+   * The one currency `total.cents` may be LABELLED with, or null when no single
+   * label is honest.
+   *
+   * ── the defect this closes ────────────────────────────────────────────
+   *
+   * `total.cents` is a sum over `sessions.rate_cents`, which have carried their
+   * own `rate_currency` since supabase/parts/1010. Every screen that printed
+   * this figure supplied the unit from `tenants.currency` instead — the gym's
+   * code TODAY, over rates snapshotted whenever they were snapshotted — and
+   * /close, the screen that FILES the month, wrote that pairing into
+   * `gym_month_closes` and exported it in the handoff CSV. /sessions, /payroll
+   * and /coach/earnings all ask src/lib/gymRateCurrency.ts this question before
+   * printing a total; this is that same call, made once, where the figure is
+   * computed rather than where it is rendered, so the label and the number can
+   * never be derived from different rows.
+   */
+  currency: string | null;
+  /** True when the payable sessions were priced in more than one money.
+   *  `total.cents` is then a sum ACROSS currencies — not an amount of anything —
+   *  and must be withheld rather than labelled with whichever code is to hand. */
+  mixedCurrency: boolean;
+  /** The sentence that goes where the total would have been, from `totalNote`.
+   *  Null when the run has one currency, or no priced sessions at all. */
+  currencyNote: string | null;
 }
 
 /** Payroll for the month's sessions, and whether it may be acted on. */
@@ -496,7 +703,28 @@ export function payrollOf(
 ): PayrollView {
   const lines = payrollByTrainer(sessions, policy, fallbackRateCents, now);
   const total = payrollTotal(lines);
-  return { lines, total, blocker: settlementBlocker(total) };
+  /*
+   * Exactly the rates `total.cents` is a sum of, through the same function
+   * `payrollByTrainer` prices each session with — not `sessions`, and not a
+   * filter written a second time here.
+   *
+   * The set matters twice over. A cancelled session in a currency this month
+   * paid nothing in must not withhold a total it contributes nothing to (the
+   * mistake the passes tile on /close was repaired for), and a session priced
+   * off the gym's standard fee must not be counted as agreeing with a
+   * snapshotted rate whose unit it never shared.
+   */
+  const rates = sessions
+    .map((s) => payableRate(s, policy, fallbackRateCents))
+    .filter((r): r is { rateCents: number; rateCurrency: string | null } => r != null);
+  return {
+    lines,
+    total,
+    blocker: settlementBlocker(total),
+    currency: runLabel(rates),
+    mixedCurrency: runCurrency(rates).kind === 'mixed',
+    currencyNote: totalNote(rates),
+  };
 }
 
 /* ── the parts, and their three states ─────────────────────────────────────── */
@@ -554,6 +782,11 @@ export function loadingCloseParts(rec: CloseRecord): ClosePart[] {
   return CLOSE_PARTS.filter((p) => rec[p].state === 'loading');
 }
 
+/** The parts that came back, and came back short. */
+export function truncatedCloseParts(rec: CloseRecord): ClosePart[] {
+  return CLOSE_PARTS.filter((p) => rec[p].state === 'partial');
+}
+
 /**
  * The sentence above a half-loaded close, or null when every part is in.
  *
@@ -568,7 +801,7 @@ export function closeWarning(rec: CloseRecord): string | null {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Could not read ${list}. This is a partial close, not a quiet one — ${broken.map((b) => b.cost).join('; ')}.`;
+  return `Could not read ${list}. This is a partial close, not a quiet one: ${broken.map((b) => b.cost).join('; ')}.`;
 }
 
 /* ── the refusal ───────────────────────────────────────────────────────────── */
@@ -576,6 +809,7 @@ export function closeWarning(rec: CloseRecord): string | null {
 export type BlockerKind =
   | 'month_running'
   | 'read_failed'
+  | 'read_truncated'
   | 'still_loading'
   | 'unmarked_sessions'
   | 'unpriced_sessions'
@@ -604,6 +838,11 @@ export function closeBlockers(
   check: MoneyCheck | null,
   income: Income | null,
   owed: Owed | null,
+  /** The month's pass sales, or null when the passes were not read. Added
+   *  because this function could not see them at all: `passRevenueCents` summed
+   *  across currencies with nothing to flag it and nothing downstream to
+   *  refuse. */
+  passes: ClosePasses | null,
   now: number = Date.now(),
 ): Blocker[] {
   const out: Blocker[] = [];
@@ -611,7 +850,24 @@ export function closeBlockers(
   for (const b of brokenCloseParts(rec)) {
     out.push({
       kind: 'read_failed',
-      text: `Could not read ${b.label} — ${b.cost}. Nothing can be closed over a read that failed.`,
+      text: `Could not read ${b.label}: ${b.cost}. Nothing can be closed over a read that failed.`,
+    });
+  }
+
+  // A read that SUCCEEDED and came back short. Its own blocker, and not folded
+  // into `read_failed`, because it is the one that would otherwise get through:
+  // every gate on this screen is written `state === 'ready'`, which withholds
+  // the FIGURES, and none of them stops the month being signed off. A month
+  // closed over a prefix of its payments is a smaller month, signed, with
+  // nothing on the document saying so.
+  const cut = truncatedCloseParts(rec);
+  for (const p of cut) {
+    out.push({
+      kind: 'read_truncated',
+      text:
+        `Only the first rows of ${CLOSE_LABEL[p]} were read, and there are more: ${CLOSE_COST[p]}. ` +
+        `A month cannot be closed over part of a set: the figure would be a subtotal with a ` +
+        `signature under it.`,
     });
   }
 
@@ -669,16 +925,51 @@ export function closeBlockers(
     out.push({ kind: 'money_gap', text: check.note });
   }
 
-  if (income && income.currencies.length > 1) {
+  // `mixedCurrency`, not `currencies.length > 1`. The two differ by exactly the
+  // case where one row states no currency: the total is withheld either way,
+  // and only this field also raises the line that says why. A withheld figure
+  // with no sentence beside it is a blank the reader has to explain to
+  // themselves, and they explain it as nothing.
+  if (income?.mixedCurrency) {
     out.push({
       kind: 'mixed_currency',
-      text: `Payments in ${w.label} are recorded in ${income.currencies.join(' and ')}. They are not added together here, because that would not be a total.`,
+      text: income.currencies.length > 1
+        ? `Payments in ${w.label} are recorded in ${income.currencies.join(' and ')}. They are not added together here, because that would not be a total.`
+        : `Payments in ${w.label} do not all say what currency they are in${income.currencies.length ? `. Some are recorded in ${income.currencies[0]} and at least one states none` : ''}. No total is offered: an amount whose money is unknown is not an amount.`,
     });
   }
-  if (owed && owed.currencies.length > 1) {
+  if (owed?.mixedCurrency) {
     out.push({
       kind: 'mixed_currency',
-      text: `Invoices in ${w.label} are issued in ${owed.currencies.join(' and ')}, so no single figure is offered for what is owed.`,
+      text: owed.currencies.length > 1
+        ? `Invoices in ${w.label} are issued in ${owed.currencies.join(' and ')}, so no single figure is offered for what is owed.`
+        : `Invoices in ${w.label} do not all say what currency they are in${owed.currencies.length ? `. Some are issued in ${owed.currencies[0]} and at least one states none` : ''}, so no single figure is offered for what is owed.`,
+    });
+  }
+  // The two sides disagreeing with EACH OTHER has no blocker of its own above:
+  // both sets are internally uniform, so neither mixed-currency line fires, and
+  // without this the month would close with no reconciliation having run and
+  // nothing on the screen saying so. Same kind as the two above because it is
+  // the same fact — two currencies where a comparison needs one.
+  if (check?.uncomparable === 'sides_differ' && check.note) {
+    out.push({ kind: 'mixed_currency', text: check.note });
+  }
+
+  // Passes are the third money record on this screen, and until now the only
+  // one nothing here asked a currency question about. They do NOT enter
+  // `CloseSnapshot` — `closeMonth` in src/lib/gymClose.ts writes taken,
+  // invoiced, outstanding and payroll, a currency for each of those four, and
+  // the unmarked count, and no pass figure among them — so nothing wrong has
+  // ever been written to
+  // `gym_month_closes` over this. It is still a line on the close: a gym that
+  // changed currency mid-month has a pass total that is not a total, and the
+  // month may not be signed off with an unexplained figure on it.
+  if (passes?.mixedCurrency) {
+    out.push({
+      kind: 'mixed_currency',
+      text: `Passes issued in ${w.label} were sold in ${
+        passes.currencies.length > 1 ? passes.currencies.join(' and ') : 'more than one currency'
+      }, so what they come to is not one figure. Pass sales are shown beside the takings and never added into them, and this is the same rule one level down.`,
     });
   }
 
@@ -686,6 +977,41 @@ export function closeBlockers(
 }
 
 export type CloseState = 'closeable' | 'blocked';
+
+/**
+ * The month's pass sales, and what money they are in.
+ *
+ * The last two fields are the point of the type. `passRevenueCents` used to be
+ * called from here with `Pick<GymPass, 'paidCents'>` — a signature that
+ * narrowed away the currency of rows whose currency is nullable — and this
+ * object carried the sum and nothing else, so `closeBlockers` could not see a
+ * pass currency and the screen had no fact to print. `passConversion.ts`
+ * already derived exactly these two for /passes; they are now derived once, in
+ * `passRevenueCents`, and both readers take them from there.
+ *
+ * `cents` is deliberately still the raw sum when `mixedCurrency` is true rather
+ * than null, because a caller wording a null `cents` is wording "not one pass
+ * carried a price", which is a different and false thing to say about a gym
+ * that priced four of them in two currencies. A caller holding
+ * `mixedCurrency: true` must WITHHOLD the figure and say why — it may not put a
+ * currency in front of it, and it may not silently print nothing either.
+ */
+export interface ClosePasses {
+  /** Minor units summed across the priced passes, or null when none carried a
+   *  price. NOT an amount of any single money when `mixedCurrency` is true. */
+  cents: number | null;
+  /** How many of the month's passes carried a recorded price. */
+  priced: number;
+  /** How many were issued in the month at all. */
+  sold: number;
+  /** What every priced pass agrees it was sold in, or null when they do not
+   *  agree or none of them says. */
+  currency: string | null;
+  /** The codes actually stated, for a sentence that has to name them. */
+  currencies: string[];
+  /** True when the priced passes are not all in one money. */
+  mixedCurrency: boolean;
+}
 
 export interface MonthClose {
   window: MonthWindow;
@@ -703,7 +1029,7 @@ export interface MonthClose {
   check: MoneyCheck | null;
   payroll: PayrollView | null;
   /** Pass sales in the month, held apart from `income` on purpose — see below. */
-  passes: { cents: number | null; priced: number; sold: number } | null;
+  passes: ClosePasses | null;
   blockers: Blocker[];
   state: CloseState;
   /** The banner above the whole screen when a part failed. */
@@ -717,6 +1043,20 @@ export interface CloseOptions {
    *  than being valued at nothing. */
   fallbackRateCents?: number | null;
   now?: number;
+  /**
+   * The day to judge an invoice overdue against, as a plain ISO date — the
+   * GYM's own, `gymDay(Date.now(), zone)`.
+   *
+   * Injected for the same reason `fmt` is: this module holds no tenant and
+   * therefore no timezone, and a close that guessed one would be guessing about
+   * which side of a month boundary somebody's invoice fell. It was not
+   * injectable at all until now, and what it did instead was take UTC's
+   * calendar day — which is nobody's, and which is one day ahead of the gym for
+   * every reader west of Greenwich through their whole evening. An invoice due
+   * on the 31st was counted overdue from 5pm on the 31st in Los Angeles, on the
+   * one screen an owner uses to sign off a month.
+   */
+  today?: string;
   /** How to render an amount inside a sentence. Injected rather than assumed:
    *  this module holds no opinion about the gym's currency. */
   fmt?: (cents: number) => string;
@@ -738,7 +1078,11 @@ export interface CloseOptions {
  */
 export function buildClose(rec: CloseRecord, w: MonthWindow, opts: CloseOptions): MonthClose {
   const now = opts.now ?? Date.now();
-  const today = new Date(now).toISOString().slice(0, 10);
+  // The reader's own day where the caller has not said which day it is. Not
+  // UTC's, which is what this was and which belongs to nobody in the building;
+  // see `today` on CloseOptions for what it cost. The gym's day is the true
+  // answer and it is one argument away.
+  const today = opts.today ?? isoDay(new Date(now));
 
   const paidRows = rowsOf(sliceMonth(rec.payments, w, (p) => p.takenAt));
   const invRows = rowsOf(rec.invoices);
@@ -764,14 +1108,25 @@ export function buildClose(rec: CloseRecord, w: MonthWindow, opts: CloseOptions)
     : null;
 
   const passesInMonth = passRows ? passRows.filter((p) => dayInMonth(p.issuedOn, w)) : null;
-  const passes = passesInMonth
+  const passes: ClosePasses | null = passesInMonth
     ? (() => {
+        // Every field, not three of six. This call took the sum and dropped the
+        // currency on the floor, so a gym that changed currency mid-month had
+        // AED 860 and GBP 240 arrive here as 1,100 with nothing anywhere saying
+        // the two halves were not the same money.
         const r = passRevenueCents(passesInMonth);
-        return { cents: r.cents, priced: r.priced, sold: r.total };
+        return {
+          cents: r.cents,
+          priced: r.priced,
+          sold: r.total,
+          currency: r.currency,
+          currencies: r.currencies,
+          mixedCurrency: r.mixedCurrency,
+        };
       })()
     : null;
 
-  const blockers = closeBlockers(rec, w, payroll, check, income, owed, now);
+  const blockers = closeBlockers(rec, w, payroll, check, income, owed, passes, now);
 
   return {
     window: w,
@@ -807,5 +1162,5 @@ export function closeHeadline(c: MonthClose): string {
   // assurance it does not have.
   return c.check?.r.state === 'agrees'
     ? `${c.window.label} reconciles against the invoice register and nothing is unmarked. This month can be closed.`
-    : `${c.window.label} has nothing unmarked and nothing unexplained. No invoice in the month was marked paid, so what came in stands on the payment record alone — it was not checked against a second source.`;
+    : `${c.window.label} has nothing unmarked and nothing unexplained. No invoice in the month was marked paid, so what came in stands on the payment record alone. It was not checked against a second source.`;
 }

@@ -1,0 +1,388 @@
+{
+  "generated": "2026-09-06",
+  "tallPx": 900,
+  "sides": {
+    "front": {
+      "base": "front_base.webp",
+      "aspect": 0.371555,
+      "muscles": [
+        {
+          "name": "palmaris_longus",
+          "side": "L",
+          "file": "front_palmaris_longus_L.webp"
+        },
+        {
+          "name": "palmaris_longus",
+          "side": "R",
+          "file": "front_palmaris_longus_R.webp"
+        },
+        {
+          "name": "brachioradialis",
+          "side": "L",
+          "file": "front_brachioradialis_L.webp"
+        },
+        {
+          "name": "brachioradialis",
+          "side": "R",
+          "file": "front_brachioradialis_R.webp"
+        },
+        {
+          "name": "pectineus_sartorius",
+          "side": "L",
+          "file": "front_pectineus_sartorius_L.webp"
+        },
+        {
+          "name": "pectineus_sartorius",
+          "side": "R",
+          "file": "front_pectineus_sartorius_R.webp"
+        },
+        {
+          "name": "adductor_longus",
+          "side": "L",
+          "file": "front_adductor_longus_L.webp"
+        },
+        {
+          "name": "adductor_longus",
+          "side": "R",
+          "file": "front_adductor_longus_R.webp"
+        },
+        {
+          "name": "vastus_medialis",
+          "side": "L",
+          "file": "front_vastus_medialis_L.webp"
+        },
+        {
+          "name": "vastus_medialis",
+          "side": "R",
+          "file": "front_vastus_medialis_R.webp"
+        },
+        {
+          "name": "vastus_lateralis",
+          "side": "L",
+          "file": "front_vastus_lateralis_L.webp"
+        },
+        {
+          "name": "vastus_lateralis",
+          "side": "R",
+          "file": "front_vastus_lateralis_R.webp"
+        },
+        {
+          "name": "rectus_femoris",
+          "side": "L",
+          "file": "front_rectus_femoris_L.webp"
+        },
+        {
+          "name": "rectus_femoris",
+          "side": "R",
+          "file": "front_rectus_femoris_R.webp"
+        },
+        {
+          "name": "gracilis",
+          "side": "L",
+          "file": "front_gracilis_L.webp"
+        },
+        {
+          "name": "gracilis",
+          "side": "R",
+          "file": "front_gracilis_R.webp"
+        },
+        {
+          "name": "gracilis_gastrocnemius",
+          "side": "L",
+          "file": "front_gracilis_gastrocnemius_L.webp"
+        },
+        {
+          "name": "gracilis_gastrocnemius",
+          "side": "R",
+          "file": "front_gracilis_gastrocnemius_R.webp"
+        },
+        {
+          "name": "tibialis_anterior",
+          "side": "L",
+          "file": "front_tibialis_anterior_L.webp"
+        },
+        {
+          "name": "tibialis_anterior",
+          "side": "R",
+          "file": "front_tibialis_anterior_R.webp"
+        },
+        {
+          "name": "obliques",
+          "side": "L",
+          "file": "front_obliques_L.webp"
+        },
+        {
+          "name": "obliques",
+          "side": "R",
+          "file": "front_obliques_R.webp"
+        },
+        {
+          "name": "triceps",
+          "side": "L",
+          "file": "front_triceps_L.webp"
+        },
+        {
+          "name": "triceps",
+          "side": "R",
+          "file": "front_triceps_R.webp"
+        },
+        {
+          "name": "biceps_brachii",
+          "side": "L",
+          "file": "front_biceps_brachii_L.webp"
+        },
+        {
+          "name": "biceps_brachii",
+          "side": "R",
+          "file": "front_biceps_brachii_R.webp"
+        },
+        {
+          "name": "abdominals",
+          "side": "L",
+          "file": "front_abdominals_L.webp"
+        },
+        {
+          "name": "abdominals",
+          "side": "R",
+          "file": "front_abdominals_R.webp"
+        },
+        {
+          "name": "deltoids",
+          "side": "L",
+          "file": "front_deltoids_L.webp"
+        },
+        {
+          "name": "deltoids",
+          "side": "R",
+          "file": "front_deltoids_R.webp"
+        },
+        {
+          "name": "pectoralis_major",
+          "side": "L",
+          "file": "front_pectoralis_major_L.webp"
+        },
+        {
+          "name": "pectoralis_major",
+          "side": "R",
+          "file": "front_pectoralis_major_R.webp"
+        },
+        {
+          "name": "trapezius",
+          "side": "L",
+          "file": "front_trapezius_L.webp"
+        },
+        {
+          "name": "trapezius",
+          "side": "R",
+          "file": "front_trapezius_R.webp"
+        },
+        {
+          "name": "sternocleidomastoid",
+          "side": "L",
+          "file": "front_sternocleidomastoid_L.webp"
+        },
+        {
+          "name": "sternocleidomastoid",
+          "side": "R",
+          "file": "front_sternocleidomastoid_R.webp"
+        }
+      ]
+    },
+    "back": {
+      "base": "back_base.webp",
+      "aspect": 0.387882,
+      "muscles": [
+        {
+          "name": "gluteus_maximus",
+          "side": "R",
+          "file": "back_gluteus_maximus_R.webp"
+        },
+        {
+          "name": "gluteus_maximus",
+          "side": "L",
+          "file": "back_gluteus_maximus_L.webp"
+        },
+        {
+          "name": "latissimus_dorsi",
+          "side": "R",
+          "file": "back_latissimus_dorsi_R.webp"
+        },
+        {
+          "name": "latissimus_dorsi",
+          "side": "L",
+          "file": "back_latissimus_dorsi_L.webp"
+        },
+        {
+          "name": "gluteus_medius",
+          "side": "R",
+          "file": "back_gluteus_medius_R.webp"
+        },
+        {
+          "name": "gluteus_medius",
+          "side": "L",
+          "file": "back_gluteus_medius_L.webp"
+        },
+        {
+          "name": "erector_spinae",
+          "side": "R",
+          "file": "back_erector_spinae_R.webp"
+        },
+        {
+          "name": "erector_spinae",
+          "side": "L",
+          "file": "back_erector_spinae_L.webp"
+        },
+        {
+          "name": "trapezius",
+          "side": "R",
+          "file": "back_trapezius_R.webp"
+        },
+        {
+          "name": "trapezius",
+          "side": "L",
+          "file": "back_trapezius_L.webp"
+        },
+        {
+          "name": "infraspinatus_teres_minor",
+          "side": "R",
+          "file": "back_infraspinatus_teres_minor_R.webp"
+        },
+        {
+          "name": "infraspinatus_teres_minor",
+          "side": "L",
+          "file": "back_infraspinatus_teres_minor_L.webp"
+        },
+        {
+          "name": "deltoids",
+          "side": "R",
+          "file": "back_deltoids_R.webp"
+        },
+        {
+          "name": "deltoids",
+          "side": "L",
+          "file": "back_deltoids_L.webp"
+        },
+        {
+          "name": "triceps",
+          "side": "R",
+          "file": "back_triceps_R.webp"
+        },
+        {
+          "name": "triceps",
+          "side": "L",
+          "file": "back_triceps_L.webp"
+        },
+        {
+          "name": "brachioradialis",
+          "side": "R",
+          "file": "back_brachioradialis_R.webp"
+        },
+        {
+          "name": "brachioradialis",
+          "side": "L",
+          "file": "back_brachioradialis_L.webp"
+        },
+        {
+          "name": "extensor_carpi",
+          "side": "R",
+          "file": "back_extensor_carpi_R.webp"
+        },
+        {
+          "name": "extensor_carpi",
+          "side": "L",
+          "file": "back_extensor_carpi_L.webp"
+        },
+        {
+          "name": "anconeus",
+          "side": "R",
+          "file": "back_anconeus_R.webp"
+        },
+        {
+          "name": "anconeus",
+          "side": "L",
+          "file": "back_anconeus_L.webp"
+        },
+        {
+          "name": "biceps_femoris",
+          "side": "R",
+          "file": "back_biceps_femoris_R.webp"
+        },
+        {
+          "name": "biceps_femoris",
+          "side": "L",
+          "file": "back_biceps_femoris_L.webp"
+        },
+        {
+          "name": "semitendinosus",
+          "side": "R",
+          "file": "back_semitendinosus_R.webp"
+        },
+        {
+          "name": "semitendinosus",
+          "side": "L",
+          "file": "back_semitendinosus_L.webp"
+        },
+        {
+          "name": "gracilis",
+          "side": "R",
+          "file": "back_gracilis_R.webp"
+        },
+        {
+          "name": "gracilis",
+          "side": "L",
+          "file": "back_gracilis_L.webp"
+        },
+        {
+          "name": "semimembranosus",
+          "side": "R",
+          "file": "back_semimembranosus_R.webp"
+        },
+        {
+          "name": "semimembranosus",
+          "side": "L",
+          "file": "back_semimembranosus_L.webp"
+        },
+        {
+          "name": "gastrocnemius",
+          "side": "R",
+          "file": "back_gastrocnemius_R.webp"
+        },
+        {
+          "name": "gastrocnemius",
+          "side": "L",
+          "file": "back_gastrocnemius_L.webp"
+        },
+        {
+          "name": "soleus",
+          "side": "R",
+          "file": "back_soleus_R.webp"
+        },
+        {
+          "name": "soleus",
+          "side": "L",
+          "file": "back_soleus_L.webp"
+        },
+        {
+          "name": "adductor_magnus",
+          "side": "R",
+          "file": "back_adductor_magnus_R.webp"
+        },
+        {
+          "name": "adductor_magnus",
+          "side": "L",
+          "file": "back_adductor_magnus_L.webp"
+        },
+        {
+          "name": "iliotibial_band",
+          "side": "R",
+          "file": "back_iliotibial_band_R.webp"
+        },
+        {
+          "name": "iliotibial_band",
+          "side": "L",
+          "file": "back_iliotibial_band_L.webp"
+        }
+      ]
+    }
+  }
+}

@@ -17,16 +17,25 @@
 // The read had the ordinary version of the same problem: a failed select left
 // `classes` at [] while `ready` still flipped true, so the timetable told a gym
 // full of members that no classes were scheduled.
-import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { createContext, useMemo, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
+// The four words `class_bookings.status` can hold, read as a standing rather
+// than as the truthiness of a string. supabase/parts/3180 §8 names this file:
+// once a cancellation stops being a DELETE, "is there a row" and "do they still
+// hold a place" are different questions with different answers.
+import { seatStanding, holdsPlace, type SeatStanding } from '../lib/classSeat';
+// Who is signed in, with the `error` kept beside the session. Two calls became
+// one: see the note at the call for why `getUser()` is not asked any more.
+import { sessionUid } from '../lib/sessionUid';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import { useLive } from './realtime';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 /**
  * How stale a cached timetable may be before it stops being worth showing.
@@ -40,6 +49,20 @@ import { useAuthRevision } from './authRevision';
  */
 const CLASS_CACHE_HORIZON_MS = 2 * 24 * 60 * 60 * 1000;
 
+/**
+ * How far back the timetable read reaches.
+ *
+ * An hour, so a class that is running RIGHT NOW is still on the screen of the
+ * member standing outside the studio door, and last Tuesday is not. It is
+ * exported because it is not only a display decision any more:
+ * app/(trainer)/calendar.tsx reconciles the coach's Google calendar against
+ * this list, and a reconcile window reaching further back than the read that
+ * fills it deletes the classes in the gap — see `pushWindow` in
+ * src/lib/calendarSync.ts, which takes this value rather than repeating the
+ * number and letting the two drift.
+ */
+export const CLASS_READ_FLOOR_MS = 3600_000;
+
 /** What the cache holds. Two keys rather than one blob, because the timetable
  *  and which seats I hold have different lifetimes and one may be readable when
  *  the other is not. */
@@ -48,7 +71,35 @@ const MINE_SCOPE = 'classMine';
 
 interface ClassesValue {
   classes: GymClass[];
+  /**
+   * The places this member still HOLDS, and only those.
+   *
+   * A key is present when the member has a seat or a queue position on that
+   * class, so `myStatus[id]` being truthy is a safe test again and every screen
+   * that makes it keeps working. It was not safe in between: supabase/parts/3060
+   * widened `class_bookings.status` to four words and part 3180 stops
+   * `cancel_class` deleting the row, so a cancelled booking arrives with a
+   * present, truthy status — and app/(client)/bookings.tsx, which lists
+   * anything with a key under "Upcoming" with a live Cancel button on it, would
+   * offer a member a second cancellation of a class they left weeks ago.
+   *
+   * A standing this build cannot read is NOT here. It is not a held place, and
+   * arming a Cancel button against a word nobody can name is the one thing
+   * src/lib/classSeat.ts refuses outright.
+   */
   myStatus: Record<string, ClassBookingStatus>;
+  /**
+   * Where this member stands on each class, in all of the words the column can
+   * hold — including the two that say they gave the place up and the one that
+   * says this build cannot read the answer. Absent for a class they never
+   * booked; `seatStanding` calls that 'none'.
+   *
+   * NEVER TEST THIS FOR TRUTHINESS. 'cancelled' is a standing and a truthy
+   * string, and reading it as "they have a booking" is the exact regression
+   * part 3180 §8 names. `holdsPlace` is the question; `myStatus` above is the
+   * answer already computed for the screens that only need that.
+   */
+  myStanding: Record<string, SeatStanding>;
   /** The seat you actually hold, or null when the booking did not reach the
    *  server. Null is not "unknown" — it means DO NOT tell them they are in. */
   book: (id: string) => Promise<ClassBookingStatus | null>;
@@ -131,7 +182,18 @@ const rowToClass = (r: any): GymClass => ({
 export function ClassesProvider({ children }: { children: React.ReactNode }) {
   const authRev = useAuthRevision();
   const [classes, setClasses] = useState<GymClass[]>([]);
-  const [myStatus, setMyStatus] = useState<Record<string, ClassBookingStatus>>({});
+  /**
+   * The member's own `class_bookings.status` per class, as the WORD the server
+   * sent and not as one of the two this app was written for.
+   *
+   * Private to this provider, and both public maps below are derived from it.
+   * Holding the raw word is what lets `myStanding` say "you cancelled this"
+   * while `myStatus` stays true to its own type; throwing the word away at the
+   * read — which is what supabase/parts/3180 §8 proposes — would collapse a
+   * cancellation and an unreadable fifth status into the same absence as never
+   * having booked, and those are three different things to tell a member.
+   */
+  const [myRow, setMyRow] = useState<Record<string, string>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -156,15 +218,42 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     // end should be told that rather than told the timetable is broken.
     let truncated = false;
     try {
-      // Signed out is a true answer, not a failed read: getUser() rejects when
-      // there is no session, which marked this whole load as failed on the
-      // first tick — before anybody had signed in — and `load` never changed
-      // identity, so the effect below never asked again.
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('ready'); setReady(true); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) failed = true;
-      const id = auth?.user?.id ?? null;
+      // ── who is asking, and which of the two nobodies it is ──────────────
+      //
+      // Signed out is a true answer and not a failed read; that part was always
+      // right. What was wrong is that `!sess?.session` was the only test of it
+      // and the line above it discarded `error`.
+      //
+      // src/lib/sessionUidRead.ts has the library's own body for it: when the
+      // stored access token has expired and the refresh cannot reach GoTrue,
+      // `getSession()` resolves with `session: null` AND a retryable error —
+      // indistinguishable, on that line, from a phone nobody has signed in on.
+      // So an outage took the `setStatus('ready')` branch, and 'ready' is
+      // src/ui/loadStatus.ts's word for the server's own answer. The member was
+      // shown an EMPTY, CONFIRMED timetable — "no classes are scheduled" at a
+      // gym running forty a week — with `myRow` never read, so every class they
+      // hold a seat on rendered as bookable again, and `uid` set to null, which
+      // takes `book` down the offline branch at the bottom of this file.
+      //
+      // One call, not two. `getUser()` was only ever here for the id and
+      // getSession() carries it; asking the network for a uid that is already
+      // on the device is what src/ui/glucoseData.ts records leaving a member
+      // looking at "Still loading." for a whole session.
+      //
+      // Narrowed on `fate`, never on `!who.uid` — `string` includes '', so
+      // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+      const who = await sessionUid('classes.load');
+      if (who.fate === 'signed-out') { setStatus('ready'); setReady(true); return; }
+      if (who.fate !== null) {
+        // 'unreadable'. Nothing was established about this person, so nothing
+        // is retracted and nothing is confirmed: `uid` and `liveUid` are left
+        // exactly as they were, whatever is on screen stays on screen, and the
+        // status says the read failed. `sessionUid` has already reported it.
+        setStatus('error');
+        setReady(true);
+        return;
+      }
+      const id = who.uid;
       setUid(id);
       setLiveUid(id);
 
@@ -192,7 +281,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
             // Past classes are dropped here for the same reason the server read
             // filters them: a member looking for what is on next must not be
             // shown last Tuesday.
-            const cutoff = Date.now() - 3600_000;
+            const cutoff = Date.now() - CLASS_READ_FLOOR_MS;
             const live = cachedList.rows.filter((c) => Date.parse(c.startsAt) >= cutoff);
             setClasses(live.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)));
             setCachedAt(cachedList.at);
@@ -201,11 +290,18 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
             // earlier moment, and a class that had two seats then may have none
             // now — which is the number a member decides their evening on.
             setCountsKnown(false);
-            const cachedMine = readCache<{ id: string; status: ClassBookingStatus }>(rawMine);
+            // `status: unknown` and not `ClassBookingStatus`. This cache is
+            // written by the read below and read back on the next launch, so
+            // after supabase/parts/3180 it holds 'cancelled' and
+            // 'late_cancelled' too — and a cache written by an OLDER build, or
+            // by a later one, may hold anything at all. Declaring it as the two
+            // words this app was written for made the compiler agree with an
+            // assumption the column had already stopped keeping.
+            const cachedMine = readCache<{ id: string; status: unknown }>(rawMine);
             if (cachedMine.rows) {
-              const ms: Record<string, ClassBookingStatus> = {};
-              cachedMine.rows.forEach((b) => { ms[String(b.id)] = b.status; });
-              setMyStatus(ms);
+              const ms: Record<string, string> = {};
+              cachedMine.rows.forEach((b) => { ms[String(b.id)] = String(b.status ?? ''); });
+              setMyRow(ms);
             }
             // Something is on screen and it is not confirmed. If the read below
             // fails, this is the state the member is left in and it has to say
@@ -215,7 +311,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         } catch { /* no usable cache; the read below is the only source */ }
       }
 
-      const nowIso = new Date(Date.now() - 3600_000).toISOString();
+      const nowIso = new Date(Date.now() - CLASS_READ_FLOOR_MS).toISOString();
       // Soonest-first and capped. Ascending is the right half to keep here, and
       // for once that is not a coincidence: the read is already filtered to
       // classes that have not finished, so the first thousand are the next
@@ -294,7 +390,16 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         else if (Array.isArray(mine)) {
           const minePage = capped(mine);
           if (minePage.truncated) truncated = true;
-          const ms: Record<string, ClassBookingStatus> = {}; minePage.rows.forEach((b: any) => { ms[String(b.class_id)] = b.status; }); setMyStatus(ms);
+          // The word, kept. This line built a map typed as the two words the
+          // app knew and filled it with whatever `class_bookings.status` holds,
+          // which supabase/parts/3060 widened to four. Every reader then asked
+          // "is there a key" and got yes for a class the member had cancelled.
+          // The question has not been answerable that way since: `myStatus` and
+          // `myStanding` below are the two shapes of the answer, and neither is
+          // the truthiness of a string.
+          const ms: Record<string, string> = {};
+          minePage.rows.forEach((b: any) => { ms[String(b.class_id)] = String(b?.status ?? ''); });
+          setMyRow(ms);
           // The seats I hold, for the next time this phone cannot ask. Not
           // cached when the read was short, for the reason above: a member
           // whose booking fell off the end would open the app to a class they
@@ -337,11 +442,48 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   useLive({ channel: 'classes:timetable', table: 'gym_classes', enabled: !!liveUid, onChange: load });
   useLive({ channel: 'classes:seats:' + (liveUid ?? 'none'), table: 'class_bookings', enabled: !!liveUid, onChange: load });
 
+  /* ── the one raw map, read two ways ──────────────────────────────────────
+   *
+   * `seatStanding` is called ONCE per row, here, and nothing downstream
+   * compares a status string. That is the point of the two memos: part 3180 §8
+   * proposes filtering the rows to `'booked' || 'waitlist'` at each of the two
+   * reads, which fixes the screen it names and quietly breaks the one thing
+   * Lane 91 built `classSeat.ts` to protect — a status word this build has
+   * never seen would be filtered out, arrive as an ABSENCE, and be offered a
+   * Book button that upserts over a standing nobody can name. Interpreting the
+   * word once and deriving both shapes from it keeps the fifth word visible
+   * where it has to be and out of every count and control where it must not be.
+   */
+  const myStanding = useMemo(() => {
+    const out: Record<string, SeatStanding> = {};
+    for (const id of Object.keys(myRow)) {
+      const s = seatStanding(myRow[id]);
+      // 'none' is the absence of a row, and an absent key IS 'none' to every
+      // reader of this map. Storing it would make `id in myStanding` and
+      // `myStanding[id] !== 'none'` two different tests of the same thing.
+      if (s !== 'none') out[id] = s;
+    }
+    return out;
+  }, [myRow]);
+
+  const myStatus = useMemo(() => {
+    const out: Record<string, ClassBookingStatus> = {};
+    for (const id of Object.keys(myStanding)) {
+      const s = myStanding[id];
+      // Narrowed through `holdsPlace` rather than by re-listing the two words,
+      // so this map cannot come to disagree with the predicate every screen
+      // asks. A cancellation and an unreadable standing are both absent here.
+      if (!holdsPlace(s)) continue;
+      out[id] = s === 'queued' ? 'waitlist' : 'booked';
+    }
+    return out;
+  }, [myStanding]);
+
   const book: ClassesValue['book'] = async (id) => {
     const cl = classes.find((x) => x.id === id);
     const willWait = cl ? cl.booked >= cl.capacity : false;
     const optimistic: ClassBookingStatus = willWait ? 'waitlist' : 'booked';
-    setMyStatus((p) => ({ ...p, [id]: optimistic }));
+    setMyRow((p) => ({ ...p, [id]: optimistic }));
     if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
     if (USE_SUPABASE && uid) {
       try {
@@ -349,43 +491,132 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         if (error) {
           // Roll the optimistic seat back. Leaving it would show the member as
           // booked into a class the server just refused them.
-          setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
+          setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
           if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
           return null;
         }
-        const st = (data === 'waitlist' ? 'waitlist' : 'booked') as ClassBookingStatus;
-        setMyStatus((p) => ({ ...p, [id]: st }));
+        // A seat that was taken looks like exactly two answers: 'booked' and
+        // 'waitlist'. `book_class` has a third — it returns 'notfound' with NO
+        // error when the class is gone, and again when it belongs to another
+        // gym, because a class outside your tenant is deliberately
+        // indistinguishable from one that is not there (supabase/parts/2320).
+        // This line read anything that was not 'waitlist' as 'booked', so that
+        // refusal reached the member as "Booked — you're in", with an
+        // hour-before reminder armed for a seat that does not exist. They
+        // arrange their evening around it and turn up to a class with no place
+        // for them: the same harm the missing `error` at the top of this file
+        // caused, arriving by the one door that fix left open.
+        //
+        // `bookOnto` in src/lib/gymSchedule.ts already states the rule for the
+        // sibling RPC — 'notfound' and any unrecognised shape are refusals and
+        // neither may be reported as a booking. This is that rule on the
+        // member's own path, and the rollback is the `error` branch's.
+        if (data !== 'booked' && data !== 'waitlist') {
+          setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
+          if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+          return null;
+        }
+        const st = data as ClassBookingStatus;
+        setMyRow((p) => ({ ...p, [id]: st }));
         return st;
       } catch {
-        setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
+        setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
         if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
         return null;
       }
     }
-    // No backend to book against: the seat exists on this device only, so this
-    // is the offline path rather than a confirmed reservation.
+    // ── the tail, and the one case it must NOT answer for ────────────────
+    //
+    // With `USE_SUPABASE` off there is no backend at all: this device IS the
+    // record, the seat genuinely exists, and `optimistic` is the true answer.
+    //
+    // With it ON and `uid` null, it is not. That combination means the auth
+    // read above did not produce an account — which, before the fate was kept,
+    // was ALSO what an outage looked like — and this line then returned
+    // 'booked' for a member nothing had been sent for. The screen above reads
+    // a non-null answer as a confirmed seat, says "Booked — you're in" and arms
+    // the hour-before reminder. They arrange their evening around a seat that
+    // does not exist: the same harm the missing `error` at the top of this file
+    // caused, arriving by the last door that fix left open.
+    //
+    // So the optimistic entry is rolled back and the answer is null, which the
+    // interface already defines as "DO NOT tell them they are in".
+    if (USE_SUPABASE) {
+      setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
+      if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+      return null;
+    }
     return optimistic;
   };
 
   const cancel: ClassesValue['cancel'] = async (id) => {
-    const was = myStatus[id];
-    setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
-    if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+    // The word that was there, not the narrowed one. `restore` has to put the
+    // row back exactly as the server last described it: narrowing first and
+    // restoring the narrowed value would quietly rewrite an unrecognised
+    // standing into 'booked' on the way back, which is the one thing this build
+    // must never do with a word it cannot read.
+    const was = myRow[id];
+    const standing = seatStanding(was);
+    // ── the gate, and why `cancel_class` cannot be its own ────────────────
+    //
+    // `cancel_class` RETURNS VOID. Read its body in
+    // supabase/parts/3180-cancelling-a-class-stops-being-a-delete.sql §3: it
+    // locks the member's row, and when the status it finds is null or is not
+    // one of 'booked'/'waitlist' it `return`s — writing nothing, raising
+    // nothing. A cancel of a cancellation and a cancel of a class the member
+    // never booked both come back as `{ error: null }`, byte for byte the
+    // answer a real cancellation gives, and there is no count to check because
+    // an RPC returning void has no rows to count.
+    //
+    // So `!error` cannot be this function's test of success, and the test has
+    // to be made HERE, before the call, off the standing the server last gave
+    // us. `holdsPlace` is that question and it is the only shape of it: a
+    // truthiness test on `was` is true of 'cancelled', and the string compare
+    // that used to guard the seat count below was true of nothing else.
+    //
+    // 'unknown' is refused by the same line, which is the point src/lib
+    // /classSeat.ts makes about arming a control against a word nobody can
+    // name: cancelling off a fifth status this build has never seen would send
+    // an RPC whose effect nothing here can predict and report it as done.
+    if (!holdsPlace(standing)) return false;
+    setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
+    // The seat count follows the STANDING, not a string compare. 'held' is the
+    // only standing that occupies a seat; a member leaving the queue frees
+    // nothing, which is the same gate `cancel_class` applies server-side before
+    // it promotes anybody.
+    if (standing === 'held') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
     // Put the seat back on screen if the server did not take the cancellation.
     // A member who thinks they cancelled and did not is a no-show the gym
     // charges them for.
     const restore = () => {
       if (!was) return;
-      setMyStatus((p) => ({ ...p, [id]: was }));
-      if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
+      setMyRow((p) => ({ ...p, [id]: was }));
+      if (standing === 'held') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
     };
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) { restore(); return false; }
     try {
       const { error } = await supabase.rpc('cancel_class', { p_class: id });
       if (error) {
         restore();
         return false;
       }
+      // ── and why the row is read again rather than guessed at ────────────
+      //
+      // The key was deleted above so that nothing goes on reading this as a
+      // held seat, and an absent key is 'none' to every reader of `myStanding`
+      // — which is the ABSENCE of a row, the one standing that means they never
+      // booked. That is now the wrong word for this member: part 3180 keeps the
+      // row and sets 'cancelled' or 'late_cancelled' on it, and which of the
+      // two it chose depends on `tenants.class_cancel_hours` against the class
+      // start, neither of which this provider reads. Writing either word from
+      // here would be inventing the server's answer, and getting it wrong in
+      // the direction that matters: 'cancelled' over a late cancellation drops
+      // the half of `seatNote` that says it was inside the notice period, which
+      // is the sentence a member needs before a fee they did not expect.
+      //
+      // So it is asked for instead. Until the answer lands the member holds no
+      // place, which is true, and says nothing about why, which is honest.
+      void load();
       return true;
     } catch {
       restore();
@@ -420,7 +651,32 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   // the rest of the time the screen is open.
   const cachedNote = cachedAtLine(cachedAt);
 
-  return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready, status, countsKnown, cachedNote }}>{children}</Ctx.Provider>;
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('classes', status, () => { void load(); });
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useClasses`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.book(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ book, cancel, addClass });
+  impl.current = { book, cancel, addClass };
+  const bookStable = useCallback((...a: Parameters<typeof book>) => impl.current.book(...a), []);
+  const cancelStable = useCallback((...a: Parameters<typeof cancel>) => impl.current.cancel(...a), []);
+  const addClassStable = useCallback((...a: Parameters<typeof addClass>) => impl.current.addClass(...a), []);
+  const value = useMemo<ClassesValue>(() => ({ classes, myStatus, myStanding, book: bookStable, cancel: cancelStable, addClass: addClassStable, refresh: load, ready, status, countsKnown, cachedNote }), [classes, myStatus, myStanding, bookStable, cancelStable, addClassStable, load, ready, status, countsKnown, cachedNote]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useClasses(): ClassesValue {

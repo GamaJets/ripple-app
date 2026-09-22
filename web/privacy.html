@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Privacy — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/privacy">
 <meta name="description" content="What Repple collects, why, who it is shared with, and how to get it back or have it deleted.">
 <meta property="og:title" content="Privacy — Repple">
 <meta property="og:description" content="What Repple collects, why, who it is shared with, and how to get it back or have it deleted.">
 <meta property="og:url" content="https://www.repplefitness.com/privacy">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="legal-redesign.css?v=3d893352c2">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,26 +77,37 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="legal-page legal-document">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".38"/><circle cx="50" cy="50" r="21" opacity=".65"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -67,23 +118,29 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main class="wrap page">
+<main id="main" tabindex="-1" class="wrap page">
   <div class="legal">
 
     <div class="legal-head prose">
       <h1>Privacy</h1>
-      <p class="updated">Updated 23 August 2026</p>
+      <p class="updated">Updated 19 September 2026</p>
     </div>
 
-    <nav class="legal-nav" aria-label="Contents">
-      <span class="ttl">Contents</span>
-      <ol>
+    <!-- Named by the words already on the page, not by a copy of them. The
+         landmark said "Contents" and so did the span under it, so a screen reader
+         announced "Contents navigation" and then read "Contents" again. One
+         string, in one place. -->
+    <nav class="legal-nav" aria-labelledby="toc-ttl">
+      <span class="ttl" id="toc-ttl">Contents</span>
+      <ol role="list">
         <li><a href="#scope">What this covers</a></li>
         <li><a href="#who-we-are">Who we are</a></li>
         <li><a href="#what-we-collect">What we collect</a></li>
         <li><a href="#apple-health">Apple Health &amp; Health Connect</a></li>
         <li><a href="#who-can-see">Who can see it</a></li>
         <li><a href="#processors">Services we rely on</a></li>
+        <li><a href="#website">This website, separately</a></li>
+        <li><a href="#ai">What the AI features send</a></li>
         <li><a href="#security">Keeping it safe</a></li>
         <li><a href="#retention">How long we keep it</a></li>
         <li><a href="#rights">Your rights</a></li>
@@ -96,7 +153,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="prose numbered">
       <div class="callout">
-        <p><strong>The short version.</strong> We collect what the app needs to do its job and nothing else. We do not sell your data. We do not use it for advertising. Health and fitness data is never used for anything but showing you your own training. You can export everything or have it deleted, at any time, by asking.</p>
+        <p><strong>The short version.</strong> We collect what the app needs to do its job and nothing else. We do not sell your data. We do not use it for advertising. Health and fitness data is never used for anything but showing you your own training. You can export everything or have it deleted, at any time, by asking. One thing we would rather you read than discover: several features work by sending material to a company outside this app to be read — a meal photo, an InBody sheet, an injury document, a question you ask the in-app coach. Each one is named in <a href="#ai">What the AI features send</a>, with the exact list of what goes.</p>
       </div>
 
       <h2 id="scope">What this covers</h2>
@@ -107,24 +164,30 @@ addEventListener('DOMContentLoaded', function () {
 
       <h2 id="what-we-collect">What we collect</h2>
 
-      <div class="scroll">
+      <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-collect">
       <table class="data">
-        <thead><tr><th>What</th><th>Why</th><th>When</th></tr></thead>
+        <caption class="vh" id="tbl-collect">What we collect, why we collect it, and when</caption>
+        <thead><tr><th scope="col">What</th><th scope="col">Why</th><th scope="col">When</th></tr></thead>
         <tbody>
-          <tr><td><strong>Email and password</strong></td><td>To create and secure your account.</td><td>Always. Passwords are stored hashed; we never see them.</td></tr>
-          <tr><td><strong>Name and profile photo</strong></td><td>So your coach knows who you are.</td><td>If you enter them.</td></tr>
-          <tr><td><strong>Date of birth, sex, height, weight</strong></td><td>Heart-rate zones and calorie estimates are calculated from these.</td><td>If you enter them.</td></tr>
-          <tr><td><strong>Workouts</strong> — exercises, sets, reps, weight, perceived effort, cardio, calories, time in heart-rate zone</td><td>Your training history, progress and personal records.</td><td>When you log a workout or import one.</td></tr>
-          <tr><td><strong>Apple Health data</strong> — heart rate, active energy, steps, resting heart rate, workouts</td><td>Live heart rate and calories during a session, and importing workouts you recorded on your watch.</td><td>Only if you grant Health permission. You can revoke it at any time.</td></tr>
-          <tr><td><strong>Blood glucose</strong> &mdash; readings a continuous glucose monitor wrote into Apple Health or Health Connect</td><td>Shown beside your own food log, so you can see what happened around a meal. Repple does not interpret them and does not tell you what to eat.</td><td>Only if you ask for it on the Blood Sugar screen and grant that permission separately. Your coach sees none of it unless you turn sharing on yourself.</td></tr>
-          <tr><td><strong>Body measurements and InBody scans</strong></td><td>To show change over time.</td><td>If you record them.</td></tr>
-          <tr><td><strong>Food and meal logs</strong></td><td>Nutrition tracking, and sharing with your coach if you have one.</td><td>If you use the nutrition features.</td></tr>
-          <tr><td><strong>Check-ins and habits</strong></td><td>Weekly progress and consistency.</td><td>If you use them.</td></tr>
-          <tr><td><strong>Messages</strong> between you and your coach</td><td>To deliver them.</td><td>When you send one.</td></tr>
-          <tr><td><strong>Device push token</strong></td><td>To send notifications you have asked for.</td><td>If you allow notifications.</td></tr>
-          <tr><td><strong>Connected device tokens</strong> (WHOOP, Oura, Fitbit, Garmin, Spotify)</td><td>To read the data you connected them for.</td><td>Only if you connect that service.</td></tr>
-          <tr><td><strong>Crash and error reports</strong></td><td>To find and fix faults.</td><td>When the app hits an error.</td></tr>
-          <tr><td><strong>Payment records</strong></td><td>For trainers and gyms taking payment through Repple.</td><td>Card details are handled by Stripe and never reach our servers.</td></tr>
+          <tr><th scope="row"><strong>Email and password</strong></th><td>To create and secure your account.</td><td>Always. Passwords are stored hashed; we never see them.</td></tr>
+          <tr><th scope="row"><strong>Name and profile photo</strong></th><td>So your coach knows who you are.</td><td>If you enter them.</td></tr>
+          <tr><th scope="row"><strong>Date of birth, sex, height, weight</strong></th><td>Heart-rate zones and calorie estimates are calculated from these.</td><td>If you enter them.</td></tr>
+          <tr><th scope="row"><strong>Workouts</strong> — exercises, sets, reps, weight, perceived effort, cardio, calories, time in heart-rate zone</th><td>Your training history, progress and personal records.</td><td>When you log a workout or import one.</td></tr>
+          <tr><th scope="row"><strong>Apple Health data</strong> — heart rate, active energy, steps, resting heart rate, workouts</th><td>Live heart rate and calories during a session, and importing workouts you recorded on your watch.</td><td>Only if you grant Health permission. You can revoke it at any time.</td></tr>
+          <tr><th scope="row"><strong>Blood glucose</strong> &mdash; readings a continuous glucose monitor wrote into Apple Health or Health Connect</th><td>Shown beside your own food log, so you can see what happened around a meal. Repple does not interpret them and does not tell you what to eat.</td><td>Only if you ask for it on the Blood Sugar screen and grant that permission separately. Your coach sees none of it unless you turn sharing on yourself.</td></tr>
+          <tr><th scope="row"><strong>Sleep</strong> &mdash; hours slept and how many nights a device actually measured, from Apple Health, Health Connect or a wearable you connected</th><td>Shown in your own record, and used as one input to the readiness figure.</td><td>Only if you grant Health permission or connect a device that reports it. Nights you typed in yourself are kept apart from nights a device measured, because a guess and a measurement are not the same fact.</td></tr>
+          <tr><th scope="row"><strong>Body measurements and InBody scans</strong></th><td>To show change over time.</td><td>If you record them.</td></tr>
+          <tr><th scope="row"><strong>Photographs of a meal, or of a scan printout</strong></th><td>Only to read them &mdash; the food in a meal photo, the figures on an InBody or DEXA sheet &mdash; so you do not type them in by hand.</td><td>Only when you ask Repple to read one, and we ask before the first time. The picture is sent to be read and is not kept: what is stored afterwards is the figures, not the photograph. A scan sheet often carries your name and date of birth, so this is asked per sheet rather than once.</td></tr>
+          <tr><th scope="row"><strong>Progress photographs</strong></th><td>To compare two of them side by side. Held in a private store, reachable only through a temporary link you ask for.</td><td>If you take them. A coach cannot see one unless you share that specific photo with them, and you can withdraw it.</td></tr>
+          <tr><th scope="row"><strong>Injuries, and any document you upload about one</strong></th><td>So the training plan works around the area until you mark it recovered. Your coach sees the area and the severity, never the document.</td><td>If you record an injury. Uploading a document is a separate step, and sending one to be read as text is a separate question we ask you per document.</td></tr>
+          <tr><th scope="row"><strong>Food and meal logs</strong></th><td>Nutrition tracking, and sharing with your coach if you have one.</td><td>If you use the nutrition features.</td></tr>
+          <tr><th scope="row"><strong>Check-ins and habits</strong></th><td>Weekly progress and consistency.</td><td>If you use them.</td></tr>
+          <tr><th scope="row"><strong>Messages</strong> between you and your coach</th><td>To deliver them.</td><td>When you send one.</td></tr>
+          <tr><th scope="row"><strong>Device push token</strong></th><td>To send notifications you have asked for.</td><td>If you allow notifications.</td></tr>
+          <tr><th scope="row"><strong>Connected device tokens</strong> (WHOOP, Oura, Spotify)</th><td>To read the data you connected them for.</td><td>Only if you connect that service. Fitbit and Garmin are listed in the app but cannot be connected yet, so there is no token for either.</td></tr>
+          <tr><th scope="row"><strong>Agreements you sign</strong> &mdash; Repple&rsquo;s own liability waiver, and any paperwork your gym asks for</th><td>To hold the record of what you agreed to, as it was worded at the time. Repple&rsquo;s waiver is the release and physician acknowledgement that opens the client app. A gym can additionally ask you to sign membership terms, a contract, a pre-exercise health questionnaire (PAR-Q), permission to photograph you in the building, or &mdash; for a member under 18 &mdash; a guardian&rsquo;s agreement.</td><td>When you sign one. These are evidence, so a signed agreement cannot be edited or withdrawn afterwards; re-wording one later creates a new record rather than changing the old. Repple&rsquo;s own waiver is readable by you and by nobody else &mdash; not your coach and not your gym. A gym&rsquo;s paperwork is readable by that gym, which is the point of it.</td></tr>
+          <tr><th scope="row"><strong>Crash and error reports</strong></th><td>To find and fix faults.</td><td>When the app hits an error.</td></tr>
+          <tr><th scope="row"><strong>Payment records</strong></th><td>For trainers and gyms taking payment through Repple.</td><td>Card details are handled by Stripe and never reach our servers.</td></tr>
         </tbody>
       </table>
       </div>
@@ -138,7 +201,8 @@ addEventListener('DOMContentLoaded', function () {
         <li>It is used solely to show you your own training, recovery and readings.</li>
         <li>It is <strong>never</strong> used for advertising or marketing, and never sold or shared with data brokers.</li>
         <li>It is not shared with anyone other than a coach you have deliberately linked to your account.</li>
-        <li>It is never transferred to any third party, and it is not used to train any model.</li>
+        <li>It is not sold, and it is not used to train any model.</li>
+        <li>One qualification, because &ldquo;it never leaves&rdquo; would be too strong. Repple turns your recent sleep into a readiness score, and if you switch on health sharing for the in-app coach chat, that score is sent to Anthropic along with your other body figures — as a number and a short phrase, such as &ldquo;68/100 (fair), from three nights&rdquo;. Your heart rate, steps, energy and workouts are not sent anywhere; they are read to draw your own charts and stay in your own record. Leave health sharing off and none of it goes.</li>
         <li>Revoke it whenever you like &mdash; on iPhone in <strong>Settings &rarr; Privacy &amp; Security &rarr; Health &rarr; Repple</strong>, on Android in <strong>Health Connect &rarr; App permissions &rarr; Repple</strong>. The app keeps working without it.</li>
       </ul>
       <p><strong>Blood glucose is asked for separately.</strong> It is not part of the permission Repple asks for when you connect a watch, because most people do not wear a monitor and a permission screen listing things an app will not use is a screen nobody reads. Repple asks for it once, when you first open the Blood Sugar screen, and never again on its own. Readings are shown to you beside your own food log. They are <strong>not</strong> visible to your coach unless you switch that on yourself, and switching it off again hides the history as well as the next reading. Repple does not diagnose, does not set targets, and does not tell anybody what to eat &mdash; the range it shows is the one commonly quoted for adults, and your own targets come from your clinician.</p>
@@ -149,32 +213,104 @@ addEventListener('DOMContentLoaded', function () {
         <li><strong>You.</strong> Always.</li>
         <li><strong>Your coach</strong>, if you accept a coaching link — they can see your training, and your nutrition and check-ins where those features are used together. You can end the link.</li>
         <li><strong>Your gym</strong>, if you are a member of one, sees membership and attendance information for running the gym. Owners do not get your private messages.</li>
-        <li><strong>Nobody else.</strong> We do not sell data, we do not share it for advertising, and we do not hand it to third parties for their own purposes.</li>
+        <li><strong>Nobody else is shown your record.</strong> We do not sell data, we do not share it for advertising, and we do not hand anything to a third party for their own purposes. The companies that process data so the app can function are a different thing from an audience, and they are listed by name in <a href="#processors">Services we rely on</a> rather than left to the phrase &ldquo;our partners&rdquo;.</li>
       </ul>
 
       <h2 id="processors">Services we rely on</h2>
-      <p>These process data on our behalf so the app can work. They are bound to use it only for that:</p>
+      <p>These process data on our behalf so the app can work. They are bound to use it only for that. The first four run for everyone; the rest only start when you use the feature beside them:</p>
       <ul>
         <li><strong>Supabase</strong> — database, sign-in and file storage.</li>
-        <li><strong>Expo</strong> — delivering push notifications.</li>
+        <li><strong>Expo</strong> — delivering push notifications. A push carries the sender&rsquo;s name and the first 180 characters of the message, because that is what a notification has to show on a locked screen.</li>
         <li><strong>Resend</strong> — sending account emails such as password resets.</li>
+        <li><strong>Cloudflare</strong> — serving this website.</li>
+        <li><strong>Anthropic</strong> — reading the things Repple asks a model to read. This is set out in full under <a href="#ai">What the AI features send, and where</a> below, because it is the part of this list most worth knowing about.</li>
+        <li><strong>OCR.space</strong> — turning a photographed or uploaded document into text. Also covered below.</li>
+        <li><strong>Cheaper Inference</strong> — a second, alternative route to the same model reading, which Repple can be switched to instead of contacting Anthropic directly. It is not in use unless we switch it on, and it is set out beside Anthropic under <a href="#ai">What the AI features send, and where</a> below, because what it receives and what it retains are not the same as Anthropic&rsquo;s.</li>
         <li><strong>Stripe</strong> — payments, where a trainer or gym takes them. Stripe handles card details directly; we never receive them.</li>
-        <li><strong>WHOOP, Oura, Fitbit, Garmin, Spotify</strong> — only if you connect them, and only for what you connected them for.</li>
+        <li><strong>Open Food Facts</strong> — barcode and food-name lookups. Your phone asks them directly, so they see the barcode you scanned and your IP address, but nothing that identifies your account.</li>
+        <li><strong>Spoonacular</strong> — the recipe library behind the Meals list, and only when you search it. Our server asks on your behalf, and what it sends is the search and nothing about who is searching: the diet you have set, the allergens you have asked to avoid, the kind of meal, a calorie range, and any words you typed into the search box. Not your name, your email, your account or your IP address &mdash; to Spoonacular every Repple member is the same one caller. Two things do reach them from your phone rather than from us. A recipe&rsquo;s photograph is loaded from Spoonacular&rsquo;s image server, so that server sees your IP address and which photograph was asked for, as any website hosting an image would. And each recipe credits the website it came from with a link; if you tap it, you are on that website and under its policy, not ours. Spoonacular&rsquo;s terms do not let us keep its recipes, so we do not: a recipe you add to your plan is remembered as its title, its photograph&rsquo;s address and its number in their library, and is asked for again when you open it.</li>
+        <li><strong>WHOOP, Oura, Spotify</strong> — only if you connect them, and only for what you connected them for. Spotify is the one that goes outwards rather than inwards: it creates a playlist in your own Spotify account.</li>
+        <li><strong>Google, Meta and TikTok</strong> — <em>inside the apps</em>, for coaches only, and only for a coach&rsquo;s own accounts: putting a coach&rsquo;s own sessions on their own calendar, and reading back what a coach&rsquo;s own advertising cost them. A client&rsquo;s name is never sent to any of the three. A calendar event Repple writes says &ldquo;Coaching session&rdquo; and nothing else. Google separately receives a request from <em>this website</em>, from everybody, and that is set out immediately below rather than folded into this line.</li>
       </ul>
 
+      <h2 id="website">This website, separately from the apps</h2>
+      <p>Everything above is about the Repple apps. This page you are reading is a plain static site with
+         no analytics, no tracking pixels, no advertising tags, no cookie banner and no cookies at all
+         &mdash; we set none, and we measure nothing about your visit. There is no banner because there is
+         nothing to ask you about. The one thing that does get written to your browser is a sign-in
+         session, on the pages where you sign in, kept in your browser&rsquo;s own storage so you stay signed
+         in; it is not a cookie and it is not sent to anybody but Supabase. That is worth stating because
+         it is unusual, and because it makes the two exceptions easy to name honestly:</p>
+      <ul>
+        <li><strong>Google Fonts</strong> (<code>fonts.googleapis.com</code> and <code>fonts.gstatic.com</code>).
+            The typefaces on this site are fetched from Google when the page loads. To serve them Google
+            receives your IP address, your browser&rsquo;s user-agent string and the address of the page you
+            are on. This happens on <em>every</em> page of this site, including this one, before you have
+            agreed to anything &mdash; so it is not covered by the &ldquo;coaches only&rdquo; line above, and we
+            would rather say so than let that line read as though Google hears nothing about an ordinary
+            visitor. Nothing is sent that identifies your Repple account, because at that moment you do
+            not have one loaded.</li>
+        <li><strong>jsDelivr</strong> (<code>cdn.jsdelivr.net</code>). The pages that talk to your account
+            &mdash; creating one, confirming it, resetting a password, joining a gym by invitation &mdash;
+            load the Supabase browser library from this public code CDN. It receives your IP address and
+            user-agent when it serves that file. It receives none of what you then type: your email and
+            password go from your browser straight to Supabase.</li>
+      </ul>
+      <p>Both are ordinary practice on the web and both are avoidable, which is the reason for naming them:
+         serving the fonts and that one library from our own domain would remove both requests, and we
+         would rather record the gap than describe a site that does not make them.</p>
+
+      <h2 id="ai">What the AI features send, and where</h2>
+      <p>Several things in Repple are done by a model that does not run on your phone, which means the material it reads leaves this app. That is worth a section of its own rather than a line in a list.</p>
+      <p><strong>Anthropic</strong> processes the following, each only when you use that feature:</p>
+      <ul>
+        <li><strong>The in-app coach chat.</strong> What you type, plus a fixed list of facts about your training: your goal, your program, your calorie and macro targets, what you have eaten today, your streak and when you last trained. Your name is not sent.</li>
+        <li><strong>Your body and health figures, but only if you switch that on.</strong> Weight, body fat, skeletal muscle, your readiness score, and the area and severity of any injury you have recorded. This is a separate switch from the chat itself, it is off until you turn it on, and the note you wrote against an injury is never sent — only the area and how bad it is.</li>
+        <li><strong>Photographs.</strong> A meal photo, a physique photo, an InBody result sheet or a photo of a gym machine is sent as an image when you ask Repple to read one. It is the image itself, not a description of it.</li>
+        <li><strong>A meal you describe in words</strong> — the text you typed, up to 500 characters, and nothing else about you.</li>
+      </ul>
+      <p><strong>OCR.space</strong> receives the whole of any document you ask Repple to read: an InBody printout, or an injury document such as a physiotherapy report or a scan result. It is sent as an image, page by page, to be turned back into text.</p>
+      <p>Two things about that are worth saying plainly rather than leaving you to assume them. Repple asks you before sending an injury document, names OCR.space when it asks, and keeps a record of your answer — so an injury document is only ever sent because you said yes to that document. But Repple does not currently ask OCR.space to avoid retaining the upload, so we cannot tell you how long a copy sits on their side. If you would rather not send a document at all, decline and type the detail in by hand; the injury feature works either way.</p>
+      <h3>The alternative route, and why it is described separately</h3>
+      <p>Repple can be configured to send all of the above through <strong>Cheaper Inference</strong> rather than
+         to Anthropic directly. It is off unless we switch it on, and this section is here so that the page
+         describes what the app is capable of doing rather than only what it happens to be doing today. If we do
+         switch it on, everything listed above goes to them instead, in the same detail.</p>
+      <p>Three things about that arrangement are different from the one above, and worth stating plainly rather
+         than leaving inside the phrase &ldquo;a service we rely on&rdquo;:</p>
+      <ul>
+        <li><strong>It is a reseller, not the company that runs the model.</strong> It receives the request and
+            forwards it to whichever company operates the model we have asked for &mdash; which may be Anthropic,
+            and may be another company entirely. So it sees everything Anthropic would see, and it is not the
+            last party to see it.</li>
+        <li><strong>Its requests are answered by further companies again.</strong> A reply Repple received while
+            this route was being tested recorded that it had been served by a separate compute provider. The
+            chain is therefore at least three companies long, and which companies are in it depends on the model
+            we name.</li>
+        <li><strong>It does not offer zero retention.</strong> Its own published catalogue of models records, for
+            every one of the sixty-five it offers, that zero data retention is not available, and lists no route
+            that would provide it. That is a weaker guarantee than the direct arrangement described above, and it
+            is the reason this route is off rather than on.</li>
+      </ul>
+      <p>We have not verified their retention practices beyond what that catalogue states, and we would rather
+         record the limit of what we know than describe a guarantee we have not seen.</p>
+
+      <p>Repple does not use anything you record to train a model, and does not give any of these services permission to use it for their own purposes. Where that rests on a retention guarantee rather than on our own instruction, the paragraph above says which route carries one and which does not.</p>
+
       <h2 id="security">Keeping it safe</h2>
-      <p>Data is encrypted in transit and at rest. Access is enforced at the database itself: every table carries row-level rules, so one person's records are not reachable by another account even if the app asked. Nobody at Repple browses your training data as a matter of routine. <a href="/security">Security &amp; data</a> sets out the mechanism in detail &mdash; who can read what, and why a coach has no access to progress photos.</p>
+      <p>Every connection is encrypted in transit, and Supabase encrypts the disks underneath the database and the file store. Access is enforced at the database itself: every table carries row-level rules, so one person's records are not reachable by another account even if the app asked. No individual column carries a second layer of encryption on top of that, so what protects your row from another account is the rule rather than a key. Nobody at Repple browses your training data as a matter of routine. <a href="/security">Security &amp; data</a> sets out the mechanism in detail &mdash; who can read what, and why a progress photo reaches a coach only when you share that photo.</p>
 
       <h2 id="retention">How long we keep it</h2>
       <p>For as long as your account exists, because a training history is only useful over time. When you delete your account we remove your personal data within 30 days, except anything we are legally required to keep — payment records for tax purposes being the usual case.</p>
+      <p>Your records and your files are two different things in two different places. Deleting the account deletes the records outright; the files go on a queue, and a scheduled job sends a delete for each one within minutes. That covers progress photographs, injury documents, message attachments, your profile photo, and on the coaching side a logo, a published document or an exercise clip. An entry is closed only when the file store confirms the object is no longer there — a file that has been asked for is not yet a file that has gone, and we record the second of those. One store is deliberately not on that queue: a document a gym filed about a member is stored under the gym rather than under the person, and how long a gym must keep it is a legal question with a different answer in each country. That decision has not been made, so those files stay. The full position is set out on <a href="/delete-account">Deleting your account</a> rather than summarised into something more comfortable here.</p>
       <p><a href="/delete-account">Deleting your account</a> sets out exactly what is removed, what survives, and how to ask.</p>
 
       <h2 id="rights">Your rights</h2>
       <ul>
-        <li><strong>Get a copy.</strong> Ask and we will export everything we hold about you. There is also an export in the app, under <strong>Me → Settings → Your data</strong>.</li>
+        <li><strong>Get a copy.</strong> Ask and we will export everything we hold about you. There is also an export in the app, under <strong>Me → Settings → Your data</strong> &mdash; it is not quite everything, and <a href="/delete-account">Deleting your account</a> lists what the in-app one leaves out. Ask us and you get the rest.</li>
         <li><strong>Correct it.</strong> Most of it you can edit in the app; ask us for the rest.</li>
-        <li><strong>Delete it.</strong> Request account deletion in <strong>Me → Settings</strong>, or email us.</li>
-        <li><strong>Withdraw consent.</strong> Turn off Health access or disconnect a device whenever you like.</li>
+        <li><strong>Delete it.</strong> Request account deletion in <strong>Me → Settings</strong>, or email us. Worth knowing which of those two is the reliable one: the in-app request records that you asked, and a person then has to carry it out &mdash; if you are not a member of a gym there is nobody on the other end of it, so a request made that way can sit unseen. Emailing us always reaches a person. <a href="/delete-account">Deleting your account</a> explains why it is built that way.</li>
+        <li><strong>Withdraw consent.</strong> Turn off Health access or disconnect a device whenever you like. The same goes for the narrower permissions: a progress photo you shared with a coach can be withdrawn one photo at a time, and the switch that lets the in-app coach read your health figures can be turned back off. An answer you gave about one injury document or one scan sheet applies only to that document; the next one asks again.</li>
         <li><strong>Object or complain.</strong> If you are in the UK or EU you may also complain to your data protection authority.</li>
       </ul>
       <p>Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> for any of these. We will respond within 30 days.</p>
@@ -201,48 +337,61 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-            </svg>
-          </span>
-          Repple
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
         </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
-          The operating record for gyms, the coaches who work in them, and the people they train.
+          One connected fitness platform for members, coaches and gyms.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
-          <li><a href="/client">Repple</a></li>
-          <li><a href="/trainer">Repple Coach</a></li>
-          <li><a href="/studio">Repple Studio</a></li>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
-          <li><a href="/signup">Create account</a></li>
-          <li><a href="/forgot-password">Reset password</a></li>
-          <li><a href="/delete-account">Delete account</a></li>
+          <li><a href="/support">Support</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
-          <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="/support">Support</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

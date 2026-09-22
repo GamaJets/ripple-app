@@ -36,15 +36,30 @@
 // src/ui/recordOutbox.ts explains why they are together and where they would
 // rather live.
 //
-// ── The device key is a migration, not a fallback ──────────────────────────
+// ── The device key is DROPPED, not migrated ────────────────────────────────
 //
-// Clients who set a target before this shipped have it on their phone and
-// nowhere else. `migrateLegacyTarget` below moves it up exactly once, and only
-// when the server has no weight goal to contradict it. After that the row is
-// the record and the key is never read again.
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+// There used to be a `migrateLegacyTarget` here that moved that pre-server blob
+// up exactly once, and the line that did it was an insert of
+// `{ client_id: who, kind: 'weight', target_value: kg }` where `who` was
+// whichever uid `supabase.auth.getUser()` had just resolved. The key carries no
+// account. So on a shared handset it wrote one member's target weight into
+// another member's `goal_targets` — the one key in this class that reached a
+// SERVER table, and the denominator `progressOf` divides by, so the coach read a
+// correct percentage of a target their client never set.
+//
+// It is gone. The two keys are removed unread on the first load of a session,
+// and src/lib/legacyGoalTarget.ts holds the reasoning, what it costs a
+// single-owner handset, and why scoping the key by account — the repair the rest
+// of this class gets — does not apply to a key that has had no writer since
+// goals moved to the server.
+import { createContext, useMemo, useRef, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()` does
+// not reject on a dropped connection — it resolves with a null user and an
+// error beside it — so an outage and a sign-out arrive identically unless the
+// error is read. See src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { classifyWrite } from '../lib/offlineQueue';
@@ -55,9 +70,23 @@ import { sortGoals, type GoalKind, type GoalTarget, type MeasuredKind } from '..
 import { isPending } from '../lib/wellnessSync';
 import { useOutbox } from './outbox';
 import { useRecordOutboxHandlers } from './recordOutbox';
+import { useRecoverRead } from './readRefresh';
+import { LEGACY_GOAL_TARGET_KEYS } from '../lib/legacyGoalTarget';
 
-const LEGACY_KEY = 'repple.goalTarget';
-const MIGRATED_KEY = 'repple.goalTarget.migrated';
+
+/**
+ * What happened to a goal somebody set.
+ *
+ * Three answers rather than two, because the screen has three things to say.
+ * `true` used to cover both "the server has it" and "this phone is holding it",
+ * so app/(client)/goal.tsx said nothing at all about the second — the queued
+ * row was drawn exactly like a stored one, and then `removeGoal` and
+ * `setAchieved` both refused it (correctly: no server has ever seen that id)
+ * and the screen blamed the member's connection for a goal that had simply not
+ * been sent yet. Every other queued write in this app says "Saved on this
+ * phone"; this is what lets this one say it too.
+ */
+export type GoalSaved = 'stored' | 'queued' | false;
 
 interface GoalValue {
   goals: GoalTarget[];
@@ -65,6 +94,15 @@ interface GoalValue {
    *  the client has none. The screen must not offer to set a first goal to
    *  somebody who already has three. */
   status: LoadStatus;
+  /**
+   * Read the goals again.
+   *
+   * A real re-read: it bumps the same `rev` a settled queued goal bumps, which
+   * the load effect is keyed on, so the server's own rows come back. Pending
+   * rows waiting in the outbox are preserved by that effect exactly as they are
+   * on any other pass, so a refresh never drops a goal the member set offline.
+   */
+  reload: () => void;
   /**
    * One target per measured metric, so this replaces any existing goal of the
    * same kind.
@@ -77,8 +115,8 @@ interface GoalValue {
    *
    * False is what it has always been: nothing was written and nothing was kept.
    */
-  setMeasuredGoal: (kind: MeasuredKind, value: number, targetDateISO: string | null) => Promise<boolean>;
-  addCustomGoal: (title: string, targetDateISO: string | null) => Promise<boolean>;
+  setMeasuredGoal: (kind: MeasuredKind, value: number, targetDateISO: string | null) => Promise<GoalSaved>;
+  addCustomGoal: (title: string, targetDateISO: string | null) => Promise<GoalSaved>;
   /** Refuses a goal that has not reached the server yet — see the note on the
    *  implementation. */
   removeGoal: (id: string) => Promise<boolean>;
@@ -115,6 +153,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   // on looking at a goal that says the right thing under an id nothing can act
   // on until the next launch.
   const [rev, setRev] = useState(0);
+  const reload = useCallback(() => setRev((n) => n + 1), []);
   // The three record handlers live here. See src/ui/recordOutbox.ts for why they
   // are registered together and why this provider is the mount.
   useRecordOutboxHandlers({
@@ -157,23 +196,42 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       setStatus('loading');
-      let who: string | null = null;
-      try {
-        const { data } = await supabase.auth.getUser();
-        who = data?.user?.id ?? null;
-      } catch { who = null; }
+      const read = await signedInUid('goalTracker.load');
       if (cancelled) return;
-      setUid(who);
-      if (!who) {
+      setUid(read.uid);
+      if (read.fate === 'signed-out') {
         // Signed out is a true answer: nobody has goals, and saying so is not
         // the same as failing to look.
         setGoals([]); setStatus('ready'); return;
       }
+      if (read.fate !== null) {
+        // Failing to look, which is the other thing entirely. The `catch` this
+        // replaces collapsed both into `who = null`, and so did the error this
+        // call used to discard: `getUser()` resolves rather than rejects on a
+        // dropped connection (src/lib/authReadFate.ts). So an outage set
+        // `goals: []` under 'ready', and an empty list under 'ready' is a
+        // screen entitled to say "you haven't set any goals yet" and offer to
+        // add a first one — to somebody who has three, mid-block, whose
+        // targets simply could not be read.
+        //
+        // The writes below are already safe on this path and it is worth
+        // saying why rather than assuming it: both `add` paths gate on `uid`,
+        // which is null here, so neither can insert a goal against an
+        // unestablished `client_id`. Only the sentence was wrong.
+        setStatus('error'); return;
+      }
+      const who = read.uid;
+      // Unread, and before anything else touches them. The blob carries no
+      // account, so reading it is a guess about whose target it is — and the
+      // only place that guess could land is somebody's `goal_targets` row. See
+      // src/lib/legacyGoalTarget.ts. Best-effort: a phone that will not let go of
+      // them is a phone where they sit inert, because nothing reads them now.
+      AsyncStorage.multiRemove([...LEGACY_GOAL_TARGET_KEYS])
+        .catch((e) => reportError('goalTracker.dropLegacy', e));
       const mine = await load(who);
       if (cancelled) return;
       if (mine == null) { setStatus('error'); return; }
-      const after = await migrateLegacyTarget(who, mine.goals);
-      if (cancelled) return;
+      const after = mine.goals;
       // Anything still on this phone is kept in front of the server's answer.
       // A re-read that dropped it would take a goal off the member's list while
       // the outbox is still holding it, and the home screen would go on counting
@@ -183,36 +241,6 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     })();
     return () => { cancelled = true; };
   }, [authRev, load, rev]);
-
-  // Move a pre-server target weight up, once. Deliberately conservative: if the
-  // server already holds a weight goal it wins, because it is the one the coach
-  // can see and the one another device may have written more recently.
-  const migrateLegacyTarget = async (who: string, current: GoalTarget[]): Promise<GoalTarget[]> => {
-    try {
-      if (await AsyncStorage.getItem(MIGRATED_KEY)) return current;
-      const raw = await AsyncStorage.getItem(LEGACY_KEY);
-      if (!raw) { await AsyncStorage.setItem(MIGRATED_KEY, '1'); return current; }
-      const old = JSON.parse(raw) as { targetWeightKg?: number; targetDateISO?: string };
-      const kg = Number(old?.targetWeightKg);
-      // 0 was the provider's "not set" sentinel, so it migrates to nothing.
-      if (!Number.isFinite(kg) || kg <= 0 || current.some((g) => g.kind === 'weight')) {
-        await AsyncStorage.setItem(MIGRATED_KEY, '1');
-        return current;
-      }
-      const { data, error } = await supabase.from('goal_targets').insert({
-        client_id: who, kind: 'weight', target_value: kg,
-        target_date: old.targetDateISO ? String(old.targetDateISO).slice(0, 10) : null,
-      }).select('id, kind, target_value, title, target_date, achieved_at, created_at').single();
-      // A failed migration is retried on the next launch rather than marked
-      // done — the key is the only copy, and losing it loses the goal.
-      if (error || !data) { reportError('goalTracker.migrate', error); return current; }
-      await AsyncStorage.setItem(MIGRATED_KEY, '1');
-      return sortGoals([...current, rowToGoal(data as unknown as Row)]);
-    } catch (e) {
-      reportError('goalTracker.migrate', e);
-      return current;
-    }
-  };
 
   /**
    * Keep this goal on the phone and show it while it waits.
@@ -228,7 +256,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
    */
   const queueGoal = async (
     kind: GoalKind, value: number | null, title: string | null, date: string | null,
-  ): Promise<boolean> => {
+  ): Promise<GoalSaved> => {
     if (!outbox) return false;
     const { result, id } = await outbox.enqueue('goal', { kind, value, title, targetDate: date });
     if (result !== 'queued' || !id) return false;
@@ -250,10 +278,10 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
         createdAtISO: new Date().toISOString(),
       },
     ]));
-    return true;
+    return 'queued';
   };
 
-  const setMeasuredGoal = async (kind: MeasuredKind, value: number, targetDateISO: string | null): Promise<boolean> => {
+  const setMeasuredGoal = async (kind: MeasuredKind, value: number, targetDateISO: string | null): Promise<GoalSaved> => {
     // No backend, or nobody signed in. There is no outbox to key by either, so
     // this is the same refusal it has always been rather than a queue.
     if (!USE_SUPABASE || !uid) return false;
@@ -279,7 +307,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
         const out = classifyWrite(error as any, data ? 1 : 0);
         if (out === 'stored' && data) {
           setGoals((p) => sortGoals(p.map((g) => (g.id === existing.id ? rowToGoal(data as unknown as Row) : g))));
-          return true;
+          return 'stored';
         }
         reportError('goalTracker.update', error);
         return out === 'refused' ? false : queueGoal(kind, value, null, date);
@@ -290,7 +318,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       const out = classifyWrite(error as any, data ? 1 : 0);
       if (out === 'stored' && data) {
         setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-        return true;
+        return 'stored';
       }
       reportError('goalTracker.insert', error);
       return out === 'refused' ? false : queueGoal(kind, value, null, date);
@@ -302,7 +330,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addCustomGoal = async (title: string, targetDateISO: string | null): Promise<boolean> => {
+  const addCustomGoal = async (title: string, targetDateISO: string | null): Promise<GoalSaved> => {
     if (!USE_SUPABASE || !uid) return false;
     const t = title.trim();
     if (!t) return false;
@@ -314,7 +342,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       const out = classifyWrite(error as any, data ? 1 : 0);
       if (out === 'stored' && data) {
         setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-        return true;
+        return 'stored';
       }
       reportError('goalTracker.addCustom', error);
       return out === 'refused' ? false : queueGoal('custom', null, t, date);
@@ -353,8 +381,34 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('goalTracker.setAchieved', e); return false; }
   };
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('goalTracker', status, reload);
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useGoalTracker`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.setMeasuredGoal(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ setMeasuredGoal, addCustomGoal, removeGoal, setAchieved });
+  impl.current = { setMeasuredGoal, addCustomGoal, removeGoal, setAchieved };
+  const setMeasuredGoalStable = useCallback((...a: Parameters<typeof setMeasuredGoal>) => impl.current.setMeasuredGoal(...a), []);
+  const addCustomGoalStable = useCallback((...a: Parameters<typeof addCustomGoal>) => impl.current.addCustomGoal(...a), []);
+  const removeGoalStable = useCallback((...a: Parameters<typeof removeGoal>) => impl.current.removeGoal(...a), []);
+  const setAchievedStable = useCallback((...a: Parameters<typeof setAchieved>) => impl.current.setAchieved(...a), []);
+  const value = useMemo<GoalValue>(() => ({ goals, status, setMeasuredGoal: setMeasuredGoalStable, addCustomGoal: addCustomGoalStable, removeGoal: removeGoalStable, setAchieved: setAchievedStable, reload }), [goals, status, setMeasuredGoalStable, addCustomGoalStable, removeGoalStable, setAchievedStable, reload]);
   return (
-    <Ctx.Provider value={{ goals, status, setMeasuredGoal, addCustomGoal, removeGoal, setAchieved }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

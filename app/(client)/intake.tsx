@@ -7,7 +7,7 @@
 // start training somebody. No readiness questions, no history, no account of
 // what has already been tried, no idea which days of the week are actually
 // available. Every coach on the platform was taking this on paper and typing
-// none of it back in, which meant the app's own programme builder — the thing
+// none of it back in, which meant the app's own program builder — the thing
 // that gates on injuries — was working from less than the coach knew.
 //
 // ── Why it is all one screen ───────────────────────────────────────────────
@@ -30,7 +30,8 @@
 // what is on screen is an empty form standing in for one that may be full, and
 // saving it would replace a real disclosure with a blank. The Save control is
 // withheld and says why — the same gesture as src/lib/overwriteGuard.ts.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import {
   View, Text, ScrollView, Pressable, TextInput, Alert,
@@ -40,12 +41,21 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
+// 44pt. Every answer on this form is a tap target and they sit in rows — see
+// the note on `Pill`.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { useMyIntake } from '../../src/ui/intake';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { draftDecision } from '../../src/lib/intakeDraft';
+// Whether the document on screen may be re-seeded, and whether it may be sent.
+// The two questions the pull-to-refresh used to answer wrongly at the same
+// moment — see the long note at the top of the module.
+import {
+  intakeBanner, intakeSaveAllowed, intakeSeedAction, type IntakeSource,
+} from '../../src/lib/intakeSeed';
 import {
   INTAKE_SECTIONS, READINESS_QUESTIONS, READINESS_NOT_ADVICE, READINESS_SEE_A_DOCTOR,
   TIME_WINDOWS, TRAINING_KINDS, TRAINING_PLACES, TRAINING_YEARS, WORK_KINDS,
@@ -66,11 +76,36 @@ const SLEEP = [5, 6, 7, 8, 9];
     end after every single character typed. It is the kind of thing that only
     shows up on a device, and it makes a form of this length unusable. */
 
+/**
+ * One answer on this form.
+ *
+ * ── The height, which was 34pt ────────────────────────────────────────────
+ *
+ * `sp.sm` above and below a `ty.label` line draws about 34 points — ten short
+ * of the 44 in src/lib/a11y.ts. These are not decorative chips: they are the
+ * ANSWERS to a health-history form, sat in rows of five or seven, and the
+ * screens they are on are filled in by somebody new to the gym, often standing
+ * up, often on a phone they are holding in one hand. Two wrong taps in a row of
+ * "1 2 3 4 5" is a different training age, a different injury history and a
+ * different starting program, and nothing on the form says which answer was
+ * meant.
+ *
+ * `minHeight` rather than `hitSlop`, deliberately, and it is the opposite of
+ * what a11y.ts's own note recommends for an icon button: these pills sit
+ * SHOULDER TO SHOULDER in a wrapping row, so slop on each one would overlap its
+ * neighbour and the overlap goes to whichever renders last — which is the same
+ * mis-tap, minus the honesty of it being visible. Growing the box moves the
+ * boundary and the drawing together, and the row simply gets taller.
+ */
 function Pill({ t, label, on, onPress }: { t: Theme; label: string; on: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      style={{
+        paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm,
+        minHeight: MIN_TARGET, justifyContent: 'center',
+        backgroundColor: on ? t.brand : t.surface2,
+      }}>
+      <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -133,6 +168,11 @@ export default function IntakeScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const reach = useReachability();
+  // The form on the server, read again. This is not a pure form: what is shown
+  // is whatever the member has already answered, and a failed read leaves the
+  // screen saying so with nothing to press. The local draft survives the
+  // re-read — see `useMyIntake`.
+  const pull = usePullToRefresh(useCallback(() => { m.reload(); }, [m.reload]));
   // Which document is on screen, and how it got there.
   //
   //   'server'   the read landed and this is what came back.
@@ -141,20 +181,34 @@ export default function IntakeScreen() {
   //              built from this exact document.
   //   'local'    the read FAILED and this is a phone-only form. Nothing may be
   //              sent from here; see the notice, and the header above.
-  const [source, setSource] = useState<'server' | 'restored' | 'local'>('server');
+  //
+  // Null until something has been seeded, which is a third answer and not a
+  // shade of 'server': under a failed first read the screen used to call an
+  // unseeded form "server" and draw the crit Flag over it. See
+  // src/lib/intakeSeed.ts.
+  const [source, setSource] = useState<IntakeSource | null>(null);
+  // The same value, readable inside the seeding effect without listing it as a
+  // dependency — the effect must re-run on the reads, not on its own decision.
+  const sourceRef = useRef<IntakeSource | null>(null);
+  const setSeeded = useCallback((s: IntakeSource) => { sourceRef.current = s; setSource(s); }, []);
   // Set only in the one case src/lib/intakeDraft.ts refuses to decide: a draft
   // started from a blank, and a server document that turns out to hold real
   // answers. Two accounts of one person, and the app does not get to pick.
   const [choose, setChoose] = useState(false);
 
-  // Seeded once. Every keystroke writes a draft, which changes `m.draft`, which
-  // re-runs this effect — and without the latch the second run would re-derive
-  // "restored" from a draft the member had just typed, and put a banner about
-  // recovering their answers over a form they never left.
-  const seeded = useRef(false);
+  // Seeded once — with one exception, and that exception is the whole of
+  // src/lib/intakeSeed.ts. Every keystroke writes a draft, which changes
+  // `m.draft`, which re-runs this effect, and without a latch the second run
+  // would re-derive "restored" from a draft the member had just typed and put a
+  // banner about recovering their answers over a form they never left.
+  //
+  // The exception: a document seeded because the read FAILED is a stand-in, and
+  // it is replaced the moment the read succeeds. Latching on it is what let a
+  // pull-to-refresh bring the member's real answers into the provider, remove
+  // the warning, unlock Save — and leave the blank on screen for Save to write.
   useEffect(() => {
-    if (m.status === 'loading' || seeded.current) return;
-    seeded.current = true;
+    const action = intakeSeedAction(m.status, sourceRef.current);
+    if (action !== 'seed') return;
     // The read failed. This used to be the end of it: `status` stayed 'error',
     // `canSave` was false, and the screen drew a Flag where the form should be
     // — so a member in a gym reception with no signal could not start the form,
@@ -162,15 +216,20 @@ export default function IntakeScreen() {
     // there is nothing on the phone it is a blank marked as one.
     if (m.status === 'error') {
       setDraft(m.draft?.intake ?? emptyIntake(new Date().toISOString()));
-      setSource('local');
+      setSeeded('local');
       return;
     }
+    // Re-seeding over a stand-in, `draftDecision` is what stops the blank —
+    // or anything typed into it, which carries `basedOn: null` — being treated
+    // as a continuation of the document that has just arrived. Where the two
+    // disagree the member is asked, and Save stays withheld until they answer.
     const decision = draftDecision(m.draft, m.intake);
     setDraft(decision === 'restore' ? m.draft!.intake : (m.intake ?? emptyIntake(new Date().toISOString())));
-    setSource(decision === 'restore' ? 'restored' : 'server');
+    setSeeded(decision === 'restore' ? 'restored' : 'server');
     if (decision === 'ask') setChoose(true);
-  }, [m.status, m.intake, m.draft]);
+  }, [m.status, m.intake, m.draft, setSeeded]);
 
+  const banner = intakeBanner(m.status, source);
   const progress = intakeProgress(draft);
   const yeses = readinessDisclosed(draft);
   // Withheld under anything but a finished read, and under an unknown owner.
@@ -180,7 +239,13 @@ export default function IntakeScreen() {
   // different act from a write to the server, and keeping one buys nothing that
   // would justify softening this. Also withheld while the member still has the
   // two-documents choice in front of them.
-  const canSave = !!draft && m.status === 'ready' && m.mayEdit && !saving && !choose;
+  //
+  // `intakeSaveAllowed` asks the status AND where the document on screen came
+  // from, because those are two different claims: a 'ready' status says the
+  // server answered, not that this is what it answered with. The frame between
+  // a successful re-read and the effect above re-seeding is exactly a document
+  // the server did not supply under a status saying it did.
+  const canSave = !!draft && intakeSaveAllowed(m.status, source) && m.mayEdit && !saving && !choose;
 
   const edit = (fn: (d: Intake) => Intake) => {
     setSaved(false);
@@ -210,7 +275,7 @@ export default function IntakeScreen() {
       // The draft is on the phone either way now, which is what lets the second
       // half of this be true rather than hopeful.
       Alert.alert(
-        'Not saved',
+        'Not Saved',
         `Your answers are kept on this phone and are not on the server, so your coach cannot see them yet. ${retryLine(reach)}`,
         [{ text: 'OK' }],
       );
@@ -233,31 +298,38 @@ export default function IntakeScreen() {
           computes in window coordinates and therefore gets right under a header
           of any height, in either orientation. See src/ui/keyboardLift.ts. */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 60 }}
-        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Before you start</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Intake</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          What your coach needs before your first session. Your answers are yours — only you can
+        <PageHead title="Your Intake" subtitle="Before you start" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+          What your coach needs before your first session. Your answers are yours. Only you can
           change them, and your coach cannot edit a word of it.
         </Text>
 
         {/* ── whether what is on screen is really yours ────────────────── */}
-        {m.status === 'loading' ? (
+        {banner === 'loading' ? (
           <View style={{ marginTop: sp.lg }}>
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading what you have already answered…</Text>
           </View>
-        ) : m.status === 'error' ? (
+        ) : banner === 'unread' ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.crit}>
               Your intake could not be read, so this is not your form. It is what is on this phone,
               standing in for one that may already be full. Everything you type is kept here and
               nothing is sent, because saving now could replace answers you have already given.
+              {' '}{retryLine(reach)}
+            </Flag>
+          </View>
+        ) : banner === 'stale' ? (
+          /* A different failure and a different sentence. The re-read failed,
+             but an earlier one landed and what is on screen is what it
+             returned — so "this is not your form" would be false of it. Save is
+             still withheld: nothing is written over a document whose current
+             state is unknown. */
+          <View style={{ marginTop: sp.lg }}>
+            <Flag tone={t.warn}>
+              These are your answers as they were read a moment ago. Asking the server again did not
+              work, so nothing can be saved until it does. What you type is kept on this phone.
               {' '}{retryLine(reach)}
             </Flag>
           </View>
@@ -285,21 +357,28 @@ export default function IntakeScreen() {
             withheld until they have. */}
         {choose && m.draft ? (
           <View style={{ marginTop: sp.md }}>
-            <Notice tone={t.warn} kicker="Two versions" title="You have answers on this phone that were never sent"
+            <Notice tone={t.warn} kicker="Two Versions" title="You have answers on this phone that were never sent"
               note="Your saved intake also has answers in it, and these were not typed on top of it. Nothing has been changed. Choose which one you want to carry on from.">
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}>
+                  {/* `setSeeded`, not `setSource`. The ref is what
+                      `intakeSeedAction` is asked about on every subsequent read,
+                      and setting only the state left the two disagreeing about
+                      which document is on screen — harmless today because both
+                      answers happen to land on 'hold', and exactly the kind of
+                      divergence that stops being harmless the moment a fourth
+                      source is added. One setter, both facts. */}
                   <Ghost label="Keep Saved" onPress={() => {
                     setDraft(m.intake ?? emptyIntake(new Date().toISOString()));
                     m.discardDraft();
-                    setSource('server');
+                    setSeeded('server');
                     setChoose(false);
                   }} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Cta label="Use This Phone" wide onPress={() => {
                     setDraft(m.draft!.intake);
-                    setSource('restored');
+                    setSeeded('restored');
                     setChoose(false);
                   }} />
                 </View>
@@ -334,7 +413,7 @@ export default function IntakeScreen() {
               <Head t={t} id="readiness" done={sectionDone('readiness')} />
 
               <View style={{ marginTop: sp.md }}>
-                <Notice tone={t.s3} kicker="Not medical advice" title="These are screening questions"
+                <Notice tone={t.s3} kicker="Not Medical Advice" title="These are screening questions"
                   note={`${BRAND.label} does not score them and does not interpret them. Your coach sees what you answered, in your words.`} />
               </View>
 
@@ -380,7 +459,7 @@ export default function IntakeScreen() {
                   questionnaire has carried for forty years. */}
               {yeses.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Notice tone={t.s5} kicker="Worth a conversation" title="Speak to a doctor before you start"
+                  <Notice tone={t.s5} kicker="Worth a Conversation" title="Speak to a doctor before you start"
                     note={READINESS_SEE_A_DOCTOR} />
                 </View>
               ) : null}
@@ -452,7 +531,7 @@ export default function IntakeScreen() {
                 value={draft.tried.didnt} placeholder="And what happened"
                 onChangeText={(v) => edit((d) => ({ ...d, tried: { ...d.tried, didnt: v } }))} />
               <Field t={t} label="What will you not do again?" multiline
-                value={draft.tried.wont} placeholder="Say it here and your coach will not programme it"
+                value={draft.tried.wont} placeholder="Say it here and your coach will not program it"
                 onChangeText={(v) => edit((d) => ({ ...d, tried: { ...d.tried, wont: v } }))} />
             </Section>
 
@@ -460,7 +539,7 @@ export default function IntakeScreen() {
             <Rule />
             <Section>
               <Head t={t} id="availability" done={sectionDone('availability')} />
-              <Row t={t} label="Days a week you can train">
+              <Row t={t} label="Days a Week You Can Train">
                 {DAYS.map((n) => (
                   <Pill t={t} key={n} label={String(n)} on={draft.availability.daysPerWeek === n}
                     onPress={() => edit((d) => ({ ...d, availability: { ...d.availability, daysPerWeek: n } }))} />
@@ -525,9 +604,9 @@ export default function IntakeScreen() {
             <Rule />
             <Section>
               <Head t={t} id="emergency" done={sectionDone('emergency')} />
-              <Field t={t} label="Their name" value={draft.emergency.name} placeholder="Who to call"
+              <Field t={t} label="Their Name" value={draft.emergency.name} placeholder="Who to call"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, name: v } }))} />
-              <Field t={t} label="Their number" value={draft.emergency.phone} placeholder="Phone number" keyboardType="phone-pad"
+              <Field t={t} label="Their Number" value={draft.emergency.phone} placeholder="Phone number" keyboardType="phone-pad"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, phone: v } }))} />
               <Field t={t} label="How do you know them?" value={draft.emergency.relation} placeholder="e.g. partner, sister, flatmate"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, relation: v } }))} />
@@ -547,7 +626,7 @@ export default function IntakeScreen() {
                 </View>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                You can save a half-finished form and come back — your coach is shown how far you got
+                You can save a half-finished form and come back. Your coach is shown how far you got
                 rather than nothing at all. Anything you type is kept on this phone as you go, so
                 closing this screen never loses it. {READINESS_NOT_ADVICE}
               </Text>

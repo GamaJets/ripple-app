@@ -152,7 +152,7 @@ if (named) {
   ok(named.title.length <= NOTICE_TITLE_MAX, 'the heading fits what notify_users() stores');
   ok(named.body.length <= NOTICE_BODY_MAX, 'and so does the body');
   ok(named.body.includes('Sam Cooper'), 'the coach is told which client');
-  ok(named.body.includes('Back squat'), 'and which movement, in the words the programme uses');
+  ok(named.body.includes('Back squat'), 'and which movement, in the words the program uses');
   ok(named.body.includes('100 kg'), 'the load in kilograms');
   ok(named.body.includes('220.5 lb'), 'and the same load in pounds');
   ok(named.body.includes('5 reps'), 'and the reps that were done');

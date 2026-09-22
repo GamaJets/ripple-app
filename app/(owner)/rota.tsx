@@ -18,23 +18,45 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone, HERO_FIT } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font, fontScale } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { pct } from '../../src/lib/gymSchedule';
 import { fetchGymTrainers, type GymTrainer } from '../../src/lib/gymTrainers';
 import {
   fetchShifts, fetchDemand, addShift, setShiftStatus, shiftFromHours,
   weekStartOf, weekDays, weekWindow, shiftWeek, coverage, shiftsByDay,
-  rosterByTrainer, summariseRota, hourLabel,
+  rosterByTrainer, summariseRota, hourLabel, rotaCost,
   type Shift, type ShiftRole, type DemandBlock, type RotaGap,
 } from '../../src/lib/gymRota';
+// What the published week costs, and what share of the till it eats.
+//
+// The screen had no money on it at all — coverage, uncovered hours and idle
+// hours over shifts that each carry a price, and nothing saying what any of it
+// costs. `rotaCost` is the cost half and has always been here; it pots by
+// currency and withholds a mixed total. `labourShare` is the half that did not
+// exist anywhere: dividing a wage bill by a till when the two may be in
+// different moneys, which is the one arithmetic on this screen that has no
+// honest answer and must say so rather than produce a clean-looking percentage.
+import { labourShare, type ReadState } from '../../src/lib/labourShare';
+// The till side. Read over the SAME week window the shifts are, so the share is
+// a week's wages over that week's takings and not over a month of them.
+import { fetchPayments, sharedCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
+// Whose clock this whole screen is on. The gym's where `tenants.timezone` is
+// set, the reader's where it is not — and `note` is the sentence that says which,
+// printed rather than implied. See src/lib/rotaClock.ts.
+import { rotaClock, rotaTimeLabel } from '../../src/lib/rotaClock';
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { calendarDateText } from '../../src/lib/gymWhen';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { num, numUpTo } from '../../src/lib/format';
+import { useNow } from '../../src/ui/today';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
   { key: 'floor', label: 'Floor' },
@@ -48,28 +70,52 @@ const ROLE_LABEL: Record<ShiftRole, string> = {
   floor: 'Floor', classes: 'Classes', pt: 'PT', desk: 'Desk', admin: 'Admin',
 };
 
-/** A local ISO date rendered as "Mon 7 Sep". */
+/** What a shift is FOR, as a colour by name — the bar at the row's leading edge
+ *  and the chip that says the role in words beside it. PT is the accent and
+ *  classes are purple, which is what those two are everywhere else in the app
+ *  (a session type keeps one colour across it); floor, desk and admin take the
+ *  hues nothing else on this screen uses. The word is always there: the colour
+ *  lets an eye find the desk shifts in a week of forty rows. */
+const ROLE_TONE: Record<ShiftRole, Tone> = {
+  pt: 'brand', classes: 'purple', floor: 'blue', desk: 'teal', admin: 'neutral',
+};
+
+/**
+ * A calendar date rendered as "Mon 7 Sep".
+ *
+ * Through `calendarDateText`, which is the one tool for a date that is ALREADY
+ * a day: "the 7th of September" is not an instant and asking which day it falls
+ * on has no content. The old body parsed `${dateIso}T00:00:00`, the reader's own
+ * midnight — an hour some zones do not have — and then asked the reader's
+ * calendar which day that was. It gave the right answer almost everywhere,
+ * which is what kept it.
+ */
 function dayLabel(dateIso: string, long = false): string {
-  const d = new Date(`${dateIso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return dateIso;
-  return d.toLocaleDateString(undefined, long
+  return calendarDateText(dateIso, long
     ? { weekday: 'long', day: 'numeric', month: 'short' }
-    : { weekday: 'short', day: 'numeric', month: 'short' });
+    : { weekday: 'short', day: 'numeric', month: 'short' }) ?? dateIso;
 }
 
 /** Hours as a figure a human reads — 7.5 stays 7.5, 8 does not become 8.0. */
 function hrs(n: number | null): string | null {
   if (n == null) return null;
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  return numUpTo(n, 1);
 }
 
-/** A stored instant as the gym's wall clock. An unreadable one is a dash, not
- *  a plausible-looking midnight. */
-function timeOf(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/**
+ * A stored instant as the rota's wall clock. An unreadable one is a dash, not a
+ * plausible-looking midnight.
+ *
+ * This function's doc comment used to say "the gym's wall clock" over a body
+ * that read `d.getHours()` — the READER's. A shift rostered from a phone in
+ * Sydney for a gym in Dubai was drawn six hours from where it runs, and
+ * `studio-web/app/staff`, which formats the same instant with `timeZone: zone`,
+ * printed a different time for the same row. `rotaTimeLabel` is now the only
+ * implementation of the sentence, and rotaClock.test.ts asserts it agrees with
+ * what the console draws.
+ */
+function timeOf(iso: string, zone: string | null): string {
+  return rotaTimeLabel(iso, zone) ?? '—';
 }
 
 function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPress: () => void; tone: string }) {
@@ -81,15 +127,30 @@ function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPres
         paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill,
         backgroundColor: on ? tone : t.surface2,
       }}>
-      <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
 
 export default function OwnerRota() {
   const t = useTheme();
-  const router = useRouter();
   const { tenant } = useTenant();
+
+  /**
+   * The gym's own IANA zone, or null because it has not set one.
+   *
+   * THREE states, and the third is why this is two pieces of state rather than
+   * one string. `zoneRead` false means the question has not been answered yet —
+   * a week bucketed on the reader's clock and then re-bucketed a moment later
+   * would redraw the grid under the owner, so the screen waits. `zoneErr` means
+   * we could not ask, which is NOT "the gym has not set one": that sentence is
+   * an instruction to go and set a setting that may already be correct.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneRead, setZoneRead] = useState(false);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+  /** Whose clock, and the sentence owed to the reader when it is not the gym's. */
+  const clock = rotaClock(zone);
 
   const [week, setWeek] = useState<string>(() => weekStartOf());
   // null = not loaded yet. [] = loaded, and genuinely empty.
@@ -115,7 +176,30 @@ export default function OwnerRota() {
   const [busy, setBusy] = useState(false);
   /** When the week's shifts and demand last landed. Not moved by a failed
    *  retry — what is on screen is still the earlier read's. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [shiftsAt, setShiftsAt] = useState<number | null>(null);
+  /** And when the coaching staff came back. It is a second, independent read —
+   *  every name on this rota comes from it — and it had neither a stamp nor a
+   *  way to be asked for again, so a refresh brought back the shifts and left
+   *  the names at whatever the first read returned. */
+  const [trainersAt, setTrainersAt] = useState<number | null>(null);
+  const [trainersTick, setTrainersTick] = useState(0);
+  /**
+   * What the gym was paid during THIS week, for the labour-share figure.
+   *
+   * Three states and the same convention app/(owner)/revenue.tsx uses:
+   * `undefined` is "not read yet", `null` is "the read failed", and an array is
+   * the answer. An empty array is a real and different fact — a week in which
+   * nobody recorded a payment — and it is the one this screen must never
+   * manufacture out of a refusal, because a zero till turns the labour share
+   * into a division by zero and, before that, into a claim that the gym earned
+   * nothing while paying its coaches.
+   *
+   * A read of its own rather than a third leg of `load`, because a refused
+   * payments read must not blank the rota: coverage and uncovered hours are
+   * this screen's reason for existing and they owe nothing to the till.
+   */
+  const [takings, setTakings] = useState<GymPayment[] | null | undefined>(undefined);
+  const [takingsAt, setTakingsAt] = useState<number | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [who, setWho] = useState<string | null>(null);
@@ -124,11 +208,46 @@ export default function OwnerRota() {
   const [to, setTo] = useState('14');
   const [role, setRole] = useState<ShiftRole>('floor');
 
+  // The gym's zone, before anything is bucketed by it. One narrow read —
+  // `fetchGymZone` exists so a rota does not have to pull the gym's pay policy
+  // and brand colour to find out what time it is.
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { zone: z, error } = await fetchGymZone(supabase, tenant.id);
+        if (cancelled) return;
+        setZone(z);
+        setZoneErr(error);
+        setZoneRead(true);
+        // The week on screen was opened on whatever clock was in force when this
+        // screen mounted. Once the gym's own is known, the current week is
+        // re-asked — an owner in London opening a Sydney gym's rota late on a
+        // Saturday is looking at a gym where it is already Sunday.
+        if (z) setWeek((w) => (w === weekStartOf() ? weekStartOf(Date.now(), z) : w));
+      } catch (e) {
+        reportError('rota.zone', e);
+        if (cancelled) return;
+        setZone(null);
+        setZoneErr('The gym’s timezone could not be read.');
+        setZoneRead(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenant?.id]);
+
   const days = useMemo(() => weekDays(week), [week]);
 
   const load = useCallback(async () => {
     if (!tenant?.id) return;
-    const win = weekWindow(week);
+    // Not before the zone is known. The window bound sent to the database IS the
+    // gym's midnight, so a read issued on the reader's midnight and a grid drawn
+    // on the gym's would disagree by exactly the offset — the screen would be
+    // missing an evening at one end and carrying somebody else's at the other,
+    // and `coverage` would report the hole as uncovered.
+    if (!zoneRead) return;
+    const win = weekWindow(week, zone);
     if (!win) return;
     setShifts(null);
     setDemand(null);
@@ -143,7 +262,7 @@ export default function OwnerRota() {
       setShifts(s);
       setDemand(d);
       setFailed(false);
-      setFetchedAt(Date.now());
+      setShiftsAt(Date.now());
     } catch (e) {
       reportError('rota.fetch', e);
       // Null, and `failed` says which of the two nulls this is. See the note on
@@ -152,9 +271,39 @@ export default function OwnerRota() {
       setDemand(null);
       setFailed(true);
     }
-  }, [tenant?.id, week]);
+  }, [tenant?.id, week, zone, zoneRead]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /**
+   * The same week's takings, on the same window bounds the shifts were read on.
+   *
+   * `weekWindow` is asked for again rather than reused from `load` for the
+   * reason that function waits on `zoneRead`: the bounds ARE the gym's midnight,
+   * and a till read on the reader's midnight against a wage bill on the gym's
+   * would compare a week to a week-and-an-evening. Neither figure would look
+   * wrong and the share between them would be.
+   */
+  const loadTill = useCallback(async () => {
+    if (!tenant?.id || !zoneRead) return;
+    const win = weekWindow(week, zone);
+    if (!win) return;
+    setTakings(undefined);
+    try {
+      const rows = await fetchPayments(supabase, tenant.id, win.fromISO, win.toISO);
+      setTakings(rows);
+      setTakingsAt(Date.now());
+    } catch (e) {
+      reportError('rota.takings', e);
+      // Null, never []. `fetchPayments` throws on a refusal and on a truncated
+      // read, and both of those are "we do not know what came in this week" —
+      // which is not "nothing came in this week", and the labour share below
+      // prints the difference rather than dividing by it.
+      setTakings(null);
+    }
+  }, [tenant?.id, week, zone, zoneRead]);
+
+  useEffect(() => { void loadTill(); }, [loadTill]);
 
   useEffect(() => {
     if (!tenant?.id) return;
@@ -162,7 +311,7 @@ export default function OwnerRota() {
     (async () => {
       try {
         const list = await fetchGymTrainers(supabase, tenant.id);
-        if (!cancelled) { setTrainers(list); setTrainersFailed(false); }
+        if (!cancelled) { setTrainers(list); setTrainersFailed(false); setTrainersAt(Date.now()); }
       } catch (e) {
         reportError('rota.trainers', e);
         // Not `[]`: that rendered as "No trainers on this gym yet, so there is
@@ -171,12 +320,60 @@ export default function OwnerRota() {
       }
     })();
     return () => { cancelled = true; };
-  }, [tenant?.id]);
+  }, [tenant?.id, trainersTick]);
+
+  /** One line over all three reads, and it is the age of the oldest. */
+  const fetchedAt = oldestFetch(oldestFetch(shiftsAt, trainersAt), takingsAt);
+  /** Every read. The Refresh button ran only the shifts one, so an owner could
+   *  press it all morning and still be looking at yesterday's staff list. */
+  const refreshAll = useCallback(() => {
+    void load();
+    void loadTill();
+    setTrainersTick((n) => n + 1);
+  }, [load, loadTill]);
+  const pull = usePullToRefresh(refreshAll);
 
   const loaded = shifts !== null && demand !== null;
-  const cov = loaded ? coverage(days, shifts!, demand!) : null;
+  const cov = loaded ? coverage(days, shifts!, demand!, zone) : null;
   const sum = loaded ? summariseRota(shifts!) : null;
-  const byDay = loaded ? shiftsByDay(days, shifts!) : [];
+
+  /* ── what the week costs ──────────────────────────────────────────────────
+   *
+   * `rotaCost` over the live shifts — pulled ones excluded, unpriced ones
+   * counted rather than summed, two currencies refused rather than added. None
+   * of that is decided here; this screen holds no money arithmetic at all, the
+   * same way it holds no hour arithmetic.
+   */
+  const cost = loaded ? rotaCost(shifts!) : null;
+  /**
+   * The till for this week, and the currency it is honestly in.
+   *
+   * `sharedCurrency` is the same rule /revenue and /money apply: a set whose
+   * rows disagree has NO currency, and a row stating none does not agree with
+   * one that does. An empty week is a real zero and keeps the gym's own code,
+   * because nothing has contradicted it.
+   */
+  const till = useMemo(() => {
+    if (!takings) return null;
+    if (!takings.length) return { cents: 0, currency: tenant?.currency ?? null };
+    return {
+      cents: takings.reduce((a, p) => a + p.amountCents, 0),
+      currency: sharedCurrency(takings),
+    };
+  }, [takings, tenant?.currency]);
+  /**
+   * How complete each side is, in the four words `LoadStatus` uses.
+   *
+   * Neither read emits 'partial' today — `fetchShifts` calls `assertWhole` and
+   * `fetchPayments` pages through `readAll`, so both throw rather than degrade
+   * — which is why 'error' is the only refusal mapped here. `labourShare`
+   * handles 'partial' regardless, so a reader that ever starts degrading finds
+   * the figure already withheld rather than already wrong.
+   */
+  const costState: ReadState = failed ? 'error' : loaded ? 'ready' : 'loading';
+  const tillState: ReadState = takings === null ? 'error' : takings === undefined ? 'loading' : 'ready';
+  const share = labourShare(cost, costState, till, tillState);
+  const byDay = loaded ? shiftsByDay(days, shifts!, zone) : [];
   const roster = loaded ? rosterByTrainer(shifts!) : [];
 
   const nameOf = useCallback((id: string, fallback: string | null): string => {
@@ -189,9 +386,12 @@ export default function OwnerRota() {
 
   const commitAdd = async () => {
     if (!tenant?.id || !who) return;
-    const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+    // The hours typed are the GYM's. Before the zone reached here they were the
+    // device's, so "06 to 14" typed in London for a Dubai gym was stored as
+    // 10:00–18:00 at the gym and the coach was rostered four hours late.
+    const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role, zone);
     if (!draft) {
-      Alert.alert('That is not a shift', 'The finish time has to be after the start time.');
+      Alert.alert('That Is Not a Shift', 'The finish time has to be after the start time.');
       return;
     }
     setBusy(true);
@@ -201,13 +401,13 @@ export default function OwnerRota() {
       await load();
     } catch (e) {
       reportError('rota.add', e);
-      Alert.alert('Could not save that shift', 'Nothing was written. Check your connection and try again.');
+      Alert.alert('Could Not Save That Shift', 'Nothing was written. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
   const togglePulled = (s: Shift) => {
     const next = s.status === 'scheduled' ? 'cancelled' : 'scheduled';
-    const verb = next === 'cancelled' ? 'Pull this shift' : 'Put this shift back';
+    const verb = next === 'cancelled' ? 'Pull This Shift' : 'Put This Shift Back';
     Alert.alert(`${verb}?`, next === 'cancelled'
       ? 'It stays on the rota struck through, so the hole it leaves is visible rather than silent.'
       : `${nameOf(s.trainerId, s.trainerName)} goes back on the rota for this shift.`, [
@@ -221,7 +421,7 @@ export default function OwnerRota() {
         catch (e) {
           reportError('rota.status', e);
           Alert.alert(
-            next === 'cancelled' ? 'Could not pull that shift' : 'Could not put that shift back',
+            next === 'cancelled' ? 'Could Not Pull That Shift' : 'Could Not Put That Shift Back',
             (e instanceof Error && e.message) || 'The rota is unchanged. Check your connection and try again.',
           );
         }
@@ -229,12 +429,22 @@ export default function OwnerRota() {
     ]);
   };
 
-  const thisWeek = weekStartOf();
+  // Subscribed, not read once. This screen is `href: null`, so it mounts on
+  // the first visit and is never torn down — a bare Date.now() here stayed at
+  // whatever day the owner first opened Rota. The cost is not a stale label:
+  // `thisWeek` is what decides whether the row reads "This week", and the
+  // Today button is hidden while `week === thisWeek`. So an owner who left
+  // this open on Sunday was told on Monday that last week was this week, with
+  // the one control that would take them out of it absent, over a hero saying
+  // how many hours had work booked and nobody rostered — for a week that had
+  // already run.
+  const thisWeek = weekStartOf(useNow().getTime(), zone);
   const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12 } as const;
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 
   const heroNote = (): string => {
-    if (failed) return 'This week could not be read, so cover is not known — that is a failed read, not a covered week.';
+    if (failed) return 'This week could not be read, so cover is not known. That is a failed read, not a covered week.';
+    if (!zoneRead) return 'Checking what time it is at the gym, before the week is bucketed by it.';
     if (!loaded) return 'Reading the rota…';
     if (cov?.blocker) return cov.blocker;
     const u = cov?.uncovered?.length ?? 0;
@@ -249,25 +459,16 @@ export default function OwnerRota() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Rota</Text>
-        </View>
-
-        {/* Who is on the floor this week, and when that was last asked. A rota
-            read in a basement an hour ago and still on screen is exactly the
-            figure somebody staffs a shift against. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={!loaded && !failed}
-          style={{ marginTop: 0, marginBottom: sp.md }} />
+        <PageHead title="Rota" />
 
         {/* ── the week being read ────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-          <Ghost icon="back" a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
+        {/* `marginTop` because the kit's head carries no margin of its own. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
               {dayLabel(days[0] ?? week)} – {dayLabel(days[6] ?? week)}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -275,37 +476,171 @@ export default function OwnerRota() {
             </Text>
           </View>
           {week !== thisWeek ? <Ghost label="Today" onPress={() => setWeek(thisWeek)} /> : null}
-          <Ghost icon="chevron" a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
+          <Ghost icon={FORWARD_ICON} a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
         </View>
 
-        <Hero
-          label="Uncovered Hours"
-          figure={fig(loaded ? (cov?.uncovered?.length ?? null) : null)}
-          tone={(cov?.uncovered?.length ?? 0) > 0 ? t.crit : undefined}
-          note={heroNote()}
-        />
+        {/* The figure as a card, not the kit's bare `Hero` — the one block on
+            this screen the board does not draw. The Hero's tone was a dot
+            beside the note; it still is, and it is still only the alarm colour
+            when an hour with work booked has nobody on it. */}
+        {/* And since the approved look the card is the week as a PICTURE: the
+            share of booked hours with somebody on them as a ring beside the
+            figure, and the seven days as bars under it — how many hours each
+            day has work booked in, RED on a day with an uncovered hour and the
+            accent on a day that is covered. With no shifts entered the bars go
+            grey and the ring stays empty: what is booked is known, whether it
+            is covered is not, and `cov.blocker` is the sentence that says so. */}
+        {(() => {
+          const figure = fig(loaded ? (cov?.uncovered?.length ?? null) : null);
+          const note = heroNote();
+          const mark = (cov?.uncovered?.length ?? 0) > 0 ? t.crit : t.brand;
+          const rate = loaded ? (cov?.coverRate ?? null) : null;
+          const booked = (d: string) => cov!.hours.filter((h) => h.date === d && (h.classes > 0 || h.ptSessions > 0)).length;
+          const missed = (d: string) => (cov?.uncovered ?? []).filter((g) => g.date === d).length;
+          return (
+            <Section>
+              <SectionHead title="Uncovered Hours" />
+              <View style={{ flexDirection: fontScale >= 1.5 ? 'column' : 'row', alignItems: fontScale >= 1.5 ? 'flex-start' : 'center', gap: sp.lg }}>
+                <View accessible accessibilityLabel={`Uncovered hours, ${figure}, ${note}`} style={{ flex: fontScale >= 1.5 ? undefined : 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+                  </View>
+                </View>
+                {/* `coverRate` is null with no shifts and with nothing booked,
+                    and null draws the track and a dash — never a full ring over
+                    a week nobody has rostered. */}
+                <Ring size={104} value={rate} figure={pct(rate)} sub="covered" tone={(cov?.uncovered?.length ?? 0) > 0 ? 'red' : 'brand'}
+                  spoken={rate == null ? 'Booked hours covered, not known' : `${pct(rate)} of booked hours have somebody rostered`} />
+              </View>
+              {loaded ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <DayBars
+                    days={days.map((d) => ({
+                      label: calendarDateText(d, { weekday: 'short' }) ?? '',
+                      value: booked(d),
+                      tone: cov?.blocker ? 'neutral' as const : missed(d) > 0 ? 'red' as const : 'brand' as const,
+                    }))}
+                    spoken={`Hours with work booked, by day. ${days.map((d) => `${dayLabel(d, true)}, ${booked(d)} booked${cov?.blocker ? '' : `, ${missed(d)} uncovered`}`).join('. ')}.`} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {cov?.blocker ? 'Booked hours per day · cover not known' : 'Booked hours per day · red has an uncovered hour'}
+                  </Text>
+                </View>
+              ) : null}
+            </Section>
+          );
+        })()}
 
-        <Rule />
+        {/* Who is on the floor this week, and when that was last asked. A rota
+            read in a basement an hour ago and still on screen is exactly the
+            figure somebody staffs a shift against. Under the figure rather
+            than over the week, so the first viewport is the rota. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />
+
+        {/* Whose clock every time and every column on this screen is drawn on.
+            Stated always, in both states, because the failure it closes is
+            invisible: a shift at the wrong hour renders exactly as neatly as one
+            at the right hour, and the only reader who finds out is the coach who
+            turns up. studio-web/app/staff prints the same sentence over the same
+            rota — that agreement is the point. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          {!zoneRead
+            ? 'Checking what time it is at the gym…'
+            : zoneErr
+            ? `The gym’s timezone could not be read, so the times below are this device’s. That is a failed read, not a gym without a timezone: ${zoneErr}`
+            : clock.atGym
+            ? `Times are ${clock.zone}, this gym’s own clock, and the hours you type are read as the gym’s too.`
+            : `Times are this device’s, not the gym’s: ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
+        </Text>
+
 
         <Section>
           <SectionHead title="Supply Against Demand" />
           <KpiRow items={[
             { label: 'Rostered Hours', value: fig(loaded ? hrs(cov?.rosteredHours ?? null) : null), unit: 'h' },
-            { label: 'Booked Hours Covered', value: fig(loaded ? pct(cov?.coverRate ?? null) : null) },
+            // The covered SHARE is the ring in the card above; this is what it
+            // is a share of, which used to be a sentence under the row.
+            { label: 'Booked Hours', value: fig(loaded ? (cov?.demandHours ?? null) : null), unit: 'h' },
             { label: 'Idle Hours', value: fig(loaded ? (cov?.idle?.length ?? null) : null) },
           ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {failed
-              ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
-              : !loaded
-              ? 'Reading this week’s shifts, classes and one-to-ones.'
-              : cov?.blocker
-                ? 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'
-                : `${cov!.demandHours} hour${cov!.demandHours === 1 ? '' : 's'} this week have a class or a one-to-one booked in them.`}
-          </Text>
+          {/* Only the sentences that say why a figure is WITHHELD stay on the
+              page; the one that restated the booked-hours count is the tile
+              above now. */}
+          {failed || !loaded || cov?.blocker ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {failed
+                ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
+                : !loaded
+                ? 'Reading this week’s shifts, classes and one-to-ones.'
+                : 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'}
+            </Text>
+          ) : null}
         </Section>
 
-        <Rule />
+
+        {/* ── what the published week costs ───────────────────────────────
+            The screen's second question, and it had no answer at all. Every
+            shift on this rota carries a price and nothing here ever said what
+            the week adds up to, or what share of the till the floor eats —
+            which is the figure an owner actually rosters against. */}
+        <Section>
+          <SectionHead title="What the Week Costs" note="Live Shifts Only" />
+          <KpiRow items={[
+            {
+              label: 'Wage Bill',
+              // Through `money`, which takes its decimal places from the
+              // currency the SHIFTS state — never from the gym's setting, and
+              // never from a hundred. A yen rota has no minor unit and a dinar
+              // rota has three, and this figure is drawn in both.
+              value: fig(cost && !cost.mixedCurrency ? money(cost.cents, cost.currency) : null),
+              delta: !loaded ? 'not read yet'
+                : failed ? 'this week could not be read'
+                : cost!.mixedCurrency ? 'priced in more than one currency'
+                : cost!.cents == null ? 'no shift on this rota carries a rate'
+                : cost!.unpriced > 0
+                  ? `${num(cost!.priced)} of ${num(cost!.priced + cost!.unpriced)} shifts priced`
+                  : 'every live shift is priced',
+            },
+            {
+              label: 'Labour · Share of Takings',
+              // "at least" is not decoration. `atLeast` is true exactly when a
+              // live shift carries no rate, and the figure is then a FLOOR —
+              // printing it bare would report unpriced work as free, which is
+              // the one direction this whole section could flatter the gym in.
+              value: fig(share.share == null ? null
+                : `${share.atLeast ? 'at least ' : ''}${pct(share.share)}`),
+              delta: share.gap === 'ok'
+                ? 'this week’s wage bill over this week’s takings'
+                : share.gap === 'loading' ? 'not read yet'
+                : 'no single percentage; see below',
+            },
+            {
+              label: 'Unpriced Shifts',
+              value: fig(loaded ? num(cost!.unpriced) : null),
+              // Said in as many words on the tile, because the number 0 beside
+              // a wage bill is read as "and nothing else to count" while a 7 is
+              // read as "seven free shifts" unless somebody writes this down.
+              delta: !loaded ? 'not read yet'
+                : cost!.unpriced === 0 ? 'nothing unaccounted for'
+                : 'rostered, and costing an unknown amount, not nothing',
+            },
+          ]} />
+          {/* The sentence the figure could not be. `labourShare` returns one
+              for every refusal it makes and for the floor case, and there are
+              eleven of them — a screen writing its own would be a second copy
+              of that judgement and would drift from it. */}
+          {share.note ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{share.note}</Text>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              A pulled shift is not a cost and is left out of both figures. Takings are what somebody
+              recorded receiving in this same week, on this same clock.
+            </Text>
+          )}
+        </Section>
+
 
         {/* ── the whole point: where the two disagree ────────────────────── */}
         <Section>
@@ -323,7 +658,7 @@ export default function OwnerRota() {
             <Text style={{ ...ty.label, color: t.ink3 }}>{cov.blocker}</Text>
           ) : (cov!.uncovered!.length === 0 && cov!.idle!.length === 0) ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              The rota and the timetable agree this week — nothing booked without cover, and no
+              The rota and the timetable agree this week: nothing booked without cover, and no
               rostered hour with nothing in it.
             </Text>
           ) : (
@@ -332,9 +667,9 @@ export default function OwnerRota() {
                 <View key={`u-${g.date}-${g.hour}`}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                    <IconPlate icon="clock" tone="red" size={36} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {dayLabel(g.date)} · {hourLabel(g.hour)}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -349,9 +684,9 @@ export default function OwnerRota() {
                 <View key={`i-${g.date}-${g.hour}`}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+                    <IconPlate icon="clock" tone="neutral" size={36} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {dayLabel(g.date)} · {hourLabel(g.hour)}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -365,20 +700,19 @@ export default function OwnerRota() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── the rota itself ───────────────────────────────────────────── */}
         <Section>
           <SectionHead
             title="The Week"
             note={loaded && sum!.shifts > 0
-              ? `${sum!.shifts} shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
+              ? `${sum!.shifts} Shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
               : undefined}
           />
           {failed ? (
             <View>
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                This week’s rota could not be read. Nobody has been taken off it — this screen
+                This week’s rota could not be read. Nobody has been taken off it. This screen
                 simply does not know who is on, which is not the same as nobody being on.
               </Text>
               <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
@@ -402,15 +736,20 @@ export default function OwnerRota() {
                 return (
                   <Pressable key={s.id} onPress={() => togglePulled(s)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${pulled ? 'Put back' : 'Pull'} ${nameOf(s.trainerId, s.trainerName)}, ${timeOf(s.startsAt)} to ${timeOf(s.endsAt)}`}
+                    accessibilityLabel={`${pulled ? 'Put back' : 'Pull'} ${nameOf(s.trainerId, s.trainerName)}, ${timeOf(s.startsAt, zone)} to ${timeOf(s.endsAt, zone)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: pulled ? 0.5 : 1 }}>
+                    {/* The role as a bar, in the colour the chip at the other
+                        end says in words. A pulled shift goes grey: it is on
+                        nobody's floor. */}
+                    <View style={{ width: 4, alignSelf: 'stretch', minHeight: 28, borderRadius: 2,
+                      backgroundColor: pulled ? t.surface3 : ROLE_TONE[s.role] === 'brand' ? t.brand : ROLE_TONE[s.role] === 'neutral' ? t.ink3 : t.data[ROLE_TONE[s.role] as 'purple' | 'blue' | 'teal'] }} />
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 92 }}>
-                      {timeOf(s.startsAt)}–{timeOf(s.endsAt)}
+                      {timeOf(s.startsAt, zone)}–{timeOf(s.endsAt, zone)}
                     </Text>
                     <Text style={{ ...ty.body, color: t.ink, flex: 1, textDecorationLine: pulled ? 'line-through' : 'none' }} numberOfLines={1}>
                       {nameOf(s.trainerId, s.trainerName)}
                     </Text>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>{pulled ? 'Pulled' : ROLE_LABEL[s.role]}</Text>
+                    <View><TonedChip label={pulled ? 'Pulled' : ROLE_LABEL[s.role]} tone={pulled ? 'neutral' : ROLE_TONE[s.role]} /></View>
                   </Pressable>
                 );
               })}
@@ -420,24 +759,16 @@ export default function OwnerRota() {
 
         {roster.length > 0 ? (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="Hours Per Trainer" />
-              {roster.map((r, i) => (
-                <View key={r.trainerId}>
-                  {i > 0 ? <Rule /> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
-                      {nameOf(r.trainerId, r.trainerName)}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>
-                      {r.shifts.length} shift{r.shifts.length === 1 ? '' : 's'}
-                    </Text>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
-                      {fig(hrs(r.hours))}{r.hours == null ? '' : 'h'}
-                    </Text>
-                  </View>
-                </View>
+              <SectionHead title="Hours per Trainer" />
+              {/* Against the longest week on the rota, so the bars compare
+                  the staff with each other. A shift with an unreadable end has
+                  no length: `hours` is then null, and the Meter draws no fill
+                  and the note keeps its dash. */}
+              {roster.map((r) => (
+                <Meter key={r.trainerId} label={nameOf(r.trainerId, r.trainerName)} tone="blue"
+                  val={r.hours} target={Math.max(1, ...roster.map((x) => x.hours ?? 0))}
+                  note={`${r.shifts.length} shift${r.shifts.length === 1 ? '' : 's'} · ${fig(hrs(r.hours))}${r.hours == null ? '' : ' h'}`} />
               ))}
             </Section>
           </>
@@ -451,75 +782,88 @@ export default function OwnerRota() {
 
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              One row per block on the floor. Shifts are written for this week only — cover and
-              swaps are edits to a single day, not to a pattern.
-            </Text>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* Trainer chips, day chips, two hour boxes, a clock note, role chips and
+                two buttons, with no scroller — so with the keyboard up over the hour
+                boxes "Put on the rota" is below the bottom of the window and there is
+                no gesture that brings it back. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                One row per block on the floor. Shifts are written for this week only. Cover and
+                swaps are edits to a single day, not to a pattern.
+              </Text>
 
-            <Text style={lab}>Trainer</Text>
-            {trainersFailed ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your trainers could not be read, so nobody can be offered here — this is a failed
-                read, not a gym with no staff.
-              </Text>
-            ) : trainers === null ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>Loading trainers…</Text>
-            ) : trainers.length === 0 ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                No trainers on this gym yet, so there is nobody to roster.
-              </Text>
-            ) : (
+              <Text style={lab}>Trainer</Text>
+              {trainersFailed ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Your trainers could not be read, so nobody can be offered here. This is a failed
+                  read, not a gym with no staff.
+                </Text>
+              ) : trainers === null ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Loading trainers…</Text>
+              ) : trainers.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No trainers on this gym yet, so there is nobody to roster.
+                </Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
+                  {trainers.map((x) => (
+                    <Chip key={x.id} label={x.name} on={who === x.id} tone={t.brand}
+                      onPress={() => setWho(x.id)} />
+                  ))}
+                </ScrollView>
+              )}
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>Day</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
-                {trainers.map((x) => (
-                  <Chip key={x.id} label={x.name} on={who === x.id} tone={t.brand}
-                    onPress={() => setWho(x.id)} />
+                {days.map((d) => (
+                  <Chip key={d} label={dayLabel(d)} on={day === d} tone={t.brand} onPress={() => setDay(d)} />
                 ))}
               </ScrollView>
-            )}
 
-            <Text style={{ ...lab, marginTop: sp.lg }}>Day</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
-              {days.map((d) => (
-                <Chip key={d} label={dayLabel(d)} on={day === d} tone={t.brand} onPress={() => setDay(d)} />
-              ))}
-            </ScrollView>
-
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Starts (hour)</Text>
-                <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
-                  style={inp} accessibilityLabel="Start hour" />
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Starts (Hour)</Text>
+                  <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
+                    style={inp} accessibilityLabel="Start hour" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Finishes (Hour)</Text>
+                  <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
+                    returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
+                    style={inp} accessibilityLabel="Finish hour" />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Finishes (hour)</Text>
-                <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
-                  returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
-                  style={inp} accessibilityLabel="Finish hour" />
-              </View>
-            </View>
 
-            <Text style={{ ...lab, marginTop: sp.lg }}>On for</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>
-              {ROLES.map((r) => (
-                <Chip key={r.key} label={r.label} on={role === r.key} tone={t.brand}
-                  onPress={() => setRole(r.key)} />
-              ))}
-            </View>
-
-            <Pressable disabled={!who || busy} onPress={commitAdd}
-              accessibilityRole="button" accessibilityLabel="Save shift"
-              accessibilityState={{ disabled: !who || busy }}
-              style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: who && !busy ? t.brandInk : t.ink3 }}>
-                {busy ? 'Saving…' : 'Put on the rota'}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {clock.atGym
+                  ? `Those hours are ${clock.zone}, the gym’s own clock, wherever you are typing them.`
+                  : `Those hours are this device’s, not the gym’s: ${clock.note}.`}
               </Text>
-            </Pressable>
-            <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>On For</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>
+                {ROLES.map((r) => (
+                  <Chip key={r.key} label={r.label} on={role === r.key} tone={t.brand}
+                    onPress={() => setRole(r.key)} />
+                ))}
+              </View>
+
+              <Pressable disabled={!who || busy} onPress={commitAdd}
+                accessibilityRole="button" accessibilityLabel="Save shift"
+                accessibilityState={{ disabled: !who || busy }}
+                style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, ...font('600'), color: who && !busy ? t.brandInk : t.ink3 }}>
+                  {busy ? 'Saving…' : 'Put on the Rota'}
+                </Text>
+              </Pressable>
+              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

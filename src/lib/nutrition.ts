@@ -344,3 +344,14 @@ export function dayBurn(
   }
   return null;
 }
+
+/**
+ * Macros in words: "39 g Protein · 51 g Carbs · 37 g Fat". The screens printed
+ * "P39 / C51 / F37", and a member asked whether C was calories and F fat or
+ * fibre (owner, 21 Sep 2026). C was carbs; now it says so.
+ */
+export function macroWords(p: number, c: number, f: number): string {
+    // Non-breaking between each figure and its words, so a line never ends on
+  // "116" with "g Carbs" below it.
+  return `${num(Math.round(p))}\u00A0g\u00A0Protein · ${num(Math.round(c))}\u00A0g\u00A0Carbs · ${num(Math.round(f))}\u00A0g\u00A0Fat`;
+}

@@ -1,7 +1,7 @@
-// A coach's programme groups — the named list of people a bootcamp programme
+// A coach's program groups — the named list of people a bootcamp program
 // goes out to, and the writes that keep it.
 //
-// Tables in supabase/parts/134-a-programme-written-once.sql; the arithmetic
+// Tables in supabase/parts/134-a-program-written-once.sql; the arithmetic
 // that decides who may be written to is in src/lib/groupProgram.ts. This file
 // is only the reads and the writes, and the honesty about both.
 //
@@ -17,26 +17,44 @@
 //
 // ── What the statuses have to carry ────────────────────────────────────────
 //
-// Two reads: the groups, and their membership. A failure in EITHER is 'error'
-// for the whole thing, because a group whose membership could not be read must
-// never render as an empty group. Eight people with a bootcamp programme and a
-// refused membership read look exactly like a group nobody is in, and the
-// screen would then offer to assign the programme to nought of them and report
-// it done. `worstStatus` is what says so.
+// THREE reads: the groups, their version history, and their membership. A
+// failure in ANY of them degrades the whole thing, because a group whose
+// membership could not be read must never render as an empty group. Eight
+// people with a bootcamp program and a refused membership read look exactly
+// like a group nobody is in, and the screen would then offer to assign the
+// program to nought of them and report it done. `worstStatus` is what says
+// so.
+//
+// The version read was the one that did not say. Its error was reported and its
+// truncation was computed, and neither reached the status — so a group with
+// eight recorded versions read "not been recorded as a version yet", every
+// member was filed as having edited their own copy, and the re-send that would
+// have put the ones who are behind back on the current version was never
+// offered. Carried now, in the same `worstStatus` call as the other two.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Program } from '../lib/programs';
 import { programSignature, type GroupVersion } from '../lib/groupProgram';
 import { supabase } from '../lib/supabase';
+// Who is signed in, with the `error` kept beside the session. Two calls became
+// one: see the note at the call for why `getUser()` is not asked any more.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
+// "Add everyone" is a button, so the verify read below can be handed a list far
+// past what one request line will carry. See the note at that read.
+import { readByIds } from '../lib/idLookup';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
+// The server's own words for a refusal, or a named unknown that admits it gave
+// none. `addMembers` groups its failures by reason, and a reason this file made
+// up would defeat the grouping — see the note there.
+import { serverSaid } from '../lib/serverSaid';
 
 export interface ProgramGroup {
   id: string;
   name: string;
-  /** The programme the group is defined by, or null when the coach has named
+  /** The program the group is defined by, or null when the coach has named
    *  the group and not yet chosen one. Null is a real state, not a missing
    *  read — the read's own status says whether it was read at all. */
   program: Program | null;
@@ -44,20 +62,42 @@ export interface ProgramGroup {
    *  anything else an empty array means the membership did not come back. */
   memberIds: string[];
   /**
-   * Every programme this group has been given, oldest first.
+   * Every program this group has been given, oldest first.
    *
    * The group still does NOT own the plan — assigning is a fan-out into each
    * member's own `assigned_programs` row, and part 134 gives three reasons that
    * have not changed. What this adds is something to compare against: with one
-   * stored programme, a member on last month's version and a member whose
+   * stored program, a member on last month's version and a member whose
    * Thursday was rewritten around their shoulder both read 'diverged', which is
    * true and useless because the two need opposite actions.
    *
-   * Empty under a read that did not land. `status` is what says which, and
-   * `versionSpread` refuses to count anything unless both reads were whole.
+   * Empty under a read that did not land — including this list's OWN read,
+   * which is a third request beside the groups and the membership and can fail
+   * or truncate on its own. `status` carries all three, and `versionSpread`
+   * refuses to count anything unless it is 'ready'.
    */
   versions: GroupVersion[];
   createdAt: string | null;
+}
+
+/**
+ * One reason, and everybody it was the reason for.
+ *
+ * The grouping is the point. `addMembers` is a FAN-OUT — "add everyone" is a
+ * button, and the picker hands over whatever was ticked — and the causes
+ * genuinely differ per person inside one tap: the policy refuses a hand-added
+ * client silently while accepting the linked one beside them, and a statement
+ * that failed outright failed for a reason of its own that has nothing to do
+ * with either. Flattening all of that into one sentence tells a coach that
+ * "the server did not accept them" about people who were refused for three
+ * different reasons, only one of which they can do anything about.
+ */
+export interface AddFailure {
+  /** What the server actually said, or — where it said nothing — what its
+   *  silence established. Never a guess about a person's account. */
+  reason: string;
+  /** The clients this reason is the reason for. Never empty. */
+  ids: string[];
 }
 
 /** What an add actually did, per client. Zero rows written is not an error in
@@ -65,7 +105,34 @@ export interface ProgramGroup {
  *  are a hand-added client with no account yet) comes back as a silent no-op —
  *  so the caller is handed the ids that landed and the ids that did not, and
  *  never a boolean that means "the request was accepted". */
-export interface AddResult { added: string[]; failed: string[] }
+export interface AddResult {
+  /** Read back from the server. Present in the group, confirmed. */
+  added: string[];
+  /**
+   * Everybody not confirmed present, whatever the reason.
+   *
+   * A SUPERSET of the ids under `failures` whose reason is a refusal: it also
+   * carries `unknown` below, because the alternative is worse. A screen reading
+   * only this field says too much about the unknown ones; a screen reading
+   * nothing at all about them says nothing to a coach who has just tapped Add
+   * on thirty people. `failures` is what lets a screen tell the two apart, and
+   * app/(trainer)/group.tsx still reads this one flat.
+   */
+  failed: string[];
+  /** The same people, grouped by the reason the server gave. Empty when
+   *  everybody landed. */
+  failures: AddFailure[];
+  /**
+   * Clients whose outcome could not be established at all.
+   *
+   * The verify read is what turns an accepted request into a fact, and when IT
+   * fails there is no fact either way — the upsert may well have worked. These
+   * ids used to be returned as `failed` with nothing to mark them, so a read
+   * failure was reported to the coach as "Nobody was added", which is a claim
+   * about the server that this app was in no position to make.
+   */
+  unknown: string[];
+}
 
 // The store used when the backend is switched off entirely. In that mode the
 // local store IS the source of truth, so its status is 'ready' and its writes
@@ -88,17 +155,36 @@ export function useProgramGroups() {
     (async () => {
       setStatus('loading');
       try {
-        // getUser() REJECTS when nobody is signed in, which is a true answer
-        // and not a failed check — the same latch that pinned
-        // assignedPrograms into 'error' before anybody had signed in.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and which of the two nobodies it is ─────────────
+        //
+        // Nobody signed in is a true answer and not a failed check; that part
+        // was always right. What was wrong is that `!sess?.session` was the
+        // only test of it and the line above it dropped `error`.
+        //
+        // src/lib/sessionUidRead.ts quotes the library body: with an expired
+        // access token and no way to reach GoTrue, `getSession()` resolves
+        // `session: null` WITH a retryable error — the same `session: null` a
+        // phone nobody has signed in on returns. So an outage took the
+        // `setGroups([]); setStatus('ready')` branch, and the header of this
+        // file says exactly what that costs: 'ready' means the server's own
+        // answer, an empty group list under it is "this coach has no groups",
+        // and the screen offers to build one beside the eight that exist.
+        //
+        // One call, not two. `getUser()` was only here for the id, which the
+        // session already carries, and it is the call that goes to the network.
+        //
+        // Narrowed on `fate`, never on `!who.uid` — `string` includes '', so
+        // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+        const who = await sessionUid('programGroups.read');
         if (cancelled) return;
-        if (!sess?.session) { setGroups([]); setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setGroups([]); setStatus('ready'); return; }
+        if (who.fate !== null) {
+          if (who.fate === 'signed-out') { setGroups([]); setStatus('ready'); return; }
+          // 'unreadable'. Nothing was established, so the groups on screen are
+          // neither confirmed nor retracted. `sessionUid` has reported it.
+          setStatus('error');
+          return;
+        }
+        const id = who.uid;
         setUid(id);
 
         const { data: gRows, error: gErr } = await supabase
@@ -129,15 +215,50 @@ export function useProgramGroups() {
           .order('group_id', { ascending: true }).order('version', { ascending: true })
           .limit(capLimit());
         if (cancelled) return;
+        /**
+         * ── the read whose answer was thrown away ─────────────────────────
+         *
+         * The comment below used to end "…and `versionSpread` refuses to count
+         * under a status that is not 'ready' — so nobody is offered a re-send
+         * off this". That was true of `versionSpread` and false of this
+         * function: nothing here ever moved the status off 'ready'. `vErr` only
+         * reported; `vPage.truncated` was computed on the next line and then
+         * dropped, never reaching the `worstStatus` call at the bottom. Either
+         * way `versions` stayed `[]` under a 'ready' the membership and group
+         * reads had earned on their own.
+         *
+         * What a coach saw: a group with eight recorded versions read "This
+         * program has not been recorded as a version yet, so nobody can be
+         * placed against it" — because `currentVersion` is the highest version
+         * whose signature matches, and there were no versions to match. Every
+         * member then fell into the bespoke column and was labelled as having
+         * edited their own copy, and `behindNote` — the sentence offering the
+         * re-send that would actually fix the ones who are behind — returns
+         * null when nothing is countable, so it was never offered.
+         *
+         * This is now carried. It is still not fatal in the sense the comment
+         * meant: `setGroups(list)` below runs either way, so the groups, their
+         * plans and their membership are all still drawn. What the status now
+         * does is make `spread.countable` false, which hides the Versions block
+         * instead of filling it with three wrong numbers, and holds the
+         * re-send. The membership read one branch down already takes exactly
+         * this position for exactly this reason.
+         */
+        let versionsStatus: LoadStatus = 'ready';
         if (vErr) {
-          // Reported and NOT fatal. A group whose version history could not be
-          // read still has a plan and a membership, and both are worth showing;
-          // what the screen loses is the ability to say who is on an older
-          // version, and `versionSpread` refuses to count under a status that
-          // is not 'ready' — so nobody is offered a re-send off this.
+          // Reported and NOT fatal to the groups themselves. A group whose
+          // version history could not be read still has a plan and a
+          // membership, and both are worth showing; what the screen loses is
+          // the ability to say who is on an older version.
           reportError('programGroups.versions', vErr);
+          versionsStatus = 'error';
         } else {
           const vPage = capped(vRows);
+          // The rows are real and the ones that came back are used. What cannot
+          // be said off them is that a group has NO version, or that a member
+          // is on none — the missing rows are exactly the ones that would
+          // disprove both.
+          if (vPage.truncated) versionsStatus = 'partial';
           const byGroup = new Map<string, GroupVersion[]>();
           for (const r of vPage.rows as any[]) {
             const bucket = byGroup.get(r.group_id) ?? [];
@@ -178,6 +299,8 @@ export function useProgramGroups() {
         setStatus(worstStatus(
           gPage.truncated ? 'partial' : 'ready',
           mPage.truncated ? 'partial' : 'ready',
+          // The third read. It was computed and dropped; see the note above it.
+          versionsStatus,
         ));
       } catch (e) {
         if (cancelled) return;
@@ -229,13 +352,13 @@ export function useProgramGroups() {
     if (!USE_SUPABASE) { LOCAL = LOCAL.map((g) => (g.id === id ? { ...g, program } : g)); return true; }
     try {
       // Through the RPC rather than a bare UPDATE, and the reason is that the
-      // group's live programme and the newest recorded version are ONE FACT.
+      // group's live program and the newest recorded version are ONE FACT.
       // Two round trips would let a version exist that the group is not on —
       // after which every member reads as behind a version nobody was ever
       // sent — or the group move onto something with no version recorded, after
       // which everybody reads as bespoke. `snapshot_group_program` allocates
       // the number under a lock and writes both inside one statement, and it
-      // returns the existing row unchanged when the programme has not actually
+      // returns the existing row unchanged when the program has not actually
       // changed, so re-picking the same template mints nothing.
       const { data, error } = await supabase.rpc('snapshot_group_program', {
         p_group_id: id, p_program: program,
@@ -244,7 +367,7 @@ export function useProgramGroups() {
       // A null row is not success. The function raises for a group that is not
       // this coach's, and PostgREST turns that into `error` — but a definer
       // function returning nothing at all would arrive here as a quiet null,
-      // and the screen above announces the programme has changed.
+      // and the screen above announces the program has changed.
       if (!data) {
         reportError('programGroups.setProgram', new Error('snapshot_group_program returned no row'), { id });
         return false;
@@ -281,11 +404,11 @@ export function useProgramGroups() {
 
   const addMembers = useCallback(async (id: string, clientIds: string[]): Promise<AddResult> => {
     const wanted = [...new Set(clientIds)];
-    if (!wanted.length) return { added: [], failed: [] };
+    if (!wanted.length) return { added: [], failed: [], failures: [], unknown: [] };
     if (!USE_SUPABASE) {
       LOCAL = LOCAL.map((g) => (g.id === id ? { ...g, memberIds: [...new Set([...g.memberIds, ...wanted])] } : g));
       setGroups(LOCAL);
-      return { added: wanted, failed: [] };
+      return { added: wanted, failed: [], failures: [], unknown: [] };
     }
     try {
       // `ignoreDuplicates` so re-adding somebody already in the group is a
@@ -295,21 +418,94 @@ export function useProgramGroups() {
       const { error } = await supabase.from('program_group_members')
         .upsert(wanted.map((c) => ({ group_id: id, client_id: c })), { onConflict: 'group_id,client_id', ignoreDuplicates: true });
       if (error) reportError('programGroups.addMembers', error, { id });
+      // The statement's OWN reason, kept rather than only reported. One upsert
+      // covers everybody in `wanted`, so when it is refused outright that
+      // refusal is the reason for every id the read-back then does not find —
+      // and it is the server's words, not this file's guess at them. Held in a
+      // variable because it has to survive to the grouping at the bottom.
+      const upsertReason = error
+        ? `The server refused the whole request: ${serverSaid(error)}`
+        : null;
       // Whatever the insert said, this is who is actually in the group. A
       // client the policy refused — not this coach's, or a hand-added client
       // with no account for the foreign key to find — is a silent no-op in
       // PostgREST, and telling the coach "added" for them is how somebody ends
-      // up believing eight people are on a programme when six are.
-      const { data, error: readErr } = await supabase.from('program_group_members')
-        .select('client_id').eq('group_id', id).in('client_id', wanted).limit(capLimit());
-      if (readErr) { reportError('programGroups.addMembers.verify', readErr, { id }); return { added: [], failed: wanted }; }
+      // up believing eight people are on a program when six are.
+      //
+      // Chunked, because `wanted` is whatever the picker handed over and "add
+      // everyone" is a button. Past roughly two hundred uuids the `in.(…)` list
+      // makes a request line bigger than the 8KB nginx and most CDNs allow, the
+      // 414 comes back as an error, and the branch below then tells the coach
+      // that every one of the three hundred clients they just added FAILED —
+      // over an upsert that worked. They would do it again. See
+      // src/lib/idLookup.ts.
+      let data: any[];
+      try {
+        data = await readByIds<any>(
+          wanted,
+          // unique (group_id, client_id), and the group is fixed here, so
+          // client_id is a total order for this read.
+          (chunk, from, to) => supabase.from('program_group_members')
+            .select('client_id').eq('group_id', id).in('client_id', chunk)
+            .order('client_id', { ascending: true }).range(from, to),
+          'who is in this group',
+        );
+      } catch (readErr) {
+        reportError('programGroups.addMembers.verify', readErr, { id });
+        // A FAILED READ IS NOT AN EMPTY LIST. This branch used to return
+        // `{ added: [], failed: wanted }`, and app/(trainer)/group.tsx turns an
+        // empty `added` into the headline "Nobody was added" — a statement
+        // about the server made from the fact that we could not ask it. The
+        // upsert above may well have written every one of them.
+        return {
+          added: [],
+          failed: wanted,
+          failures: [{
+            reason: `We could not check who is in the group, so whether ${wanted.length === 1 ? 'this client was added' : 'these ' + wanted.length + ' clients were added'} is not known. Nothing here says they were not.`,
+            ids: wanted,
+          }],
+          unknown: wanted,
+        };
+      }
       const there = new Set((data ?? []).map((r: any) => r.client_id as string));
       const added = wanted.filter((c) => there.has(c));
       if (added.length) {
         setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, memberIds: [...new Set([...g.memberIds, ...added])] } : g)));
       }
-      return { added, failed: wanted.filter((c) => !there.has(c)) };
-    } catch (e) { reportError('programGroups.addMembers', e, { id }); return { added: [], failed: wanted }; }
+      const failed = wanted.filter((c) => !there.has(c));
+      // ── grouped by the reason the server actually gave ──────────────────
+      //
+      // Two reasons are possible here and they are not the same fact.
+      //
+      //   · the upsert was refused outright, and PostgREST said why. Everybody
+      //     missing from the read-back is missing because of THAT, quoted.
+      //   · the upsert was accepted and the row still is not there. Nothing was
+      //     said, and the silence is the finding: RLS matched no row for them.
+      //     That is the hand-added client with no account, and it is the one
+      //     cause a coach can act on.
+      //
+      // Never both, because `upsertReason` is null in the second case; and
+      // never a sentence about somebody's account written over a 500.
+      const failures: AddFailure[] = failed.length
+        ? [{
+          reason: upsertReason
+            ?? 'The server accepted the request and added nobody for them, which means the row was not theirs to write: a client who is not yours, or one you added by hand who has no account yet.',
+          ids: failed,
+        }]
+        : [];
+      return { added, failed, failures, unknown: [] };
+    } catch (e) {
+      reportError('programGroups.addMembers', e, { id });
+      // Nothing reached the server, or nothing came back from it. Same shape as
+      // the verify failure above and for the same reason: this is an unknown,
+      // not a refusal, and it must not be reported as one.
+      return {
+        added: [],
+        failed: wanted,
+        failures: [{ reason: `That request did not complete, so who is in the group is not known: ${serverSaid(e)}`, ids: wanted }],
+        unknown: wanted,
+      };
+    }
   }, []);
 
   const removeMember = useCallback(async (id: string, clientId: string): Promise<boolean> => {

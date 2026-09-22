@@ -21,11 +21,82 @@
 //   4. THE LIST REORDERING ITSELF ON A FAILURE. Sorting on `unread` would put a
 //      nullable value in the ORDER BY; recency is the only key that is known
 //      whenever a thread is.
+//
+// ── The one-off failure in section 6, and what it actually was ─────────────
+//
+// This file failed once inside a full `npm test`, on three assertions in
+// section 6, and passed on every rerun after it. It is written down here
+// because "it passed on rerun" is not a diagnosis, and because the first two
+// explanations anybody reaches for are both wrong.
+//
+// The reported failure was `got "Aug 21", wanted "21/8"`. Read which side is
+// which, because it is the whole answer. `got` is what `threadWhen` returned:
+// `Aug 21`, the shared renderer, on an en-US machine. `wanted` is what the
+// assertion asked for: `21/8`, which is `${d.getDate()}/${d.getMonth() + 1}` —
+// hand-rolled arithmetic, the form this test asserted BEFORE the change that
+// moved `threadWhen` onto `fmtAxisDay` and rewrote these assertions with it.
+//
+// So the module was the new one and the compiled TEST was the old one. Not a
+// defect in `threadWhen`, whose new form is what ran and is correct.
+//
+// It was not the locale either, and that is checkable rather than assertable:
+// `fmtAxisDay` is `toLocaleDateString(locale, { day: 'numeric', month: 'short' })`
+// and NO locale renders `21/8`. A sweep of ninety-odd finds six that render
+// with no month name at all — lt-LT `08-21`, bg-BG `21.08`, cs-CZ and sk-SK
+// `21. 8.`, fi-FI `21.8.`, pt-PT `21/08` — and the only slashed one of those
+// pads the month. Nothing Intl can produce is `21/8`, so the string did not
+// come from a formatter, and no locale on any machine explains it.
+//
+// It was not the clock. `now` is a parameter and every assertion in section 6
+// passes a fixed one; there is no wall clock in this file to roll over.
+//
+// What it was: `npm test` is `tsc -p tsconfig.test.json && node .tmp/lib/a.test.js && …`
+// — one compile into `.tmp`, then a few hundred separate node processes reading
+// that output back off disk one at a time over several minutes. `.tmp` is a
+// single shared directory, tsc never cleans it (it still holds `.js` for
+// modules whose sources were deleted days ago), and nothing serialises two
+// `tsc` runs against it. A chain that is still walking `.tmp` when the next
+// run's `tsc` overwrites it loads a test compiled from one snapshot of the tree
+// against a module compiled from another — which is exactly the pair of
+// literals above, an old test against a new module.
+//
+// That is a defect in the harness and it is NOT fixed here, because nothing in
+// a test file can defend against being a stale binary. The two fixes that close
+// it are: compile each run into its OWN output directory (`tsc --outDir` per
+// run), or hold a lock across `tsc` plus the chain that follows it. Cleaning
+// `.tmp` first fixes the stale-output half and makes the concurrency half
+// LOUDER — a wiped directory mid-chain is a MODULE_NOT_FOUND rather than a
+// wrong answer — but it does not remove it.
+//
+// ── What IS fixed here ────────────────────────────────────────────────────
+//
+// Chasing the above turned up a real one in this file, of the kind it was
+// wrongly accused of. Section 6 read whatever locale the runner's machine was
+// set to: it asserted the date against `fmtAxisDay` called with the same
+// arguments — an assertion that could only ever agree with itself — and then
+// asserted separately that the result was not a bare `d/m`. On a handset set
+// to Portuguese (Portugal) `fmtAxisDay` returns `21/08`, and that second
+// assertion fails. `LANG=pt_PT.UTF-8 npx tsx src/lib/coachThreads.test.ts`
+// reproduced it every time.
+//
+// So the locale is now LATCHED, the way referralCredit.test.ts and
+// locale.test.ts latch it, and the date is asserted as a literal rather than
+// against the renderer under test. Nothing here reads the machine any more.
 import {
   hasConversation, rowToThread, sortThreads, sortUnstarted, splitThreads,
   threadPreview, threadWhen, threadsEmptyNote, unreadBadgeLabel,
   type CoachThread,
 } from './coachThreads';
+import { setAppLocale } from './locale';
+
+// Section 6 asserts a date in British order — the day first, then the month by
+// name. That is not this app's house style; Repple is white-label and has no
+// house locale. `fmtAxisDay` writes in whatever `appLocale()` holds, which in
+// the app is the handset's, so the same call is "Aug 20" on an American one and
+// "20/08" on a Portuguese one. Stated here for the same reason this file states
+// its clock: a test that reads whatever the runner happens to be set to is a
+// test of the machine. See the header.
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -239,20 +310,42 @@ eq(threadPreview(thread()).text, 'No messages yet', 'a client with no thread say
   eq(threadWhen('2026-08-31T19:00:00Z', now), '1h', 'exactly an hour is 1h, never 60m');
   eq(threadWhen('2026-08-30T20:00:00Z', now), '1d', 'exactly a day is 1d, never 24h');
   eq(threadWhen('2026-08-30T20:00:01Z', now), '23h', 'a second under a day is still hours');
-  ok(/\//.test(threadWhen('2026-08-24T20:00:00Z', now) ?? ''), 'exactly a week is a date, never 7d');
+  ok(!/^\d+[mhd]$/.test(threadWhen('2026-08-24T20:00:00Z', now) ?? ''),
+    'exactly a week is a date, never 7d');
   eq(threadWhen('2026-08-24T20:00:01Z', now), '6d', 'a second under a week is still days');
-  // Past a week it is a date rather than arithmetic — and the date is the
-  // READER's, so this is stated against the local calendar rather than against
-  // a literal. `npm run test:zones` runs the suite in Los Angeles, Auckland and
-  // Dubai, and 2026-08-20T20:00:00Z is the 20th in one of those and the 21st in
-  // the other two; a hardcoded '20/8' asserts a timezone, not a format. The
-  // `+ 1` on the month is what this is really guarding: getMonth() is 0-based
-  // and every date in the app has been off by a month for it at least once.
+  // Past a week it is a date rather than arithmetic. Three separate things are
+  // being asserted here and they take their literals from different places:
+  //
+  //   the DAY comes off the local calendar, because the date is the READER's.
+  //   `npm run test:zones` runs this suite in Kiritimati, Auckland, Dubai, UTC,
+  //   Los Angeles and Midway, and 2026-08-20T20:00:00Z is the 21st in the first
+  //   three and the 20th in the last three. A hardcoded day asserts a timezone.
+  //
+  //   the MONTH is written out, as a NAME, and it is the point of the block.
+  //   `fmtAxisDay` takes a 0-based month index, `getMonth()` gives one, and a
+  //   `+ 1` between them has been in this app's dates at least once before.
+  //   'Aug' is what proves the index went through unshifted; 'Sept' — which is
+  //   how en-GB abbreviates it — is what the defect looks like. The instant is
+  //   in August in all six zones `test:zones` runs.
+  //
+  //   the ORDER and the SHAPE are the latched locale's — en-GB, seeded at the
+  //   top of this file. This used to be asserted against `fmtAxisDay` called
+  //   with the same three arguments, which is an assertion that agrees with
+  //   itself no matter what either side does; a literal is the only form that
+  //   can catch `threadWhen` reverting to `${d.getDate()}/${d.getMonth() + 1}`,
+  //   which is what it printed before, and which reads as 20 August in London
+  //   and as no date at all in New York, where the month comes first.
   {
     const iso = '2026-08-20T20:00:00Z';
     const d = new Date(Date.parse(iso));
-    eq(threadWhen(iso, now), `${d.getDate()}/${d.getMonth() + 1}`, 'past a week, the local day and month');
-    ok(/^\d{1,2}\/\d{1,2}$/.test(threadWhen(iso, now) ?? ''), 'and it is a date, not a duration');
+    eq(threadWhen(iso, now), `${d.getDate()} Aug`,
+      'past a week, the local day and the month by name');
+    // Belt and braces on the shape, and cheap: no separator-joined pair of
+    // numbers, in any of the forms a locale writes one — 21/08, 21.08, 08-21.
+    // Two numbers in an order is a date to the reader who wrote it and a
+    // different date, or none, to everybody else.
+    ok(!/^\d{1,2}\s?[/.\-]\s?\d{1,2}\.?$/.test(threadWhen(iso, now) ?? ''),
+      'and never a bare pair of numbers, which means two different days to two readers');
   }
   // A clock that puts the message in the future must not print "-3m".
   eq(threadWhen('2026-08-31T20:05:00Z', now), 'now', 'a message from the future reads as now, not as a negative');

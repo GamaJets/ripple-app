@@ -26,43 +26,106 @@
 // It now agrees with `visionAvailable`, which is the only honest reading: if
 // the function is reachable the feature is on, and if it is not, the call
 // returns null and the screen already says so.
+//
+// ── And the four answers that left here as one ─────────────────────────────
+//
+// `parseFoodText` was `if (error || !data || (data as any).error) return null`
+// followed by `if (!Array.isArray(items)) return null` and a `catch` returning
+// the same. Four different facts — the reader did not answer, the answer did
+// not parse, the answer was the wrong shape, and the reader read the words and
+// NAMED NO FOOD IN THEM — arrived at four different lines and left by one, and
+// app/(client)/foodlog.tsx then said "Could not read that" to all of them.
+//
+// The third of those is not a failure. It is the commonest outcome and the
+// only one the member can act on: somebody who typed "a bowl of soup" and is
+// shown an error learns the app is broken, while somebody told the reader
+// found no food in that line learns to type differently.
+//
+// `nutrition-parse` has kept the four apart on the wire since Lane 129 (an
+// empty `items` with a note for the read that named nothing; a `why` on each
+// of the three failures). `readFoodText` below is where they land, and
+// src/lib/readerAnswer.ts holds the reading of them and the four sentences.
+//
+// The same file also holds the kcal rule this one used to get wrong: an absent
+// calorie figure became a 0 and the food was then FILTERED OUT for being worth
+// nothing, so a member who described three things and got two back was never
+// told the third had been read at all. Calories are nullable like the macros
+// and nothing is dropped for having a gap in it.
 import { supabase } from './supabase';
 import { visionAvailable } from './vision';
+import { readFoodReply, type FoodRead, type ReadFood } from './readerAnswer';
 
-export interface ParsedFood {
-  name: string;
-  kcal: number;
-  /** Null when the reader did not give us one. NEVER zero for an absent
-   *  figure — see the header. */
-  protein: number | null;
-  carbs: number | null;
-  fat: number | null;
-}
+/**
+ * One food the reader named.
+ *
+ * The shape itself now lives in src/lib/readerAnswer.ts, beside the rules that
+ * build it, because this file imports `./supabase` and so cannot be exercised
+ * under plain node. The name is kept because every screen imports it by it,
+ * and it gained one field: `notGiven`, naming which of the four figures the
+ * reader did not give — the list `nutrition-parse` started sending and that
+ * nothing on this side could see.
+ */
+export type ParsedFood = ReadFood;
+export type { FoodRead } from './readerAnswer';
 
 /** AI food parsing is on exactly when the reader next door is. */
 export function foodAIAvailable(): boolean {
   return visionAvailable();
 }
 
-export async function parseFoodText(text: string): Promise<ParsedFood[] | null> {
+/**
+ * Ask the reader to read a description, and report WHICH of four things
+ * happened.
+ *
+ * This is the whole of the repair. `parseFoodText` below returned `null` for
+ * every one of them, so a member who typed "a bowl of soup" and a member whose
+ * request never left the building read the same sentence — and the commonest
+ * case by far, the reader reading the words and naming no food in them, is not
+ * a failure at all. src/lib/readerAnswer.ts carries the four outcomes and the
+ * four sentences; this function only does the I/O.
+ *
+ * `null` is the fifth thing and is deliberately not one of the four: the
+ * feature is off, or the box is empty, and neither is a reader doing anything.
+ * The screen already has its own words for that.
+ */
+export async function readFoodText(text: string): Promise<FoodRead | null> {
   if (!foodAIAvailable() || !text.trim()) return null;
   try {
     const { data, error } = await supabase.functions.invoke('nutrition-parse', { body: { text } });
-    if (error || !data || (data as any).error) return null;
-    const items = (data as any).items;
-    if (!Array.isArray(items)) return null;
-    // A number, or null. Accepts numeric strings for the reason ./vision.ts
-    // gives — models stringify JSON numbers — and refuses everything else
-    // rather than rounding it to a zero nobody measured.
-    const num = (v: unknown): number | null => {
-      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : null;
-      if (typeof v === 'string') { const p = parseFloat(v.replace(/[^0-9.\-]/g, '')); return Number.isFinite(p) ? Math.round(p) : null; }
-      return null;
-    };
-    return items.map((r: any) => ({
-      name: String(r.name ?? 'Food'),
-      kcal: num(r.kcal) ?? 0,
-      protein: num(r.protein), carbs: num(r.carbs), fat: num(r.fat),
-    })).filter((r: ParsedFood) => r.kcal > 0);
-  } catch { return null; }
+    if (error) {
+      // supabase-js puts the function's JSON error body on error.context (a
+      // Response), which is where the `why` is. Without reading it every
+      // non-2xx would be indistinguishable from no reply at all — which is
+      // three of the four outcomes collapsing again, one layer lower.
+      let body: unknown = null;
+      try { body = await (error as any)?.context?.json?.(); } catch { /* no body: nothing answered */ }
+      return readFoodReply({ answered: body != null, body });
+    }
+    return readFoodReply({ answered: data != null, body: data });
+  } catch {
+    return readFoodReply({ answered: false, body: null });
+  }
 }
+
+/*
+ * `parseFoodText` stood here and is gone, deliberately.
+ *
+ * It returned the foods alone — `read.ok ? read.items : null` — and existed for
+ * one reason: to let the two describe-a-meal screens keep working while the four
+ * outcomes above were being separated, without changing them in the same edit.
+ * That is a migration scaffold, and the migration is finished: `foodlog.tsx` and
+ * `nutrition.tsx` both call `readFoodText` and both say which of the four
+ * happened.
+ *
+ * It is deleted rather than kept, because what it does is precisely the collapse
+ * this file was rewritten to undo. Its `null` meant four different things at
+ * once — nothing answered, the answer would not parse, the answer was the wrong
+ * shape, and the reader read the description and found no food in it. Only the
+ * last of those is something a member can act on, and a screen reaching for the
+ * short wrapper would silently lose that distinction again with nothing to say
+ * it had. A convenience that can only be used wrongly is not a convenience.
+ *
+ * If a future caller genuinely wants the foods and nothing else, the honest
+ * spelling is two lines at the call site against `readFoodText`, where the
+ * discarded reason is visible in the code doing the discarding.
+ */

@@ -37,9 +37,10 @@
 // src/lib/offlineQueue.ts already draws the line between a write the server
 // REFUSED and a write nobody answered, because those get opposite treatment.
 // This file is the same line drawn one level up, for the sentence a person
-// reads. "Check your connection and try again" is printed on four client
-// screens today for both halves of it, and on the refusal half it is a lie
-// that sends somebody to their router when the server has just told them no.
+// reads. "Check your connection and try again" was printed for both halves of
+// it, and on the refusal half it is a lie that sends somebody to their router
+// when the server has just told them no. See `retryLine` below for where that
+// sentence still stands, and where it no longer does.
 
 /**
  * What we currently believe about reaching the backend.
@@ -49,6 +50,9 @@
  * would be an invention. Every copy helper here treats it as "do not claim
  * either way".
  */
+import { isRequestTimeout, maxAttempts, methodOf, withRequestTimeout } from './requestTimeout';
+import type { TimeoutDeps } from './requestTimeout';
+
 export type Reach = 'unknown' | 'online' | 'offline';
 
 /** One request's verdict. 'reached' means bytes came back from our server —
@@ -80,9 +84,19 @@ export const initialReach = (): ReachState => ({ reach: 'unknown', since: 0, fai
  * Everything else that throws out of fetch is a transport failure — RN says
  * "Network request failed", browsers say "Failed to fetch", and neither is
  * worth pattern-matching when the absence of a response is the whole signal.
+ *
+ * The ONE abort that is not ours-and-therefore-nothing is the ceiling in
+ * src/lib/requestTimeout.ts, and it is checked first, before any of the name
+ * matching below. That request was not cancelled by a person leaving a screen:
+ * it was sent, and the network swallowed it, which is the exact evidence this
+ * file was built to collect. Reading it as a navigation would mean the app
+ * still believed it was online after waiting thirty seconds for nothing —
+ * which is the whole defect that ceiling exists to close, closed at one end
+ * and left open at this one.
  */
 export function isTransportFailure(err: unknown): boolean {
   if (err == null) return false;
+  if (isRequestTimeout(err)) return true;
   const name = String((err as any)?.name ?? '');
   if (name === 'AbortError' || name === 'CanceledError') return false;
   const msg = String((err as any)?.message ?? '');
@@ -145,11 +159,36 @@ export function probeDelayMs(failures: number): number {
 /**
  * The sentence to put in front of somebody whose write did not land.
  *
- * This is the whole point of the file. Today four client screens say "Check
- * your connection and try again" whatever happened, and one of the two things
- * that happened is the server having read the request and declined it — a full
- * class, a lapsed membership, a policy. Sending that person to their wifi
- * settings wastes their time and hides the actual answer.
+ * This is the whole point of the file. "Check your connection and try again"
+ * was said whatever had happened, and one of the two things that happened is
+ * the server having read the request and declined it — a full class, a lapsed
+ * membership, a policy. Sending that person to their wifi settings wastes
+ * their time and hides the actual answer.
+ *
+ * ── Where it has got to, counted rather than remembered ───────────────────
+ *
+ * This note used to say "four client screens", and it was stale in the
+ * direction that matters: TEN client screens carried the sentence, not four.
+ * All ten now call this — bookings, calendar, challenges, classes, goal,
+ * intake, settings, standing, trainers, workouts — and so do the shared pieces
+ * they are reached through: src/ui/DeliveryModeChoice.tsx, src/ui/waiver.tsx,
+ * src/ui/emailOtp.ts, src/lib/phone.ts and src/lib/threadSafety.ts (the last
+ * three are not components, so they take the reach as an argument or read
+ * `currentReach()`; each says which, and why, where it does it).
+ *
+ * ONE site reached from a client screen deliberately does NOT use this, and it
+ * is worth knowing about before the next reader "finishes the job": the catch
+ * in `respond`, src/ui/CoachRequests.tsx. Both sentences below assert that the
+ * write did not land — "nothing was sent", "nothing has changed" — and that
+ * catch spans three writes and cannot support either claim. It says what it
+ * knows instead. This function is for a write known not to have landed; it is
+ * not a general-purpose apology.
+ *
+ * WHAT IS LEFT, as of this edit: 32 sites, in 13 files, all of them staff
+ * screens — 17 across eight files in app/(trainer)/, 15 across five in
+ * app/(owner)/. No client screen and nothing in src/ still says it. A coach
+ * sent to their router over a refused payout, or an owner over a refused rota
+ * shift, is the same lie told to somebody who is at work.
  *
  * Returns a sentence and never null, because every caller here is already
  * committed to saying something. Sentence case, no value interpolated, so it
@@ -178,15 +217,35 @@ export function offlineBanner(reach: Reach): string | null {
   return 'No connection. You are seeing what was on this phone the last time it could reach us.';
 }
 
-/**
- * Whether a screen may state, as a fact, that a read came back empty.
+/* ── `canAssertEmpty`, and why it is not here ──────────────────────────────
  *
- * The house rule is that an empty list under 'error' means UNKNOWN. This is the
- * same rule reaching one step further back: when the app cannot reach the
- * server at all, even a cached list that looks complete is a list from some
- * earlier moment, and "there are none" is not available as a sentence.
+ * There was a `canAssertEmpty(reach)` at this point in the file — "whether a
+ * screen may state, as a fact, that a read came back empty" — exported, tested,
+ * and called by NOTHING. Four comments in this tree stated the protection it
+ * gave as a fact about the running app: this file's own note on `observedFetch`
+ * below, src/lib/readDeadline.ts, src/lib/requestTimeout.ts and
+ * src/ui/reachability.tsx all said some version of "the banner appears,
+ * `canAssertEmpty` goes false, and every screen switches to the sentences it
+ * has for a phone that cannot reach us". No screen ever asked it anything.
+ *
+ * app/(client)/dashboard.tsx records the same defect one house down —
+ * "`offlineBanner` and `lapsedNote` were both written, both tested and both
+ * read by nothing" — and fixed one of the three. This was the third.
+ *
+ * It was deleted rather than wired, and the reason is that the ground it
+ * covered is already held. src/ui/loadStatus.ts refuses an empty list under
+ * 'error', src/lib/readCache.ts's rule 2 refuses to serve a cached list as
+ * 'ready', and `Fetched` puts the age of the read on screen through
+ * `useReachability()`. So the honest options were to wire it or to delete it,
+ * and wiring it would have meant editing screens on the strength of a
+ * protection whose remaining ground is a sliver. A comment asserting a
+ * safeguard that is not there is worse than no safeguard, and it is worse than
+ * the sliver.
+ *
+ * If a screen ever does need this, the sentence it wants is one line:
+ * `reach !== 'offline'`. What it must not have again is four files describing
+ * it as though somebody had already written it down.
  */
-export const canAssertEmpty = (reach: Reach): boolean => reach !== 'offline';
 
 /* ── the store ────────────────────────────────────────────────────────────
  *
@@ -254,7 +313,8 @@ export function resetReach(): void {
 }
 
 /**
- * `fetch`, with every call reporting what it learnt.
+ * `fetch`, with every call reporting what it learnt — and a ceiling on how long
+ * it may learn nothing for.
  *
  * Installed once, on the Supabase client itself, so this is not a thing each
  * provider has to remember to do — and there is no version of the app where
@@ -265,18 +325,57 @@ export function resetReach(): void {
  * `noteReached`, deliberately — the server answered, which is the only thing
  * this file claims to measure. Whether it answered YES is offlineQueue's
  * question and it has better evidence for it.
+ *
+ * ── The ceiling, and where the evidence is taken ──────────────────────────
+ *
+ * Until src/lib/requestTimeout.ts there was no ceiling at all, and the `catch`
+ * below was unreachable for the failure that matters most: a request nobody
+ * answers does not throw, it simply never settles, so `noteUnreachable` was
+ * never called and the app went on believing it was online with every provider
+ * stuck in 'loading'. Every screen's 'error' copy was correct and could not be
+ * reached. Wrapping the base fetch turns that silence into a throw, and the
+ * throw is labelled so `isTransportFailure` counts it.
+ *
+ * ── Why the verdict is filed per ATTEMPT, before the retry ────────────────
+ *
+ * This is the ordering that makes the read-retry affordable, and it is worth
+ * being explicit about because getting it backwards would undo the fix.
+ *
+ * `noteThrown` runs on EVERY attempt, as it fails, not once at the end. So on a
+ * dead network the first timeout marks the app unreachable at its ceiling — the
+ * home screen's `offlineBanner` appears and `retryLine` stops sending people to
+ * their router over a refusal — whether or not a retry is still in flight
+ * behind it. Those two are what the state actually reaches today; see the note
+ * where `canAssertEmpty` used to be, above, for the third sentence this comment
+ * claimed and no screen ever read.
+ *
+ * A retry therefore extends how long one READ takes to give up. It never
+ * extends how long the APP takes to stop claiming it is online, which is the
+ * number a person is actually standing in front of.
+ *
+ * Only our own ceiling is retried, and only for the methods
+ * `retryOnTimeout` allows — a GET or a HEAD, never a write, for the reasons
+ * written out there. A caller's own abort is not a timeout, so a screen that
+ * unmounts mid-read is not chased with a second request.
  */
 export function observedFetch(
   base: (input: any, init?: any) => Promise<Response>,
+  deps: TimeoutDeps = {},
 ): (input: any, init?: any) => Promise<Response> {
+  const timed = withRequestTimeout(base, deps);
   return async (input: any, init?: any) => {
-    try {
-      const res = await base(input, init);
-      noteReached();
-      return res;
-    } catch (e) {
-      noteThrown(e);
-      throw e;
+    const attempts = maxAttempts(methodOf(input, init));
+    for (let n = 1; ; n += 1) {
+      try {
+        const res = await timed(input, init);
+        noteReached();
+        return res;
+      } catch (e) {
+        // Filed here, inside the loop, on purpose. See above.
+        noteThrown(e);
+        if (n < attempts && isRequestTimeout(e)) continue;
+        throw e;
+      }
     }
   };
 }

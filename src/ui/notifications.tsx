@@ -62,16 +62,38 @@ import {
   inboxAge, inboxIcon, inboxHeading, safeRoute, unreadBadge,
   inboxControls, clearReadPrompt, deletedNote, clearedNote,
 } from '../lib/notifyInbox';
+// The chip row and every sentence it owes. Which kinds exist and why there are
+// only two of them is argued in that file's header; nothing about it is keyed
+// on which of the three builds is asking.
+import {
+  NO_INBOX_FILTER, bulkOffWhileFiltered, filterInbox, hiddenUnread, inboxChips,
+  inboxFilterActive, inboxFilterLine, inboxKind, type InboxKind, type InboxMode,
+} from '../lib/inboxFilter';
 import { writeFailure } from '../lib/wroteRows';
+// Counts of rows in a table with no ceiling. See the notes on `unreadBadge`
+// and on `onMarkAll` below: `1204` unseparated is what this exists to stop.
+import { num } from '../lib/format';
+// 44pt, and the arithmetic that gets a small control there. See
+// ROW_CONTROL_SIZE below.
+import { hitSlopFor } from '../lib/a11y';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { Rule, Ghost, Notice, PartialRead } from './kit';
+import { Section, Ghost, PageHead, Notice, PartialRead, Segmented, IconPlate, TonedChip, type Tone } from './kit';
 import { SkeletonList } from './Skeleton';
-import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+// The two auth reads this file makes, each classified once rather than
+// collapsed. `sessionUid` fronts the list read (storage-first, so it answers
+// offline); `signedInUid` is the stronger check the two deletes take before
+// they read a zero as a refusal. Both end in src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 import { useLive } from './realtime';
+import { useNow } from './today';
+import { FORWARD_ICON } from './direction';
 
 export interface InboxItem {
   id: string;
@@ -84,6 +106,10 @@ export interface InboxItem {
   heading: string | null;
   body: string;
   icon: IconName;
+  /** What the filter chips sort on. Resolved here, from the icon and not from
+   *  the route, because the icon is the value the legacy-message branch below
+   *  overrides and so the only one that is true of every row. */
+  kind: InboxKind;
   /** Already validated against this build's route group. Null means the row is
    *  worth reading and there is nowhere to send the reader. */
   route: string | null;
@@ -95,6 +121,46 @@ export interface InboxItem {
  *  share a phone at the gym and must not see each other's inbox in the gap
  *  before the server answers. */
 const cacheKey = (uid: string) => `repple.notifications:${uid}`;
+
+/**
+ * The colour of a row's plate, by what the row is about.
+ *
+ * The same meanings the rest of the app spends these hues on: a payment is
+ * green (the accent), a message blue, a booking purple, a check-in teal, and
+ * anything that warns (an injury, a notice) amber. Decided from the two values
+ * `rowToItem` has already validated and from nothing else: the ICON, which is
+ * derived from the route and survives the legacy-message override, and the
+ * ROUTE, which has been through `safeRoute`. The stored icon string is a
+ * caller-supplied value and is not read here, for the reason it is not drawn.
+ *
+ * A row that matches nothing takes the accent rather than a guess. The plate
+ * is decoration beside a heading and a body that say what happened in words,
+ * so a colour nobody can name costs the reader nothing.
+ */
+function inboxTone(item: Pick<InboxItem, 'icon' | 'route'>): Tone {
+  const r = item.route ?? '';
+  if (/\/(invoices|packages|payments|billing|money)\b/.test(r)) return 'brand';
+  if (/\/(checkin|check-ins?|intake|habits)\b/.test(r)) return 'teal';
+  switch (item.icon) {
+    case 'message': return 'blue';
+    case 'calendar': return 'purple';
+    case 'heart': case 'info': return 'amber';
+    case 'trophy': case 'dumbbell': return 'orange';
+    case 'sparkle': return 'pink';
+    case 'people': return 'blue';
+    default: return 'brand';
+  }
+}
+
+/**
+ * How big the two icon buttons on a row actually are: a 16pt glyph inside 4pt
+ * of padding.
+ *
+ * Named rather than left as an 8 in a `hitSlop` prop, because the number that
+ * matters is not the slop — it is the drawn size, and the slop is derived from
+ * it by `hitSlopFor`. Change the icon or the padding and the target follows.
+ */
+const ROW_CONTROL_SIZE = 24;
 
 /**
  * Rows written by the `notify-message` edge function — every row in this table
@@ -127,12 +193,20 @@ const rowToItem = (r: any, group: AppVariant): InboxItem => {
     // nothing at all. It is derived from the route instead, so every row draws
     // something, with the legacy message rows recognised above.
     icon: icon as IconName,
+    kind: inboxKind(icon),
     // Through safeRoute either way, including the value this file just chose:
     // one path for validating a route means the group check cannot be skipped
     // by whichever branch somebody adds next.
     route: safeRoute(route, group),
     read: r.read === true,
-    at: String(r.created_at ?? ''),
+    // `r.at` is not a column and is not dead code. This function runs over two
+    // populations: server rows, which carry `created_at`, and the AsyncStorage
+    // cache, which holds already-mapped `InboxItem`s and therefore carries `at`.
+    // Without the second name every cached row came back with `at: ''`, which
+    // `inboxAge` renders as the empty string — so the list a person saw before
+    // the server answered had no ages on it at all, on the one screen where how
+    // old a thing is decides whether it still matters.
+    at: String(r.created_at ?? r.at ?? ''),
   };
 };
 
@@ -160,8 +234,13 @@ export interface InboxValue {
   remove: (id: string) => Promise<{ ok: boolean; why: string | null }>;
   /** Remove every row of mine that is marked read. Returns how many the server
    *  actually deleted — the count is the only thing that separates "there was
-   *  nothing to clear" from "the policy refused every row". */
-  clearRead: () => Promise<{ ok: boolean; changed: number }>;
+   *  nothing to clear" from "the policy refused every row".
+   *
+   *  `why` is a sentence when the reason is one the shared `clearedNote` cannot
+   *  know about: today that is only the auth gate, where "the server did not
+   *  answer" would be the wrong half of the story. Null otherwise, and the
+   *  caller falls back to `clearedNote`. */
+  clearRead: () => Promise<{ ok: boolean; changed: number; why: string | null }>;
 }
 
 /**
@@ -176,24 +255,81 @@ export interface InboxValue {
  *
  * So before a zero can be reported as a failure of the ROW, the caller has to
  * rule out that it was a failure of the SESSION. `getUser()` reaches the server
- * and rejects when there is no valid one, which is exactly the distinction
- * `getSession()` cannot make — it reads a token off the phone that may have
- * expired hours ago. The load path deliberately uses `getSession()` (a
- * rejection there is a signed-out user, not a failed read); this is the one
- * place the stronger check is worth its round trip, because the alternative is
- * telling somebody their notification could not be deleted when the truth is
- * that they are no longer signed in.
+ * and asks, which is the distinction `getSession()` cannot make — it reads a
+ * token off the phone that may have expired hours ago — and this is the one
+ * place the stronger check is worth its round trip.
+ *
+ * ── THREE answers, because the old two were a false sign-out ──────────────
+ *
+ * This returned a boolean, and it was false for `error` of any kind. The
+ * paragraph above used to say `getUser()` "rejects when there is no valid one",
+ * and that is not what the installed library does: src/lib/authReadFate.ts
+ * quotes the `catch` at the bottom of `_getUser`, which RESOLVES with
+ * `{ data: { user: null }, error }` for every AuthError — and a dead fetch,
+ * a DNS failure, a captive portal and every 5xx are all AuthErrors
+ * (`AuthRetryableFetchError`). So an aeroplane, a lift, or ten seconds of
+ * GoTrue being down came back `false`, and `remove()` said in so many words:
+ * "you are not signed in on this device any more. Sign in and try again." To
+ * somebody who was signed in, about a session that was fine, with the one
+ * remedy that cannot help. The person then signs out to sign back in, which is
+ * the only way this advice can make anything worse.
+ *
+ * 'no' is now reserved for what it says: the credential was looked at and
+ * refused, or the account that answered is not the one these rows were read
+ * for. Everything else is 'unknown', and the callers say so instead.
  *
  * Same shape as src/ui/pushNotifications.ts `registerForPush`, which gates its
  * `push_tokens` upsert on getUser() for the same reason.
  */
-async function signedInAs(expected: string | null): Promise<boolean> {
-  if (!expected) return false;
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) return false;
-    return data?.user?.id === expected;
-  } catch { return false; }
+type StillMe = 'yes' | 'no' | 'unknown';
+
+async function signedInAs(expected: string | null, context: string): Promise<StillMe> {
+  if (!expected) return 'no';
+  // Narrowed on `fate`, never on `!who.uid`: UidRead's signed-in member is
+  // `string`, which includes '', so `!who.uid` does not discriminate the union.
+  const who = await signedInUid(context);
+  if (who.fate === 'unreadable') return 'unknown';
+  // A genuine sign-out, or a different account on this phone. Both are 'no':
+  // the rows on screen were read for `expected` and nobody else may act on
+  // them, and in both cases signing in as the right account is the true remedy.
+  return who.uid === expected ? 'yes' : 'no';
+}
+
+/**
+ * Every live `useNotifications` instance, so one of them changing the list
+ * changes all of them.
+ *
+ * ── the bug this exists for ───────────────────────────────────────────────
+ *
+ * The list lives in `useState`, so each call site got its OWN copy. The bell in
+ * the dashboard header and the inbox screen are two call sites. Deleting a
+ * notification in the inbox updated the inbox's copy and the server, and the
+ * bell — still mounted behind the pushed screen, never re-run — went on drawing
+ * the old number. The badge was not stale by a moment; it was stale until
+ * something unrelated happened to remount it.
+ *
+ * The comment on `markUnread` already argues the principle: the badge is
+ * `items.filter(i => !i.read).length` and is DERIVED, because "a separate
+ * counter kept alongside the list is how they drift". Two separate LISTS is the
+ * same defect one level up, and it drifted the same way.
+ *
+ * Keyed by account as well as app: a coach and a client sharing a phone have
+ * two accounts and two inboxes, and a delete in one must not touch the other.
+ * `cacheKey` above is keyed per account for exactly that reason.
+ */
+type InboxSink = (next: InboxItem[]) => void;
+const inboxSinks = new Map<string, Set<InboxSink>>();
+const sinkKey = (group: AppVariant, uid: string) => `${group}:${uid}`;
+
+/** Hand `next` to every instance for this account and app EXCEPT the one that
+ *  produced it, which has already set its own state and must not be told again. */
+function broadcastInbox(group: AppVariant, uid: string, next: InboxItem[], from: InboxSink): void {
+  const set = inboxSinks.get(sinkKey(group, uid));
+  if (!set) return;
+  for (const fn of set) {
+    if (fn === from) continue;
+    try { fn(next); } catch { /* one dead listener is not the others' problem */ }
+  }
 }
 
 export function useNotifications(group: AppVariant): InboxValue {
@@ -210,30 +346,63 @@ export function useNotifications(group: AppVariant): InboxValue {
    *  next launch open on part of the list with no way to know it. */
   const cacheable = useRef(true);
 
-  const setItems = (next: InboxItem[], owner: string | null) => {
+  /** This instance's own way of receiving a list from a sibling. Stable for the
+   *  life of the hook, because it is also the identity `broadcastInbox` skips. */
+  const selfSink = useRef<InboxSink>((next: InboxItem[]) => {
+    listRef.current = next;
+    setItemsState(next);
+  });
+
+  /**
+   * `share` is false for the one write that is not authoritative: seeding from
+   * the AsyncStorage cache on mount. A newly mounted bell holding yesterday's
+   * cached rows must not push them over an inbox that has already read the
+   * server — that would turn this fix into a way of going backwards.
+   */
+  const setItems = (next: InboxItem[], owner: string | null, share = true) => {
     listRef.current = next;
     setItemsState(next);
     if (owner && cacheable.current) {
       AsyncStorage.setItem(cacheKey(owner), JSON.stringify(next)).catch(() => { /* the list is right this session either way */ });
     }
+    const who = owner ?? uid.current;
+    if (share && who) broadcastInbox(group, who, next, selfSink.current);
   };
 
   const load = useCallback(async (): Promise<void> => {
-    let id: string | null = null;
-    try {
-      // getSession(), not getUser(): getUser() REJECTS when nobody is signed
-      // in, and reading that rejection as a failed read is how sibling
-      // providers in this folder used to latch into 'error' before anybody had
-      // signed in at all.
-      const { data: sess } = await supabase.auth.getSession();
-      id = sess?.session?.user?.id ?? null;
-    } catch { /* no local session; treated as signed out below */ }
+    // getSession(), not getUser(): it answers from device storage and therefore
+    // answers offline, which is what an inbox on a phone in a gym needs. What
+    // it cannot do is tell an outage from a sign-out on its own — when the
+    // stored access token has expired and the refresh cannot get out it
+    // resolves `{ data: { session: null }, error }`, the same shape as a phone
+    // with nothing in storage — so the `error` is classified rather than
+    // dropped. See src/lib/sessionUidRead.ts.
+    const who = await sessionUid('notifications.load');
 
+    if (who.fate === 'unreadable') {
+      // We do not know who this is. The branch below would have called that a
+      // sign-out: it cleared `uid`, cleared the LIST — including the
+      // AsyncStorage-cached copy standing in front of a dropped connection —
+      // and set 'ready', which is this screen's word for "this is true". The
+      // person was then shown `emptyTitle` ("Nothing to catch up on") and a
+      // bell with no mark on it, which is the app stating that nobody has
+      // written to them. It is the one sentence this whole file exists to
+      // refuse, and an outage reached it by the only door that was unlocked.
+      //
+      // So: nothing is cleared and nothing is claimed. Whatever is on screen
+      // stays, `uid` stays (the stored session did not change — a refresh
+      // failed), and 'error' puts the "Not confirmed" notice over it. The
+      // realtime channel stays open on the account it already had.
+      setStatus('error');
+      return;
+    }
+
+    const id = who.uid;
     cacheable.current = true;
-    // Signed out, or a build with no backend. Nothing is addressed to nobody,
-    // and there is no absent server to misreport — so this is 'ready', and an
-    // empty inbox here is a true statement.
-    if (!id || !USE_SUPABASE) { uid.current = null; setLiveUid(null); setItems([], null); setStatus('ready'); return; }
+    // Genuinely signed out, or a build with no backend. Nothing is addressed to
+    // nobody, and there is no absent server to misreport — so this is 'ready',
+    // and an empty inbox here is a true statement.
+    if (id === null || !USE_SUPABASE) { uid.current = null; setLiveUid(null); setItems([], null); setStatus('ready'); return; }
     uid.current = id;
     setLiveUid(id);
 
@@ -242,7 +411,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       const raw = await AsyncStorage.getItem(cacheKey(id));
       if (raw) local = (JSON.parse(raw) as any[]).map((r) => rowToItem(r, group));
     } catch { /* no usable cache; the server read below is the only source */ }
-    if (local.length && !listRef.current.length) setItems(local, null);
+    if (local.length && !listRef.current.length) setItems(local, null, false);
 
     try {
       // No `.eq('user_id', …)`. `notif_self` is what decides whose rows come
@@ -268,6 +437,30 @@ export function useNotifications(group: AppVariant): InboxValue {
   }, [group]);
 
   useEffect(() => { void load(); }, [load, authRev]);
+
+  /**
+   * Join the set of live instances for this account and app.
+   *
+   * Keyed on `liveUid` rather than the ref, because the ref changing does not
+   * re-run an effect and a sign-in would otherwise leave this instance
+   * registered under nobody — deaf to every sibling for the rest of its life.
+   */
+  useEffect(() => {
+    if (!liveUid) return;
+    const key = sinkKey(group, liveUid);
+    const mine = selfSink.current;
+    let set = inboxSinks.get(key);
+    if (!set) { set = new Set(); inboxSinks.set(key, set); }
+    set.add(mine);
+    return () => {
+      const live = inboxSinks.get(key);
+      if (!live) return;
+      live.delete(mine);
+      // The last one out takes the key with it, so a phone that has had several
+      // accounts on it does not accumulate an empty set per account forever.
+      if (live.size === 0) inboxSinks.delete(key);
+    };
+  }, [group, liveUid]);
 
   /* ── live ────────────────────────────────────────────────────────────────
    *
@@ -391,8 +584,15 @@ export function useNotifications(group: AppVariant): InboxValue {
     if (!USE_SUPABASE || !uid.current) return { ok: false, why: 'This notification could not be deleted.' };
     const row = listRef.current.find((i) => i.id === id);
     if (!row) return { ok: false, why: 'That notification is no longer on this list, so nothing was deleted.' };
-    if (!(await signedInAs(uid.current))) {
-      return { ok: false, why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.' };
+    const me = await signedInAs(uid.current, 'notifications.remove');
+    if (me === 'no') {
+      return { ok: false, why: 'Nothing was deleted. You are not signed in on this device any more. Sign in and try again.' };
+    }
+    if (me === 'unknown') {
+      // Not a sign-out. The delete is not sent, so `authGateMessage`'s "nothing
+      // has been changed" is literally true, and the row is still on the list
+      // where the reader can see it.
+      return { ok: false, why: `This notification was not deleted. ${authGateMessage('unreadable')}` };
     }
     try {
       const res = await supabase
@@ -406,7 +606,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       setItems(listRef.current.filter((i) => i.id !== id), uid.current);
       return { ok: true, why: null };
     } catch {
-      return { ok: false, why: 'Nothing was deleted — the server did not answer.' };
+      return { ok: false, why: 'Nothing was deleted. The server did not answer.' };
     }
   }, []);
 
@@ -436,10 +636,24 @@ export function useNotifications(group: AppVariant): InboxValue {
    * Verified live that RLS alone already scopes it correctly: one account's
    * clear-read deleted 2 of their own rows and none of the other account's.
    */
-  const clearRead = useCallback(async (): Promise<{ ok: boolean; changed: number }> => {
+  const clearRead = useCallback(async (): Promise<{ ok: boolean; changed: number; why: string | null }> => {
     const me = uid.current;
-    if (!USE_SUPABASE || !me) return { ok: false, changed: 0 };
-    if (!(await signedInAs(me))) return { ok: false, changed: 0 };
+    if (!USE_SUPABASE || !me) return { ok: false, changed: 0, why: null };
+    const still = await signedInAs(me, 'notifications.clearRead');
+    if (still === 'no') {
+      return {
+        ok: false,
+        changed: 0,
+        why: 'Nothing was deleted. You are not signed in on this device any more. Sign in and try again.',
+      };
+    }
+    if (still === 'unknown') {
+      // The delete is not sent, so nothing has changed and the read rows are
+      // all still there. Saying "the server did not answer" — which is what the
+      // shared sentence says for `ok: false` — would be close but would send
+      // somebody looking at the wrong thing.
+      return { ok: false, changed: 0, why: `Nothing was deleted. ${authGateMessage('unreadable')}` };
+    }
     try {
       const res = await supabase
         .from('notifications')
@@ -450,10 +664,20 @@ export function useNotifications(group: AppVariant): InboxValue {
       // marked read" is a real and common outcome, and the caller is handed the
       // count so it can say which happened. `count == null` is a failure though
       // — it means nobody counted — which is what writeFailure checks for.
-      if (res.error || res.count == null) return { ok: false, changed: 0 };
-      setItems(listRef.current.filter((i) => !i.read), me);
-      return { ok: true, changed: res.count };
-    } catch { return { ok: false, changed: 0 }; }
+      if (res.error || res.count == null) return { ok: false, changed: 0, why: null };
+      // Painted only when the server says it deleted something. A DELETE the
+      // policy filtered out answers 204 with a count of zero and no error —
+      // indistinguishable, at this line, from "nothing was marked read" — so
+      // stripping the read rows unconditionally took them off a screen the
+      // server still held them behind, under a dialog that had just said
+      // "Delete 3 read notifications?" and a note that then said "Nothing was
+      // deleted. There was nothing marked read to remove." The rows came back
+      // at the next launch. When the count really is zero there is nothing on
+      // screen this would have removed anyway, so the only case this changes is
+      // the refusal.
+      if (res.count > 0) setItems(listRef.current.filter((i) => !i.read), me);
+      return { ok: true, changed: res.count, why: null };
+    } catch { return { ok: false, changed: 0, why: null }; }
   }, []);
 
   return {
@@ -526,11 +750,11 @@ export function NotificationBell({ group }: { group: AppVariant }) {
         pointerEvents="none"
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={{ position: 'absolute', top: badge.kind === 'count' ? -4 : 2, right: badge.kind === 'count' ? -4 : 2 }}
+        style={{ position: 'absolute', top: badge.kind === 'count' ? -4 : 2, end: badge.kind === 'count' ? -4 : 2 }}
       >
         {badge.kind === 'count' ? (
           <View style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: radius.pill, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }} numberOfLines={1}>{badge.label}</Text>
+            <Text style={{ ...ty.micro, ...font('700'), color: t.brandInk }} numberOfLines={1}>{badge.label}</Text>
           </View>
         ) : badge.kind === 'some' ? (
           // Truncated read: there IS something unread, and the number would be
@@ -556,7 +780,9 @@ export interface InboxFraming {
    *  falls back to 'client' under a bare `expo start` — which would make the
    *  coach's inbox refuse every coach route in development. */
   group: AppVariant;
-  /** The small line above the title. */
+  /** The small line that used to sit above the title. Kept on the framing so
+   *  the three route files need no change, but not drawn: the approved board
+   *  opens this screen with the one word, centred, and nothing over it. */
   kicker: string;
   /** What this screen is called here. */
   title: string;
@@ -578,6 +804,24 @@ export function NotificationInbox(f: InboxFraming) {
   // rows the person is looking at for a skeleton — so the spinner needs its own
   // flag or it never appears and the gesture looks broken.
   const [refreshing, setRefreshing] = useState(false);
+  /**
+   * The instant every row's age is measured from.
+   *
+   * `inboxAge(item.at)` defaults its second argument to `Date.now()`, read in
+   * this render body — which is only as fresh as the last render. All three
+   * route files register this screen with `href: null` (app/(client)/_layout.tsx
+   * and its two siblings), so it is mounted once and never torn down, and
+   * backgrounding the app does not tear it down either. A member who opened the
+   * inbox on Sunday and came back on Wednesday was looking at a list where the
+   * newest thing still said "2h" — on the one screen where how old a thing is
+   * decides whether it still matters.
+   *
+   * `useNow()` re-settles on foreground, on focus, and at the next local
+   * midnight, and it is passed in below rather than left to default. See
+   * src/ui/today.ts, and scripts/check-frozen-day.mjs for why the wrong form is
+   * the one that looks right.
+   */
+  const nowMs = useNow().getTime();
   const onRefresh = async () => {
     setNote(null);
     setRefreshing(true);
@@ -605,6 +849,37 @@ export function NotificationInbox(f: InboxFraming) {
   const readCount = items.filter((i) => i.read).length;
   const clearPrompt = clearReadPrompt(readCount, status);
 
+  /* ── The filter ─────────────────────────────────────────────────────────
+   *
+   * Held here and nowhere else: it is a question somebody is asking of the list
+   * on this visit, not a preference. Nothing persists it, and leaving the screen
+   * returns it to All — an inbox that reopens tomorrow already narrowed is one
+   * that hides tomorrow's cancellation behind a chip somebody pressed once.
+   *
+   * `items` stays the whole list and `shown` is what is drawn. Everything that
+   * speaks about the INBOX — the "3 new" pill, the read count in the Clear Read
+   * confirmation, the genuinely-empty state — goes on reading `items`, because
+   * those are claims about a person's notifications and not about their current
+   * question. Only the rows and the sentence under the chips read `shown`.
+   */
+  const [mode, setMode] = useState<InboxMode>(NO_INBOX_FILTER);
+  const narrowed = inboxFilterActive(mode);
+  const shown = filterInbox(items, mode);
+  const chips = inboxChips(items, mode, status);
+  const filterLine = inboxFilterLine({
+    status,
+    mode,
+    matched: shown.length,
+    searched: items.length,
+    hidden: hiddenUnread(items, mode),
+  });
+  // Whether the bulk row would have been offered at all, which is the same
+  // condition it is rendered under below. Passed in so the sentence is only
+  // produced when there is really a control missing — explaining the absence of
+  // something that was never going to be there is noise.
+  const bulkOffered = items.length > 0 && (items.some((i) => !i.read) || !!clearPrompt);
+  const bulkNote = bulkOffWhileFiltered(mode, bulkOffered);
+
   const onMarkAll = async () => {
     if (busy) return;
     setBusy(true);
@@ -613,11 +888,18 @@ export function NotificationInbox(f: InboxFraming) {
       // Three outcomes, three sentences. The middle one is the one that gets
       // written as "Done" everywhere else in this codebase and is the reason
       // the RPC returns a count at all.
+      // Through num(), for the same reason the badge above is: this is a count
+      // of rows in a table with no ceiling, and a gym pushing an offer a day to
+      // a member who never opens the inbox reaches four digits in three years.
+      // The bell said "1,204 unread" and this line said "Marked 1204 as read"
+      // about the same rows — src/lib/notifyInbox.ts names this exact case.
       setNote(!res.ok
-        ? 'Could not mark them read — the server did not answer. Nothing has changed.'
+        ? 'Could not mark them read. The server did not answer. Nothing has changed.'
         : res.changed === 0
           ? 'Nothing was unread.'
-          : `Marked ${res.changed} as read.`);
+          : res.changed === 1
+            ? 'Marked one as read.'
+            : `Marked ${num(res.changed)} as read.`);
     } finally { setBusy(false); }
   };
 
@@ -636,7 +918,36 @@ export function NotificationInbox(f: InboxFraming) {
    * the confirm-everything habit of `deleteEntry` and `app/(owner)/deletions.tsx`.
    * The reason is what the row IS. Deleting a workout entry destroys the record
    * of something somebody did; deleting the account of a member cascades across
-   * 39 tables. A notification is a COPY of something that already happened —
+   * 118 tables of gym data, plus 11 more inside Supabase's own `auth` schema —
+   * 129 in all.
+   *
+   * That figure read "39 tables" here until 14 September 2026. 39 was measured
+   * when the schema was about a quarter of its present size and was never
+   * re-counted, so this comment understated the contrast it exists to make by
+   * a factor of three. It is not a number to carry in your head; it moves the
+   * day somebody adds a cascading foreign key. Measured against the LIVE
+   * database (project phgfwzpkkwdysftlgkoq) on 14 September 2026, as the
+   * transitive closure of `on delete cascade` from the row
+   * `action_account_deletion()` actually deletes:
+   *
+   *     with recursive fk as (
+   *       select (conrelid::regclass)::text  as child,
+   *              (confrelid::regclass)::text as parent
+   *         from pg_constraint
+   *        where contype = 'f' and confdeltype = 'c')
+   *     , rec as (
+   *       select 'auth.users'::text as tbl
+   *        union
+   *       select fk.child from fk join rec on fk.parent = rec.tbl)
+   *     select count(*) from rec;
+   *
+   * Re-run that, not a count of clauses in `supabase/setup.sql` — the file
+   * parse gives 125 and is wrong, because a `create table` clause is not the
+   * last word on a foreign key. `app/(owner)/deletions.tsx` holds the same
+   * figure in `CASCADE_TABLES` with the same provenance; that is the copy an
+   * owner actually reads, and this one is only an argument about a gesture.
+   *
+   * A notification is a COPY of something that already happened —
    * the session is still cancelled, the invoice is still owed, the booking is
    * still in the calendar — so the cost of a mis-tap is losing a duplicate of a
    * fact that is still recorded in the place it belongs.
@@ -670,7 +981,7 @@ export function NotificationInbox(f: InboxFraming) {
       const res = await markUnread(item.id);
       setNote(res.ok && res.changed
         ? null
-        : 'That notification was not marked unread — the server did not confirm it, so it still reads as read.');
+        : 'That notification was not marked unread. The server did not confirm it, so it still reads as read.');
     } finally { setBusy(false); }
   };
 
@@ -687,7 +998,25 @@ export function NotificationInbox(f: InboxFraming) {
           setBusy(true);
           try {
             const res = await clearRead();
-            setNote(clearedNote(res.ok, res.changed));
+            // The zero-count case has two meanings and the shared sentence can
+            // only carry one. `clearedNote` says "There was nothing marked read
+            // to remove", which is true of an inbox with no read rows and false
+            // of one the policy refused — a bulk DELETE that matched nothing
+            // answers 204 with a count of zero exactly as a filtered one does.
+            // This screen is the only place that knows which of the two it was
+            // looking at, because it counted the read rows to put the figure in
+            // the confirmation. When it named a figure and none of them came
+            // off, it says so rather than repeating a sentence the person can
+            // see is wrong.
+            setNote(res.why
+              // The auth gate's own sentence, which is the one thing
+              // `clearedNote` cannot say — it only knows ok and a count.
+              ? res.why
+              : res.ok && res.changed === 0 && readCount > 0
+              ? (readCount === 1
+                ? 'Nothing was deleted. The read notification is still in your inbox. The server did not remove it.'
+                : `Nothing was deleted. Those ${num(readCount)} read notifications are still in your inbox. The server did not remove them.`)
+              : clearedNote(res.ok, res.changed));
           } finally { setBusy(false); }
         } },
       ],
@@ -711,22 +1040,20 @@ export function NotificationInbox(f: InboxFraming) {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={t.ink3} />}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{f.kicker}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{f.title}</Text>
-          </View>
-          {badge.kind === 'count' ? (
-            <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
-              {/* caption, not micro: micro uppercases, and "3 NEW" is the same
-                  defect as the "2H" timestamp below — a word beside a figure,
-                  shouted. */}
-              <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
-            </View>
-          ) : null}
+        {/* ── the head, the board's way (coach page 18) ────────────────────
+            Back at the start, the title centred, and the unread pill at the
+            end. The kicker is no longer drawn — the board opens this screen
+            with the one word — and the blurb has moved to the foot of the
+            list, so nothing procedural sits in the first viewport. When there
+            is no pill PageHead's own blank holds the title in the middle. */}
+        <View style={{ marginBottom: sp.lg }}>
+          <PageHead title={f.title} trailing={badge.kind === 'count' ? (
+            // The kit's chip: the accent's pale plate under its text colour,
+            // in the case it was given. Not uppercased, for the reason the
+            // "2H" timestamp below gives: a word beside a figure, shouted.
+            <TonedChip label={`${badge.label} New`} />
+          ) : undefined} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>{f.blurb}</Text>
 
         {status === 'error' ? (
           // Deliberately NOT "you have no notifications". Under 'error' an
@@ -735,11 +1062,11 @@ export function NotificationInbox(f: InboxFraming) {
           // left to be inferred from a list that looks authoritative.
           <Notice
             tone={t.crit}
-            kicker="Not confirmed"
+            kicker="Not Confirmed"
             title={items.length ? 'This is the last copy on this phone' : 'Your notifications could not be read'}
             note={items.length
               ? 'The server did not answer, so anything sent since you were last connected is not on this list.'
-              : 'The server did not answer. This is not the same as having none — pull down to try again once you have a connection.'}
+              : 'The server did not answer. This is not the same as having none. Pull down to try again once you have a connection.'}
           />
         ) : null}
 
@@ -747,7 +1074,47 @@ export function NotificationInbox(f: InboxFraming) {
 
         {note ? <Notice kicker="Inbox" title={note} /> : null}
 
-        <Rule />
+        {/* ── the chip row ────────────────────────────────────────────────
+            Single-select, so there is never a fifth state nobody named. Drawn
+            only when `inboxChips` returns more than one — a lone All over an
+            unfiltered list is furniture — which also means an owner inbox
+            holding nothing filterable shows no controls rather than three that
+            can only filter to nothing.
+
+            The colours are the ones app/(trainer)/messages.tsx already uses for
+            this exact control: brandInk on brand when lit, ink2 on surface2
+            when not. No lineHeight is pinned anywhere here — `ty.micro` already
+            carries one through grown(), and writing a number after it is what
+            clips a paragraph at the largest text size. */}
+        {chips.length ? (
+          <View style={{ marginBottom: sp.lg }}>
+            {/* One full-width segmented bar — All | Unread on the board — in
+                the idiom app/(client)/nutrition.tsx draws its meal slots with:
+                equal segments in a surface2 pill, the lit one filled with ink.
+                The chips themselves are unchanged: same set, same order, same
+                labels and spoken lines from `inboxChips`. */}
+            {/* The kit's bar now, not a hand-built copy of it: the tablist
+                and tab roles, `selected` on each, and the large-text behaviour
+                are Segmented's. `a11yLabel` is the chip's own spoken line, which
+                carries the figure, or the reason there is not one, because a
+                number drawn on a chip that nobody can hear is the same defect
+                as a number that is wrong. With four chips the bar SCROLLS, its
+                segments as wide as their words: "Sessions · 12" is a figure,
+                and a figure is never cut to fit a quarter of the screen. */}
+            <Segmented
+              options={chips.map((c) => ({ key: c.mode, label: c.label, a11yLabel: c.a11y }))}
+              value={mode} onChange={setMode} scroll={chips.length > 3} />
+            {/* What the narrowing did, and what it is holding back. The only
+                thing on this screen allowed to state an absence, and only under
+                a whole read — see src/lib/inboxFilter.ts. The unread rows a chip
+                is hiding are named here whatever the status, because a
+                notification arriving over the realtime subscription into a
+                filter that excludes it is exactly the failure this exists for. */}
+            {filterLine ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{filterLine}</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {status === 'loading' && !items.length ? (
           <View style={{ paddingTop: sp.lg }}><SkeletonList n={4} /></View>
@@ -755,16 +1122,24 @@ export function NotificationInbox(f: InboxFraming) {
 
         {status === 'ready' && !items.length ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
-            <Icon name="bell" size={26} color={t.ink3} />
+            <IconPlate icon="bell" tone="neutral" size={56} />
             <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>{f.emptyTitle}</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, textAlign: 'center' }}>{f.emptyNote}</Text>
           </View>
         ) : null}
 
-        {items.map((item, i) => (
+        {/* `shown`, not `items`. The genuinely-empty state above deliberately
+            stays on `items`: "Nothing to catch up on" is a statement about
+            somebody's inbox, and a chip matching nothing is not that. What a
+            narrowed empty list says instead is the filter line under the chips,
+            which is the one place that can tell the two apart. */}
+        {/* The rows sit in one card, as the board draws them (coach page 18):
+            a round mark at the start, the heading over the body, the age and a
+            chevron at the end. */}
+        {shown.length ? <Section style={{ marginTop: 0, paddingVertical: 0 }}>{shown.map((item, i) => (
           <View
             key={item.id}
-            style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
           >
             {/* The row's own tap target stops at the controls. Nesting the
                 delete inside the Pressable that opens the notification would
@@ -775,59 +1150,66 @@ export function NotificationInbox(f: InboxFraming) {
               accessibilityRole="button"
               accessibilityLabel={`${item.heading ?? 'Notification'}. ${item.body}`}
               accessibilityState={{ selected: !item.read }}
-              style={{ flex: 1, flexDirection: 'row', gap: sp.md }}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}
             >
-              <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : t.surface3 }}>
-                <Icon name={item.icon} size={17} color={item.read ? t.ink3 : t.brand} />
-              </View>
+              {/* The mockups' mark: a toned plate that names what KIND of
+                  thing happened (see `inboxTone`), and the grey of "nothing to
+                  report" once the row has been read. The fill IS the unread state — the 7pt dot that
+                  used to sit beside the age said the same thing twice. It is
+                  per row and needs no whole-list read to be true: this row came
+                  back with read=false, whatever the status of the set it
+                  arrived in. */}
+              <IconPlate icon={item.icon} tone={item.read ? 'neutral' : inboxTone(item)} />
               <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                  {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
-                      "Notifications" — over every untitled row, which reads as
-                      a heading somebody wrote and says nothing. `inboxHeading`
-                      returns a true one or none at all; when it is none the
-                      body moves up into this line's place and the age still
-                      has a row to sit on. */}
-                  {item.heading ? (
-                    <Text style={{ ...ty.label, fontWeight: item.read ? '500' : '700', color: t.ink, flex: 1 }} numberOfLines={1}>
-                      {item.heading}
-                    </Text>
-                  ) : (
-                    <View style={{ flex: 1 }} />
-                  )}
-                  {/* ty.caption, not ty.micro: micro carries
-                      `textTransform: 'uppercase'` and rendered a two-hour-old
-                      notification as "2H". A unit beside a figure is lowercase
-                      everywhere else in this app (kg, kcal, min), and an
-                      uppercased aside shouts as loudly as the heading it sits
-                      next to. Same change, same reason, as the `Field` hint in
-                      src/ui/kit.tsx. */}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at)}</Text>
-                  {/* The unread mark is per row and needs no whole-list read to
-                      be true: this row came back with read=false, whatever the
-                      status of the set it arrived in. */}
-                  {!item.read ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.brand }} /> : null}
-                </View>
-                <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 3 : 0 }}>{item.body}</Text>
+                {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
+                    "Notifications" — over every untitled row, which reads as
+                    a heading somebody wrote and says nothing. `inboxHeading`
+                    returns a true one or none at all; when it is none the
+                    body moves up into this line's place. */}
+                {item.heading ? (
+                  <Text style={{ ...ty.head, ...font(item.read ? '500' : '700'), color: t.ink }}>
+                    {item.heading}
+                  </Text>
+                ) : null}
+                <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 2 : 0 }}>{item.body}</Text>
                 {item.route ? null : (
                   // A row whose stored route this build will not follow. Saying
                   // so is better than a tap that appears to do nothing. Caption
-                  // rather than micro for the same reason as the age above:
+                  // rather than micro for the same reason as the age below:
                   // this is a sentence, and micro would shout it.
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Nothing to open</Text>
                 )}
               </View>
+              {/* ty.caption, not ty.micro: micro carries
+                  `textTransform: 'uppercase'` and rendered a two-hour-old
+                  notification as "2H". A unit beside a figure is lowercase
+                  everywhere else in this app (kg, kcal, min), and an
+                  uppercased aside shouts as loudly as the heading it sits
+                  next to. Same change, same reason, as the `Field` hint in
+                  src/ui/kit.tsx. */}
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at, nowMs)}</Text>
             </Pressable>
 
             {/* Back to unread, on read rows only — on an unread row it is a
                 control that cannot do anything. `eye-off` because that is what
-                it means: not seen. */}
+                it means: not seen.
+
+                ── The slop, and why it is not 8 ──────────────────────────────
+                A 16pt icon in 4pt of padding is 24pt drawn. `hitSlop={8}` takes
+                that to 40 — four short of the 44 src/lib/a11y.ts requires, and
+                short in BOTH axes, on a row where the next control along is
+                this one's destructive neighbour eight points away. Two 40pt
+                targets side by side, tapped one-handed while walking out of a
+                gym, is how somebody deletes the message they meant to mark
+                unread. `hitSlopFor` computes the slop that brings a control of a
+                given size up to 44 — it is the same arithmetic every time and
+                this file is the last place it should be done by eye. */}
             {controls.markUnread && item.read ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Mark ${item.heading ?? 'this notification'} as unread`}
                 onPress={() => void onMarkUnread(item)}
-                hitSlop={8}
+                hitSlop={hitSlopFor(ROW_CONTROL_SIZE)}
                 style={{ padding: 4 }}
               >
                 <Icon name="eye-off" size={16} color={t.ink3} />
@@ -844,16 +1226,33 @@ export function NotificationInbox(f: InboxFraming) {
                 accessibilityRole="button"
                 accessibilityLabel={`Delete ${item.heading ?? 'this notification'}`}
                 onPress={() => void onDelete(item)}
-                hitSlop={8}
+                hitSlop={hitSlopFor(ROW_CONTROL_SIZE)}
                 style={{ padding: 4 }}
               >
                 <Icon name="minus" size={16} color={t.crit} />
               </Pressable>
             ) : null}
-          </View>
-        ))}
 
-        {items.length > 0 && (items.some((i) => !i.read) || clearPrompt) ? (
+            {/* The board's chevron, only where a tap goes somewhere. Drawn
+                outside the Pressable so the two row controls keep their place
+                between the text and the edge, and hidden from the reader — the
+                row's own label and role already say it opens. */}
+            {item.route ? (
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+              </View>
+            ) : null}
+          </View>
+        ))}</Section> : null}
+
+        {/* Withheld under a live filter, and said rather than simply gone. Both
+            of these are scoped by PREDICATE and not by what is drawn — the RPC
+            takes everything unread, the clear takes everything read — so under
+            a chip showing six of forty rows they act on rows the reader cannot
+            see, and `clearReadPrompt` would name a figure counted over the whole
+            inbox beneath a list that is not it. `bulkNote` below says so and
+            says the way back. */}
+        {!narrowed && bulkOffered ? (
           <View style={{ marginTop: layout.section, flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
             {items.some((i) => !i.read) ? (
               <Ghost label={busy ? 'Working…' : 'Mark All Read'} icon="check" onPress={() => void onMarkAll()} />
@@ -874,6 +1273,15 @@ export function NotificationInbox(f: InboxFraming) {
         {controls.withheld && items.length > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{controls.withheld}</Text>
         ) : null}
+
+        {bulkNote ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{bulkNote}</Text>
+        ) : null}
+
+        {/* What this inbox carries and what it does not — the framing's blurb,
+            under the list rather than over it. It is the one line that
+            differs between the three apps, and it is still said. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: layout.section }}>{f.blurb}</Text>
 
         {/* WHY THERE IS NO "CLEAR ALL".
             An unread notification is one the person has not seen, and the only

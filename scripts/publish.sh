@@ -38,6 +38,30 @@ if [ ${#CHANNELS[@]} -eq 0 ]; then
 fi
 cd "$(dirname "$0")/.."
 
+# Scope check:runtime-reach to the channels this run is actually publishing to.
+#
+# That gate is in check:all, and check:all takes no arguments, so without this
+# it would judge all six channels during a run narrowed to one — and refuse the
+# publish over five channels nobody was publishing to. Narrowing is the whole
+# point of the paragraph above; it must not be the thing that blocks a publish.
+export REPPLE_REACH_CHANNELS="${CHANNELS[*]}"
+
+# ── the App Store Connect key, if this machine has one ─────────────────────
+#
+# `check:testflight` below reads three environment variables. On a developer's
+# machine they come from their shell profile; a non-interactive runner — CI, or
+# an agent shelling out — sources no profile and would therefore SKIP the one
+# check that answers "can anybody install this", silently and with exit 0.
+# Skipping is the correct behaviour when there is no key and the wrong
+# behaviour when there is one sitting on disk unread.
+#
+# Guarded, so a clone without the file is untouched. The file lives outside the
+# repo and holds a team-wide private key path; nothing here prints it.
+if [ -z "${ASC_ISSUER_ID:-}" ] && [ -f "$HOME/.appstoreconnect/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.appstoreconnect/env"
+fi
+
 # Where the bundling actually happens. Set below to a detached worktree at HEAD
 # rather than this directory, so an agent writing a file mid-publish cannot
 # reach the thing being bundled at all. The first version of this script only
@@ -108,6 +132,89 @@ npm test >/dev/null
 npm run check:all
 printf '%-20s ' "check:schema"
 npm run --silent check:schema >/dev/null 2>&1 && echo ok || { echo FAIL; exit 1; }
+
+echo
+echo "── can these channels receive this runtime? ──"
+#
+# Run by name and NOT only inside check:all, because this is the one gate whose
+# answer is about the channels on the command line rather than about the source
+# tree, and its per-channel output is worth reading at the moment of publishing.
+#
+# It exists because of 4 September, and it is worth being exact about how much
+# of that it covers: app.json went to 1.3.0, this script published sixteen
+# bundles to runtime 1.3.0, and the only live client install was a 1.0.0 build
+# because the TestFlight group had never been given a newer one. Every publish
+# printed an Update group ID and exited 0.
+#
+# This gate would have been GREEN through all of it on iOS. Builds 44 and 45
+# were finished at 1.3.0 within minutes of the bump. What was missing was not a
+# binary, it was that binary being RELEASED TO A TESTER GROUP — App Store
+# Connect, an ASC API key this repo does not hold, and a screen no check here
+# can read. Submitted and approved is not released. Somebody still has to look.
+#
+# What it does catch: publishing into the gap between a version bump and a
+# build, and a platform where the build never followed. On 7 Sep 2026, with iOS
+# green, REPPLE_REACH_PLATFORM=android failed on all three preview channels —
+# the APKs, which per the note above are the ONLY installable Android artifacts
+# — because none has been built since the bump. Ask it that way before
+# believing an Android tester is receiving any of this.
+node scripts/check-runtime-reach.mjs "${CHANNELS[@]}"
+
+# ── and can anybody INSTALL it? ────────────────────────────────────────────
+#
+# The gate above proves a binary exists at this runtime. It then prints the one
+# thing it cannot check and tells the reader to check it by eye: whether that
+# binary is actually assigned to a TestFlight tester group. "Check it by eye"
+# is the instruction that failed sixteen times in a row, because nobody eyeballs
+# a thing they believe is fine.
+#
+# This asks Apple. It needs an App Store Connect API key, and with none
+# configured it says so and exits 0 — so a clone with no key publishes exactly
+# as it did before, and a machine with one gets the answer. See the script's
+# header for the three variables and where they come from.
+#
+# Once per APP, and only for the apps whose channels are in this run. The three
+# variants are three App Store records with three sets of tester groups, and
+# they are not in the same state: the first run of this gate found the client's
+# external group holding 1.3.0 and the COACH's holding 1.0.0 (build 7), so every
+# coach OTA since the version bump has been invisible to every external coach
+# tester. A check that looked only at the client app would have passed.
+#
+# Narrowed with the channels rather than always checking all three, so a
+# deliberate `publish.sh "msg" production` is not blocked by the state of an app
+# it is not publishing to. The mapping is the same 1:1 one the channel list
+# uses, written out because it is two lines and a lookup table nobody can
+# misread beats a clever transformation of a string.
+#
+# Not `&&`-guarded and not backgrounded: a non-zero exit here means what is
+# about to be sent cannot reach the people it is for, and that is a reason to
+# stop rather than a warning to scroll past.
+tf_bundles=()
+for ch in "${CHANNELS[@]}"; do
+  case "$ch" in
+    production|preview)             tf_bundles+=("com.washateria.repple") ;;
+    coach-production|coach-preview) tf_bundles+=("com.washateria.repple.coach") ;;
+    owner-production|owner-preview) tf_bundles+=("com.washateria.repple.studio") ;;
+    # An example-brand or one-off channel names no app this mapping knows. Said
+    # rather than skipped in silence: an unchecked channel is exactly what the
+    # nine days were.
+    *) echo "check:testflight — no bundle id known for channel '$ch'; not checked." ;;
+  esac
+done
+# Deduplicated, because production and preview are the same app.
+#
+# The length test is not defensive padding. This script runs under `set -u`,
+# and `"${tf_bundles[@]}"` on an EMPTY array is an unbound variable there — so a
+# publish narrowed to channels this mapping does not know (an example-brand
+# channel, say) would abort the whole run with "tf_bundles[@]: unbound
+# variable", after the gates had passed and before anything was published. The
+# case above already says such a channel is not checked; this is what makes
+# that true rather than fatal.
+if [ "${#tf_bundles[@]}" -gt 0 ]; then
+  while IFS= read -r b; do
+    [ -n "$b" ] && node scripts/check-testflight.mjs "$b"
+  done < <(printf '%s\n' "${tf_bundles[@]}" | sort -u)
+fi
 
 echo
 echo "── publish ──"

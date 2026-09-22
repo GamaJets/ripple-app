@@ -17,7 +17,7 @@ import {
   FALLBACK_LOCALE, appLocale, isWellFormedLocale, localeNote, localeSource,
   normaliseLocale, prefers12Hour, resolveLocale, setAppLocale,
 } from './locale';
-import { fmtAxisDay, fmtClock, fmtDay, fmtFullDay, fmtPointDay, fmtRelativeDay, monthNamesShort, isoDate, num, num1 } from './format';
+import { fmtAxisDay, fmtClock, fmtDay, fmtFullDay, fmtPointDay, fmtRelativeDay, monthNamesShort, isoDate, num, num1, num2, numUpTo } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -226,6 +226,45 @@ setAppLocale('de-DE');
 eq(isoDate(new Date(2026, 7, 1)), '2026-08-01', 'a storage key is not localised');
 setAppLocale('ar-EG');
 eq(isoDate(new Date(2026, 7, 1)), '2026-08-01', 'not even in a locale with its own digits');
+
+/* ── the two decimals below `num1`, and the trimmed one ───────────────────
+ *
+ * The defect these pin is `toFixed`. Thirty-one call sites wrote a fraction
+ * with it — a goal pace, a strength ratio, a churn percentage, a file size —
+ * and `toFixed` is `Number.prototype`'s own decimal spelling, not a formatter:
+ * it writes a FULL STOP in every locale there has ever been and it never
+ * groups. So one paragraph printed "1,204.5 kg" from `num1` and "0.25 kg/wk"
+ * from `toFixed`, and in German the second of those is not a quarter of a
+ * kilogram — a full stop is the thousands mark, so it reads as twenty-five.
+ */
+setAppLocale('en-GB');
+eq(num2(0.25), '0.25', 'a British reader gets a point on a two-decimal rate');
+eq(num2(1), '1.00', 'and both places, because a fixed two is the point of num2');
+setAppLocale('de-DE');
+eq(num2(0.25), '0,25', 'a German reader gets a comma on the same rate');
+eq(num2(1204.5), '1.204,50', 'and grouping, which toFixed never did at all');
+eq(num2(null), '—', 'a missing rate is a dash, never a zero');
+eq(num2(Number.POSITIVE_INFINITY), '—', 'and so is an infinity');
+
+// numUpTo is the other half: at most N places, trailing zeros dropped. Two
+// screens wrote this as `.toFixed(2).replace(/0$/, '').replace(/\.$/, '')`,
+// which is an English point AND a trim that cannot find a comma — so on a
+// German handset the trim silently stopped working too.
+setAppLocale('en-GB');
+eq(numUpTo(8, 1), '8', 'a whole number of hours does not become 8.0');
+eq(numUpTo(7.5, 1), '7.5', 'and a half hour keeps its half');
+eq(numUpTo(1.75, 2), '1.75', 'two places where two are wanted');
+eq(numUpTo(1.5, 2), '1.5', 'and no trailing zero to pad it out');
+setAppLocale('de-DE');
+eq(numUpTo(7.5, 1), '7,5', 'the same half hour, in the reader\'s own separator');
+eq(numUpTo(1.5, 2), '1,5', 'and the trailing zero still goes, which the hand-rolled trim could not do');
+eq(numUpTo(8, 1), '8', 'a whole is a whole in every locale');
+// The clamp, which exists because Intl throws a RangeError outside 0-20 and a
+// throw inside a formatter takes out whichever screen was drawing a figure.
+setAppLocale('en-GB');
+eq(numUpTo(1.5, -3), '2', 'a negative place count clamps to none rather than throwing');
+eq(numUpTo(1.5, 99), '1.5', 'and an absurd one clamps to Intl\'s ceiling');
+eq(numUpTo(null, 2), '—', 'a missing figure is a dash here too');
 
 // Leave the latch where a later test file would expect nothing in particular.
 setAppLocale(null);

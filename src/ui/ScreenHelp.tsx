@@ -26,10 +26,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Ghost } from './kit';
-import { sp, radius, hairline, type as ty } from '../theme/scale';
+import { sp, radius, hairline, type as ty, grown } from '../theme/scale';
 import {
   SCREEN_HELP, dismissedFrom, isDismissed, withDismissed, type ScreenHelpKey,
 } from '../lib/screenHelp';
+import { FORWARD_ICON, turn } from './direction';
 
 const KEY = 'repple.screenHelp.dismissed';
 
@@ -82,7 +83,16 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
       >
         <Icon name="info" size={16} color={t.brand} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{help.title}</Text>
-        <Icon name="chevron" size={14} color={t.ink3} />
+        {/* The chevron turns when the card is open. It did not: the row kept
+            drawing a forward chevron while three paragraphs sat underneath it,
+            so the one visible affordance said "there is more over there" about
+            content that was already on screen — and nothing said the tap that
+            would put it away. `accessibilityState` had been telling a screen
+            reader all along; this is the same fact for the eye, in the house
+            form used by every other disclosure in the app. */}
+        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+          <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
+        </View>
       </Pressable>
 
       {open ? (
@@ -91,9 +101,16 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
             // One text node, not two: the term and its explanation are one
             // sentence and wrap as one. Split across two <Text> they hang the
             // explanation under a heading and the row becomes three rows.
+            // `grown(18)`, not a raw 18. `ty.caption` already carries a line
+            // height that tracks the reader's text size; pinning one here puts
+            // back the exact defect src/lib/typeScale.ts was written to end —
+            // React Native scales fontSize and never lineHeight, so at 235%
+            // text these are 28pt glyphs laid out in an 18pt line. This card is
+            // the app's own explanation of the screen you are on, so the reader
+            // who turned their text up is the reader it clips.
             <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: 18 }}>
               <Text style={{ color: t.ink2, fontWeight: '600' }}>{l.term}</Text>
-              {' — '}{l.means}
+              {': '}{l.means}
             </Text>
           ))}
           <View style={{ flexDirection: 'row', marginTop: sp.sm }}>

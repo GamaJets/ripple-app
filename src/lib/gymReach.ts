@@ -43,6 +43,10 @@
 // honest half is built here; `segmentCsv` hands the rest to whatever the gym
 // already uses to send email, rather than pretending.
 
+// One CSV writer for the whole product. `toCsv` carries the BOM and the CRLF
+// endings that decide whether a non-ASCII member name survives being opened.
+import { toCsv } from './gymExport';
+
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
 /* ── who is in a segment ───────────────────────────────────────────────────── */
@@ -107,7 +111,7 @@ export function buildSegments(
   const active = members.filter((m) => m.status === 'active');
   const doorNote = live
     ? ''
-    : ' The door log is silent or unread, so nobody can be placed here — this is not a gym where everyone is still coming in.';
+    : ' The door log is silent or unread, so nobody can be placed here. This is not a gym where everyone is still coming in.';
 
   const seenBand = (lo: number, hi: number | null) => (live
     ? active.filter((m) => m.lastSeenDays != null && m.lastSeenDays >= lo && (hi == null || m.lastSeenDays < hi))
@@ -122,7 +126,7 @@ export function buildSegments(
     },
     {
       id: 'lapsing',
-      label: `Slipping — ${LAPSING_DAYS} to ${UNSEEN_DAYS} days`,
+      label: `Slipping · ${LAPSING_DAYS} to ${UNSEEN_DAYS} days`,
       note: `Active members whose last visit was between ${LAPSING_DAYS} and ${UNSEEN_DAYS} days ago. Still members; the gap is new.${doorNote}`,
       members: seenBand(LAPSING_DAYS, UNSEEN_DAYS),
     },
@@ -135,7 +139,7 @@ export function buildSegments(
     {
       id: 'never-seen',
       label: 'Never through the door',
-      note: `Active members with no visit in the window at all — usually a new joiner nobody has got in yet, occasionally a desk that stopped scanning.${doorNote}`,
+      note: `Active members with no visit in the window at all, usually a new joiner nobody has got in yet, occasionally a desk that stopped scanning.${doorNote}`,
       members: live ? active.filter((m) => m.lastSeenDays == null) : [],
     },
     {
@@ -162,27 +166,36 @@ export function buildSegments(
  * with the law rather than with its members. A CSV hands the list to whatever
  * already has them.
  *
- * Fields are quoted and internal quotes doubled, so a member called
- * O'Brien, Jr. does not silently split into two columns.
+ * ── written by `toCsv`, having been written by hand ───────────────────────
+ *
+ * This had its own `cell()` and joined its lines with `'\n'`, and it emitted no
+ * byte-order mark. Both omissions have the same victim: Excel opens a
+ * BOM-less UTF-8 file in the machine's legacy code page, so a gym in the Gulf
+ * downloads its own call list and `Ahmed Al-Naïm` arrives as mojibake — in the
+ * NAME column, on the list somebody is about to ring people from.
+ *
+ * `toCsv` in src/lib/gymExport.ts does the BOM and the CRLF endings and says
+ * why in as many words, and /export advertises it as the correct writer. The
+ * roster segment beside the desk is the download an owner actually uses and it
+ * used a different one. There is now one writer.
  */
 export function segmentCsv(seg: Segment, contactFor?: (memberId: string) => { email: string | null; phone: string | null }): string {
-  const cell = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['Member id', 'Name', 'Membership', 'Days since last visit', 'Email', 'Phone'];
-  const lines = [head.map(cell).join(',')];
-  for (const m of seg.members) {
-    const c = contactFor?.(m.memberId) ?? { email: null, phone: null };
-    lines.push([
-      cell(m.memberId),
-      cell(m.name),
-      cell(m.status),
-      // Empty, not 0: a member the door log has never seen has no interval, and
-      // 0 in this column reads as "came in today" to whoever opens the file.
-      cell(m.lastSeenDays == null ? '' : String(m.lastSeenDays)),
-      cell(c.email),
-      cell(c.phone),
-    ].join(','));
-  }
-  return lines.join('\n');
+  return toCsv(
+    ['Member id', 'Name', 'Membership', 'Days since last visit', 'Email', 'Phone'],
+    seg.members.map((m) => {
+      const c = contactFor?.(m.memberId) ?? { email: null, phone: null };
+      return [
+        m.memberId,
+        m.name,
+        m.status,
+        // Empty, not 0: a member the door log has never seen has no interval, and
+        // 0 in this column reads as "came in today" to whoever opens the file.
+        m.lastSeenDays == null ? '' : String(m.lastSeenDays),
+        c.email,
+        c.phone,
+      ];
+    }),
+  );
 }
 
 /* ── sending ───────────────────────────────────────────────────────────────── */
@@ -319,7 +332,7 @@ export function deliveryNote(r: ReachResult, intended: number): string {
     return 'Posted to the gym’s notice board. How many inboxes it reached could not be read, so that number is unknown rather than nil.';
   }
   if (r.delivered < intended) {
-    return `Posted, and delivered to ${r.delivered} of ${intended} inboxes. The difference is accounts the database would not write to — usually somebody who has left the gym. No push was sent; the console cannot send one.`;
+    return `Posted, and delivered to ${r.delivered} of ${intended} inboxes. The difference is accounts the database would not write to, usually somebody who has left the gym. No push was sent; the console cannot send one.`;
   }
-  return `Posted, and delivered to ${r.delivered} ${r.delivered === 1 ? 'inbox' : 'inboxes'}. No push was sent — the console cannot send one, so it will be read next time they open the app.`;
+  return `Posted, and delivered to ${r.delivered} ${r.delivered === 1 ? 'inbox' : 'inboxes'}. No push was sent. The console cannot send one, so it will be read next time they open the app.`;
 }

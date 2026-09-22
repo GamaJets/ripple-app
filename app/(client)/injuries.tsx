@@ -34,20 +34,26 @@
 // and a viewer that never hands the file to another app
 // (src/lib/injuryDocView.ts). Editing the injury a report produced changes the
 // injury and nothing else.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
-import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
-import { ackState } from '../../src/lib/injuryGate';
+import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle, injuryStanding } from '../../src/lib/injuryEdit';
+import { ackState, programChoiceState } from '../../src/lib/injuryGate';
+import { worstStatus } from '../../src/ui/loadStatus';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
+// The day this screen judges a disclosure's age against, kept live across
+// midnight. See `nowMs` below.
+import { useNow } from '../../src/ui/today';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -55,6 +61,9 @@ const SEVS: { id: InjurySeverity; label: string }[] = [
 
 export default function Injuries() {
   const t = useTheme();
+  // The movements the coach acknowledged loading are recorded under their
+  // English names, and this screen is the member's own record of that decision.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const c = useClientData();
   const [open, setOpen] = useState(false);
@@ -65,6 +74,17 @@ export default function Injuries() {
   // Held whole rather than as an id: the warning below is about what CHANGED,
   // so it needs the values as they were before the fields were touched.
   const [editing, setEditing] = useState<Injury | null>(null);
+  /**
+   * The clock every row's age is read against.
+   *
+   * `useNow()` and not `Date.now()`. A `Date.now()` in the render body is
+   * correct every time this screen redraws and only then, and a screen sitting
+   * open on a list of injuries redraws for nothing at all — so a row reading
+   * "Disclosed 89 days ago" the evening before the threshold would still say
+   * so the next morning, and the question this screen exists to put would not
+   * be put. `useNow` re-settles at local midnight, on foreground and on focus.
+   */
+  const nowMs = useNow().getTime();
 
   const active = c.injuries.filter((i) => i.status === 'active');
   const past = c.injuries.filter((i) => i.status === 'recovered');
@@ -77,10 +97,35 @@ export default function Injuries() {
   // and program_inj_ack_client_r), and the second one exists specifically so
   // somebody who disclosed a knee can see that leg press was assigned knowing.
   const mine = useMyInjuryAcks();
+  // The disclosures themselves live on the profile; whether the coach has read
+  // them is a second, independent read. "Your coach has seen this" is exactly
+  // the line somebody pulls a screen down to check.
+  const pull = usePullToRefresh(useCallback(() => { c.reload(); mine.reload(); }, [c.reload, mine.reload]));
   // The coach's side asks the same function. Two screens, one definition of
   // "read": a confirmation covers the disclosures it was made against, so a
   // client who has added one since is told it is waiting rather than read.
-  const coachRead = ackState(mine.status, active, mine.read?.keys ?? null);
+  // mine.readStatus, not mine.status: the acknowledgement read and the
+  // program read fail independently, and the folded figure made this
+  // sentence disclaim an answer that had come back perfectly.
+  // BOTH reads, folded with `worstStatus`. `ackState` is given a status and a
+  // list of disclosures, and the status it was given was only ever the
+  // acknowledgement half — while `active` comes off `c.injuries`, whose read is
+  // `c.profileStatus` and which this provider deliberately does NOT clear when
+  // that read fails (the cached copy stays on screen, which is right). So a
+  // healthy ack read over a stale or unconfirmed disclosure list satisfies
+  // `active.every(seen.has(...))` trivially, and this screen printed "Your
+  // coach confirmed they have read these" over a list the app had just failed
+  // to confirm — about the one subject where being wrong sends somebody into a
+  // session on a knee nobody has been told about.
+  //
+  // The coach's side of this exact fact already takes the disclosure read's
+  // status as its FIRST argument, and says why in as many words: "An empty
+  // `active` means 'they have disclosed nothing' only when the read that
+  // produced it finished." One function, two readers, and the two must not be
+  // able to disagree — so the client side passes the same thing.
+  const coachRead = ackState(worstStatus(mine.readStatus, c.profileStatus), active, mine.read?.keys ?? null);
+  // The second fact, with its own status and its own failure sentence.
+  const choices = programChoiceState(mine.choicesStatus, mine.choices.length);
 
   const closeSheet = () => { setNote(''); setSev('moderate'); setArea('knee'); setEditing(null); setOpen(false); };
 
@@ -119,22 +164,55 @@ export default function Injuries() {
 
   // One injury: a status dot, the area, its severity as ink text, and its two
   // actions. Divided by a hairline rather than boxed.
-  const Row = ({ inj, first }: { inj: Injury; first?: boolean }) => {
+  //
+  // A PLAIN FUNCTION, called as `row(i, first)`, and not a component rendered
+  // as `<Row inj={…} />`. The difference is not style. A component declared in
+  // this body is a new function object on every render, so React sees a
+  // different element TYPE each time and unmounts and remounts the whole
+  // subtree rather than updating it — and the outer View here is `accessible`
+  // with a composed label, so VoiceOver loses its place and re-announces the
+  // injury from the top every time anything on this screen changes state.
+  // Which is often: the sheet opening, a note being typed in it, a status
+  // toggling, both background reads landing.
+  //
+  // app/(client)/report.tsx already states this rule about its own
+  // `narrativeBlock` — "written as a plain call and not a component so it does
+  // not remount the text — and therefore does not interrupt a screen reader —
+  // every time this screen redraws". Same rule, same reason, and the `key`
+  // moves onto the returned element because there is no longer an element
+  // above it to carry one.
+  const row = (inj: Injury, first?: boolean) => {
     const { id, area: areaId, severity, status, note: nt } = inj;
+    // How long this has been standing, and whether it is time to ask about it.
+    // `nowMs` comes from `useNow()` above rather than from a `Date.now()` here:
+    // a clock read in a render body is right only at the moment something else
+    // happens to redraw, and the sentence this produces changes at midnight.
+    const age = injuryStanding(inj, nowMs);
     return (
-    <View style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
+    <View key={id} style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       {/* One element, one sentence. The dot's colour is the severity said in
           colour, and colour is the one thing a screen reader cannot read out —
           so the row is grouped and spoken whole rather than as three fragments
-          with an unnamed shape in front of them. */}
+          with an unnamed shape in front of them.
+          The age goes INSIDE the group, not beside it: a grouped View swallows
+          its children's labels, so a line rendered next to this one would be
+          read out as a separate stop with no injury attached to it. */}
       <View accessible accessibilityRole="text"
-        accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}`}>
+        accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}${age.line ? `. ${age.line}` : ''}`}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'active' ? sevColor(severity) : t.ink3 }} />
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
           <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>{status === 'active' ? severity : 'recovered'}</Text>
         </View>
         {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
+        {/* A disclosure nobody has revisited. `age.line` is null when there is
+            nothing honest to print — no date on the row, an unreadable one, a
+            recovered injury — so this renders nothing rather than a hedge. The
+            long-standing case is the one worth reading, so it gets the
+            attention colour; a recent one is a quiet fact. */}
+        {age.line ? (
+          <Text style={{ ...ty.caption, color: age.recheck ? t.ink2 : t.ink3, marginTop: sp.sm }}>{age.line}</Text>
+        ) : null}
       </View>
       {/* Named, because "Delete, button" in a list of injuries does not say
           which one — and this one cannot be undone from here. */}
@@ -159,17 +237,11 @@ export default function Injuries() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Injuries & Limitations</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Your coach and your plan train around these — flagging and swapping risky moves.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
+        <PageHead title="Injuries & Limitations" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>Your coach and your plan train around these, flagging and swapping risky moves.</Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
+        <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice"
           note="For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
         <View style={{ marginTop: sp.md }}>
@@ -183,7 +255,7 @@ export default function Injuries() {
             SUGGESTIONS they confirm one at a time — see app/(client)/injury-doc
             for why it is never allowed to write on its own. */}
         <ListRow icon="camera" title="Read It Off a Document"
-          note="Physio report, scan or doctor's note. You confirm what it finds — nothing is added on its own."
+          note="Physio report, scan or doctor's note. You confirm what it finds. Nothing is added on its own."
           onPress={() => router.push('/(client)/injury-doc')} />
 
         {/* An injury on this screen is in the list; whether it reached the
@@ -191,7 +263,7 @@ export default function Injuries() {
             coach ever sees it. Said here rather than left to be discovered. */}
         {c.saveFailed ? (
           <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-            Your last change has not reached the server yet, so your coach may still be seeing the old list. It keeps retrying — check back before you rely on it.
+            Your last change has not reached the server yet, so your coach may still be seeing the old list. It keeps retrying. Check back before you rely on it.
           </Flag>
         ) : null}
 
@@ -200,7 +272,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Active" note={String(active.length)} />
-              {active.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
+              {active.map((i, idx) => row(i, idx === 0))}
             </Section>
           </View>
         ) : null}
@@ -210,7 +282,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Recovered" note={String(past.length)} />
-              {past.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
+              {past.map((i, idx) => row(i, idx === 0))}
             </Section>
           </View>
         ) : null}
@@ -235,7 +307,7 @@ export default function Injuries() {
                 </Text>
               ) : coachRead === 'none' ? (
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                  Not read yet. Your coach is shown these before they can assign you a programme, and can't assign one until they confirm they have read them.
+                  Not read yet. Your coach is shown these before they can assign you a program, and can't assign one until they confirm they have read them.
                 </Text>
               ) : coachRead === 'stale' ? (
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
@@ -251,26 +323,43 @@ export default function Injuries() {
               )}
 
               {/* What they did about it. A coach may put a movement that loads
-                  a disclosure into a programme on purpose — that is their
+                  a disclosure into a program on purpose — that is their
                   judgement — but not without saying so, and this is where the
                   saying-so is addressed to the person it is about. */}
-              {mine.choices.length > 0 ? (
+              {choices === 'unknown' ? (
+                /* A different sentence from the one above it, on purpose. The
+                   two reads are two facts, and this one failing must not be
+                   drawn as "your coach assigned nothing over your injuries". */
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                  We couldn't load what your coach has assigned since. Pull down to try again.
+                </Text>
+              ) : choices === 'none' ? null : (
                 <View style={{ marginTop: sp.lg, gap: sp.md }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned knowing about these</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned Knowing About These</Text>
                   {mine.choices.slice(0, 5).map((ch, i) => (
                     <View key={i}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmtDay(ch.at)}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{fmtDay(ch.at)}</Text>
                       <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>
-                        {ch.movements.slice(0, 6).map((m) => `${m.exercise} (${areaLabel(m.area).toLowerCase()})`).join(', ')}
+                        {/* The movement in the reader's language; the join stays
+                            English, because the sentence around it is — see
+                            namesOf() in src/lib/wearables/liveNotes.ts. */}
+                        {ch.movements.slice(0, 6).map((m) => `${movement(m.exercise)} (${areaLabel(m.area).toLowerCase()})`).join(', ')}
                         {ch.movements.length > 6 ? ` and ${num(ch.movements.length - 6)} more` : ''}
                       </Text>
                     </View>
                   ))}
+                  {choices === 'partial' ? (
+                    /* Truncated, so the list is real but not the whole of it —
+                       shown, never summed, and never presented as all of them. */
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      These are the most recent. There are more than we can show here.
+                    </Text>
+                  ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>
                     If any of these hurt, stop and tell your coach.
                   </Text>
                 </View>
-              ) : null}
+              )}
             </Section>
           </View>
         ) : null}
@@ -283,7 +372,7 @@ export default function Injuries() {
         {c.injuries.length === 0 && c.profileStatus === 'ready' ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
             <Icon name="check" size={30} color={t.ink3} />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginTop: sp.md }}>No injuries disclosed</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink2, marginTop: sp.md }}>No Injuries Disclosed</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, maxWidth: 260 }}>If something's bothering you, add it here so your plan can adapt.</Text>
           </View>
         ) : c.injuries.length === 0 && c.profileStatus === 'loading' ? (
@@ -293,7 +382,7 @@ export default function Injuries() {
         ) : c.injuries.length === 0 ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.crit}>
-              Your injuries could not be read, so this is not your list — it is an empty screen standing in for one. Anything you add now will save, but check back before you rely on what is here.
+              Your injuries could not be read, so this is not your list. It is an empty screen standing in for one. Anything you add now will save, but check back before you rely on what is here.
             </Flag>
           </View>
         ) : null}
@@ -301,7 +390,8 @@ export default function Injuries() {
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={closeSheet}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeSheet} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeSheet}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {/* An edit and a first disclosure are the same three fields and two
@@ -322,7 +412,7 @@ export default function Injuries() {
                   accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
                   accessibilityLabel={a.label} accessibilityHint="The part of your body that is injured"
                   style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{a.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{a.label}</Text>
                 </Pressable>); })}
             </View>
 
@@ -333,7 +423,7 @@ export default function Injuries() {
                   accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
                   accessibilityLabel={sv.label} accessibilityHint="How bad the injury is"
                   style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{sv.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{sv.label}</Text>
                 </Pressable>); })}
             </View>
 
@@ -353,7 +443,7 @@ export default function Injuries() {
             <Pressable onPress={closeSheet} accessibilityRole="button"
               accessibilityLabel={editing ? 'Cancel without changing this injury' : 'Cancel without disclosing an injury'}
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

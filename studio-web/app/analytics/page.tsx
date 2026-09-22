@@ -63,10 +63,16 @@
 // counted LEAVING and never counted PRESENT, which inflates churn, and inflates
 // it most at the gyms with the messiest records. Both halves are now drawn from
 // the same population, and a month that lost somebody undated withholds the
-// rate rather than quietly printing the smaller one. See `monthRows`.
+// rate rather than quietly printing the smaller one. See `churnMonths` in
+// src/lib/memberChurn.ts, which the owner’s phone now calls as well.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 // The console's banner, with the live region it never had. The local copy of
 // this component that used to sit at the bottom of this file — and still sits
 // at the bottom of eighteen other page files — rendered every sentence this
@@ -82,7 +88,23 @@ import { cohorts, type Cohort, type TrainerLike } from '@lib/ownerAnalytics';
 import {
   MIN_COHORT_FOR_RATE, COHORT_MATURITY_DAYS, rateOf, pointsPerMember, monthOfDate,
 } from '@lib/gymRetention';
-import { monthWindow, recentMonths, monthEnded, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
+// The member spine and the churn arithmetic used to be written out in this
+// file, which is why the owner's phone said member churn "is not derived
+// anywhere on this handset". It is one module now, framework-free and tested,
+// and the handset's Growth tab calls the same functions — so the console and
+// the phone cannot land on two different churn figures for the same gym.
+import {
+  memberSpans, churnMonths, undatedExitCount, undatedJoinCount, isDay,
+  MONTHS_SHOWN, type MemberSpan, type ChurnMonth,
+} from '@lib/memberChurn';
+import { monthWindow, recentMonths, monthEnded, monthKeyOf } from '@lib/monthEnd';
+// The calendar month it is NOW, which is not the month the tab was opened in.
+// This console has no router — the rail is a plain `<a href>` — so a front-desk
+// tab is one document that lives for days, and every month-shaped figure below
+// used to be built from a `Date.now()` read once at mount. See the fix note on
+// `monthNow` in the component, and studio-web/lib/monthTick.ts for the hook.
+import { monthTickStart } from '@lib/pickerMonth';
+import { useMonthTick } from '@/lib/monthTick';
 import { readAll } from '@lib/rowCap';
 // `sharedCurrency` is gone from this file. It answers "are these all one
 // money", and the only thing this page did with a No was withhold the entire
@@ -90,6 +112,26 @@ import { readAll } from '@lib/rowCap';
 // rule one level down ('gbp', ' GBP ' and 'GBP' are one currency, '' and null
 // are one silence) and is what the payments are grouped by instead.
 import { money, normaliseCurrency } from '@lib/gymRecord';
+// The gym's own clock. `gymHour` is the ONLY place in TypeScript that turns an
+// instant into an hour of the gym's day — see the header of src/lib/gymZone.ts
+// on why two implementations of a calendar rule is how one Sunday's takings end
+// up in two places.
+import { gymHour, parseGymZone, NO_ZONE_NOTE } from '@lib/gymZone';
+// `deltaSign` and not `deltaLabel`: the sign half of src/lib/deltaLabel.ts is
+// pure arithmetic (deltaFigure + a comparison) and carries no locale, while
+// `deltaLabel` and `deltaMagnitude` reach `plain` -> `appLocale()`, the
+// module-level latch lib/num.ts refuses because it resolves once on the server
+// and again in the browser. So the SIGN comes from the shared helper and the
+// FIGURE is spelled by the console's own formatter.
+//
+// All three sites below were correct about zero and are changed anyway, which
+// is what check-deltas.mjs asks for: it cannot tell a guarded hand-rolled sign
+// from an unguarded one, so the rule is not to hand-roll one. What actually
+// changes for a reader is the minus: `String(-4)` and `{m.net}` spell a
+// negative with an ASCII HYPHEN, and every movement in the phone app uses
+// U+2212. The console printed "-4" beside the app's "−4" for the same figure.
+import { deltaSign } from '@lib/deltaLabel';
+import { num, num1 } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -97,10 +139,6 @@ const DAY = 86400000;
  *  that is the window `cohorts()` already judges activity over, and two
  *  different recencies on one screen is two different answers. */
 const VISIT_DAYS = 30;
-
-/** How many months of joiners and leavers to draw. Thirteen so the same month
- *  last year is on screen — a gym with a January is not churning in January. */
-const MONTHS_SHOWN = 13;
 
 /**
  * What a read is when it has produced no rows: still in flight, or refused.
@@ -110,7 +148,6 @@ const MONTHS_SHOWN = 13;
  * this month" are both lies about a query that errored — and an owner acts on
  * the second one, by concluding the gym is holding when it is not.
  */
-type Unread = 'loading' | 'failed' | null;
 
 /** Rows plus which of the three states they are in. Rows are null unless the
  *  read actually returned; a failed read is never []. */
@@ -120,200 +157,10 @@ const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading' });
 const returned = <T,>(rows: T[]): Read<T> => ({ rows, state: null });
 const refused = <T,>(): Read<T> => ({ rows: null, state: 'failed' });
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 const settled = <T,>(res: PromiseSettledResult<T[]>): Read<T> =>
   res.status === 'fulfilled' ? returned(res.value) : refused<T>();
 
-/* ── the member spine ──────────────────────────────────────────────────────── */
-
-/**
- * One person's whole history with the gym, from every membership row they hold.
- *
- * Built per member rather than per membership on purpose. Somebody who
- * cancelled in March and rejoined in June has two rows, and counting rows would
- * report them as two joiners and file the second under June — a gym that
- * recruits well and keeps nobody, assembled entirely out of its own returning
- * members. Their join month is the earliest start they have ever had.
- */
-interface Span {
-  memberId: string;
-  name: string | null;
-  /** Earliest `started_on`, or null when no row carried a usable one. */
-  joinedOn: string | null;
-  /** Latest `ends_on`, and only when every membership they hold has one. */
-  leftOn: string | null;
-  /** Holds a membership that has not been given an end date and has not been
-   *  cancelled — i.e. still on the books. */
-  open: boolean;
-  /** Holds a membership marked `active`. */
-  active: boolean;
-  /** Holds a cancelled or expired membership with NO end date. Their leaving
-   *  month is unknown, and no month may be given credit for it. */
-  undatedExit: boolean;
-}
-
-const isDay = (s: string | null | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}/.test(s);
-
-function spansOf(rows: Membership[]): Span[] {
-  const by = new Map<string, Span>();
-  for (const m of rows) {
-    const cur = by.get(m.memberId) ?? {
-      memberId: m.memberId, name: m.memberName, joinedOn: null, leftOn: null,
-      open: false, active: false, undatedExit: false,
-    };
-    if (m.memberName && !cur.name) cur.name = m.memberName;
-
-    // String comparison, not Date.parse. 'YYYY-MM-DD' compares correctly as
-    // text, and parsing it produces UTC midnight — which read back as a local
-    // month puts every member who joined on the 1st into the previous month
-    // west of Greenwich. A whole cohort moved by a timezone.
-    if (isDay(m.startedOn) && (cur.joinedOn == null || m.startedOn < cur.joinedOn)) {
-      cur.joinedOn = m.startedOn.slice(0, 10);
-    }
-
-    if (m.status === 'active') cur.active = true;
-
-    const ended = m.status === 'cancelled' || m.status === 'expired';
-    if (!ended && !isDay(m.endsOn)) cur.open = true;
-    if (ended && !isDay(m.endsOn)) cur.undatedExit = true;
-    if (isDay(m.endsOn)) {
-      const d = m.endsOn.slice(0, 10);
-      if (cur.leftOn == null || d > cur.leftOn) cur.leftOn = d;
-    }
-
-    by.set(m.memberId, cur);
-  }
-
-  // Somebody with any membership still running has not left, whatever end date
-  // an older row of theirs carries. Otherwise their leaving day is the last end
-  // date they hold — unless one of their ended memberships has no date at all,
-  // in which case the gym does not know when they went and this page will not
-  // pick a month for them.
-  return [...by.values()].map((s) => ({
-    ...s,
-    leftOn: s.open || s.undatedExit ? null : s.leftOn,
-  }));
-}
-
-/* ── months ────────────────────────────────────────────────────────────────── */
-
-interface MonthRow {
-  key: string;
-  label: string;
-  w: MonthWindow;
-  running: boolean;
-  joined: number;
-  left: number;
-  /** On the books on the first day of the month — the churn denominator. */
-  opening: number;
-  /**
-   * Departures this month by members with NO usable join date.
-   *
-   * They are inside `left` — a person who leaves has left, whatever the record
-   * says about their arrival — and they are the reason this month can have no
-   * churn rate. See the ladder below.
-   */
-  undatedLeavers: number;
-  /** joined − left, or null when the leavers are known to be incomplete. */
-  net: number | null;
-  churn: number | null;
-  /** Why there is no churn rate. Empty when there is one. */
-  churnNote: string;
-}
-
-function monthRows(spans: Span[], undatedExits: number, now: number): MonthRow[] {
-  const keys = recentMonths(MONTHS_SHOWN, now);
-  const out: MonthRow[] = [];
-
-  for (const key of keys) {
-    const w = monthWindow(key);
-    if (!w) continue;
-    const running = !monthEnded(w, now);
-
-    const joined = spans.filter((s) => monthOfDate(s.joinedOn) === key).length;
-    const left = spans.filter((s) => monthOfDate(s.leftOn) === key).length;
-
-    /**
-     * ── The two populations, which used to be different ────────────────────
-     *
-     * `left` above counts everybody who left this month. `opening` below counts
-     * everybody on the books when it began — and it can only count somebody it
-     * has a join date for, because "joined before the 1st" is a question about
-     * a date. So a member whose start was never recorded was counted LEAVING
-     * and never counted PRESENT: in the numerator, absent from the denominator,
-     * having arrived in no month at all.
-     *
-     * That is not a rate. It is one population over another, it errs upward in
-     * both directions at once, and it errs most at the gyms with the messiest
-     * records — the ones whose churn figure is least likely to be checked
-     * against anything.
-     *
-     * Both halves are fixed here. The numerator is restricted to the same
-     * population as the denominator, so `churnable / opening` is a rate over
-     * one set of people; and where that restriction actually dropped somebody,
-     * the month withholds the rate rather than printing the smaller number,
-     * because those departures happened and a figure that quietly leaves them
-     * out understates churn exactly where the record is worst. The count is
-     * carried out to the table so the owner is told which months, and how many.
-     */
-    const undatedLeavers = spans.filter(
-      (s) => !isDay(s.joinedOn) && monthOfDate(s.leftOn) === key,
-    ).length;
-    const churnable = left - undatedLeavers;
-
-    // On the books at the START of the month: joined before it began, and had
-    // not left before it began. Somebody who joined and left inside the same
-    // month is in neither the denominator nor the opening roster, which is the
-    // standard treatment and is why the two counts are shown beside the rate.
-    const opening = spans.filter(
-      (s) => isDay(s.joinedOn) && s.joinedOn < w.firstDay && (s.leftOn == null || s.leftOn >= w.firstDay),
-    ).length;
-
-    // The churn rate, in the order the reasons disqualify it.
-    let churn: number | null = null;
-    let churnNote = '';
-    if (running) {
-      churnNote = 'still running — a partial month is not a low churn month';
-    } else if (undatedExits > 0) {
-      churnNote = `${undatedExits} ended membership${undatedExits === 1 ? ' has' : 's have'} no end date, so the leavers are incomplete`;
-    } else if (undatedLeavers > 0) {
-      // Above the size floor deliberately. This is not "too few to say"; it is
-      // "the two halves are drawn from different people", and no denominator is
-      // large enough to make that a rate.
-      churnNote = `${undatedLeavers} left this month with no start date recorded, so they are in no opening roster to be a share of`;
-    } else if (opening === 0) {
-      churnNote = 'nobody was on the books when the month began';
-    } else {
-      // rateOf withholds anything under the shared floor, so this screen and
-      // the Retention screen cannot disagree about "too small to say".
-      churn = rateOf(churnable, opening);
-      if (churn == null) {
-        const p = pointsPerMember(opening);
-        churnNote = `${opening} on the books — one leaver would move it ${p == null ? '—' : p.toFixed(1)} points`;
-      }
-    }
-
-    out.push({
-      key, label: w.label, w, running, joined, left, opening, undatedLeavers,
-      // A net over an incomplete leaver count is a claim about the direction of
-      // the roster made from half the evidence, and it always errs upward.
-      //
-      // `undatedLeavers` withholds it for the mirror-image reason, downward: a
-      // member with no start date was in no month's joiner count and is in this
-      // month's leaver count, so the net subtracts an arrival it never added.
-      // The roster reads as shrinking by somebody who, on this page, never came.
-      net: undatedExits > 0 || undatedLeavers > 0 ? null : joined - left,
-      churn, churnNote,
-    });
-  }
-  return out;
-}
 
 /* ── visit frequency ───────────────────────────────────────────────────────── */
 
@@ -336,6 +183,10 @@ interface BucketRow {
 
 export default function Analytics() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Whether the gym's NAME could not be READ, as distinct from there being no
   // gym. The read below still drops the error into a `no-error-ok:` — no figure
@@ -343,6 +194,19 @@ export default function Analytics() {
   // either, and that is a sentence about the owner's ACCOUNT produced by a
   // query that failed. Carrying this one bit is what lets the rail say which.
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /**
+   * The gym's own clock, from `tenants.timezone`.
+   *
+   * The hour histogram below said "in the gym's own time" over
+   * `new Date(t).getHours()` — the READER's machine. Those are the same hour
+   * only when the owner happens to be standing in the gym. An owner in London
+   * looking at their Dubai gym read the 10am rush as a 6am one and would staff
+   * against it; /classes has bucketed its slots through `gymHour(zone)` all
+   * along, and this page was the one screen making the claim without the read
+   * behind it. Null means the gym has not set one — `NO_ZONE_NOTE` is then
+   * printed rather than a zone being guessed at.
+   */
+  const [zone, setZone] = useState<string | null>(null);
 
   const [memberships, setMemberships] = useState<Read<Membership>>(reading);
   const [visits, setVisits] = useState<Read<Visit>>(reading);
@@ -362,8 +226,27 @@ export default function Analytics() {
    */
   const [payments, setPayments] = useState<Read<MoneyRow>>(reading);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * The bounds the last read actually ASKED FOR, carried out of `load`.
+   *
+   * Every "in the last 30 days" and "thirteen months of" sentence on this page
+   * is a claim about a window, and the window belongs to the READ rather than
+   * to the component — the same lesson /revenue records at its own `since`.
+   * These were derived from a `Date.now()` frozen at mount, and this page
+   * refreshes itself on the way back to the tab, so on a desk tablet left open
+   * for three days the door-log guard was testing the log's last entry against
+   * a window opening three days EARLIER than the one the visits read used. That
+   * is not a cosmetic drift: a terminal that stopped 31 days ago is outside the
+   * read (so every member counts zero visits) and inside the frozen window (so
+   * `doorState` says `live`) — which is the silent-log disaster `doorState`
+   * exists to prevent, arriving through the clock rather than through a read.
+   *
+   * Null until a read has run. `doorState` treats that as still loading, which
+   * is what it is.
+   */
+  const [asked, setAsked] = useState<{ at: number; visitsSince: string; moneySince: string } | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setMemberships(reading); setVisits(reading); setClasses(reading);
     setDoor({ state: 'loading', at: null }); setErr(null);
 
@@ -377,10 +260,36 @@ export default function Analytics() {
     // allSettled, not all. Under one catch, a refused classes read — which
     // costs a single tile — would empty the memberships too, and this page
     // would report a gym where nobody has ever joined and nobody has ever left.
-    // Thirteen months back for the money, so the same month last year is on
-    // screen for exactly the reason MONTHS_SHOWN is thirteen: a gym with a
-    // January is not in trouble in January.
-    const moneySince = new Date(now - 400 * DAY).toISOString();
+    //
+    // ── A WHOLE NUMBER OF MONTHS, not 400 days ───────────────────────────────
+    //
+    // This was `now - 400 * DAY`, and every figure it feeds is a MONTH. 400 days
+    // is thirteen months and a few days, which sounds generous and is not: the
+    // table shows thirteen month keys, and the only one of them that can carry a
+    // year-on-year figure is last month — whose comparison month is the
+    // thirteenth back, the one the window opens part-way THROUGH.
+    //
+    // On the 14th of a month that window starts on the 10th of the comparison
+    // month, so twenty-one of its thirty-one days were read and ten were not.
+    // A gym taking exactly the same money every day of both years printed
+    // **+48%** growth, and it printed it on the one row of this table an owner
+    // reads. The error is largest at the end of the month and vanishes on the
+    // 1st, which is why it would never have been caught by looking twice.
+    //
+    // So the window is the first instant of the month MONTHS_SHOWN back. The
+    // table still shows thirteen months; the read reaches one month further so
+    // that the single comparison it is allowed to make divides by a WHOLE month.
+    // `moneyMonthsOf` is told this bound as well and withholds the ratio for any
+    // month whose comparison month is not wholly inside it, so a later change to
+    // this line cannot quietly reintroduce the partial denominator.
+    const moneyFrom = monthWindow(recentMonths(MONTHS_SHOWN + 1, now)[MONTHS_SHOWN]);
+    const moneySince = moneyFrom
+      ? moneyFrom.fromIso
+      // Unreachable: `recentMonths` only emits keys `monthWindow` parses. A
+      // bound is still required, and one that is too SHORT is the safe way to
+      // be wrong — the guard above withholds the ratio rather than taking it.
+      : new Date(now).toISOString();
+    setAsked({ at: now, visitsSince: since, moneySince });
 
     const [mRes, vRes, cRes, dRes, pRes] = await Promise.allSettled([
       // PAGED, for the same reason the two reads below it are. `fetchMemberships`
@@ -420,6 +329,10 @@ export default function Analytics() {
       failure(pRes, 'the payments of the last thirteen months'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length ? trouble.join(' · ') : null);
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read,
+    // so a trend drawn without the door log leaves the stamp where it was.
+    return settledLanded([mRes, vRes, cRes, dRes, pRes]);
   }, []);
 
   useEffect(() => {
@@ -427,6 +340,10 @@ export default function Analytics() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setMemberships(returned([])); setVisits(returned([])); setClasses(returned([]));
@@ -437,33 +354,97 @@ export default function Analytics() {
       // The error is now read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
-      await load(who.tenantId);
+      // `timezone` alongside the name, in the one read this page already makes
+      // of the gym row. The hour histogram is the only figure that needs it,
+      // and a failed read leaves it null — which prints NO_ZONE_NOTE rather
+      // than quietly substituting the reader's clock and calling it the gym's.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as { timezone?: string | null } | null)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
+      }
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the five reads are the effect below's.
+  }, []);
 
-  // Frozen for the life of the page. `Date.now()` read in the render body moves
-  // on every keystroke elsewhere, which would make every memo below recompute
-  // and — worse — let the month that counts as "running" change underneath a
-  // table the owner is reading.
-  const [now] = useState(() => Date.now());
-  const windowStart = useMemo(() => new Date(now - VISIT_DAYS * DAY).toISOString(), [now]);
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * "Which way it is moving" is a claim about a window ending now, and this
+   * page never said which now. The thirteen-month payments read and the
+   * thirty-day door read are both cut at the moment of the request, so a tab
+   * left open across a month boundary draws last month's chart under this
+   * month's heading.
+   */
+  // `reading` is taken here by `Read`'s constructor from lib/read.
+  const { at: readAt, busy: refetching, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
+
+  /**
+   * The calendar month it is NOW — built once a MONTH, not once a mount.
+   *
+   * This was `const [now] = useState(() => Date.now())`, defended as "frozen for
+   * the life of the page" so that the month counting as running could not change
+   * underneath a table somebody was reading. The instinct is right and the
+   * remedy was a month too coarse: `Date.now()` in a render body does move on
+   * every keystroke, but a value fixed at MOUNT is fixed for the life of a
+   * document that this console gives no way to replace — the rail is a plain
+   * `<a href>`, and the page refreshes itself on the way back to the tab.
+   *
+   * So a front-desk tab opened on 28 September and still open on 3 October read
+   * October's payments and October's joiners from the database and then built
+   * its month list from September: October appeared on neither table, September
+   * was still labelled "running" two days after it ended — so the one month
+   * whose year-on-year an owner wants was withheld as unfinished — and "Net
+   * change · last full month" named August for ever. Proved rather than
+   * reasoned; the reproduction is in this lane's notes.
+   *
+   * `useMonthTick` holds a MONTH, not an instant, and React bails out of a
+   * re-render when a setter is handed the value it already has. So this screen
+   * re-renders exactly never on account of the clock and exactly once when the
+   * month turns — which is the one moment it must. Six other console screens
+   * already do this; /analytics was the seventh and had no picker to make the
+   * omission visible.
+   */
+  const tick = useMonthTick();
+  const monthNow = useMemo(() => monthTickStart(tick).getTime(), [tick]);
+
+  /**
+   * The instant the visits read asked about, and the window it opened.
+   *
+   * Not a clock read here at all. See `asked` above: this is the READ's bound,
+   * so `doorState` and the thirty-day figures can never be judging a window
+   * other than the one the rows came from.
+   */
+  const readNow = asked?.at ?? null;
+  const windowStart = asked?.visitsSince ?? null;
 
   const spans = useMemo(
-    () => (memberships.rows ? spansOf(memberships.rows) : null),
+    () => (memberships.rows ? memberSpans(memberships.rows) : null),
     [memberships.rows],
   );
 
   /** Members whose leaving month the record does not hold. */
-  const undatedExits = useMemo(() => (spans ?? []).filter((s) => s.undatedExit).length, [spans]);
+  const undatedExits = useMemo(() => undatedExitCount(spans ?? []), [spans]);
   /** Members with no usable join date — they are in no cohort and no roster. */
-  const undatedJoins = useMemo(() => (spans ?? []).filter((s) => !isDay(s.joinedOn)).length, [spans]);
+  const undatedJoins = useMemo(() => undatedJoinCount(spans ?? []), [spans]);
 
   const months = useMemo(
-    () => (spans ? monthRows(spans, undatedExits, now) : null),
-    [spans, undatedExits, now],
+    () => (spans ? churnMonths(spans, undatedExits, monthNow, MONTHS_SHOWN) : null),
+    [spans, undatedExits, monthNow],
   );
 
   /** Departures inside the thirteen months on screen made by members with no
@@ -492,7 +473,9 @@ export default function Analytics() {
    * through the read the guard was not watching.
    */
   const doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live' =
-    door.state === 'loading' || visits.state === 'loading' ? 'loading'
+    // `windowStart` is null only before the first read has been dispatched, and
+    // a window nobody has asked for cannot judge a log. Reading, not live.
+    door.state === 'loading' || visits.state === 'loading' || windowStart == null ? 'loading'
       : door.state === 'failed' || visits.state === 'failed' ? 'failed'
       : door.at == null ? 'silent'
       : door.at < windowStart ? 'stale'
@@ -565,16 +548,24 @@ export default function Analytics() {
       if (held) held.push(p); else groups.set(c, [p]);
     }
     return [...groups.entries()]
-      .map(([currency, rows]) => ({
-        currency,
-        payments: rows.length,
-        months: moneyMonthsOf(rows, now, currency != null),
-      }))
+      .map(([currency, rows]) => {
+        const months = moneyMonthsOf(rows, monthNow, currency != null, asked?.moneySince ?? null);
+        return {
+          currency,
+          // Payments in the months ON SCREEN, not rows in the read. The read
+          // now reaches one month further back than the table shows — see
+          // `moneySince` in `load` — so that the year-on-year comparison has a
+          // whole month to divide by, and counting the read here would put a
+          // month nobody can see into a sentence about this table.
+          payments: months.reduce((a, m) => a + m.payments, 0),
+          months,
+        };
+      })
       // Largest first, and the currency-less group last however big it is: it
       // is the one with no figures in it, and leading with a table of dashes
       // buries the money the gym can actually read.
       .sort((a, b) => (a.currency == null ? 1 : b.currency == null ? -1 : b.payments - a.payments));
-  }, [payments.rows, now]);
+  }, [payments.rows, monthNow, asked?.moneySince]);
 
   /** Whether this gym's ledger holds more than one money. Not an error — it is
    *  what a gym that changed currency looks like — and the only thing it
@@ -586,21 +577,33 @@ export default function Analytics() {
    *
    * `entered_at` has been read by this page all along and nothing has ever
    * drawn an hour out of it — while "when is my gym busy" is the single most
-   * actionable staffing question an owner has. Local hours, not UTC: an owner
-   * in Dubai staffing against a UTC histogram would put people on four hours
-   * early.
+   * actionable staffing question an owner has.
+   *
+   * THE GYM'S hour, not the reader's. This was `new Date(t).getHours()` under a
+   * heading that said "in the gym's own time", which is true only while the
+   * owner is standing in the gym: the same 06:00–07:00 bar is the Dubai gym's
+   * 10am rush when the laptop is in London, and an owner rostering against it
+   * puts staff on four hours early. `tenants.timezone` is the stored answer and
+   * `gymHour` is the only place in TypeScript that turns an instant into one —
+   * the same function /classes buckets its slots with, so the two screens
+   * cannot land on two different mornings for one gym.
+   *
+   * With no zone set there is no gym hour to compute, so the histogram is drawn
+   * on the reader's own clock and SAYS SO (`NO_ZONE_NOTE` below). That is the
+   * house rule from src/lib/gymZone.ts: no zone means no answer, and the
+   * caller's job is to have a sentence ready rather than to fall back silently.
    */
   const hours = useMemo<HourRow[] | null>(() => {
     if (!visits.rows) return null;
     const counts = new Array(24).fill(0) as number[];
     for (const v of visits.rows) {
-      const t = Date.parse(v.enteredAt);
-      if (!Number.isFinite(t)) continue;
-      counts[new Date(t).getHours()] += 1;
+      const h = zone ? gymHour(v.enteredAt, zone) : localHour(v.enteredAt);
+      if (h == null) continue;
+      counts[h] += 1;
     }
     const peak = Math.max(...counts);
     return counts.map((n, h) => ({ hour: h, visits: n, share: peak > 0 ? n / peak : 0 }));
-  }, [visits.rows]);
+  }, [visits.rows, zone]);
 
   /* ── the four figures an owner watches ─────────────────────────────────── */
 
@@ -765,7 +768,7 @@ export default function Analytics() {
         key: b.key, label: b.label, members, share,
         note: share != null ? ''
           : roster.length === 0 ? 'no active membership on the books'
-            : `${roster.length} active member${roster.length === 1 ? '' : 's'} — one is worth ${p == null ? '—' : p.toFixed(1)} points`,
+            : `${roster.length} active member${roster.length === 1 ? '' : 's'} — one is worth ${num1(p)} points`,
       };
     });
   }, [visitsCounted, doorNote, memberships.state, roster, visitsByMember]);
@@ -778,8 +781,11 @@ export default function Analytics() {
     return [...visitsByMember.keys()].filter((id) => !active.has(id)).length;
   }, [visitsCounted, memberships.state, roster, visitsByMember]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -814,6 +820,9 @@ export default function Analytics() {
         whether the people who arrived are still coming through the door, and how
         often.
       </p>
+
+      <Fetched at={readAt} busy={refetching} onRefresh={refresh}
+               what="these trends" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {doorState === 'silent' ? (
@@ -878,7 +887,7 @@ export default function Analytics() {
         />
         <Kpi
           label={`Net change · ${lastFull ? lastFull.label : 'last full month'}`}
-          text={lastFull && lastFull.net != null ? (lastFull.net > 0 ? `+${lastFull.net}` : String(lastFull.net)) : null}
+          text={lastFull && lastFull.net != null ? `${deltaSign(lastFull.net, 0)}${num(Math.abs(lastFull.net))}` : null}
           tone={lastFull && lastFull.net != null ? (lastFull.net > 0 ? 'good' : lastFull.net < 0 ? 'crit' : undefined) : undefined}
           note={
             !months ? (memberships.state === 'failed' ? 'the memberships could not be read' : 'reading the memberships…')
@@ -892,7 +901,7 @@ export default function Analytics() {
         />
         <Kpi
           label="Visits per member · 30 days"
-          text={avgVisits == null ? null : avgVisits.toFixed(1)}
+          text={avgVisits == null ? null : num1(avgVisits)}
           note={avgNote}
         />
         <Kpi
@@ -914,7 +923,7 @@ export default function Analytics() {
         doorState={doorState}
         doorNote={doorNote}
         undatedJoins={undatedJoins}
-        now={now}
+        now={readNow}
       />
 
       <Frequency
@@ -928,7 +937,7 @@ export default function Analytics() {
 
       <Money series={moneySeries} state={payments.state} mixed={moneyMixed} />
 
-      <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} />
+      <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} zone={zone} />
     </Shell>
   );
 }
@@ -950,6 +959,19 @@ interface MoneyMonth {
    *  currency are not known to be in the same money, so the ratio between two
    *  of their months is a ratio of nothing in particular. */
   yoyPct: number | null;
+  /**
+   * Whether the month a year back is WHOLLY inside the read that produced these
+   * rows.
+   *
+   * The distinction the dash used to lose. "No month to compare" was printed
+   * both where the gym has no such month — a gym eleven months old has no last
+   * January — and where the read simply did not reach it, and the second is a
+   * fact about this screen rather than about the gym. It is also the half that
+   * was silently WRONG before: a comparison month the read opened part-way
+   * through still answered `by.get(...)`, with a fraction of its takings, and
+   * the ratio came out as growth the gym never had.
+   */
+  yearAgoRead: boolean;
 }
 
 /**
@@ -985,8 +1007,14 @@ interface MoneySeries {
  * still counted, because the payments are real, but no percentage is taken
  * between two months of money nobody has named.
  */
-function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): MoneyMonth[] {
+function moneyMonthsOf(
+  rows: MoneyRow[], now: number, comparable: boolean, since: string | null,
+): MoneyMonth[] {
   const keys = recentMonths(MONTHS_SHOWN, now);
+  // The first instant the read asked for, as a number. Null — nobody has read
+  // anything yet — disqualifies every comparison, because no month is known to
+  // be whole.
+  const from = since == null ? null : Date.parse(since);
   const by = new Map<string, { cents: number; payers: Set<string>; count: number }>();
   for (const p of rows) {
     const k = monthKeyOf(Date.parse(p.takenAt));
@@ -1005,6 +1033,17 @@ function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): Mone
     const running = k === thisMonth || (w != null && !monthEnded(w, now));
     const yearAgoKey = `${Number(k.slice(0, 4)) - 1}-${k.slice(5, 7)}`;
     const yearAgo = by.get(yearAgoKey);
+    // ── The denominator has to be a WHOLE month ──────────────────────────────
+    //
+    // `by.get(yearAgoKey)` answers for a month the read opened part-way through
+    // exactly as confidently as for one it read end to end — with a fraction of
+    // that month's takings. Dividing by a fraction reads as growth, it reads as
+    // growth for every gym at once, and it is worst at the end of the month and
+    // absent on the 1st. So the comparison month is required to begin at or
+    // after the read's own bound before any ratio is taken from it.
+    const yearAgoW = monthWindow(yearAgoKey);
+    const yearAgoRead =
+      from != null && yearAgoW != null && Date.parse(yearAgoW.fromIso) >= from;
     return {
       key: k,
       label: w ? w.label : k,
@@ -1015,12 +1054,14 @@ function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): Mone
       // Null rather than zero: nobody paid means there is no average to take,
       // and 0.00 per member reads as a gym whose members pay nothing.
       arpuCents: v.payers.size ? Math.round(v.cents / v.payers.size) : null,
-      // Withheld on a running month and where there is no matching month in
-      // the read at all — a gym eleven months old has no last January, and
-      // "−100%" would be the answer to a question nobody asked.
-      yoyPct: !comparable || running || !yearAgo || yearAgo.cents === 0
+      // Withheld on a running month, where there is no matching month in the
+      // read at all — a gym eleven months old has no last January, and "−100%"
+      // would be the answer to a question nobody asked — and where the read
+      // holds only part of that month.
+      yoyPct: !comparable || running || !yearAgoRead || !yearAgo || yearAgo.cents === 0
         ? null
         : Math.round(((v.cents - yearAgo.cents) / yearAgo.cents) * 100),
+      yearAgoRead,
     };
   });
 }
@@ -1122,10 +1163,16 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
       render: (m) => {
         if (currency == null) return <span className="dash">no currency stated</span>;
         if (m.running) return <span className="dash">the month has not finished</span>;
+        // Said apart from "no month to compare", which is a fact about the GYM.
+        // This one is a fact about this screen: the read reaches thirteen months
+        // and a comparison needs twenty-five, so every row but the newest
+        // finished one is outside it. Printing the gym's sentence over the
+        // screen's limitation is how an owner concludes they have no history.
+        if (!m.yearAgoRead) return <span className="dash">last year&rsquo;s month is outside this read</span>;
         if (m.yoyPct == null) return <span className="dash">no month to compare</span>;
         return (
           <span style={{ color: m.yoyPct < 0 ? 'var(--crit)' : m.yoyPct > 0 ? 'var(--good)' : undefined }}>
-            {m.yoyPct > 0 ? '+' : ''}{m.yoyPct}%
+            {deltaSign(m.yoyPct, 0)}{num(Math.abs(m.yoyPct))}%
           </span>
         );
       } },
@@ -1147,7 +1194,7 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
           ) : null}
         </div>
       ) : null}
-      <DataTable
+      <DataTable noun="months of revenue"
         rows={series.months} columns={cols} rowKey={(m) => m.key}
         empty="No payment has been recorded in thirteen months. That is not the same as no income — it is the same as nobody having entered one."
       />
@@ -1162,15 +1209,23 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
  *
  * `entered_at` has been read by this page since it was written and nothing has
  * ever drawn an hour out of it, while "when is my gym busy" is the single most
- * actionable staffing question an owner has. LOCAL hours: an owner in Dubai
- * staffing against a UTC histogram would put people on four hours early.
+ * actionable staffing question an owner has.
+ *
+ * THE GYM'S hours, from `tenants.timezone`, and the heading says which. It said
+ * "in the gym's own time" over the reader's own clock — the same claim /costs,
+ * /classes and /staff all make with `gymZone` behind it and this one made with
+ * nothing behind it. A gym that has set no zone gets the reader's clock and
+ * `NO_ZONE_NOTE` in place of the claim, rather than a guess dressed as the gym's
+ * morning.
  *
  * Hours with nobody in them are shown rather than filtered out. A gap at 3pm is
  * the finding; a table that skipped it would draw a smooth day.
  */
-function ByHour({ rows, state, doorState, doorNote }: {
+function ByHour({ rows, state, doorState, doorNote, zone }: {
   rows: HourRow[] | null; state: Unread;
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live'; doorNote: string;
+  /** The gym's IANA zone, or null when it has not set one. */
+  zone: string | null;
 }) {
   const busiest = rows ? rows.reduce((a, b) => (b.visits > a.visits ? b : a), rows[0]) : null;
   const hour = (h: number) => `${String(h).padStart(2, '0')}:00`;
@@ -1189,7 +1244,7 @@ function ByHour({ rows, state, doorState, doorNote }: {
   return (
     <Section
       title="When the gym is busy"
-      sub="Door entries in the last 30 days, by hour, in the gym's own time. Hours with nobody in them are shown — a gap at three is the finding, and a table that skipped it would draw a smooth day."
+      sub={`Door entries in the last 30 days, by hour, ${zone ? `in the gym’s own time (${zone})` : 'on your own device’s clock'}. Hours with nobody in them are shown — a gap at three is the finding, and a table that skipped it would draw a smooth day.`}
     >
       {state === 'loading' ? <Loading /> : null}
       {state === 'failed' ? <Unreadable what="the door log" cost="when the gym is busy is unknown, not quiet" /> : null}
@@ -1202,13 +1257,22 @@ function ByHour({ rows, state, doorState, doorNote }: {
       ) : null}
       {state === null && doorState === 'live' && rows ? (
         <>
+          {/* Said above the figure, not under it. A busiest hour on the wrong
+              clock is the one number on this page somebody rosters against. */}
+          {zone ? null : (
+            <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--warn)', fontSize: 12.5, maxWidth: '80ch' }}>
+              {capitalise(NO_ZONE_NOTE)}. The bars below are drawn on your machine&rsquo;s clock, so a
+              colleague opening this page from another country sees a different busiest hour for the
+              same gym. Set the timezone on Settings and this becomes the gym&rsquo;s own morning.
+            </p>
+          )}
           {busiest && busiest.visits > 0 ? (
             <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
               Busiest hour: <strong>{hour(busiest.hour)}</strong> &mdash; {busiest.visits} entr
-              {busiest.visits === 1 ? 'y' : 'ies'} in 30 days.
+              {busiest.visits === 1 ? 'y' : 'ies'} in 30 days{zone ? '' : ', on your own device’s clock'}.
             </p>
           ) : null}
-          <DataTable rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
+          <DataTable noun="hours of the day" rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
         </>
       ) : null}
     </Section>
@@ -1218,11 +1282,11 @@ function ByHour({ rows, state, doorState, doorNote }: {
 /* ── joiners and leavers ───────────────────────────────────────────────────── */
 
 function Joiners({ months, state, undatedJoins }: {
-  months: MonthRow[] | null; state: Unread; undatedJoins: number;
+  months: ChurnMonth[] | null; state: Unread; undatedJoins: number;
 }) {
   const peak = Math.max(1, ...(months ?? []).map((m) => Math.max(m.joined, m.left)));
 
-  const cols: Column<MonthRow>[] = [
+  const cols: Column<ChurnMonth>[] = [
     { key: 'month', header: 'Month', value: (m) => m.label,
       render: (m) => (
         <span style={{ color: m.running ? 'var(--ink3)' : undefined }}>
@@ -1242,7 +1306,7 @@ function Joiners({ months, state, undatedJoins }: {
           ? <span className="dash" title="a leaver who joined on no recorded date">— {m.undatedLeavers} left with no start date</span>
           : <span className="dash" title="leavers incomplete">— leavers incomplete</span>
         : <span style={{ color: m.net > 0 ? 'var(--good)' : m.net < 0 ? 'var(--crit)' : 'var(--ink2)' }}>
-            {m.net > 0 ? `+${m.net}` : m.net}
+            {deltaSign(m.net, 0)}{num(Math.abs(m.net))}
           </span> },
     { key: 'shape', header: 'Shape', value: (m) => m.joined - m.left,
       render: (m) => <Bars joined={m.joined} left={m.left} peak={peak} /> },
@@ -1251,7 +1315,7 @@ function Joiners({ months, state, undatedJoins }: {
     { key: 'churn', header: 'Churn', value: (m) => m.churn, numeric: true,
       render: (m) => m.churn == null
         ? <span className="dash">— {m.churnNote}</span>
-        : <span>{(m.churn * 100).toFixed(1)}%</span> },
+        : <span>{num1(m.churn * 100)}%</span> },
   ];
 
   return (
@@ -1266,7 +1330,7 @@ function Joiners({ months, state, undatedJoins }: {
       ) : null}
       {state === null && months ? (
         <>
-          <DataTable
+          <DataTable noun="months of joiners and leavers"
             rows={months} columns={cols} rowKey={(m) => m.key}
             empty="No month to draw."
           />
@@ -1328,7 +1392,9 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live';
   doorNote: string;
   undatedJoins: number;
-  now: number;
+  /** The instant the READ asked about, not a clock this component may take for
+   *  itself. Null before a read has run — see `asked` on the page. */
+  now: number | null;
 }) {
   const cols: Column<Cohort>[] = [
     { key: 'label', header: 'Joined in', value: (c) => c.label },
@@ -1357,7 +1423,7 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
       ) : null}
       {state === null ? (
         <>
-          <DataTable
+          <DataTable noun="cohorts"
             rows={rows} columns={cols} rowKey={(c) => c.label}
             empty="No member on the roster carries a usable join date, so there are no cohorts to draw. That is a gap in the record, not a gym with no history."
           />
@@ -1390,7 +1456,7 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
 function retention(
   c: Cohort,
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live',
-  now: number,
+  now: number | null,
 ): { rate: number | null; note: string } {
   if (doorState !== 'live') {
     return {
@@ -1400,6 +1466,10 @@ function retention(
           : 'the door log is silent, so activity is unknown',
     };
   }
+  // Unreachable while `doorState` is 'live' — the same read sets both — and
+  // written rather than asserted, because a maturity test against a missing
+  // clock would otherwise silently pass every cohort as mature.
+  if (now == null) return { rate: null, note: 'reading the door log\u2026' };
   const key = keyOfLabel(c.label);
   const w = key ? monthWindow(key) : null;
   if (w && now < Date.parse(w.toIso) + COHORT_MATURITY_DAYS * DAY) {
@@ -1416,7 +1486,7 @@ function retention(
     // Nothing is withheld by saying so plainly instead.
     note: p == null
       ? 'nobody joined in this month'
-      : `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${p.toFixed(1)} points`,
+      : `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${num1(p)} points`,
   };
 }
 
@@ -1459,7 +1529,7 @@ function Frequency({ buckets, rosterSize, rosterState, anonVisits, seenNotOnRost
       title="How often members come"
       sub="Every active membership placed in a band by its door-log visits over the last 30 days. A gym holding its headcount while everybody halves their visits is losing, and the member count will not say so for another six months."
     >
-      <DataTable
+      <DataTable noun="visit-frequency bands"
         rows={buckets} columns={cols} rowKey={(b) => b.key}
         empty="—"
       />
@@ -1528,7 +1598,7 @@ async function pageMemberships(tenantId: string): Promise<Membership[]> {
   const rows = await readAll<any>(
     (from, to) => supabase
       .from('memberships')
-      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status, frozen_from, frozen_to')
       .eq('tenant_id', tenantId)
       .order('started_on', { ascending: false })
       .order('id', { ascending: true })
@@ -1558,6 +1628,12 @@ async function pageMemberships(tenantId: string): Promise<Membership[]> {
     startedOn: r.started_on,
     endsOn: r.ends_on ?? null,
     status: r.status,
+    // Carried, not defaulted. supabase/parts/2616 added these and
+    // src/lib/membershipFreeze.ts reads them; a console row that hard-coded
+    // null here would report every paused membership as one that was never
+    // paused, on the surface a gym reconciles its own figures from.
+    frozenFrom: r.frozen_from ?? null,
+    frozenTo: r.frozen_to ?? null,
   }));
 }
 
@@ -1646,6 +1722,25 @@ async function lastVisitAt(tenantId: string): Promise<string | null> {
 /** A plain 'YYYY-MM-DD' as local noon, so any module that parses it and reads
  *  the month back in local time gets the month the gym meant. Midnight UTC does
  *  not survive the trip west of Greenwich. */
+/**
+ * The hour of an instant on the READER's own clock — the fallback, and only
+ * where the gym has stated no zone.
+ *
+ * Separate from `gymHour` and named for what it is, so a later reader cannot
+ * mistake one for the other: this is the answer the histogram used to give for
+ * every gym while claiming to give the gym's. Null on an unparseable instant,
+ * matching `gymHour`, so the caller's `== null` skip covers both.
+ */
+function localHour(at: string): number | null {
+  const t = Date.parse(at);
+  return Number.isFinite(t) ? new Date(t).getHours() : null;
+}
+
+/** First letter up, for a shared sentence that was written to sit mid-line. */
+function capitalise(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 function localNoon(day: string): string {
   const [y, m, d] = day.slice(0, 10).split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0, 0).toISOString();
@@ -1662,21 +1757,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
       </div>
       {children}
     </section>
-  );
-}
-
-function Kpi({ label, text, note, tone }: {
-  label: string; text: string | null; note?: string; tone?: 'good' | 'crit';
-}) {
-  const colour = text == null ? 'var(--ink3)' : tone ? `var(--${tone})` : 'var(--ink)';
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: colour }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
   );
 }
 
@@ -1709,6 +1789,3 @@ function Unreadable({ what, cost }: { what: string; cost: string }) {
   );
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

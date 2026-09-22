@@ -1,4 +1,5 @@
-// Design tokens — 10 selectable palettes. Elevated Teal is the default. Every
+// Design tokens — 12 selectable palettes. Repple (the approved board's light
+// scheme) is the default, with Repple Dark as its counterpart. Every
 // palette carries the full token set so any screen renders on any palette.
 // The client & trainer pick a palette in Appearance; the owner can also set a
 // custom brand colour on top (white-label).
@@ -8,7 +9,7 @@
 // stops clearing 4.5:1 on any of its four grounds, or a status colour stops
 // clearing 3:1 as a mark. Adding a palette without running the numbers is no
 // longer possible.
-import { readableInkOn } from '../lib/a11y';
+import { readableInkOn, contrastRatio, rgb, AA_TEXT, AA_MARK } from '../lib/a11y';
 
 // crit was #d03b3b, and that number quietly cost the status palette its whole
 // justification. The rule the app is built on — a coloured MARK beside
@@ -53,22 +54,183 @@ const lightSem = { grid: '#e1e0d9', s1: '#2a78d6', s2: '#179468', s3: '#b07700',
 // src/lib/a11y.test.ts measures all ten on every run.
 
 // ── Elevated Teal (DEFAULT) ────────────────────────────────────────────────
-export const teal = {
+const tealBase = {
   bg: '#0c1413', surface: '#10201d', surface2: '#14261f', surface3: '#1b3229',
   ink: '#e8f2f0', ink2: '#b6c9c4', ink3: '#809996', ring: 'rgba(255,255,255,0.09)',
   brand: '#16b8a6', brandInk: '#04211d', ...darkSem, s3: '#c9a35b',
 };
-export type Theme = typeof teal;
+/** What a palette is TYPED as: grounds, inks, the accent, status and series. */
+type Base = typeof tealBase;
 
-const midnight: Theme = { bg: '#0a0f1e', surface: '#111a30', surface2: '#16223c', surface3: '#1e2b47', ink: '#eaf0ff', ink2: '#b9c6e0', ink3: '#8692ab', ring: 'rgba(255,255,255,0.08)', brand: '#5b9dff', brandInk: '#04122e', ...darkSem };
-const sage: Theme = { bg: '#0f1411', surface: '#16201a', surface2: '#1b281f', surface3: '#24322a', ink: '#e9f0e9', ink2: '#bcd0bc', ink3: '#899a89', ring: 'rgba(255,255,255,0.08)', brand: '#8fd694', brandInk: '#0c1f12', ...darkSem };
-const noir: Theme = { bg: '#000000', surface: '#101010', surface2: '#181818', surface3: '#242424', ink: '#ffffff', ink2: '#c8c8c8', ink3: '#8b8b8b', ring: 'rgba(255,255,255,0.12)', brand: '#f2f2f2', brandInk: '#000000', ...darkSem };
-const sunset: Theme = { bg: '#140e14', surface: '#1e141e', surface2: '#271a27', surface3: '#33223a', ink: '#ffffff', ink2: '#d9c7d4', ink3: '#9a8a9a', ring: 'rgba(255,255,255,0.09)', brand: '#ff8a5b', brandInk: '#2a0f1e', ...darkSem };
-const clinical: Theme = { bg: '#f4f6fb', surface: '#ffffff', surface2: '#eef2f9', surface3: '#e3e9f4', ink: '#0f1830', ink2: '#3c4a63', ink3: '#5d6984', ring: 'rgba(15,24,48,0.12)', brand: '#2b68ff', brandInk: '#ffffff', ...lightSem };
-const terminal: Theme = { bg: '#0a0d0a', surface: '#0f140f', surface2: '#141a14', surface3: '#1e2e1e', ink: '#d6ffd6', ink2: '#9ccf9c', ink3: '#679d67', ring: 'rgba(70,255,122,0.14)', brand: '#46ff7a', brandInk: '#052b10', ...darkSem };
-const cream: Theme = { bg: '#fbf6ef', surface: '#ffffff', surface2: '#f5efe5', surface3: '#efe6d8', ink: '#2a2018', ink2: '#5a4c3c', ink3: '#736656', ring: 'rgba(42,32,24,0.12)', brand: '#ff6f5e', brandInk: '#111310', ...lightSem };
-const violet: Theme = { bg: '#100e18', surface: '#191529', surface2: '#201a33', surface3: '#2a2440', ink: '#ece9f7', ink2: '#c3bce0', ink3: '#918bab', ring: 'rgba(255,255,255,0.09)', brand: '#7756ff', brandInk: '#ffffff', ...darkSem };
-const swiss: Theme = { bg: '#f6f5f1', surface: '#ffffff', surface2: '#f0efe9', surface3: '#e6e4dc', ink: '#111111', ink2: '#4a4842', ink3: '#686660', ring: 'rgba(17,17,17,0.12)', brand: '#e3261c', brandInk: '#ffffff', ...lightSem };
+// ── The data palette ───────────────────────────────────────────────────────
+// Seven hues for infographics and status, as the approved mockups use them: a
+// ring per macro, a plate behind a row's icon, a chip that says "Slipping".
+// Each hue is THREE values, because the mockups use a hue three ways and the
+// three do not have the same job:
+//
+//   blue      a MARK — a ring's arc, a bar, a spark line, an icon on its
+//             plate. Held to 3:1 against every ground it is drawn on and
+//             against its own plate (WCAG 1.4.11), like the series colours.
+//   blueSoft  the PLATE — the pale fill behind an icon or a chip's words.
+//   blueInk   TEXT in the hue — a chip's label on its plate, a KPI figure on a
+//             card. Held to 4.5:1 against the plate and every ground.
+//
+// The mockups draw the label in the mark colour, and on a phone in daylight
+// that is the mistake this file's header is about: orange #EA580C on its own
+// #FFEDD5 plate is 3.11:1 and teal #0D9488 on #CCFBF1 is 3.32. So `…Ink` is
+// the mark with hue and saturation held and lightness walked down to the first
+// step that clears 4.5 on the worst ground — the method ink3 and lightSem were
+// fixed by. Two MARKS moved too, by a hair and by the same method: orange
+// #EA580C was 2.80:1 on surface3 and is #e0540c (3.03), teal #0D9488 was 2.94
+// and is #0d9286 (3.01). Red needed nothing; its ink is its mark.
+//
+// One set for the light palettes and one for the dark, exactly as lightSem and
+// darkSem are, and measured over every palette of that scheme in
+// src/lib/a11y.test.ts. The dark set is Tailwind's 400s over its 950s: bright
+// enough that mark and ink are the same value (worst case 4.85:1).
+//
+// scripts/check-contrast.mjs refuses `color: t.data.blue` and
+// `color: t.data.blueSoft` for the reason it refuses `color: t.crit`.
+const lightData = {
+  blue: '#2563eb', blueSoft: '#dbeafe', blueInk: '#1759ea',
+  orange: '#e0540c', orangeSoft: '#ffedd5', orangeInk: '#b04209',
+  purple: '#7c3aed', purpleSoft: '#ede9fe', purpleInk: '#7a38ed',
+  teal: '#0d9286', tealSoft: '#ccfbf1', tealInk: '#0a7168',
+  pink: '#db2777', pinkSoft: '#fce7f3', pinkInk: '#bf2066',
+  amber: '#b45309', amberSoft: '#fef3c7', amberInk: '#a54c08',
+  red: '#b91c1c', redSoft: '#fee2e2', redInk: '#b91c1c',
+};
+export type DataPalette = typeof lightData;
+const darkData: DataPalette = {
+  blue: '#60a5fa', blueSoft: '#172554', blueInk: '#60a5fa',
+  orange: '#fb923c', orangeSoft: '#431407', orangeInk: '#fb923c',
+  purple: '#a78bfa', purpleSoft: '#2e1065', purpleInk: '#a78bfa',
+  teal: '#2dd4bf', tealSoft: '#042f2e', tealInk: '#2dd4bf',
+  pink: '#f472b6', pinkSoft: '#500724', pinkInk: '#f472b6',
+  amber: '#fbbf24', amberSoft: '#451a03', amberInk: '#fbbf24',
+  red: '#f87171', redSoft: '#450a0a', redInk: '#f87171',
+};
+/** The seven hue names, for anything that walks the palette. */
+export const DATA_HUES = ['blue', 'orange', 'purple', 'teal', 'pink', 'amber', 'red'] as const;
+export type DataHue = typeof DATA_HUES[number];
+
+/**
+ * A whole theme: a palette's own colours, plus everything DERIVED from them.
+ *
+ *   night, night2     the hero card's ground and the tile on it; the workout
+ *                     focus mode's ground. Near-black on a light palette; one
+ *                     and two steps LIGHTER than the ground on a dark one, so
+ *                     a hero still reads as a hero where everything is dark.
+ *   nightInk…3        white, the quiet line, and the eyebrow, on night.
+ *   brandBright       the accent as it is drawn ON night: the hero's button,
+ *                     its ring, the current tab's icon. With `brandDeep`, the
+ *                     ink written on it.
+ *   brandSoft         the accent's pale plate (a chip, an icon plate).
+ *   brandText         the accent where it is TEXT — a section's "See all", a
+ *                     chip's label. The accent itself where that clears 4.5:1
+ *                     on the ground, the card and the plate; `ink` where it
+ *                     does not, because a link nobody can read is not a link.
+ *   data              the data palette above.
+ */
+export interface Theme extends Base {
+  night: string; night2: string; nightInk: string; nightInk2: string; nightInk3: string;
+  brandBright: string; brandDeep: string; brandSoft: string; brandText: string;
+  data: DataPalette;
+}
+
+/** `a` laid over `b` at `share` — a plate is the accent at 14% over the card. */
+function mix(a: string, b: string, share: number): string {
+  const x = rgb(a), y = rgb(b);
+  if (!x || !y) return b;
+  return '#' + x.map((v, i) => Math.round(v * share + y[i] * (1 - share)).toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The four accent-derived tokens, MEASURED rather than picked.
+ *
+ * Shared by every palette below and by `withAccent`, so a gym's typed hex goes
+ * through exactly the arithmetic the built-in green does. Two decisions:
+ *
+ *   · On night, the accent is used if it clears 3:1 there as a mark — it is a
+ *     button's fill and a ring's arc. A navy or a charcoal brand does not, and
+ *     a hero whose one button cannot be seen is worse than one whose button is
+ *     white: so it falls to `nightInk` on `night`, which always clears.
+ *   · As text, the accent is used if it clears 4.5:1 on the ground, the card
+ *     and its own plate. Otherwise `ink`.
+ */
+function accentTokens(t: { brand: string; brandInk: string; bg: string; surface: string; ink: string; night: string; nightInk: string }) {
+  const clears = (fg: string, bgs: string[], bar: number) => bgs.every((g) => (contrastRatio(fg, g) ?? 0) >= bar);
+  const brandSoft = mix(t.brand, t.surface, 0.14);
+  const onNight = clears(t.brand, [t.night], AA_MARK);
+  return {
+    brandSoft,
+    brandText: clears(t.brand, [t.bg, t.surface, brandSoft], AA_TEXT) ? t.brand : t.ink,
+    brandBright: onNight ? t.brand : t.nightInk,
+    brandDeep: onNight ? t.brandInk : t.night,
+  };
+}
+
+/**
+ * A palette's own colours, made into a whole Theme.
+ *
+ * The ten palettes that are not the approved board's get their night from
+ * colours they already have: a dark palette's hero is its surface3 — surface2
+ * was tried and is 1.10:1 from the ground on Terminal, one more dark rectangle
+ * — with tiles a tenth of the way to its ink and its own inks on top; a light
+ * palette's is its ink — the darkest thing it owns, in its own hue — with ink2
+ * tiles and white on top. src/lib/a11y.test.ts measures every pairing. `over` is where Repple
+ * and Repple Dark name the mockups' exact values instead.
+ */
+function theme(base: Base, light: boolean, over: Partial<Theme> = {}): Theme {
+  const night = light
+    ? { night: base.ink, night2: base.ink2, nightInk: '#ffffff', nightInk2: base.surface3, nightInk3: base.surface3 }
+    : { night: base.surface3, night2: mix(base.ink, base.surface3, 0.1), nightInk: base.ink, nightInk2: base.ink2, nightInk3: base.ink2 };
+  const t = { ...base, ...night, data: light ? lightData : darkData, ...over };
+  return { ...t, ...accentTokens(t), ...over };
+}
+
+export const teal: Theme = theme(tealBase, false);
+
+// ── Repple (DEFAULT) — the approved mockups ────────────────────────────────
+// A pale grey ground with white cards ON it, slate inks, one green. The ground
+// is what makes a card a card now — sections lost their hairline edge and
+// gained a shadow — so `bg` and `surface` are two colours again, and `ring` is
+// only the rule between two rows inside a card.
+//
+// The green is green-700 rather than the mockups' brighter fill wherever the
+// label on it is white: #22c55e puts white at 2.3:1 and #16a34a at 3.3, and
+// #15803d is 5.0. The bright green is not gone — it is `brandBright`, drawn on
+// the night hero card under `brandDeep` ink (6.5:1), which is where the
+// mockups use it.
+//
+// ink3 is the mockups' #64748b walked down to #5d6b81. As drawn it is 4.36:1
+// on the ground and 4.02 on surface3, and ink3 is the most-read colour in the
+// app (see "ink3, the quiet one" above); hue and saturation held, lightness
+// walked to the first step that clears 4.5 on all four grounds.
+const repple: Theme = theme(
+  { bg: '#f4f5f7', surface: '#ffffff', surface2: '#f1f3f6', surface3: '#e9ecf1', ink: '#0f172a', ink2: '#475569', ink3: '#5d6b81', ring: '#e8eaee', brand: '#15803d', brandInk: '#ffffff', ...lightSem },
+  true,
+  { night: '#0b1d19', night2: '#14302a', nightInk: '#ffffff', nightInk2: '#cbd5e1', nightInk3: '#86efac', brandBright: '#22c55e', brandDeep: '#052e16', brandSoft: '#dcfce7' },
+);
+// The mockups' dark mode: near-black with the same green, where the bright
+// fill is readable under dark ink (8.2:1) and so is what the board draws. The
+// hero is the light scheme's night2 — a green-black a clear step LIGHTER than
+// the ground and the cards, so it still leads the screen.
+const reppleDark: Theme = theme(
+  { bg: '#0b0f0e', surface: '#141a18', surface2: '#1b2320', surface3: '#252e2a', ink: '#f1f5f3', ink2: '#b8c4bf', ink3: '#93a09b', ring: 'rgba(255,255,255,0.10)', brand: '#22c55e', brandInk: '#111310', ...darkSem },
+  false,
+  { night: '#14302a', night2: '#1d443b', nightInk: '#ffffff', nightInk2: '#cbd5e1', nightInk3: '#86efac' },
+);
+
+const midnight: Theme = theme({ bg: '#0a0f1e', surface: '#111a30', surface2: '#16223c', surface3: '#1e2b47', ink: '#eaf0ff', ink2: '#b9c6e0', ink3: '#8692ab', ring: 'rgba(255,255,255,0.08)', brand: '#5b9dff', brandInk: '#04122e', ...darkSem }, false);
+const sage: Theme = theme({ bg: '#0f1411', surface: '#16201a', surface2: '#1b281f', surface3: '#24322a', ink: '#e9f0e9', ink2: '#bcd0bc', ink3: '#899a89', ring: 'rgba(255,255,255,0.08)', brand: '#8fd694', brandInk: '#0c1f12', ...darkSem }, false);
+const noir: Theme = theme({ bg: '#000000', surface: '#101010', surface2: '#181818', surface3: '#242424', ink: '#ffffff', ink2: '#c8c8c8', ink3: '#8b8b8b', ring: 'rgba(255,255,255,0.12)', brand: '#f2f2f2', brandInk: '#000000', ...darkSem }, false);
+const sunset: Theme = theme({ bg: '#140e14', surface: '#1e141e', surface2: '#271a27', surface3: '#33223a', ink: '#ffffff', ink2: '#d9c7d4', ink3: '#9a8a9a', ring: 'rgba(255,255,255,0.09)', brand: '#ff8a5b', brandInk: '#2a0f1e', ...darkSem }, false);
+const clinical: Theme = theme({ bg: '#f4f6fb', surface: '#ffffff', surface2: '#eef2f9', surface3: '#e3e9f4', ink: '#0f1830', ink2: '#3c4a63', ink3: '#5d6984', ring: 'rgba(15,24,48,0.12)', brand: '#2b68ff', brandInk: '#ffffff', ...lightSem }, true);
+const terminal: Theme = theme({ bg: '#0a0d0a', surface: '#0f140f', surface2: '#141a14', surface3: '#1e2e1e', ink: '#d6ffd6', ink2: '#9ccf9c', ink3: '#679d67', ring: 'rgba(70,255,122,0.14)', brand: '#46ff7a', brandInk: '#052b10', ...darkSem }, false);
+const cream: Theme = theme({ bg: '#fbf6ef', surface: '#ffffff', surface2: '#f5efe5', surface3: '#efe6d8', ink: '#2a2018', ink2: '#5a4c3c', ink3: '#736656', ring: 'rgba(42,32,24,0.12)', brand: '#ff6f5e', brandInk: '#111310', ...lightSem }, true);
+const violet: Theme = theme({ bg: '#100e18', surface: '#191529', surface2: '#201a33', surface3: '#2a2440', ink: '#ece9f7', ink2: '#c3bce0', ink3: '#918bab', ring: 'rgba(255,255,255,0.09)', brand: '#7756ff', brandInk: '#ffffff', ...darkSem }, false);
+const swiss: Theme = theme({ bg: '#f6f5f1', surface: '#ffffff', surface2: '#f0efe9', surface3: '#e6e4dc', ink: '#111111', ink2: '#4a4842', ink3: '#686660', ring: 'rgba(17,17,17,0.12)', brand: '#e3261c', brandInk: '#ffffff', ...lightSem }, true);
 
 export interface PaletteMeta {
   key: string; name: string; theme: Theme; light: boolean;
@@ -95,6 +257,8 @@ export interface PaletteMeta {
   counterpart: string;
 }
 export const PALETTES: PaletteMeta[] = [
+  { key: 'repple', name: 'Repple', theme: repple, light: true, counterpart: 'repple-dark' },
+  { key: 'repple-dark', name: 'Repple Dark', theme: reppleDark, light: false, counterpart: 'repple' },
   { key: 'teal', name: 'Elevated Teal', theme: teal, light: false, counterpart: 'clinical' },
   { key: 'midnight', name: 'Midnight Blue', theme: midnight, light: false, counterpart: 'clinical' },
   { key: 'sage', name: 'Sage', theme: sage, light: false, counterpart: 'cream' },
@@ -108,7 +272,7 @@ export const PALETTES: PaletteMeta[] = [
 ];
 export const paletteByKey = (k: string): Theme => (metaByKey(k)).theme;
 export const metaByKey = (k: string): PaletteMeta => PALETTES.find((p) => p.key === k) ?? PALETTES[0];
-export const DEFAULT_PALETTE = 'teal';
+export const DEFAULT_PALETTE = 'repple';
 
 /**
  * The palette to draw when the phone is in `scheme` and the member chose `key`.
@@ -184,4 +348,20 @@ export const light = clinical;
  */
 export function brandInkFor(hex: string): string {
   return readableInkOn(hex);
+}
+
+/**
+ * A theme under a gym's own colour.
+ *
+ * The accent replaces `brand`, and everything DERIVED from the accent is
+ * derived again from theirs — the ink on it, the fill it takes on the night
+ * hero, its plate, and whether it may be text at all — by the same measured
+ * arithmetic the built-in palettes went through (`accentTokens`). What a gym
+ * does not get to move: the data palette, which is meaning and not brand, and
+ * the night ground. The eyebrow on the hero drops from Repple's mint to the
+ * quiet night ink, because a mint line over a red gym's button is two brands.
+ */
+export function withAccent(t: Theme, accent: string): Theme {
+  const branded = { ...t, brand: accent, brandInk: brandInkFor(accent), nightInk3: t.nightInk2 };
+  return { ...branded, ...accentTokens(branded) };
 }

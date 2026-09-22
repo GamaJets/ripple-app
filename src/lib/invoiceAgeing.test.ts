@@ -24,6 +24,10 @@ import {
   plusDays,
   chaseBlocker,
   chaseHistoryLine,
+  settleBlocker,
+  settleDayBlocker,
+  chaseFromBlocker,
+  chaseFromDayBlocker,
   invoiceBlockers,
   coachInvoiceDoc,
   BUCKET_TITLE,
@@ -31,6 +35,7 @@ import {
   type CoachInvoice,
   type InvoiceDraft,
 } from './coachInvoice';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -201,8 +206,33 @@ ok(/1 time/.test(chaseHistoryLine(inv({ reminderCount: 1, remindedAt: '2026-08-2
   'one chase is singular');
 ok(/4 times/.test(chaseHistoryLine(inv({ reminderCount: 4, remindedAt: '2026-08-20T09:00:00Z' }))!),
   'four is plural, so a coach can see they have already sent four');
-ok(/20 Aug 2026/.test(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!),
-  'and the last one is dated');
+// Derived, not pinned: the line renders the day in the reader's own language
+// now, so a literal here asserted the formatter and not this module. What is
+// still being claimed is that the date shown is the LAST reminder's.
+//
+// ── and the ZONE is derived too, which it was not ────────────────────────
+//
+// This read `fmtPointDay(2026, 7, 20)` — the day that instant falls on in
+// GREENWICH. `chaseHistoryLine` deliberately reads the LOCAL parts, and says
+// why at length: slicing the UTC day told a coach who chased at 18:00 on 31
+// March in California "last on 1 Apr", a date in the future, on the one line
+// that exists to say when they last chased.
+//
+// So the assertion demanded the exact behaviour the code was written to stop.
+// It passed in five of the six zones `npm run test:zones` runs by luck of the
+// offsets — 09:00 UTC lands on the same calendar day in Kiritimati (+14),
+// Dubai (+4) and Los Angeles (-7) — and failed at Pacific/Midway (-11), where
+// that instant is 22:00 on the 19th.
+//
+// The expected day is now taken from the same instant the same way the code
+// takes it, so this asserts "the date shown is the last reminder's" in every
+// zone rather than "the date shown is Greenwich's".
+{
+  const at = new Date('2026-08-20T09:00:00Z');
+  ok(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!
+      .includes(fmtPointDay(at.getFullYear(), at.getMonth(), at.getDate())),
+    'and the last one is dated, on the reader\u2019s own day rather than Greenwich\u2019s');
+}
 
 /* ── 7. the shortcut arithmetic ─────────────────────────────────────────── */
 
@@ -248,8 +278,9 @@ const issuer = { status: 'ready' as const, name: 'Sam Whitfield', brand: 'Ironha
   // On the DOCUMENT, not only on the coach's list. A date the coach chases
   // against that the person being chased has never been shown is a term nobody
   // agreed to, and the first they would hear of it is the reminder.
-  ok(d.html.includes('15 Sep 2026'), 'a stated due date is printed on the document');
-  ok(d.text.includes('15 Sep 2026'), 'and in the text fallback, which some builds are all a client gets');
+  const due = fmtPointDay(2026, 8, 15);
+  ok(d.html.includes(due), 'a stated due date is printed on the document');
+  ok(d.text.includes(due), 'and in the text fallback, which some builds are all a client gets');
 }
 
 {
@@ -273,6 +304,131 @@ for (const withDate of [null, '2026-09-15']) {
 // so nothing can be stale.
 ok(!/overdue/i.test(coachInvoiceDoc({ invoice: inv({ dueOn: '2026-06-01' }), issuer }).text),
   'a document never calls itself overdue — this app is not told when anybody pays');
+
+/* ── 9. THE INVOICE THE CLIENT ACTUALLY PAID ──────────────────────────────
+   Until part 660 there was no way to say so. `kind` is on the document and
+   immutable, correctly, so a 'requested' invoice that was paid had two exits
+   and both were wrong: leave it at "61+ days overdue" for ever, in the
+   outstanding figure and on part 613's nightly chase, or void it — which prints
+   THIS INVOICE HAS BEEN VOIDED across a document that was paid in full and says
+   it "is not a record of a charge that stands".
+
+   The settlement is a NEW FACT and not an edit. Every assertion below is as
+   much about what did NOT change as about what did. */
+
+{
+  const paid = inv({ dueOn: '2026-06-01', settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z' });
+  const age = invoiceAge(paid, TODAY);
+  eq(age.state, 'settled', 'an invoice recorded as settled is settled, not 92 days overdue');
+  eq(age.daysOverdue, null, 'and carries no day count');
+  eq(age.bucket, null, 'and is in no chasing band');
+  ok(age.line.includes('You recorded'), 'and the line says whose word it is, exactly as `kind` does');
+
+  // The document still says what it said. This is the assertion that fails the
+  // moment somebody "fixes" this by flipping `kind`.
+  eq(paid.kind, 'requested', 'the kind on the row is untouched by a settlement');
+  const doc = coachInvoiceDoc({ invoice: paid, issuer });
+  ok(doc.text.includes('The issuer states this amount is being requested.'),
+    'and the reprinted document still carries the claim it was issued with');
+  ok(doc.text.includes(`the issuer states this was paid on ${fmtPointDay(2026, 7, 20)}`),
+    'beside the new fact, dated, as the issuer’s own statement');
+  ok(!doc.text.includes('VOIDED'), 'and nothing about it is voided');
+
+  // Off every list and out of the figure, which is the whole point.
+  const book = ageingBook([paid, inv({ id: 'i2', seq: 8, dueOn: '2026-08-01' })], 'ready', TODAY);
+  eq(book.overdue.length, 1, 'a settled invoice is on no overdue list');
+  eq(book.overdue[0].invoice.id, 'i2', 'only the one that is genuinely outstanding is');
+  eq(book.outstanding?.pots[0]?.count, 1, 'and it is out of the outstanding figure too');
+
+  // And it cannot be chased, which is the act the coach would otherwise perform
+  // against somebody who has paid.
+  ok((chaseBlocker(paid) ?? '').includes('settled'), 'a settled invoice cannot be chased, and says why');
+  ok((settleBlocker(paid) ?? '').includes('written once'), 'nor settled twice');
+  ok(!!settleBlocker(inv({ kind: 'received' })), 'a "received" invoice has nothing to settle — it already says so');
+  ok(!!settleBlocker(inv({ voidedAt: '2026-08-02T00:00:00.000Z', voidReason: 'duplicate' })),
+    'nor has a voided one');
+  eq(settleBlocker(inv({ dueOn: '2026-08-25' })), null, 'and an ordinary overdue one can be settled');
+
+  // Both ends of the day are refused rather than corrected.
+  ok(!!settleDayBlocker(inv(), '2026-07-01', TODAY)?.includes('before the invoice was written'),
+    'money cannot have arrived before the invoice existed');
+  ok(!!settleDayBlocker(inv(), '2026-09-02', TODAY)?.includes('has not happened'),
+    'nor on a day that has not happened');
+  ok(!!settleDayBlocker(inv(), 'soon', TODAY), 'and a non-date is refused rather than parsed');
+  eq(settleDayBlocker(inv(), '2026-08-20', TODAY), null, 'a real day between the two is accepted');
+
+  // Nothing is claimed about a settlement that is not there. The extra
+  // paragraph appears only on a document that carries one.
+  ok(!coachInvoiceDoc({ invoice: inv({ dueOn: '2026-08-25' }), issuer }).text.includes('The settlement above'),
+    'an unsettled document says nothing about a settlement');
+}
+
+/* ── 10. THE BACK CATALOGUE NOBODY COULD CHASE ────────────────────────────
+   `due_on` arrived in part 188 and is immutable, correctly. So every invoice
+   issued before it — and every one since by a coach who left the optional box
+   alone — was 'undated': in no outstanding figure, on no chase list, and the
+   screen said so in a sentence ending "cannot be added afterwards".
+
+   `chaseFrom` is not a due date, and every assertion below is about keeping the
+   two apart. It is the coach's own note, it reaches no document, and it is
+   worded as theirs everywhere it appears. */
+
+{
+  const old = inv({ dueOn: null, issuedOn: '2026-06-01' });
+  eq(invoiceAge(old, TODAY).state, 'undated', 'with no date of any kind it is still undated, never "not due"');
+  ok(invoiceAge(old, TODAY).line.includes('Set a day to chase it from'),
+    'and the line now names the way out instead of describing a dead end');
+
+  const planned = inv({ dueOn: null, issuedOn: '2026-06-01', chaseFrom: '2026-08-01' });
+  const age = invoiceAge(planned, TODAY);
+  eq(age.state, 'overdue', 'a chase date the day has passed puts it on the overdue list at last');
+  eq(age.daysOverdue, 31, 'and counts the days from that day, not from the issue date');
+  eq(age.fromChaseDate, true, 'flagged as measured against the coach’s own note');
+  ok(age.line.includes('you set'), 'and worded "you set", never "you stated"');
+  ok(age.line.includes('No due date is on the document'), 'and says outright that the document carries none');
+
+  // A due date always wins, so no invoice ever has two answers to "when is this
+  // late". Part 660 refuses to write the second where the first exists; this is
+  // the same rule read back.
+  const both = inv({ dueOn: '2026-08-25', chaseFrom: '2026-07-01' });
+  eq(invoiceAge(both, TODAY).daysOverdue, 7, 'where both are present the DOCUMENT’s date decides');
+  eq(invoiceAge(both, TODAY).fromChaseDate, false, 'and it is not flagged as a private note');
+  ok(invoiceAge(both, TODAY).line.includes('you stated'), 'and is worded as the term the client was shown');
+
+  // It reaches no artefact. This is the assertion that fails if anybody ever
+  // "helpfully" prints it on the invoice.
+  const doc = coachInvoiceDoc({ invoice: planned, issuer });
+  ok(!doc.text.includes('1 Aug 2026'), 'a chase date is on no document');
+  ok(!doc.html.includes('chase'), 'and the word does not appear on one either');
+
+  // The blockers keep it off the invoices it must not be set on.
+  eq(chaseFromBlocker(old), null, 'an undated requested invoice can take one');
+  ok((chaseFromBlocker(both) ?? '').includes('cannot be moved'),
+    'one that already carries a due date cannot, and says why');
+  ok(!!chaseFromBlocker(inv({ dueOn: null, kind: 'received' })), 'nor can one stating the money was received');
+  ok(!!chaseFromBlocker(inv({ dueOn: null, settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z' })),
+    'nor a settled one');
+  ok(!!chaseFromDayBlocker(old, '2026-05-01')?.includes('before the invoice was written'),
+    'a chase date before the invoice is refused');
+  eq(chaseFromDayBlocker(old, '2027-03-01'), null,
+    'and there is deliberately no upper bound — waiting until March is a plan, not an error');
+
+  // The note under the undated list names the act rather than describing a
+  // permanent condition.
+  const book = ageingBook([old], 'ready', TODAY);
+  eq(book.undated.length, 1, 'an invoice with no date of any kind is still on its own list');
+  ok((book.undatedNote ?? '').includes('set a day to start chasing'),
+    'and the note tells the coach what they can do about it');
+  ok(!(book.undatedNote ?? '').includes('cannot be added afterwards'),
+    'rather than the dead end it used to describe');
+
+  // And once a chase date is set it counts in the figure, which is the second
+  // half of what was broken: these were outside every total as well as off
+  // every list.
+  const after = ageingBook([planned], 'ready', TODAY);
+  eq(after.undated.length, 0, 'a planned invoice is off the undated list');
+  eq(after.outstanding?.pots[0]?.count, 1, 'and inside the outstanding figure');
+}
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'INVOICE AGEING FAILURES:\n' + errors.join('\n') : 'ALL INVOICE AGEING TESTS PASSED');

@@ -91,9 +91,12 @@ for (const r of STRETCH_ROUTINES) {
   }
 }
 
-// The twelve stretches that are marked as flows are exactly the twelve RepDB
-// rows whose force_type is 'dynamic', which are exactly the twelve that ship an
-// animation. Named in full rather than counted, so marking a static hold as a
+// The stretches marked as flows are exactly the rows whose `force` is
+// 'dynamic' — `exercises.force`, which is RepDB's force_type — and those are
+// exactly the ones that ship an animation. Twelve of them at the time this list
+// was written; v1.41 added three more (the two leg swings and Torso Twists),
+// and none of the six routines below uses one, which is why the set here is
+// unchanged. Named in full rather than counted, so marking a static hold as a
 // flow to "get it an animation" fails here instead of putting "Keep moving"
 // over a position somebody is supposed to sit still in.
 const ANIMATED = new Set([
@@ -104,8 +107,8 @@ const ANIMATED = new Set([
 ]);
 for (const r of STRETCH_ROUTINES) {
   for (const s of r.steps) {
-    if (s.flow) ok(ANIMATED.has(s.id), `${r.id}: "${s.name}" is marked a flow, and only the twelve dynamic rows are flows`);
-    else ok(!ANIMATED.has(s.id), `${r.id}: "${s.name}" IS one of the twelve moving sequences and must not be labelled a hold`);
+    if (s.flow) ok(ANIMATED.has(s.id), `${r.id}: "${s.name}" is marked a flow, and only a dynamic row is a flow`);
+    else ok(!ANIMATED.has(s.id), `${r.id}: "${s.name}" IS one of the moving sequences and must not be labelled a hold`);
   }
 }
 
@@ -119,7 +122,11 @@ for (const r of STRETCH_ROUTINES) {
 // not the data it is fed.
 //
 // Every id here carries `is_unilateral: true` in the RepDB pack; every stretch
-// used by a routine and absent from it carries false.
+// used by a routine and absent from it carries false. That column is on
+// `public.exercises` now, so this is no longer a claim about a file we cannot
+// check against — src/lib/stretchBuilder.ts reads it for every routine it
+// builds, and stretchBuilder.test.ts keeps the same list over the whole pack.
+// The two lists must never disagree about a shared id.
 const UNILATERAL = new Set([
   'cross-body-shoulder-stretch', 'downward-dog-to-low-lunge',
   'half-kneeling-hip-flexor-rock', 'knee-to-chest-stretch',

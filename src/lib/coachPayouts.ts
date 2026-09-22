@@ -159,9 +159,19 @@ export function payoutSummary(rows: readonly CoachPayout[], status: LoadStatus):
         amount_cents: p.amountCents,
         currency: p.currency,
         // The day the money reached the bank, which is the date a coach
-        // reconciles on. A payout with no arrival date will not parse and is
-        // therefore in no period, which is right: it is in the all-time figure
-        // and in no month.
+        // reconciles on. `''` where Stripe told us nothing, and that stand-in
+        // is safe here for a reason worth stating rather than assuming:
+        // `sumTaken` does not look at `created_at` at all, so an undated payout
+        // is in this all-time figure exactly as it should be, and this function
+        // never splits these rows by month, so there is no period for it to
+        // fall silently out of.
+        //
+        // The month split for payouts is somewhere else entirely — src/lib/
+        // coachStatement.ts passes `p.arrivalOn` straight to `splitByDay`,
+        // which counts an unparseable day as `undated` and makes the statement
+        // say so. Neither half quietly drops the row; both were checked, and
+        // this note is here so the next person moving one does not have to
+        // check again.
         created_at: p.arrivalOn ?? '',
       });
     } else if (st === 'on-the-way') onTheWay += 1;
@@ -182,7 +192,7 @@ export function payoutSummary(rows: readonly CoachPayout[], status: LoadStatus):
  * different periods on Stripe's own schedule.
  */
 export const PAYOUT_IS_NOT_A_SALE =
-  'A payout is your Stripe balance reaching your bank, not the proceeds of one sale. It is many charges at once, less what Stripe and Repple took and anything refunded, on Stripe’s own schedule — so it does not line up with any figure above it and the two are deliberately never subtracted from each other.';
+  'A payout is your Stripe balance reaching your bank, not the proceeds of one sale. It is many charges at once, less what Stripe and Repple took and anything refunded, on Stripe’s own schedule, so it does not line up with any figure above it and the two are deliberately never subtracted from each other.';
 
 /**
  * That Stripe remains the record.

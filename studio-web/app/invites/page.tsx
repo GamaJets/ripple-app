@@ -40,14 +40,20 @@
 // answered is the commonest thing an owner wants and there was no second
 // message anywhere in the product.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPlans, type MembershipPlan } from '@lib/gymRecord';
+import { gymDateText } from '@lib/gymWhen';
+import { parseGymZone, NO_ZONE_NOTE } from '@lib/gymZone';
 import {
   fetchInvites, createInvite, createInvites, extendInvite, revokeInvite,
   inviteState, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites,
-  normaliseEmail, DEFAULT_VALID_DAYS,
+  normaliseEmail, DEFAULT_VALID_DAYS, isDuplicateInvite,
   inviteMessage, inviteMailto, bulkInviteMailto,
   type MemberInvite, type MemberInviteState, type NewMemberInvite,
 } from '@lib/memberInvites';
@@ -58,6 +64,7 @@ import {
 } from '@lib/inviteDelivery';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { BRAND } from '@lib/brands';
+import { Banner } from '@/components/Banner';
 
 /** How each state reads, and in what colour. Nothing here says "failed": an
  *  invitation nobody answered has not failed, it has not been answered. */
@@ -75,10 +82,89 @@ const STATE_COLOUR: Record<MemberInviteState, string> = {
   expired: 'var(--crit)',
 };
 
+/**
+ * What to say instead of "there is already an invitation waiting" when the
+ * invitation on record has lapsed.
+ *
+ * Both halves matter. The rule — one open row per address per gym, over the
+ * stored status, so a lapsed one still occupies the slot — is why the write
+ * cannot go; Reopen is what the owner actually wants and is already on the row.
+ * Without this the sentence would be `inviteBlocker`'s, and "waiting" is the
+ * one thing a lapsed invitation is not.
+ */
+const LAPSED_INVITE_NOTE =
+  'That address already has an invitation on record here and it has lapsed. A gym keeps one open '
+  + 'invitation per address, so a second cannot be written down — find it in the list below and '
+  + 'press Reopen, which gives the same invitation a fresh 30 days.';
+
+/**
+ * The duplicate-refusal predicate moved to `isDuplicateInvite` in
+ * src/lib/memberInvites.ts, beside the insert that provokes the 23505.
+ *
+ * Knowing that 23505 on `member_invites` means "there is already an open
+ * invitation for that address" is database knowledge, and it was being
+ * re-derived here by a screen that does not own the constraint. The library's
+ * predicate is the same three tests plus one more: the code, the constraint
+ * name, and `DuplicateInviteError` — the wrapper `createInvite` now throws —
+ * so the swap needed no second branch at either call site below.
+ *
+ * ── a correction, recorded rather than erased ─────────────────────────────
+ *
+ * This block used to end by holding `createInvite` to account. It said that
+ * its doc comment claims it throws "a readable reason … rather than letting a
+ * constraint violation surface as raw Postgres", and that this "is true of
+ * the address checks it makes itself and not of this, which is Postgres's".
+ *
+ * That was true when it was written and is now wrong the other way round.
+ * `createInvite` translates the 23505 itself, and its comment says so in
+ * terms: the refusal "is translated here rather than rethrown raw". The
+ * charge stands only against the version of the library that predates that
+ * change, and is left here so that the next reader of these two branches knows
+ * the sentences below are a choice and not a repair — the screen keeps its own
+ * wording because it names console buttons ("Read again", "Reopen", "the
+ * list below") that a library shared with the phone cannot truthfully name.
+ *
+ * The `else` branches are unchanged and still interpolate `x?.message`. They
+ * are not the duplicate case — that is caught above — and for everything else
+ * the library rethrows what arrived, having nothing true to add to it.
+ */
+
+/**
+ * How many days the invitation stays open, as somebody typed it — or NaN, which
+ * both callers already refuse with a sentence.
+ *
+ * Not `parseInt`, which reads a prefix and throws the rest away: "30 days" came
+ * back 30 and so did "30.7", and "1e3" — a person typing a thousand the way a
+ * spreadsheet writes it — came back as ONE DAY. That is an invitation that
+ * lapses tomorrow, written down as the owner's own answer, with nothing on the
+ * screen disagreeing. Whole digits only; anything else is refused by name.
+ */
+function openDays(typed: string): number | null {
+  const raw = typed.trim();
+  if (raw === '') return null;
+  return /^\d+$/.test(raw) ? Number(raw) : NaN;
+}
+
+/** `inviteBlocker`'s refusal, with the lapsed case given its own sentence. */
+function blockerFor(
+  email: string | null | undefined, openTo: string[], lapsedTo: Set<string>,
+): string | null {
+  const stop = inviteBlocker(email, openTo);
+  if (!stop) return null;
+  const e = normaliseEmail(email);
+  return e !== null && lapsedTo.has(e) ? LAPSED_INVITE_NOTE : stop;
+}
+
 export default function Invites() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   // Null is "not read yet, or the read failed"; [] is "read, and the gym has
   // none". They are different facts and nothing below renders them the same
@@ -89,7 +175,7 @@ export default function Invites() {
   const [plans, setPlans] = useState<MembershipPlan[] | null>(null);
   const [plansErr, setPlansErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // Two reads, deliberately not one Promise.all behind a single catch. A price
     // book that will not load must not empty the invitation list with it.
     const [iRes, pRes] = await Promise.allSettled([
@@ -100,6 +186,9 @@ export default function Invites() {
     else { setInvites(null); setInvitesErr(iRes.reason?.message ?? 'Could not read the invitations.'); }
     if (pRes.status === 'fulfilled') { setPlans(pRes.value); setPlansErr(null); }
     else { setPlans(null); setPlansErr(pRes.reason?.message ?? 'Could not read the price book.'); }
+
+    // Whole means both came back. `useFetched` stamps only on a whole read.
+    return settledLanded([iRes, pRes]);
   }, []);
 
   useEffect(() => {
@@ -107,6 +196,10 @@ export default function Invites() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setInvites([]); setPlans([]); return; }
       // supabase-js resolves with { data, error } on a database error rather
@@ -115,29 +208,97 @@ export default function Invites() {
       // a claim about the owner's account, in the branch where the account
       // demonstrably has a tenant.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        // `timezone` joins `name` because the list below stamps a date on every
+        // invitation, and which day an invitation was written down is a fact
+        // about the gym rather than about whoever opens this page.
+        .from('tenants').select('name, timezone').eq('id', who.tenantId).single();
       if (live) {
         setGymName(tErr ? null : ((t as any)?.name ?? null));
         setGymNameUnread(!!tErr);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the two reads are the effect below's.
+  }, []);
 
-  const summary = useMemo(() => (invites ? summariseInvites(invites) : null), [invites]);
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * An invitation's state is written by somebody else: the person accepts it on
+   * their phone, or it quietly expires. This list said "sent" about an invite
+   * accepted an hour ago, on the screen an owner uses to decide whether to
+   * chase somebody.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
 
-  // The addresses this gym already has an open invitation for. Only ever from a
-  // list that was actually read: [] on a failed read would tell the form there
-  // are no open invitations, and the duplicate would then be refused by the
-  // partial unique index instead — after the owner had typed it.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
+
+  /** When this list was read, and therefore the instant an expiry is judged
+   *  against. An invitation expires without anybody touching it, so a clock
+   *  frozen at the moment the tab was opened goes on calling a dead invitation
+   *  "pending" — on the screen an owner uses to decide who still needs chasing,
+   *  and to decide that an address already has an invitation out. */
+  const nowMs = readAt ?? Date.now();
+
+  const summary = useMemo(() => (invites ? summariseInvites(invites, nowMs) : null), [invites, nowMs]);
+
+  /**
+   * The addresses the database would refuse a second invitation for.
+   *
+   * Only ever from a list that was actually read: [] on a failed read would
+   * tell the form there are no open invitations, and the duplicate would then
+   * be refused by the partial unique index instead — after the owner had typed
+   * it.
+   *
+   * ── Why this is the STORED status and not `inviteState` ──────────────────
+   *
+   * It was `inviteState(i, nowMs) === 'pending'`, which is the screen's word
+   * and not the database's. `uq_member_invites_open` (37-member-invites.sql) is
+   * `unique (tenant_id, lower(email)) where status = 'pending'`, and 'expired'
+   * is not a status anything writes down — a lapsed invitation is still
+   * `status = 'pending'` in the row. So the two rules disagreed over exactly
+   * one set of addresses: the ones whose invitation had run out.
+   *
+   * For those, this screen said the address was free, the form let the owner
+   * type it, and Postgres refused the insert with 23505 — which arrived in the
+   * banner as `duplicate key value violates unique constraint
+   * "uq_member_invites_open"`, on a screen whose own list was at that moment
+   * showing the invitation as "lapsed" with a Reopen button beside it. The
+   * owner is told a system error over a rule this page could have stated, and
+   * the action that works is two inches away.
+   *
+   * Now the two rules are the same rule, and `lapsedTo` below is what turns the
+   * refusal into the sentence that names Reopen.
+   */
   const openTo = useMemo(
-    () => (invites ?? []).filter((i) => inviteState(i) === 'pending').map((i) => i.email),
+    () => (invites ?? []).filter((i) => i.status === 'pending').map((i) => i.email),
     [invites],
   );
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  /** Of those, the ones whose invitation has run out — still one open row as
+   *  far as the index is concerned, and "waiting" is the wrong word for them. */
+  const lapsedTo = useMemo(
+    () => new Set(
+      (invites ?? [])
+        .filter((i) => inviteState(i, nowMs) === 'expired')
+        .map((i) => normaliseEmail(i.email))
+        .filter((e): e is string => e !== null),
+    ),
+    [invites, nowMs],
+  );
+
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -165,8 +326,29 @@ export default function Invites() {
     );
   }
 
-  const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // An owner whose profile carries no gym. A modelled state — /settings has
+  // carried this branch since it was written — and without it the `!` below was
+  // a lie the rest of this screen believed: `tenantId` arrived at both forms as
+  // null, `createInvite` would post `tenant_id: null` into a NOT NULL column,
+  // and the list above it said "Nobody has been invited yet" because the effect
+  // sets `invites` to [] in this branch. An owner would read that as a gym with
+  // an empty roster and start typing two hundred addresses into a form whose
+  // every insert the database is going to refuse.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={null} current="/invites">
+        <h1>Invites</h1>
+        <Banner tone="crit">
+          Your account is not linked to a gym, so there is no roster to invite anybody onto and
+          nothing below could be written. That is a record to fix rather than an empty gym —
+          whoever set the gym up needs to add you to it as its owner first.
+        </Banner>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
+  // `refresh` is the hook's — see /money for the same note.
   const unread = invites === null;
 
   return (
@@ -176,6 +358,9 @@ export default function Invites() {
         A membership belongs to a person, not to a row of spreadsheet text. This
         is where the person is asked.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="these invitations" style={{ margin: '2px 0 14px' }} />
 
       {/* This said "Nothing here sends an email", which was true and was the
           whole gap: an invite is a row addressed to somebody who has not been
@@ -240,14 +425,16 @@ export default function Invites() {
 
       <InviteOne
         tenantId={tenantId} me={me} plans={plans} plansErr={plansErr}
-        openTo={openTo} listRead={!unread} onChange={refresh}
+        openTo={openTo} lapsedTo={lapsedTo} listRead={!unread} onChange={refresh}
       />
       <InviteMany
         tenantId={tenantId} me={me} plans={plans} plansErr={plansErr}
-        openTo={openTo} listRead={!unread} onChange={refresh}
+        openTo={openTo} lapsedTo={lapsedTo} listRead={!unread} onChange={refresh}
       />
       <TheList
         invites={invites} readErr={invitesErr} gymName={gymName}
+        zone={zone} zoneUnread={gymNameUnread}
+        nowMs={nowMs}
         tenantId={tenantId} onChange={refresh}
       />
     </Shell>
@@ -256,9 +443,9 @@ export default function Invites() {
 
 /* ── one person ────────────────────────────────────────────────────────────── */
 
-function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }: {
+function InviteOne({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, onChange }: {
   tenantId: string; me: Me; plans: MembershipPlan[] | null; plansErr: string | null;
-  openTo: string[]; listRead: boolean; onChange: () => void;
+  openTo: string[]; lapsedTo: Set<string>; listRead: boolean; onChange: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -271,13 +458,19 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }
   // Said while they are still typing, not after the round trip. Only checked
   // against the open invitations when the list actually read — otherwise the
   // duplicate rule is left to the database, which enforces it properly.
-  const blocker = email.trim() ? inviteBlocker(email, listRead ? openTo : []) : null;
+  const blocker = email.trim() ? blockerFor(email, listRead ? openTo : [], lapsedTo) : null;
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    const stop = inviteBlocker(email, listRead ? openTo : []);
+    // Guarded against a second press while the first insert is in flight. The
+    // button is disabled on `busy`, which a keyboard Enter in any of the four
+    // fields goes straight past — and two presses here are two invitations
+    // written against one address, which is the one thing the unique index
+    // below cannot save us from when they race.
+    if (busy) return;
+    const stop = blockerFor(email, listRead ? openTo : [], lapsedTo);
     if (stop) { setWriteErr(stop); return; }
-    const validDays = days.trim() === '' ? null : parseInt(days, 10);
+    const validDays = openDays(days);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {
       setWriteErr('How many days should it stay open? Leave it blank for the gym’s default.');
       return;
@@ -296,7 +489,17 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }
     } catch (x: any) {
       // The address stays in the box on purpose: nothing was written, so there
       // is something to retry.
-      setWriteErr(`That invitation was not recorded: ${x?.message ?? 'the write was refused'}. Nothing has been written against that address.`);
+      setWriteErr(isDuplicateInvite(x)
+        // The rule, not the index. This is reachable with the list unread (the
+        // form then checks against nothing on purpose) and reachable when the
+        // other machine at the desk wrote the same address a minute ago, so the
+        // sentence names Read as well as Reopen — the invitation that is in the
+        // way may genuinely not be in the list under this form yet.
+        ? `${email.trim()} already has an open invitation at this gym, so a second could not be `
+          + 'written down — a gym keeps one per address, and a lapsed one still holds the place '
+          + 'until it is reopened. Nothing has been written. Press “Read again” at the top of this '
+          + 'page to bring the list up to date, then use Reopen beside that address for a fresh 30 days.'
+        : `That invitation was not recorded: ${x?.message ?? 'the write was refused'}. Nothing has been written against that address.`);
     } finally { setBusy(false); }
   };
 
@@ -327,10 +530,14 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }
         <button type="submit" disabled={busy} style={primaryBtn}>{busy ? 'Recording…' : 'Invite'}</button>
       </form>
       {blocker && !writeErr ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p>
       ) : null}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
-      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced. `writeErr` beside it was already bannered; `msg` carries
+          the clipboard refusal — "your browser would not let this page use the
+          clipboard" — which is the moment somebody thinks the link was
+          copied. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
     </Section>
   );
 }
@@ -356,9 +563,9 @@ function parseLine(line: string): { email: string; fullName: string | null } | n
   return { email: emailPart, fullName: rest || null };
 }
 
-function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange }: {
+function InviteMany({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, onChange }: {
   tenantId: string; me: Me; plans: MembershipPlan[] | null; plansErr: string | null;
-  openTo: string[]; listRead: boolean; onChange: () => void;
+  openTo: string[]; lapsedTo: Set<string>; listRead: boolean; onChange: () => void;
 }) {
   const [text, setText] = useState('');
   const [planId, setPlanId] = useState('');
@@ -377,12 +584,22 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
       .filter((r): r is { line: number; parsed: { email: string; fullName: string | null } } => r.parsed !== null)
       .map((r) => ({ line: r.line, email: r.parsed.email, fullName: r.parsed.fullName }));
     if (!rows.length) return null;
-    return screenInvites(rows, listRead ? openTo : []);
-  }, [text, openTo, listRead]);
+    const out = screenInvites(rows, listRead ? openTo : []);
+    // Same swap as the single form's: a refusal caused by a LAPSED invitation
+    // says so and names Reopen, rather than calling it one that is waiting.
+    return {
+      send: out.send,
+      rejected: out.rejected.map(({ row, reason }) => {
+        const e = normaliseEmail(row.email);
+        return { row, reason: e !== null && lapsedTo.has(e) ? LAPSED_INVITE_NOTE : reason };
+      }),
+    };
+  }, [text, openTo, lapsedTo, listRead]);
 
   const send = async () => {
+    if (busy) return;
     if (!screened || !screened.send.length) return;
-    const validDays = days.trim() === '' ? null : parseInt(days, 10);
+    const validDays = openDays(days);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {
       setWriteErr('How many days should these stay open? Leave it blank for the gym’s default.');
       return;
@@ -414,7 +631,17 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
       // createInvites inserts the batch in one statement, so a refusal means
       // NOT ONE of them landed. Saying so is what stops the owner pasting the
       // list again minus the rows they think went through.
-      setWriteErr(`Not one of these invitations was recorded: ${x?.message ?? 'the write was refused'}. The whole batch is written in one go, so nothing has changed and the list above is still to record.`);
+      setWriteErr(isDuplicateInvite(x)
+        // Which address it was is not in the refusal, and guessing one would be
+        // worse than saying so: the owner would strike the wrong line out of
+        // their list. What the batch case needs is the rule and a way to find
+        // the row, and Read puts every open invitation in the list below.
+        ? 'Not one of these invitations was recorded. One of these addresses already has an open '
+          + 'invitation at this gym — a gym keeps one per address, and a lapsed one still holds '
+          + 'the place until it is reopened. Which address is not in the refusal, so nothing is '
+          + 'struck off here: press “Read again” at the top of this page to bring the list of invitations up to date, and '
+          + 'the ones already on it will be refused beside their own line before you press again.'
+        : `Not one of these invitations was recorded: ${x?.message ?? 'the write was refused'}. The whole batch is written in one go, so nothing has changed and the list above is still to record.`);
     } finally { setBusy(false); }
   };
 
@@ -457,7 +684,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
       {screened && screened.rejected.length ? (
         <div style={{ padding: '0 14px 14px' }}>
           {screened.rejected.slice(0, 20).map(({ row, reason }) => (
-            <div key={row.line} style={{ fontSize: 12.5, color: '#f0c04e' }}>
+            <div key={row.line} style={{ fontSize: 12.5, color: 'var(--warn)' }}>
               line {row.line}: {row.email || '(blank)'} — {reason}
             </div>
           ))}
@@ -474,7 +701,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
       {result ? (
         <div style={{ padding: '0 14px 14px' }}>
-          <p style={{ margin: '0 0 6px', fontSize: 13, color: result.sent ? 'var(--ink2)' : '#ef8080' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 13, color: result.sent ? 'var(--ink2)' : 'var(--crit)' }}>
             {result.sent === 0
               ? 'Nothing was recorded.'
               : `${result.sent} invitation${result.sent === 1 ? '' : 's'} recorded.`}
@@ -483,7 +710,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
               : ''}
           </p>
           {result.rejected.slice(0, 20).map((r) => (
-            <div key={`${r.line}:${r.email}`} style={{ fontSize: 12.5, color: '#ef8080' }}>
+            <div key={`${r.line}:${r.email}`} style={{ fontSize: 12.5, color: 'var(--crit)' }}>
               line {r.line}: {r.email || '(blank)'} — {r.reason}
             </div>
           ))}
@@ -495,9 +722,31 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
 /* ── the list ──────────────────────────────────────────────────────────────── */
 
-function TheList({ invites, readErr, gymName, tenantId, onChange }: {
+function TheList({ invites, readErr, gymName, zone, zoneUnread, nowMs, tenantId, onChange }: {
   invites: MemberInvite[] | null; readErr: string | null;
-  gymName: string | null; tenantId: string; onChange: () => void;
+  gymName: string | null;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
+  /**
+   * Null because the gym record could not be READ, rather than because the gym
+   * has not set a zone. The same `tenants` read supplies both this and the name,
+   * and the rail already separates those two nulls — this column had them
+   * collapsed, so a refused read would have printed "this gym has not set its
+   * timezone" as a claim about a row nobody could see.
+   */
+  zoneUnread: boolean;
+  /**
+   * The instant these invitations were read, and the one every expiry below is
+   * judged against — the same instant the counts above the table are judged at.
+   *
+   * Passed rather than read here. `inviteState` and `daysUntilExpiry` both
+   * default their `now` to `Date.now()`, which in a render body is fresh but is
+   * a DIFFERENT moment from the one the summary tiles used; an invitation that
+   * expired since the last read would show "Expired" in this table while the
+   * tile above went on counting it as sent. One screen has to make one claim.
+   */
+  nowMs: number;
+  tenantId: string; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -583,7 +832,11 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
       // extendInvite counts the rows it changed, so this fires for a refusal AND
       // for an invite that is no longer pending — both of which leave the
       // original expiry standing, and neither of which may look like success.
-      setErr(`${i.email} was not extended: ${x?.message ?? 'the change was refused'}. Its date is unchanged.`);
+      setErr(writeFailedText(x, {
+        what: `Extending the invitation to ${i.email}`,
+        unchanged: 'its date is unchanged',
+        howToCheck: 'Reload this page: the expiry shown against that invitation is whatever is actually stored.',
+      }));
     }
   };
 
@@ -595,15 +848,29 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
       setMsg(`The invitation to ${i.email} has been withdrawn.`);
       onChange();
     } catch (x: any) {
-      setErr(`The invitation to ${i.email} was not withdrawn: ${x?.message ?? 'the change was refused'}. It is still open.`);
+      // "It is still open" was the one thing this could not say. `revokeInvite`
+      // filters `.eq('status', 'pending')` and counts the rows it changed, so
+      // the commonest way it throws is the invitation having been ACCEPTED
+      // since this list was read — in which case it is not open, the person has
+      // joined, and the sentence sent an owner off to chase a member who was
+      // already in the gym. The other two ways are a refusal, where the state is
+      // whatever it was, and a request nobody answered, where the withdrawal may
+      // well have landed. Three outcomes, one sentence, and it was true of the
+      // least likely of them. `extend` ten lines above already does this
+      // correctly, and says why.
+      setErr(writeFailedText(x, {
+        what: `Withdrawing the invitation to ${i.email}`,
+        unchanged: 'its state is unchanged — which may mean it is still open, or that it has already been accepted or withdrawn',
+        howToCheck: 'Reload this page: the state shown against that address is whatever is actually stored.',
+      }));
     }
   };
 
-  const shown = searchRows(invites ?? [], q, (i) => [i.email, i.fullName, i.planName, inviteState(i)]);
+  const shown = searchRows(invites ?? [], q, (i) => [i.email, i.fullName, i.planName, inviteState(i, nowMs)]);
   const note = searchNote(q, shown.length, invites?.length ?? 0);
   // Only the ones still open. A batch mail to everybody would include people
   // who joined last month and people the gym withdrew.
-  const waiting = (invites ?? []).filter((i) => inviteState(i) === 'pending');
+  const waiting = (invites ?? []).filter((i) => inviteState(i, nowMs) === 'pending');
   const waitingLink = waiting.length ? bulkInviteMailto(waiting, opts) : null;
   /** Still waiting, and long enough to be worth a second message. Counted off
    *  the handoff when this browser made one and off the row's own date when it
@@ -627,7 +894,7 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
     // reading "Sent 14 Aug" beside an address believed a message went out that
     // day. What happened that day is that they typed it in.
     { key: 'written', header: 'Written down', value: (i) => i.createdAt,
-      render: (i) => new Date(i.createdAt).toLocaleDateString() },
+      render: (i) => gymDateText(i.createdAt, zone) ?? <span className="dash">not stated</span> },
     // The second fact, and the only one this console can observe: what this
     // browser did. Never "not sent" for an absent note — the owner may well
     // have sent it from their phone or read it down the telephone, and a
@@ -638,23 +905,23 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
         const text = handoffNote(h, now);
         return h ? <span style={{ color: 'var(--ink2)' }}>{text}</span> : <span className="dash">{text}</span>;
       } },
-    { key: 'left', header: 'Days left', value: (i) => daysUntilExpiry(i), numeric: true,
+    { key: 'left', header: 'Days left', value: (i) => daysUntilExpiry(i, nowMs), numeric: true,
       render: (i) => {
-        if (inviteState(i) !== 'pending') return <span className="dash">—</span>;
-        const d = daysUntilExpiry(i);
+        if (inviteState(i, nowMs) !== 'pending') return <span className="dash">—</span>;
+        const d = daysUntilExpiry(i, nowMs);
         // Null is "no expiry was recorded", which is not 0 — and 0 reads as
         // "today", which would have the desk chasing somebody with no deadline.
         if (d == null) return <span className="dash">no expiry recorded</span>;
         return <span style={{ color: d <= 3 ? 'var(--crit)' : 'var(--ink)' }}>{d}</span>;
       } },
-    { key: 'state', header: 'State', value: (i) => inviteState(i),
+    { key: 'state', header: 'State', value: (i) => inviteState(i, nowMs),
       render: (i) => {
-        const s = inviteState(i);
+        const s = inviteState(i, nowMs);
         return <span style={{ color: STATE_COLOUR[s] }}>{STATE_LABEL[s]}</span>;
       } },
     { key: 'act', header: '', value: () => '', align: 'right',
       render: (i) => {
-        const s = inviteState(i);
+        const s = inviteState(i, nowMs);
         // Only the two states a decision can still be made about. An accepted
         // invitation is a member now, and a withdrawn one stays withdrawn —
         // reopening either by overwriting the row would rewrite what happened.
@@ -707,7 +974,26 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
       sub="Withdrawn, never deleted: “we never invited them” and “we invited them and changed our mind” are different answers to a member standing at the desk."
     >
       {err ? <Banner tone="crit">{err}</Banner> : null}
-      {msg ? <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+
+      {/* Whose calendar the "Written down" column is drawn on.
+          `gymDateText` renders in the gym's zone when there is one and in the
+          READER's when there is not — src/lib/gymWhen.ts states the bargain at
+          the head of the text-only forms: a screen that uses them owes the
+          reader `whoseClockNote` somewhere on the page. This one did not pay
+          it. So a gym that has never set a timezone had every invitation
+          stamped with the date on the laptop that happened to be open, and a
+          bookkeeper a few hours away read a different day against the same row
+          with nothing on the screen saying which of the two it was. The dates
+          are not wrong by much, and either side of midnight they are wrong by a
+          day — which is the day an owner counts a lapse from. */}
+      {zone ? null : (
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+          {zoneUnread
+            ? 'The gym’s record could not be read, so this console does not know what its timezone is — the dates below are your own device’s, not necessarily the gym’s. That is not the same as the gym having none.'
+            : `Written down is a date, and ${NO_ZONE_NOTE}.`}
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
         <input
@@ -774,9 +1060,17 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
           </div>
         ) : <Loading />
       ) : (
-        <DataTable
+        <DataTable noun="invites"
           rows={shown} columns={cols} rowKey={(i) => i.id}
-          empty="Nobody has been invited yet. Everyone on the roster arrives through one of these."
+          // The filtered case has its own sentence. `shown` is what survived
+          // the search box, so typing a name that does not match printed
+          // "Nobody has been invited yet" — and this page's own banner warns
+          // that believing that is how a gym sends its whole batch of
+          // invitations twice. The search box is exactly how somebody would
+          // check before doing it.
+          empty={q.trim()
+            ? `Nothing here matches “${q.trim()}”. That is this search box, not an empty gym — clear it before concluding nobody has been invited.`
+            : 'Nobody has been invited yet. Everyone on the roster arrives through one of these.'}
         />
       )}
     </Section>
@@ -792,7 +1086,9 @@ function PlanPicker({ plans, plansErr, value, onChange }: {
   value: string; onChange: (v: string) => void;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...field, flex: 2, minWidth: 170 }}>
+    // Named. The first option reads like a label until somebody chooses, and
+    // then the control has no name at all.
+    <select aria-label="Which plan the invite opens" value={value} onChange={(e) => onChange(e.target.value)} style={{ ...field, flex: 2, minWidth: 170 }}>
       {/* A picker holding nothing but "No plan" looks like a gym that sells
           nothing. Say which it is, so nobody invites two hundred people onto no
           plan believing there was none to choose. */}
@@ -845,28 +1141,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

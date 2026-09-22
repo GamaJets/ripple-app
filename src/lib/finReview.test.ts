@@ -142,5 +142,40 @@ for (const [label, f] of cases) {
     `${label}: no ratio may come out NaN or Infinity`);
 }
 
+/* ── retention and growth are not scored off a member count nobody entered ── */
+//
+// `hasFigures` gates the whole review on REVENUE, and its doc tells the story:
+// an owner who entered only member counts was handed a grade scored against a
+// number nobody supplied. Retention and growth are shares of MEMBERS in exactly
+// the same way and were left — with `members` at 0 both divide-guards pinned
+// their rate to zero, and the score read that as perfect.
+{
+  const r = reviewFinances({
+    revenue: 40000, expenses: 20000, mrr: 30000,
+    members: 0, newMembers: 0, churnedMembers: 0,
+  } as FinInputs, 'AED');
+
+  // 35 of 35 for churn and 5 of 25 for growth used to be free.
+  ok(r.score <= 100, 'the score stays in range');
+  ok(!r.strengths.some((f) => /churn/i.test(f.title)),
+    'no gym is congratulated on retention it never reported');
+  ok(!r.strengths.some((f) => /grow/i.test(f.title)),
+    'nor on growth');
+  ok(!r.improvements.some((f) => /Churn to watch|High churn|Flat growth|Shrinking/i.test(f.title)),
+    'and no churn or growth FINDING is invented either — the else-branches were the loud ones');
+  ok(r.improvements.some((f) => /not entered/i.test(f.title)),
+    'the absence is named once, as a gap in what was entered');
+}
+
+// With real member counts, everything behaves as before.
+{
+  const r = reviewFinances({
+    revenue: 40000, expenses: 20000, mrr: 30000,
+    members: 200, newMembers: 12, churnedMembers: 4,
+  } as FinInputs, 'AED');
+  ok(r.strengths.some((f) => /churn/i.test(f.title)), 'a real low-churn month is still a strength');
+  ok(!r.improvements.some((f) => /not entered/i.test(f.title)), 'and nothing says the numbers are missing');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('finReview.test.ts OK');

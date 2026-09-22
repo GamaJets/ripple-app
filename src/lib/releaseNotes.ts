@@ -73,7 +73,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['client'],
         title: 'Your member number has changed',
-        note: 'The old one was not unique — two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
+        note: 'The old one was not unique. Two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
       },
       /* ── client ──────────────────────────────────────────────────────── */
       {
@@ -140,7 +140,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['trainer'],
         title: 'A session pack can be given a time limit',
-        note: 'Set the validity when you create or edit a package. Nothing already sold is affected — a pack only ever gets the window that existed on the day it was bought — and if one runs out with sessions left you are told, by name and with the number.',
+        note: 'Set the validity when you create or edit a package. Nothing already sold is affected (a pack only ever gets the window that existed on the day it was bought), and if one runs out with sessions left you are told, by name and with the number.',
       },
       {
         kind: 'new',
@@ -188,7 +188,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['trainer'],
         title: 'Your data export contains your business',
-        note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes — and nobody else’s.',
+        note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes, and nobody else’s.',
       },
       {
         kind: 'fixed',
@@ -207,7 +207,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['owner'],
         title: 'Waivers, signatures and your filed documents are in the export',
-        note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle — a spreadsheet cannot hold a scan — but every one is listed with where it is.',
+        note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle (a spreadsheet cannot hold a scan), but every one is listed with where it is.',
       },
       {
         kind: 'new',
@@ -249,7 +249,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['owner'],
         title: 'A gym that changed currency keeps its revenue trend',
-        note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months — still never added together, because they do not add.',
+        note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months, still never added together, because they do not add.',
       },
       {
         kind: 'fixed',
@@ -261,7 +261,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['owner'],
         title: 'Growth says it measures trainers',
-        note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented — the tab now says what it is.',
+        note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented. The tab now says what it is.',
       },
       {
         kind: 'fixed',
@@ -284,7 +284,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['client'],
         title: 'Blood sugar from your monitor, beside what you ate',
-        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there — on iPhone; on Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
+        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there on iPhone. On Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
       },
       {
         kind: 'new',
@@ -296,7 +296,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['trainer'],
         title: 'A client can choose to show you their glucose readings',
-        note: 'On their page, when they have turned it on. Readings and what they ate — not advice, and not something you can switch on for them.',
+        note: 'On their page, when they have turned it on. Readings and what they ate: not advice, and not something you can switch on for them.',
       },
       {
         kind: 'new',
@@ -481,7 +481,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ALL,
         title: 'Password rules are shown before you are refused',
-        note: 'Eight characters with a capital, a number and a symbol — all listed as you type. The apps used to say six and then refuse it.',
+        note: 'Eight characters with a capital, a number and a symbol, all listed as you type. The apps used to say six and then refuse it.',
       },
       {
         kind: 'fixed',
@@ -493,7 +493,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ALL,
         title: 'Figures we cannot read show a dash instead of a zero',
-        note: 'A roster, an inbox or a payroll total that failed to load used to render as 0 — indistinguishable from genuinely none.',
+        note: 'A roster, an inbox or a payroll total that failed to load used to render as 0, indistinguishable from genuinely none.',
       },
       {
         kind: 'fixed',
@@ -654,6 +654,40 @@ export function firstRunReleases(
   return [rel];
 }
 
+/**
+ * Whether a stored position is a stamp that nobody was ever shown.
+ *
+ * ── The bug this exists to end, which is the SAME bug twice ───────────────
+ *
+ * firstRunReleases above fixed "no stored position". It could not fix the
+ * accounts that already had one, and those are the accounts the first bug
+ * created: the pre-fix build wrote `lastSeen = CURRENT_RELEASE` silently on
+ * first launch, for everybody. A position equal to the current release makes
+ * unseenReleases return nothing, forever — so the readers who were robbed by
+ * the first bug are precisely the readers the first fix cannot reach. Reported
+ * again, months later: "Still not getting the What's New screen when opening
+ * the Client or Coach apps. It appears on the Studio app." Studio appears to
+ * work only because it is a separate bundle with its own storage, which the
+ * broken build never wrote to.
+ *
+ * The stamp cannot be un-written and must not be: erasing it would be a guess
+ * dressed up as a fact. So the dismissal is recorded as a SECOND fact, next to
+ * it. A position with a matching dismissal was read by somebody. A position
+ * with no dismissal beside it was written by a machine, and is not evidence
+ * that anybody read anything.
+ *
+ * Only the CURRENT release is ever in question. A position BEHIND current is
+ * already handled — unseenReleases shows the gap — and a reader who dismissed
+ * 1.3.0 before this existed is asked again only while 1.3.0 is still current,
+ * once, and never after 1.4.0 ships.
+ */
+export function stampWasNeverShown(seen: string | null, read: string | null, current: string): boolean {
+  if (!isVersion(seen) || !isVersion(current)) return false;
+  // Behind or ahead of current is not this question.
+  if (seen.trim() !== current.trim()) return false;
+  return !(isVersion(read) && read.trim() === current.trim());
+}
+
 /** Semver-ish compare on dot-separated numbers. Returns >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
@@ -676,12 +710,12 @@ export function storeNotes(audience: Audience, version: string, releases: Releas
   const fixes = r.entries.filter((e) => e.kind === 'fixed');
   if (news.length) {
     lines.push('NEW');
-    for (const e of news) lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    for (const e of news) lines.push(`• ${e.title}${e.note ? `: ${e.note}` : ''}`);
     if (fixes.length) lines.push('');
   }
   if (fixes.length) {
     lines.push('FIXED');
-    for (const e of fixes) lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    for (const e of fixes) lines.push(`• ${e.title}${e.note ? `: ${e.note}` : ''}`);
   }
   return lines.join('\n');
 }

@@ -24,6 +24,17 @@
 //    failed read. So the two statuses are folded with worstStatus and the
 //    screen refuses to attribute anything unless both landed whole.
 //
+//    THE FOLD IS NOT THE WHOLE ANSWER, and treating it as one is a defect this
+//    file has now caused twice. `worstStatus` makes a failed CODES read
+//    indistinguishable from a failed ENQUIRY read, and a consumer branching on
+//    it took a coach's entire list of strangers off the screen for the sake of
+//    a label lookup; the same fold turned a 'partial' enquiry read into the
+//    sentence "your enquiries could not be read" printed over enquiries that
+//    had been read. The fold decides what may be SAID as a whole. It never
+//    decides who is listed, and it never speaks for one read on the other's
+//    behalf — so `leadsStatus` and `codesStatus` are both published unfolded,
+//    and `note` is built from the enquiry read's own status.
+//
 // 3. THE FOLLOW-UPS. What the coach already did. A failure here is the mildest
 //    of the three — it hides history rather than inventing it — and it still
 //    matters, because an enquiry whose notes did not load looks like one nobody
@@ -41,7 +52,17 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+// A page of enquiries is up to ROW_CAP uuids and the follow-up read used to put
+// all of them into one `.in()`. See the note at that read.
+import { readCappedByIds } from '../lib/cappedByIds';
 import { worstStatus, type LoadStatus } from './loadStatus';
+// The auth read, classified once rather than collapsed into `!uid`. See
+// src/lib/sessionUidRead.ts: getSession() resolves with `session: null` and a
+// retryable error beside it when the stored token has expired and the refresh
+// cannot get out — the same shape as a coach who has never signed in.
+import { sessionUid } from '../lib/sessionUid';
+import { authGateMessage } from '../lib/authedUid';
+import type { AuthReadFate } from '../lib/authReadFate';
 import { useAuthRevision } from './authRevision';
 import { fetchMyJoinCodes } from './joinCode';
 import type { KnownCode } from '../lib/adMatch';
@@ -56,6 +77,29 @@ export type LeadWrite = { ok: true } | { ok: false; reason: string };
 export interface LeadBook {
   /** The worst of the enquiry read and the code read. */
   status: LoadStatus;
+  /**
+   * The ENQUIRY read's own status, unfolded.
+   *
+   * `status` above is `worstStatus(leadsStatus, codesStatus)`, and the fold is
+   * right for deciding what may be said. It is wrong for deciding what may be
+   * SHOWN, and the difference cost a real screen: a failed codes read — a
+   * lookup that only ever decides whether "Gym flyer" can be printed beside a
+   * code — arrives in `status` as 'error' indistinguishably from a failed
+   * enquiry read, and `app/(trainer)/leads.tsx` branched on it and took the
+   * coach's entire list off the screen, replacing strangers who had left phone
+   * numbers with "the read did not come back".
+   *
+   * That screen now reads `status === 'error' && rows.length === 0`, which is
+   * true for the right reason — the hook clears the rows when the enquiry read
+   * fails — but it is a proxy, and a proxy is a thing the next consumer has to
+   * re-derive correctly. This is the fact itself, so nobody has to. 'partial'
+   * here is the other half of it: the enquiries were read and there are more of
+   * them, which is not something `status` can still say once the codes read has
+   * folded 'error' over the top of it.
+   */
+  leadsStatus: LoadStatus;
+  /** The CODES read's own status. `codesRead` is this being 'ready'. */
+  codesStatus: LoadStatus;
   rows: LeadRow[];
   /** The line under the heading, true in all four states. */
   note: string;
@@ -88,6 +132,16 @@ export function useLeads(): LeadBook {
   const [notesUnread, setNotesUnread] = useState(false);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const [coachId, setCoachId] = useState<string | null>(null);
+  /**
+   * Why there is no `coachId`, when there is not one. Null while there is.
+   *
+   * The three writes below all refused with a sentence beginning "Not signed
+   * in", for any falsy coachId. `authGateMessage` is what tells a coach whose
+   * connection dropped from a coach who signed out; its unreadable arm ends in
+   * "nothing has been changed", which is literally true of all three — each
+   * returns before its statement reaches the database.
+   */
+  const [authFate, setAuthFate] = useState<AuthReadFate | null>(null);
 
   const load = useCallback(async () => {
     // Without a server there is no table to have read, and an empty list under
@@ -99,12 +153,28 @@ export function useLeads(): LeadBook {
       setCodesStatus('error');
       return;
     }
-    // getSession and not getUser: getUser REJECTS when nobody is signed in,
-    // which would latch this into 'error' before anybody has logged in.
-    const { data: sess } = await supabase.auth.getSession();
-    const uid = sess?.session?.user?.id ?? null;
-    setCoachId(uid);
-    if (!uid) { setLoaded(EMPTY); setStatus('error'); setCodesStatus('error'); return; }
+    // getSession and not getUser — it answers from device storage and therefore
+    // answers offline — and through `sessionUid`, which is what stops the
+    // `error` beside it being thrown away. Both fates land on 'error' here and
+    // that is the right pair of answers: `leadCountLine('error', …)` says "Your
+    // enquiries could not be read, so nothing here is a count. This is not an
+    // empty inbox", which is true of a coach who is signed out and true of one
+    // whose connection dropped, and neither of them may be shown "Nobody has
+    // left their details yet" — a sentence about strangers, assembled out of an
+    // absence, that a coach reads as a verdict on the ad they are paying for.
+    //
+    // The fate is kept rather than folded away, because the WRITES below need
+    // it: "Not signed in, so this could not be saved" is a false statement
+    // during an outage, and it is the one sentence that sends somebody to
+    // re-enter a password that was never the problem.
+    //
+    // Told apart by `fate`, never by `!who.uid`: `string` includes '', so
+    // `!who.uid` does not narrow UidRead.
+    const who = await sessionUid('leads.read');
+    setAuthFate(who.fate);
+    setCoachId(who.uid);
+    if (who.fate !== null) { setLoaded(EMPTY); setStatus('error'); setCodesStatus('error'); return; }
+    const uid = who.uid;
 
     // The codes first, and separately, because their failure and the enquiry
     // read's failure say different things on screen.
@@ -136,11 +206,30 @@ export function useLeads(): LeadBook {
       let unread = false;
       const ids = leads.map((l) => String(l.id ?? '')).filter(Boolean);
       if (ids.length) {
-        const noteRes = await supabase.from('coach_lead_notes')
-          .select('id, lead_id, body, at')
-          .in('lead_id', ids)
-          .order('at', { ascending: false })
-          .limit(capLimit());
+        // Chunked. `ids` comes off the `.limit(capLimit())` read above, so it
+        // is up to ROW_CAP = 1000 enquiry ids, and one `.in()` over that builds
+        // a ~39KB request line against the 8KB nginx and most CDNs allow. Past
+        // roughly two hundred ids the proxy refuses before the database sees
+        // the query; the 414 is not a rejected promise in supabase-js, so it
+        // lands in the branch below and every enquiry loses its follow-up
+        // history at once. The screen is honest about that — `unread` puts a
+        // sentence up rather than an empty list — but it is a whole feature
+        // switching off for a coach whose enquiry book grew past two hundred,
+        // with no way to tell that the size of their book was the cause.
+        //
+        // Still capped rather than finished (`readCappedByIds`, not
+        // `readByIds`): follow-ups are one row per note per enquiry with no
+        // bound at all, `unread` is already the honest answer to a short page,
+        // and paging every note a coach has ever written to compute a preview
+        // is not what this screen is for. See src/lib/cappedByIds.ts.
+        const noteRes = await readCappedByIds<RawFollowUp>(
+          ids,
+          (chunk) => supabase.from('coach_lead_notes')
+            .select('id, lead_id, body, at')
+            .in('lead_id', chunk)
+            .order('at', { ascending: false })
+            .limit(capLimit()),
+        );
         if (noteRes.error) {
           // Not fatal to the screen. The enquiries are real and actionable
           // without their history; the screen says the history is missing
@@ -150,7 +239,7 @@ export function useLeads(): LeadBook {
           unread = true;
         } else {
           const byLead: Record<string, RawFollowUp[]> = {};
-          for (const n of noteRes.data ?? []) {
+          for (const n of noteRes.rows) {
             const key = String((n as any).lead_id ?? '');
             if (!key) continue;
             (byLead[key] ||= []).push(n as RawFollowUp);
@@ -158,7 +247,10 @@ export function useLeads(): LeadBook {
           notes = Object.fromEntries(
             Object.entries(byLead).map(([k, v]) => [k, shapeFollowUps(v)]),
           );
-          unread = capped(noteRes.data).truncated;
+          // Already trimmed to the cap chunk by chunk, and `truncated` is true
+          // if ANY chunk was — an enquiry's notes are all in one chunk, so a
+          // short page still means somebody's history is missing.
+          unread = noteRes.truncated;
         }
       }
 
@@ -188,12 +280,46 @@ export function useLeads(): LeadBook {
     [loaded.leads, loaded.codes, codesStatus],
   );
 
+  /**
+   * The line under the heading.
+   *
+   * Built from the ENQUIRY read's own status and never from the fold. The fold
+   * is `worstStatus`, so a failed codes read turns 'partial' into 'error' and
+   * this line fell through to `leadCountLine('error', rows)` — "Your enquiries
+   * could not be read, so nothing here is a count. This is not an empty inbox."
+   * — printed above a list of enquiries that HAD been read and were on screen
+   * underneath it. The codes read is a lookup for campaign names; it cannot
+   * make a statement about whether the enquiries came back, and it must not be
+   * allowed to write one.
+   *
+   * So the two facts are said as two facts. `leadCountLine` says what is known
+   * about the enquiries, under their own status — which keeps 'partial' saying
+   * "there are more of them" rather than losing it — and the codes sentence is
+   * added after it when the codes did not land. Neither sentence states a
+   * figure the other one makes false: `leadCountLine` already refuses a total
+   * under 'partial', and the campaign half is about attribution, not counts.
+   */
   const note = useMemo(() => {
-    if (codesStatus !== 'ready' && status === 'ready') {
-      return 'Your enquiries were read, but your codes were not — so none of them can be put against a campaign. The people below are real; where they came from is unknown until this reads again.';
-    }
-    return leadCountLine(combined, rows);
-  }, [combined, status, codesStatus, rows]);
+    const own = leadCountLine(status, rows);
+    // Nothing to add while the enquiry read is still in flight or has failed:
+    // under 'loading' there is no list to attribute yet, and under 'error'
+    // `leadCountLine` has already said the enquiries are unknown, which is the
+    // larger fact and the one a coach acts on.
+    //
+    // whole-ok: this line is the "did not land" half and it is right to stop at
+    // two. 'partial' goes on through DELIBERATELY, and is the reason this memo
+    // was rewritten: a truncated enquiry read still put real strangers on the
+    // screen, and the sentence after this one is about ATTRIBUTION — whether
+    // the rows that are there can be named against a campaign — not about
+    // whether they are all of the rows. `leadCountLine` is what answers the
+    // "all of them" question and it refuses a total under 'partial' on its own,
+    // one line above. Swapping this for `isWhole(status)` would drop the codes
+    // caveat exactly when the coach is already looking at an incomplete list,
+    // which is the one case where an unnamed campaign is most likely to be read
+    // as broken attribution rather than as a failed read.
+    if (codesStatus === 'ready' || status === 'loading' || status === 'error') return own;
+    return `${own} Your codes were not read, so none of these can be put against a campaign. The people below are real; where they came from is unknown until this reads again.`;
+  }, [status, codesStatus, rows]);
 
   const followUpsFor = useCallback(
     (leadId: string): FollowUp[] => loaded.notes[leadId] ?? [],
@@ -202,7 +328,11 @@ export function useLeads(): LeadBook {
 
   const setLeadState = useCallback(async (leadId: string, state: LeadState): Promise<LeadWrite> => {
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so this could not be saved — the enquiry is still where it was.' };
+      // Which of the two it was decides the sentence. An outage is not a
+      // sign-out and must not be dressed as one; what is true either way is the
+      // second clause, because this returns before the update is sent.
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so this could not be saved.';
+      return { ok: false, reason: `${why} The enquiry is still where it was.` };
     }
     // `.select('id')` so a policy that refused the row comes back as zero rows
     // rather than as a silent success: a zero-row update is not an error in
@@ -218,32 +348,36 @@ export function useLeads(): LeadBook {
       return { ok: false, reason: 'That could not be saved, so this enquiry is still marked as it was.' };
     }
     if (!data || data.length === 0) {
-      return { ok: false, reason: 'Nothing was changed — this enquiry may have been removed. Pull to read the list again.' };
+      return { ok: false, reason: 'Nothing was changed. This enquiry may have been removed. Pull to read the list again.' };
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   const addFollowUp = useCallback(async (leadId: string, body: string): Promise<LeadWrite> => {
     const problem = followUpProblem(body);
     if (problem) return { ok: false, reason: problem };
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so nothing was recorded — and an unrecorded call is one you will make twice.' };
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so nothing was recorded.';
+      return { ok: false, reason: `${why} An unrecorded call is one you will make twice.` };
     }
     const { data, error } = await supabase.from('coach_lead_notes')
       .insert({ lead_id: leadId, coach_id: coachId, body: body.trim().slice(0, MAX_FOLLOW_UP) })
       .select('id');
     if (error || !data || data.length === 0) {
       reportError('leads.followUp', error);
-      return { ok: false, reason: 'That could not be recorded. What you did still happened — it is this note that did not save, so write it down somewhere before you close this.' };
+      return { ok: false, reason: 'That could not be recorded. What you did still happened. It is this note that did not save, so write it down somewhere before you close this.' };
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   const erase = useCallback(async (leadId: string): Promise<LeadWrite> => {
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so nothing was removed. This enquiry is still on your list.' };
+      // The one of the three where the person on the other end asked to be
+      // forgotten, so the sentence has to say plainly that they have not been.
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so nothing was removed.';
+      return { ok: false, reason: `${why} This enquiry is still on your list.` };
     }
     const { data, error } = await supabase.from('coach_leads')
       .delete()
@@ -255,14 +389,16 @@ export function useLeads(): LeadBook {
       return { ok: false, reason: 'That could not be removed, so this person’s details are still held. Try again.' };
     }
     if (!data || data.length === 0) {
-      return { ok: false, reason: 'There was nothing to remove — this enquiry has already gone.' };
+      return { ok: false, reason: 'There was nothing to remove. This enquiry has already gone.' };
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   return {
     status: combined,
+    leadsStatus: status,
+    codesStatus,
     rows,
     note,
     codesRead: codesStatus === 'ready',

@@ -225,6 +225,17 @@ const ready = shapeLeads([
   const line = leadCountLine('partial', ready);
   ok(/not the whole list/.test(line), 'a truncated read says it is not the whole list');
   ok(/no figure on this screen is a total/.test(line), 'and refuses every total on the screen');
+  // The RELATION, and the direction of it. This sentence read "More enquiries
+  // came back than could be read in one go", which puts the larger number on
+  // the side of what ARRIVED — the exact opposite of a truncated read, and the
+  // opposite of what the clause after it then says. Every sibling states it the
+  // true way round (src/lib/leadWait.ts, src/lib/leadConversion.ts, the
+  // app/(trainer)/leads.tsx header); this one was the odd one out, so it is
+  // pinned rather than left to the next reader to notice.
+  ok(/more enquiries exist than came back/i.test(line),
+    "'partial' says more enquiries EXIST than came back");
+  ok(!/came back than could be read/i.test(line),
+    'and never the reverse, which would say the read returned more than the set holds');
 }
 {
   const line = leadCountLine('loading', ready);

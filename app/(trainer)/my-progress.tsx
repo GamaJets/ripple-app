@@ -61,15 +61,16 @@
 // A scan here is what feeds `weightKg` and `bodyFatPct` on `useClientData`,
 // which is what My Nutrition needs before it can build a daily calorie target.
 // That is the whole chain a coach could not complete: scan → body → target.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Spark, Cta, Ghost, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value as valueType } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig, HERO_FIT } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value as valueType, font } from '../../src/theme/scale';
 import { useCheckIns, type CheckIn } from '../../src/ui/checkins';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
 import { useClientData } from '../../src/ui/clientData';
@@ -81,9 +82,19 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote,
   readNumber,
 } from '../../src/lib/units';
-import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+// How a reading was taken, and how often readings are being taken at all. Both
+// are facts about `scans` rows that this screen has always held and never
+// shown: `ScanRec.source` arrives on every row (src/ui/clientData.tsx:702) and
+// the section below printed the figures without it, so the scan this screen
+// writes as 'Entered by me' looked exactly like one lifted off an InBody sheet.
+import { SourceChip, SourceLine, SourceCaveat } from '../../src/ui/ScanSource';
+import { readSource, mixedSourcesNote } from '../../src/lib/scanProvenance';
+import { ScanCadencePanel } from '../../src/ui/ScanCadencePanel';
+import { useToday } from '../../src/ui/today';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
 // the record is metric; the bounds are converted for whichever unit the coach
@@ -111,7 +122,7 @@ const TREND_POINTS = 24;
 function Rating({ t, label, score, onChange }: { t: Theme; label: string; score: number; onChange: (v: number) => void }) {
   return (
     <View style={{ marginBottom: sp.md }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2, marginBottom: sp.sm }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font('500'), color: t.ink2, marginBottom: sp.sm }}>{label}</Text>
       <View style={{ flexDirection: 'row', gap: sp.sm }}>
         {[1, 2, 3, 4, 5].map((n) => (
           <Pressable key={n} onPress={() => onChange(n)} accessibilityRole="button"
@@ -132,9 +143,34 @@ export default function MyProgress() {
   const ms = useMeasurements();
   const cd = useClientData();
   const settings = useSettings();
+  // A trainer's own progress, read off the client hooks: their check-ins,
+  // their tape measurements and the profile and scans behind them. Every
+  // change on this screen is one figure set against an earlier one, and the
+  // three reads fail independently — so all three, or the deltas would be
+  // drawn between numbers from different moments.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(ci.reload()), Promise.resolve(ms.reload()), Promise.resolve(cd.reload()),
+  ]), [ci, ms, cd]));
   const wu = settings.weightUnit;
   const lu = settings.lengthUnit;
-  const today = todayISO();
+  // ── the day a scan gets stamped with ──────────────────────────────────
+  //
+  // `useToday()`, not `todayISO()`. This is not only a label: `addScan` below
+  // writes `takenAt: today`, so this value becomes the date on a body-
+  // composition reading, and a reading filed on the wrong day is a point in the
+  // wrong place on a trend the coach is reading their own progress off.
+  //
+  // A bare call in the render body is not frozen the way `useMemo(…, [])` is,
+  // but it is only ever as fresh as the last render — and `my-progress` is
+  // registered `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is
+  // never torn down, and does not re-render while nobody is touching it. Open
+  // it on Sunday, come back on Wednesday, type in the numbers off the machine,
+  // and the scan is dated Sunday. `check:frozen-day` looks for an empty
+  // dependency array and cannot see this shape.
+  //
+  // Same format and same local timezone: `todayKey` and `todayISO` both build
+  // `YYYY-MM-DD` off getFullYear/getMonth/getDate.
+  const today = useToday();
 
   // Each provider answers for its own section, and the header answers for the
   // screen. An empty list under 'error' is "we could not read it", never "you
@@ -186,7 +222,7 @@ export default function MyProgress() {
   const latestAgo = latest ? agoLabel(latest.at, today) : null;
   const latestDays = latest ? daysBetween(latest.at, today) : null;
   const staleNote = latestDays != null && latestDays > STALE_AFTER_DAYS
-    ? `Your last weigh-in is ${latestDays} days old — this figure describes the body you had then.`
+    ? `Your last weigh-in is ${latestDays} days old, so this figure describes the body you had then.`
     : null;
   const weightNote = convertedNote(wu);
   const tapeNote = convertedNote(lu);
@@ -217,36 +253,75 @@ export default function MyProgress() {
    * written as a 0, which is not a point on a 1–5 scale and would sit in the
    * record as a rating nobody gave.
    *
-   * Awaited, and believed only when the row is on the server. `addCheckIn`
+   * Awaited, and believed only when the row is on the server. `sendCheckIn`
    * inserts the entry into `checkins` optimistically, so on a refused write the
    * weigh-in is on this phone alone — and the client app's own check-in screen
    * throws this answer away and says "Check-in sent" regardless, which is the
    * bug this does not repeat.
+   *
+   * ── why this is `sendCheckIn` and not `addCheckIn` ───────────────────────
+   *
+   * `addCheckIn` is `(await sendCheckIn(c)) === 'stored'` (src/ui/checkins.tsx),
+   * and the two answers it flattens into `false` are opposites:
+   *
+   *   · 'unsent'  — nobody answered. The check-in IS kept: it is in `checkins`,
+   *                 it is on the trend above, it is written to the per-account
+   *                 cache so it survives the app being killed, it is counted in
+   *                 `unsent`, and `flushQueue` sends it on the next launch,
+   *                 reconnect or foreground.
+   *   · 'refused' — the server read it and declined. `sendCheckIn` takes it
+   *                 straight back out of the list, and offering it again as it
+   *                 stands will be refused again.
+   *
+   * Told apart because the sentence for one is a lie about the other. A coach
+   * who weighed in on gym wifi that dropped was told their weigh-in "will be
+   * gone when you next open the app" and left holding a full form — so the
+   * honest thing to do was type it again, and the queue then delivered both.
+   * Two weigh-ins an hour apart is a "Since Last" of 0.0 kg on their own hero.
+   *
+   * This is the same three-way `saveTape` below already makes over
+   * `ms.addEntry`, and the one app/(trainer)/my-training.tsx makes over
+   * `logWorkouts`. This write was the odd one out.
    */
   const logWeighIn = async () => {
     setProblem(null);
     const kg = weightToKg(typed, wu);
     if (kg == null) { setProblem(`Enter your weight in ${wu}.`); return; }
     if (kg < MIN_KG || kg > MAX_KG) {
-      setProblem(`That is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
+      setProblem(`That is outside the range this records: ${minShown} to ${maxShown} ${wu}.`);
       return;
     }
     if (!energy || !sleep || !mood || !adherence) {
-      setProblem('Tap a score for energy, sleep, mood and adherence — they are not guessed for you.');
+      setProblem('Tap a score for energy, sleep, mood and adherence. They are not guessed for you.');
       return;
     }
     setBusy(true);
-    const saved = await ci.addCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
+    const out = await ci.sendCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
     setBusy(false);
-    if (saved) {
+    /** The form, emptied. Only where the weigh-in is actually being kept — a
+     *  form left full beside a kept entry is how the same weigh-in gets
+     *  recorded twice. */
+    const clear = () => { setTyped(''); setEnergy(0); setSleep(0); setMood(0); setAdherence(0); setNote(''); };
+    if (out === 'stored') {
       notifySuccess();
-      setTyped(''); setEnergy(0); setSleep(0); setMood(0); setAdherence(0); setNote('');
-      Alert.alert('Weigh-in logged', 'It is on your own record and on the trend above.');
+      clear();
+      Alert.alert('Weigh-in Logged', 'It is on your own record and on the trend above.');
       return;
     }
-    // The fields are deliberately left as they are: what was typed is the only
-    // copy of it, and this is the one path where the coach may want to retry.
-    setProblem('Not saved — we could not reach your record. This weigh-in is on this phone only and will be gone when you next open the app.');
+    if (out === 'unsent') {
+      // Kept, counted, and on the trend above — it simply has not reached the
+      // server yet. Cleared for the same reason 'stored' is: the weigh-in
+      // exists, and leaving it in the boxes as well invites a second one.
+      clear();
+      Alert.alert('Saved on This Phone',
+        'No connection, so this weigh-in has not reached your record yet. Nothing is lost. It is saved here, it is on the trend above, and it goes up on its own the next time you have signal.');
+      return;
+    }
+    // 'refused'. The server read this and declined it, so it is not on the
+    // record and it is not waiting either — `sendCheckIn` has already taken it
+    // back off the trend. The fields are deliberately left as they are: what
+    // was typed is now the only copy of it.
+    setProblem('Not saved. Your record rejected this weigh-in, so it has not been stored and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /* ── logging tape measurements ───────────────────────────────────────── */
@@ -271,7 +346,7 @@ export default function MyProgress() {
     // reads an inch entry as centimetres, which turns a 32 in waist into a
     // 32 cm one.
     for (const { key } of METRICS) { const cm = lengthToCm(tape[key], lu); if (cm != null && cm > 0) parsed[key] = cm; }
-    if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to save', 'Enter at least one measurement.'); return; }
+    if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to Save', 'Enter at least one measurement.'); return; }
     setTapeBusy(true);
     const out = await ms.addEntry(parsed);
     setTapeBusy(false);
@@ -285,12 +360,12 @@ export default function MyProgress() {
     // either: the numbers stay in front of the coach until they are actually on
     // their record. But it is not a loss and must not be described as one.
     if (out === 'queued') {
-      Alert.alert('Waiting to send',
+      Alert.alert('Waiting to Send',
         'No signal, so these are saved on this phone and have not reached your record yet. They go up on their own once you are back online.');
       return;
     }
     // Not cleared, and not called saved.
-    Alert.alert('Not saved',
+    Alert.alert('Not Saved',
       'These are on screen but could not be sent to your account, so they will be gone at the next launch. Save again in a moment.');
   };
 
@@ -329,7 +404,7 @@ export default function MyProgress() {
     const kg = weightToKg(scanWt, wu);
     if (kg == null) { setScanProblem(`Enter your weight in ${wu}.`); return; }
     if (kg < MIN_KG || kg > MAX_KG) {
-      setScanProblem(`That weight is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
+      setScanProblem(`That weight is outside the range this records: ${minShown} to ${maxShown} ${wu}.`);
       return;
     }
     // `Number('18,5')` is NaN, so a coach on a German phone was told to enter
@@ -338,7 +413,7 @@ export default function MyProgress() {
     const bf = readNumber(scanBf);
     if (!scanBf.trim() || bf == null) { setScanProblem('Enter your body fat as a percentage.'); return; }
     if (bf < MIN_BF || bf > MAX_BF) {
-      setScanProblem(`That body-fat percentage is outside the range this records — ${MIN_BF} to ${MAX_BF}%.`);
+      setScanProblem(`That body-fat percentage is outside the range this records: ${MIN_BF} to ${MAX_BF}%.`);
       return;
     }
     // Blank is absent, not zero. A typed figure that will not read is refused
@@ -365,12 +440,12 @@ export default function MyProgress() {
     if (stored) {
       notifySuccess();
       setScanWt(''); setScanBf(''); setScanSm('');
-      Alert.alert('Scan saved', 'It is on your own record, and your daily calorie target on My Nutrition is now built from it.');
+      Alert.alert('Scan Saved', 'It is on your own record, and your daily calorie target on My Nutrition is now built from it.');
       return;
     }
     // Not cleared. What was typed is the only copy of it, and this is the one
     // path where the coach may want to try again.
-    setScanProblem('Not saved — we could not reach your record. This scan is on this phone only and will be gone when you next open the app, along with anything built from it.');
+    setScanProblem('Not saved. We could not reach your record. This scan is on this phone only and will be gone when you next open the app, along with anything built from it.');
   };
 
   /* ── presentation ────────────────────────────────────────────────────── */
@@ -382,26 +457,18 @@ export default function MyProgress() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-          {/* ── header. Whose body this is, said before anything else ─────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon="back" onPress={() => router.back()} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your own body, not a client&rsquo;s</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Progress</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-            Every figure on this screen was measured by you, for you, under your own account. No
-            client&rsquo;s readings appear here, and nothing you log here reaches a client&rsquo;s record.
-          </Text>
+          {/* ── header. Whose body this is, said before anything else ───────
+              The board's pushed-page head; the subtitle is the one line that
+              keeps this screen from being mistaken for a client's. */}
+          <PageHead title="My Progress" subtitle="Your own body, not a client’s" />
 
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {bodyStatus === 'error' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Your record" title="We couldn’t read your body record"
-                note="Your own weigh-ins and measurements are safe — this screen cannot see them right now. Nothing has been reset, and an empty history below means unknown rather than none." />
+              <Notice tone={t.warn} kicker="Your Record" title="We Couldn’t Read Your Body Record"
+                note="Your own weigh-ins and measurements are safe. This screen cannot see them right now. Nothing has been reset, and an empty history below means unknown rather than none." />
             </Section>
           ) : bodyStatus === 'partial' ? (
             <Section>
@@ -409,24 +476,29 @@ export default function MyProgress() {
             </Section>
           ) : null}
 
-          <Rule />
 
           {/* ── the hero: the last weight you recorded ─────────────────────
               The figure goes through `plain` rather than num1: `weightIn` has
               already rounded to the grain the unit can carry — whole pounds, a
               tenth of a kilogram — and a fixed decimal would print a
               whole-pound reading as "180.0". Neither can reach four digits, so
-              no thousands separator is due. */}
-          <Hero
-            label="Your Latest Weight"
-            figure={shownWeight == null ? fig(null) : plain(shownWeight)}
-            unit={shownWeight == null ? undefined : wu}
-            note={shownWeight == null
+              no thousands separator is due — which is the whole reason `plain`
+              is a separate formatter and not `numUpTo`: it writes the reader's
+              own decimal separator on ASCII digits and never groups, so the
+              same figures can go straight back into the boxes below. The
+              movement in the note beside it prints through the same function,
+              so this row cannot show a comma and a full stop at once. */}
+          {(() => {
+            // The board's figure card in place of the Hero: the same label,
+            // figure, unit and sentence, in a Section at the board's figure
+            // size, as client-body.tsx draws each of its metrics.
+            const figure = shownWeight == null ? fig(null) : plain(shownWeight);
+            const moved = shownWeight == null
               ? (ci.status === 'loading'
                 ? 'Reading your record…'
                 : !weighKnown
                   ? 'Your weigh-ins could not be read, so this is unknown rather than none.'
-                  : 'No weigh-in of your own yet — log one below and the trend builds from it.')
+                  : 'No weigh-in of your own yet. Log one below and the trend builds from it.')
               // The three arms — a movement, no movement, and no earlier
               // reading — are deltaLabel's own, so this line cannot drift out of
               // step with the same sentence on the client's Progress hero.
@@ -437,23 +509,43 @@ export default function MyProgress() {
                 unit: wu,
                 noChange: 'Unchanged',
                 noBaseline: 'First weigh-in',
-              })} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
-          />
-          {staleNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{staleNote}</Text> : null}
-          {weightNote && shownWeight != null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{weightNote}</Text>
-          ) : null}
+              })} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`;
+            return (
+              <Section>
+                <SectionHead title="Your Latest Weight" note={shownWeight != null && latest ? dayLabel(latest.at) : undefined} />
+                {/* One stop for the ear: label, figure, movement. */}
+                <View accessible accessibilityLabel={`Your latest weight, ${shownWeight == null ? 'no reading' : `${figure} ${wu}`}. ${moved}`}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                    {/* The kit's hero size, shrunk to fit before it wraps: a
+                        weight broken over two lines is a figure read wrong. */}
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
+                      style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                    {shownWeight != null ? (
+                      <Text style={{ ...ty.head, ...numeric, color: t.ink3, marginStart: 6 }}>{wu}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>
+                </View>
+                {staleNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{staleNote}</Text> : null}
+                {weightNote && shownWeight != null ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text>
+                ) : null}
+              </Section>
+            );
+          })()}
 
-          <Rule />
 
           {/* ── the trend ────────────────────────────────────────────────── */}
           <Section>
             {/* The note counts the whole series, not the drawn window, and only
                 when the read was whole — a count over a truncated list is not
                 a count. */}
-            <SectionHead title="Your Weight Trend" note={weighWhole && weighed.length ? `${weighed.length} weigh-ins` : undefined} />
+            <SectionHead title="Your Weight Trend" note={weighWhole && weighed.length ? `${weighed.length} Weigh-ins` : undefined} />
             {trend.length >= 2 ? (
-              <Spark
+              // The filled area chart the client's own body screens draw.
+              // Weight takes the accent, as it does there (fat is orange and
+              // muscle blue; see app/(client)/body-trends.tsx).
+              <Spark area tone="brand"
                 data={trend.map((c) => weightIn(c.weightKg, wu) ?? c.weightKg)}
                 labels={trend.map((c) => c.at)}
                 unit={` ${wu}`}
@@ -463,7 +555,7 @@ export default function MyProgress() {
                 {ci.status === 'loading'
                   ? 'Reading your record…'
                   : !weighKnown
-                    ? 'Your weigh-ins could not be read, so there is no trend to draw. They have not gone anywhere — this screen cannot see them right now.'
+                    ? 'Your weigh-ins could not be read, so there is no trend to draw. They have not gone anywhere. This screen cannot see them right now.'
                     : 'A trend needs two weigh-ins of your own. Log one below, and another next week.'}
               </Text>
             )}
@@ -489,13 +581,12 @@ export default function MyProgress() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── log a weigh-in ───────────────────────────────────────────── */}
           <Section>
             <SectionHead title="Log a Weigh-in" note={wu} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              Your weight and how the week has gone. Stored against your own account — no client and no
+              Your weight and how the week has gone. Stored against your own account. No client and no
               other coach can read it.
             </Text>
             <TextInput value={typed} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu}
@@ -519,7 +610,6 @@ export default function MyProgress() {
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── the tape ─────────────────────────────────────────────────── */}
           <Section>
@@ -539,7 +629,7 @@ export default function MyProgress() {
                   <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
+                      <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
                       {d != null && d !== 0 ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
                           {/* A neutral mark. This painted every falling tape
@@ -554,7 +644,7 @@ export default function MyProgress() {
                           <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu })}</Text>
                         </View>
                       ) : (
-                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: 'right' }}>—</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: END_ALIGN }}>—</Text>
                       )}
                     </View>
                   </View>
@@ -568,20 +658,19 @@ export default function MyProgress() {
                     // Not "you have never measured yourself" — a failed read
                     // gives nobody the standing to say that about somebody
                     // else's history.
-                    ? 'Your tape history could not be read, so nothing is shown. That is not the same as having none — try again once you have a connection and it will be exactly as you left it.'
+                    ? 'Your tape history could not be read, so nothing is shown. That is not the same as having none. Try again once you have a connection and it will be exactly as you left it.'
                     : 'No tape measurements of your own yet. Save the first below and the comparison builds from it.'}
               </Text>
             )}
           </Section>
 
-          <Rule />
 
           {/* ── log tape measurements ────────────────────────────────────── */}
           <Section>
             <SectionHead title="Log New Measurements" note={lu} />
             {METRICS.map(({ key, label }) => (
               <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink2 }}>{label}</Text>
                 <TextInput value={tape[key] ?? ''} onChangeText={(v) => setTapeVal(key, v)} keyboardType="decimal-pad"
                   accessibilityLabel={`${label} in ${lu === 'cm' ? 'centimetres' : 'inches'}`}
                   placeholder={lastTape(key) ?? lu} placeholderTextColor={t.ink3} style={tapeInp} />
@@ -604,17 +693,16 @@ export default function MyProgress() {
                   accessibilityRole="radio" accessibilityState={{ selected: lu === u }}
                   accessibilityLabel={u === 'cm' ? 'Centimetres' : 'Inches'}
                   style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: lu === u ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: lu === u ? '600' : '500', color: lu === u ? t.brandInk : t.ink2 }}>{u}</Text>
+                  <Text style={{ ...ty.label, ...font(lu === u ? '600' : '500'), color: lu === u ? t.brandInk : t.ink2 }}>{u}</Text>
                 </Pressable>
               ))}
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── history ──────────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Your History" note={isWhole(ms.status) && ms.entries.length ? `${ms.entries.length} entries` : undefined} />
+            <SectionHead title="Your History" note={isWhole(ms.status) && ms.entries.length ? `${ms.entries.length} Entries` : undefined} />
             {ms.entries.map((e: MeasureEntry, i) => (
               <View key={e.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 {/* Read through localDate: `taken_at` is a bare DATE, and
@@ -626,7 +714,7 @@ export default function MyProgress() {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg, marginTop: 5 }}>
                   {METRICS.map(({ key, label }) => e[key] != null ? (
                     <Text key={key} style={{ ...ty.caption, color: t.ink3 }}>
-                      {label} <Text style={{ ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text>
+                      {label} <Text style={{ ...numeric, ...font('500'), color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text>
                     </Text>
                   ) : null)}
                 </View>
@@ -652,17 +740,44 @@ export default function MyProgress() {
                 {bodyStatus === 'loading'
                   ? 'Reading your record…'
                   : bodyStatus === 'error'
-                    ? 'Your own history could not be read. It has not gone anywhere — this screen cannot see it right now.'
+                    ? 'Your own history could not be read. It has not gone anywhere. This screen cannot see it right now.'
                     : 'Nothing of your own recorded yet. Anything you log above appears here, and only you ever see it.'}
               </Text>
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── body composition scans ───────────────────────────────────── */}
           <Section>
-            <SectionHead title="Body Composition" note={isWhole(cd.scansStatus) && cd.scans.length ? `${cd.scans.length} scans` : undefined} />
+            <SectionHead title="Body Composition" note={isWhole(cd.scansStatus) && cd.scans.length ? `${cd.scans.length} Scans` : undefined} />
+            {/* How often, before what. A trend through three readings taken in
+                one week and a trend through three taken in three years are the
+                same list of rows and nothing like the same evidence — and the
+                panel is drawn under every status, because "your scans could not
+                be read" and "you have not been scanned since March" are two
+                different things for it to say and it knows which is which. */}
+            <View style={{ marginBottom: sp.md }}>
+              <ScanCadencePanel
+                days={cd.scans.map((s) => s.takenAt)}
+                status={cd.scansStatus}
+                today={today}
+                subject={{ they: 'you', have: 'have' }}
+              />
+            </View>
+            {/* Body fat across the scans, as the area chart the client's own
+                body screens draw it, in the orange body fat wears everywhere.
+                Only from a WHOLE read of at least two scans: a line through a
+                truncated list starts wherever the page happened to, and one
+                scan is a reading, not a trend (the row below states it). Every
+                point is a scan's own figure; nothing is interpolated. */}
+            {isWhole(cd.scansStatus) && cd.scans.length >= 2 ? (
+              <View style={{ marginBottom: sp.md }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>Body Fat</Text>
+                <Spark area tone="orange" unit="%"
+                  data={cd.scans.map((s) => s.bodyFatPct)}
+                  labels={cd.scans.map((s) => s.takenAt)} />
+              </View>
+            ) : null}
             {cd.scans.length ? (
               [...cd.scans].reverse().map((s, i) => (
                 <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -673,6 +788,14 @@ export default function MyProgress() {
                     {fig(weightLabel(s.weightKg, wu))} · {num1(s.bodyFatPct)}% body fat
                     {s.skeletalMuscleKg != null ? ` · ${fig(weightLabel(s.skeletalMuscleKg, wu))} muscle` : ''}
                   </Text>
+                  {/* The newest reading gets the chip AND the sentence; the ones
+                      under it get the chip alone. The same explanation repeated
+                      beside nine rows is one nobody reads by the third, and the
+                      top of the list is where somebody is actually looking when
+                      they decide what a figure is worth. */}
+                  {i === 0
+                    ? <SourceLine source={s.source} />
+                    : <View style={{ marginTop: sp.sm }}><SourceChip source={s.source} /></View>}
                 </View>
               ))
             ) : (
@@ -686,6 +809,14 @@ export default function MyProgress() {
                     : 'No scan of your own yet. Add the first below and your weight, body fat and muscle build from it.'}
               </Text>
             )}
+            {/* Gated on a whole read, because this sentence COUNTS rows by
+                source — "2 off a machine, 1 typed in" — and a count over a
+                truncated list is a count over an unknown fraction of it. The
+                chips on the rows above need no such gate: each one is a fact
+                about the row it sits on. */}
+            {isWhole(cd.scansStatus)
+              ? <SourceCaveat note={mixedSourcesNote(cd.scans.map((s) => readSource(s.source)))} />
+              : null}
             {cd.scansStatus === 'partial' ? (
               <View style={{ marginTop: sp.md }}>
                 <PartialRead what="scans of your own" shown={cd.scans.length} />
@@ -693,14 +824,13 @@ export default function MyProgress() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── log a body scan ──────────────────────────────────────────── */}
           <Section>
             <SectionHead title="Log a Body Scan" note={dayLabel(today)} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
               The figures off your scale or InBody sheet, dated today. Stored against your own account,
-              and this is what your daily calorie target on My Nutrition is built from — no client and
+              and this is what your daily calorie target on My Nutrition is built from. No client and
               no other coach can read it.
             </Text>
             {[
@@ -709,7 +839,7 @@ export default function MyProgress() {
               { key: 'sm', label: 'Muscle', unit: wu, value: scanSm, set: setScanSm, a11y: `Your skeletal muscle mass in ${wu === 'kg' ? 'kilograms' : 'pounds'}, optional` },
             ].map((f) => (
               <View key={f.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink2 }}>
                   {f.label}
                   {/* The unit belongs on the row, not in the placeholder. Two of
                       these three are in the coach's weight unit and the middle
@@ -733,25 +863,24 @@ export default function MyProgress() {
               <Cta wide label={scanBusy ? 'Saving…' : 'Save My Scan'} onPress={saveScan} disabled={scanBusy} />
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Leave muscle empty if your scan did not report one — it is stored as absent rather than as
+              Leave muscle empty if your scan did not report one. It is stored as absent rather than as
               a zero, so the history never shows a reading nobody took. Weight is stored in kilograms
               whichever unit you read in, so switching the unit in Settings never changes what you
               measured.
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── where a CLIENT's body record goes instead ────────────────── */}
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               Looking at a client&rsquo;s weight, scans or measurements? Those are on their record,
-              from their card on the Clients tab — not here.
+              from their card on the Clients tab, not here.
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />
               <Pressable onPress={() => router.push('/(trainer)/dashboard')} hitSlop={8} accessibilityRole="button">
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Go to Clients</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Go to Clients</Text>
               </Pressable>
             </View>
           </Section>

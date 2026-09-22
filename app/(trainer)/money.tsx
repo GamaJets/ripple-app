@@ -60,8 +60,15 @@
 // to keep them apart:
 //
 //   Coming in   is recorded money a client was charged through Stripe. Gross,
-//               and incomplete — Repple never sees cash, a bank transfer, or
-//               work paid for through a gym.
+//               and incomplete — Repple never sees cash or a bank transfer.
+//
+// A THIRD kind now has its own section and is in neither ledger: what an
+// employed coach's GYM says it settled for them, from `payroll_settlements`.
+// See src/ui/PaidRuns.tsx. It is not a strand of Coming In and never becomes
+// one: a gym recording that it handed money over is a different sort of fact
+// from Stripe watching a card be charged, and a figure adding the two would be
+// neither of them. For the coaches on this product today it draws a single
+// sentence saying there is no gym attached to the account.
 //   Going out   is the coach's own Repple bill and what they told us their ads
 //               cost. The second is self-reported and the first is Stripe's.
 //
@@ -77,9 +84,13 @@
 //     sees — which makes getting it right the whole job rather than a detail.
 //     `ledgerEmptyLine` says "nothing recorded" under a whole read and "the read
 //     failed" under a broken one, and those are different sentences.
-//   · An amount in a currency nobody chose. 35 of 54 live tenants have
-//     `tenants.currency` NULL and part 150 removed the last database defaults,
-//     so no currency set is the COMMON path. Amounts that carry their own
+//   · An amount in a currency nobody chose. Part 150 removed the last database
+//     defaults, so a tenant with no currency is a real state and not a
+//     misconfiguration. This used to read "35 of 54 live tenants" and call it
+//     the common path; the table has since been cleaned and it is 3 of 20
+//     (checked live, 6 Sep 2026). The rule does not move with the count — a
+//     figure printed in a currency nobody chose is wrong at one tenant in
+//     twenty exactly as it was at two in three. Amounts that carry their own
 //     currency (a sale, a renewal, a recorded fee) print it; the ones that do
 //     not are withheld with `denominate` saying which silence it is.
 //   · A projection. Nothing here is annualised, averaged forward, or run to a
@@ -100,19 +111,40 @@
 // prints as a hundredth of itself.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
+import Svg, { Polyline } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag, ListRow, PartialRead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { minorMoney, wholeMoney, since, monthStart, type Taken, type TakenRow } from '../../src/lib/coachMoney';
-import { takingsStrands } from '../../src/lib/coachRevenue';
+// The month window's instant, recomputed at midnight, on foreground and on
+// focus — never frozen at mount. See src/ui/today.ts.
+import { useNow, useToday } from '../../src/ui/today';
+import { BusinessHead } from '../../src/ui/BusinessSwitch';
+import { CoachPosts } from '../../src/ui/coach/CoachPosts';
+import { Rule, Section, SectionHead, PageHead, Ghost, Card, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
+import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
+import { takingsStrands, TAKINGS_IS_GROSS } from '../../src/lib/coachRevenue';
+// The hero's month is a STATEMENT PERIOD — the same type, the same half-open
+// local-midnight range and the same split the Statement of Record builds its
+// month figure from — rather than a `monthStart()` of this screen's own. Two
+// month bounds written in two files is how the hero and the statement come to
+// disagree about a payment on the 1st, and the statement is the document an
+// accountant reconciles against.
+import { calendarMonth, periodRange, splitByPeriod, dayLabel, type StatementPeriod } from '../../src/lib/coachStatement';
+// The one place a movement is signed. See scripts/check-deltas.mjs.
+import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
+import { fmtDay } from '../../src/lib/format';
+import { localDate } from '../../src/lib/localDate';
+import { peerMonogram } from '../../src/lib/peerAvatar';
+import { NO_NAME } from '../../src/lib/threadPeer';
 import {
-  ledger, sumMajor, sumSpend, denominate, ledgerEmptyLine,
+  ledger, joinLabels, sumMajor, sumSpend, denominate, ledgerEmptyLine,
   NO_NET_NOTE, STRIPE_AUTHORITY_NOTE, PERIOD_NOTE,
   type Strand,
 } from '../../src/lib/coachLedger';
 import { fetchClientPurchases, fetchMyConnect, type CoachPurchase, type ConnectStatus } from '../../src/lib/connect';
+import { payoutStage } from '../../src/lib/payoutAccount';
 import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { fetchMySubscription, fetchFailedInvoices, money as platformMoney, type Subscription, type Invoice } from '../../src/lib/billing';
 import { fetchMyCodeReturns, type CodeReturnsRead } from '../../src/ui/joinCode';
@@ -123,27 +155,193 @@ import {
   againstLine, channelEmptyLine, channelReachLine, channelSum, spendAgainstReturn,
 } from '../../src/lib/coachChannels';
 import { useLateCancelCharges } from '../../src/ui/sessions';
+import { useMySettlements } from '../../src/ui/coachSettlements';
+import { PaidRuns } from '../../src/ui/PaidRuns';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+// The ageing book and the sentence it makes, both already written and both
+// already drawn on app/(trainer)/dashboard.tsx. Nothing here computes an
+// amount of its own: `homeMoney` sums the OVERDUE rows per currency and
+// `homeMoneyTitle`/`homeMoneyNote` say what the figure is, including the
+// refusals — two currencies are two amounts and are never added.
+import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { homeMoney, homeMoneyDrawn, homeMoneyTitle, homeMoneyNote } from '../../src/lib/homeMoney';
 import { fetchMyReceipts } from '../../src/ui/coachReceipts';
 import { fetchMyPayouts } from '../../src/ui/coachPayouts';
 import {
   payoutSummary, payoutStateLabel, payoutFailureLine, payoutsEmptyLine,
   PAYOUT_IS_NOT_A_SALE, PAYOUT_STRIPE_IS_THE_RECORD, type CoachPayout,
 } from '../../src/lib/coachPayouts';
-import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
+import { receiptsTaken, receiptTakenRows, receiptsEmptyLine, methodLabel, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
 import { fetchMyCosts } from '../../src/ui/coachCosts';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { costsTaken, costsEmptyLine, COSTS_ARE_NEVER_NETTED, type CoachCost } from '../../src/lib/coachCosts';
 import {
   clientValue, rankByValue, currenciesIn, unattributedReceipts, unattributedLine,
-  valueSpanLine, valueEmptyLine, VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS,
+  valueSpanLine, valueEmptyLine, valueBookEmptyLine, refundedLine,
+  VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS, VALUE_IS_NET_OF_REFUNDS,
   type RankedClient,
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
-
-/** The month a period figure covers, in the words a person uses for it. */
-const monthName = (d: Date): string => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+import { isWhole } from '../../src/ui/loadStatus';
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/** The calendar month before the one `now` is in, as a statement period. Built
+ *  through Date so January's predecessor takes the previous year with it. */
+function monthBefore(now: Date): StatementPeriod {
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return calendarMonth(d.getFullYear(), d.getMonth() + 1);
+}
+
+/** The letters in the round avatar the board draws on every payment row.
+ *  Through `peerMonogram`, so a client whose name could not be read gets the
+ *  dash whole rather than a dash sliced into something that looks like
+ *  initials — src/lib/peerAvatar.ts gives the reason. */
+const monogram = (name: string | null): string =>
+  peerMonogram(name ? { text: name, note: null, isName: true } : { text: NO_NAME, note: 'unread', isName: false });
+
+/**
+ * One payment as the Recent Payments list draws it: who, how much, and the
+ * two facts that keep it from being read as something it is not.
+ */
+interface RecentPayment {
+  key: string;
+  /** Null when no source holds a name. The money beside it is still real. */
+  name: string | null;
+  /** Formatted, or null for an amount with no currency on it. Never a bare
+   *  number: `minorMoney` refuses one and `fig` draws the dash. */
+  amount: string | null;
+  /** What kind of record this is and when — "Ten-Pack · Fri 12 Sep". The kind
+   *  matters more than the date: a payment the coach typed in and a card
+   *  Stripe watched being charged are different KINDS of fact, and this
+   *  screen's whole design is about not blurring those. */
+  note: string;
+  /** For ordering only. */
+  atMs: number;
+  /** Which of the three strands it came from — the row's chip and the tone of
+   *  its monogram. `chip` is the word on it: the receipt's own method for a
+   *  payment the coach recorded, so "Cash" is never printed over a transfer. */
+  kind: PaymentKind;
+  chip: string;
+}
+
+type PaymentKind = 'package' | 'renewal' | 'recorded';
+/** Package green, renewal blue, recorded-by-you amber — the same three hues
+ *  Revenue by Source gives the same three strands on Analytics. */
+const KIND_TONE: Record<PaymentKind, Tone> = { package: 'brand', renewal: 'blue', recorded: 'amber' };
+
+/** The three takings strands by `Strand.key`, named and toned as the rows are. */
+const STRAND_NAME: Record<string, string> = { sales: 'Packages', renewals: 'Renewals', receipts: 'Recorded by You' };
+const STRAND_TONE: Record<string, Tone> = { sales: 'brand', renewals: 'blue', receipts: 'amber' };
+
+/** How many whole calendar months the hero's trend looks back over. */
+const TREND_MONTHS = 6;
+
+/**
+ * The hero's trend, drawn on night.
+ *
+ * Inline rather than the kit's `Spark`, and for one reason: Spark's axis and
+ * readout are `t.ink3` and `t.ring`, which are near-black on the night card in
+ * the light theme, and it has no night mode to ask for. This is the smallest
+ * honest version — a line from a ZERO baseline over months that were each read
+ * whole, the first and last month named under it, one spoken sentence carrying
+ * every value. It draws nothing unless there are two points and something
+ * above nought to draw: six counted zeroes are a flat line along the bottom of
+ * a card, which says less than the absence of one.
+ */
+function NightSpark({ values, from, to, spoken }: { values: number[]; from: string; to: string; spoken: string }) {
+  const t = useTheme();
+  const W = 300, H = 44, pad = 4;
+  const top = Math.max(0, ...values);
+  if (values.length < 2 || top <= 0) return null;
+  const pts = values.map((v, i) => `${pad + (i / (values.length - 1)) * (W - pad * 2)},${H - pad - (v / top) * (H - pad * 2)}`).join(' ');
+  return (
+    // rtl-ok: pinned LTR because the <Svg> above the labels does not mirror —
+    // mirror the two month names alone and each sits under the wrong end.
+    <View accessible accessibilityRole="image" accessibilityLabel={spoken} style={{ marginTop: sp.md, direction: 'ltr' }}>
+      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <Polyline points={pts} fill="none" stroke={t.brandBright} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      </Svg>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.nightInk3 }}>{from}</Text>
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.nightInk3 }}>{to}</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The most recent payments across all three strands, newest first.
+ *
+ * ── Why this is a merge and not one read ──────────────────────────────────
+ *
+ * The board's Recent Payments is a list of individual payments, and this app
+ * holds them in three tables read separately: one-off sales, subscription
+ * renewals and the receipts the coach recorded by hand. A list drawn from one
+ * of them alone would be the same defect the ledger above refuses — for most
+ * self-employed coaches the cash half is the bigger half — so the three are
+ * merged here and dated the way the ledger dates them: a sale by when Stripe
+ * charged it, a renewal by Stripe's own `paid_at`, a receipt by the calendar
+ * day the coach says the money arrived.
+ *
+ * A row with no readable date cannot be placed in a "recent" list and is
+ * counted rather than dropped, so the screen can say it is missing. Statuses
+ * are the caller's business: a list over a failed strand is drawn with the
+ * failure named beside it, never as the whole of what came in.
+ */
+function recentPayments(
+  sales: readonly CoachPurchase[],
+  renewals: readonly SubscriptionPayment[],
+  receipts: readonly CoachReceipt[],
+  nameOf: (clientId: string | null) => string | null,
+  limit: number,
+): { rows: RecentPayment[]; undated: number } {
+  const out: RecentPayment[] = [];
+  let undated = 0;
+  const push = (key: string, name: string | null, amount: string | null, note: string, at: number | null, kind: PaymentKind, chip: string) => {
+    if (at == null || !Number.isFinite(at)) { undated += 1; return; }
+    out.push({ key, name, amount, note, atMs: at, kind, chip });
+  };
+  for (const r of sales) {
+    // Gross, as every takings line in this app has always meant it. What has
+    // gone back is said beside the sale rather than quietly taken off it.
+    const back = typeof r.refunded_cents === 'number' && r.refunded_cents > 0 ? minorMoney(r.refunded_cents, r.currency ?? null) : null;
+    push(
+      `sale:${r.id}`,
+      r.client_name ?? nameOf(r.client_id),
+      minorMoney(r.amount_cents, r.currency ?? null),
+      [r.package_name ?? 'Package', fmtDay(r.created_at), back ? `${back} refunded` : null].filter(Boolean).join(' · '),
+      Date.parse(r.created_at),
+      'package', 'Package',
+    );
+  }
+  for (const r of renewals) {
+    push(
+      `renewal:${r.id}`,
+      nameOf(r.client_id),
+      minorMoney(r.amount_cents, r.currency),
+      [r.billing_reason === 'subscription_create' ? 'Subscription started' : 'Renewal', r.paid_at ? fmtDay(r.paid_at) : null].filter(Boolean).join(' · '),
+      r.paid_at ? Date.parse(r.paid_at) : null,
+      'renewal', 'Renewal',
+    );
+  }
+  for (const r of receipts) {
+    push(
+      `receipt:${r.id}`,
+      r.paidBy || nameOf(r.clientId),
+      minorMoney(r.amountCents, r.currency),
+      `Recorded by you · ${dayLabel(r.receivedOn)}`,
+      localDate(r.receivedOn)?.getTime() ?? null,
+      'recorded', methodLabel(r.method),
+    );
+  }
+  out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
+  return { rows: out.slice(0, limit), undated };
+}
+
+/** How many payments the board's list shows before the per-client book below
+ *  takes over. Six is what fits under the hero on the board's page. */
+const RECENT_LIMIT = 6;
 
 export default function CoachMoney() {
   const t = useTheme();
@@ -154,11 +352,16 @@ export default function CoachMoney() {
   const [sales, setSales] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   const [renewals, setRenewals] = useState<{ rows: SubscriptionPayment[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   const [plan, setPlan] = useState<{ sub: Subscription | null; error: string | null } | null>(null);
-  const [dues, setDues] = useState<Invoice[] | null>(null);
+  const [dues, setDues] = useState<Invoice[]>([]);
   const [duesRead, setDuesRead] = useState<LoadStatus>('loading');
   const [codes, setCodes] = useState<CodeReturnsRead>({ status: 'loading', rows: [] });
   const [connect, setConnect] = useState<{ acct: ConnectStatus | null; read: LoadStatus }>({ acct: null, read: 'loading' });
-  const [issued, setIssued] = useState<{ count: number; status: LoadStatus }>({ count: 0, status: 'loading' });
+  // The rows, not just how many of them there are. This screen counted the
+  // coach's issued documents and threw the documents away, so the one question
+  // a coach opens a Money tab to ask — who has not paid me — was computed
+  // nowhere on it and drawn on the Clients screen instead. Nothing new is
+  // read: `fetchMyInvoices` was already one of the ten reads in `load`.
+  const [issued, setIssued] = useState<{ rows: CoachInvoice[]; count: number; status: LoadStatus }>({ rows: [], count: 0, status: 'loading' });
   // The third strand of Coming In, and for most coaches the biggest one. Its
   // own state and its own status: it fails independently of Stripe's two
   // tables, and a screen that shared one status would hide a working half
@@ -175,7 +378,28 @@ export default function CoachMoney() {
   // `COSTS_ARE_NEVER_NETTED` says so where the figure is drawn.
   const [costs, setCosts] = useState<{ rows: CoachCost[]; status: LoadStatus }>({ rows: [], status: 'loading' });
 
-  const fees = useLateCancelCharges();
+  // 'my-clients': this is the coach's ledger, and the fees on it are the ones
+  // their clients owe them. See `ChargesAudience` in src/ui/sessions.tsx.
+  const fees = useLateCancelCharges('my-clients');
+  // Pulled out because the hook hands back a fresh object each render while
+  // the callback inside it is stable.
+  const reloadFees = fees.reload;
+
+  // ── what a GYM has paid this coach ──────────────────────────────────────
+  //
+  // The twelfth read, and deliberately not inside `load`'s `Promise.all`. It is
+  // four reads of its own with four independent statuses, and — unlike every
+  // strand above — it is NOT a ledger figure: `ledger()` must never be handed a
+  // settlement, because a gym saying it settled a run is a different kind of
+  // fact from Stripe watching a client pay, and adding them would produce a
+  // number that is neither.
+  //
+  // Its refresh is fired from the same pull as the rest of the screen, though.
+  // A section that quietly kept a stale copy through a pull-to-refresh is worse
+  // than one that cannot be refreshed: the gesture reports success and the
+  // figures under it are from before it.
+  const paid = useMySettlements();
+  const refreshPaid = paid.refresh;
 
   const load = useCallback(async () => {
     const [p, r, sub, inv, cr, ca, docs, rec, pay, cost] = await Promise.all([
@@ -193,26 +417,74 @@ export default function CoachMoney() {
     setSales(p);
     setRenewals(r);
     setPlan(sub);
-    setDues(inv);
-    // fetchFailedInvoices answers null for a failed read and [] for nothing
-    // outstanding. Collapsing those would tell a coach with an unpaid Repple
-    // invoice that their account is clear, which is the one sentence that stops
-    // them looking.
-    setDuesRead(inv == null ? 'error' : 'ready');
+    setDues(inv.rows);
+    // fetchFailedInvoices answers 'error' for a failed read and 'ready' with
+    // nothing for nothing outstanding. Collapsing those would tell a coach with
+    // an unpaid Repple invoice that their account is clear, which is the one
+    // sentence that stops them looking. 'partial' is the third: more unpaid
+    // invoices than one read returns, on which `owed.length` is a floor and not
+    // the number of invoices outstanding.
+    setDuesRead(inv.status);
     setCodes(cr);
     setConnect({ acct: ca, read: ca == null ? 'error' : 'ready' });
-    setIssued({ count: docs.rows.length, status: docs.status });
+    setIssued({ rows: docs.rows, count: docs.rows.length, status: docs.status });
     setReceipts(rec);
     setPayouts(pay);
     setCosts(cost);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // Eleven reads: `load` is ten of them in one `Promise.all` and the late
+  // cancellation charges are the eleventh. All of them, and nothing less —
+  // this screen adds strands into totals, and `ledger()` withholds a total
+  // the moment any strand is short. A refresh that moved some of the strands
+  // would produce a total whose parts came from different minutes, which is
+  // worse than a stale one because nothing about it looks wrong.
+  const pull = usePullToRefresh(useCallback(
+    () => {
+      // Fired, not awaited: `refreshPaid` bumps a counter that re-runs the
+      // payroll reads inside their own provider, and there is no promise to
+      // track. The spinner follows the twelve reads it CAN see rather than
+      // pretending to know about four it cannot.
+      refreshPaid();
+      return Promise.all([load(), reloadFees()]);
+    },
+    [load, reloadFees, refreshPaid],
+  ));
 
   /* ── coming in ─────────────────────────────────────────────────────────── */
 
-  const now = useMemo(() => new Date(), []);
-  const from = monthStart(now);
+  /* `useNow`, not `useMemo(() => new Date(), [])`. The comment that stood here
+     said `now` was fixed "for the render"; an empty dependency array fixes it
+     for the life of the MOUNT, and this screen is a tab that stays mounted for
+     as long as the app runs. Both bounds of the month window come from it, so a
+     coach who opened this on the 31st and came back on the 1st read last
+     month's figures under a heading saying this month — and a pull-to-refresh
+     re-read the server against the same wrong dates, which made the stale
+     figure look freshly confirmed. See src/ui/today.ts. */
+  const now = useNow();
+  /* What is owed, and how much of it is late — the lead of this tab.
+     `useToday()` and not a day key taken off `now` inside a memo keyed on the
+     invoices: that is the bug recorded over `invoiceAgeing` in
+     app/(trainer)/dashboard.tsx, where the day froze at whenever the rows last
+     landed and an invoice that went overdue at midnight stayed "upcoming"
+     until the next read. Both this
+     screen and app/(trainer)/invoices.tsx now age the same rows against the
+     same day. */
+  const today = useToday();
+  const ageing = useMemo(() => ageingBook(issued.rows, issued.status, today), [issued, today]);
+  const owedBook = useMemo(() => homeMoney(ageing, issued.status), [ageing, issued.status]);
+  /* The hero's month and the month before it, as statement periods. `useMemo`
+     on `now` because `useNow` hands back a new Date only when the day, the
+     foreground or the focus changes, so the ranges move exactly when the
+     figure should and not on every render. `periodRange` is null only for a
+     period that will not read, which a `calendarMonth` never is — but it is
+     nullable, so the hero handles it rather than asserting it away: see
+     `PERIOD_UNREADABLE` in src/lib/coachStatement.ts. */
+  const period = useMemo(() => calendarMonth(now.getFullYear(), now.getMonth() + 1), [now]);
+  const prior = useMemo(() => monthBefore(now), [now]);
+  const range = useMemo(() => periodRange(period), [period]);
+  const priorRange = useMemo(() => periodRange(prior), [prior]);
 
   // A renewal is dated by Stripe's own `paid_at`, never by when the row landed
   // here: a webhook retried three days late would otherwise move somebody's
@@ -231,10 +503,33 @@ export default function CoachMoney() {
   // wrote the row down. A coach catching up on three weeks of cash on a Sunday
   // evening would otherwise have all of it land in that Sunday's month, which
   // is the one thing that would make this figure worse than not having it.
-  const receiptRows = useMemo<TakenRow[]>(
-    () => receipts.rows.map((r) => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
-    [receipts.rows],
-  );
+  //
+  // And read as a CALENDAR DAY, which is what it is. `received_on` is a
+  // Postgres `date` and arrives as a bare `YYYY-MM-DD`; this handed that
+  // string straight to `since`, which parses it with `Date.parse` — and
+  // `Date.parse('2026-09-01')` is UTC midnight, while `monthStart` two dozen
+  // lines above is LOCAL midnight. West of Greenwich the first is EARLIER than
+  // the second, so `t >= fromMs` was false and every cash payment a coach
+  // recorded as received on the 1st fell straight out of "Coming In · this
+  // month". It was not counted as unpriced or unlabelled either — `since`
+  // drops it before `sumTaken` ever sees it — so `ledger()` reported the short
+  // figure as 'ready', with nothing on the screen to suggest a payment was
+  // missing. Invisible in the UTC+4 gym this was written for; present every
+  // month for every coach in the Americas.
+  //
+  // `localDate` is the module written for exactly this and its header names
+  // the same trap; src/lib/coachStatement.ts compares these rows as days for
+  // the same reason. A day that does not parse becomes 'unknown', which keeps
+  // it out of every period rather than sweeping it into this one.
+  //
+  // The mapping was written out here and app/(trainer)/analytics.tsx then
+  // composed the same three strands through the same `since()` without it, so
+  // the two screens gave a coach two different answers about the same cash on
+  // the first of the month. It is `receiptTakenRows` in
+  // src/lib/coachReceipts.ts now — one rule, beside `receiptsTaken`, which goes
+  // through it too so the all-time figure cannot date a payment differently
+  // from the monthly one.
+  const receiptRows = useMemo<TakenRow[]>(() => receiptTakenRows(receipts.rows), [receipts.rows]);
 
   /* ── what each client has paid, all time ──────────────────────────────
    *
@@ -251,21 +546,28 @@ export default function CoachMoney() {
     [sales.status, renewals.status, receipts.status],
   );
 
+  // The name comes from whichever source holds one. `client_purchases` joins
+  // `profiles` for it; a receipt carries the name the coach TYPED, which is a
+  // snapshot and is deliberately not a join — see part 138 on `bill_to`. A
+  // renewal carries neither, so a client known only from renewals shows as a
+  // dash and the money beside them is still real.
+  //
+  // Hoisted out of the per-client book because the Recent Payments list names
+  // the same people from the same three sources, and two copies of "whose name
+  // wins" is how a client comes to have two names on one screen.
+  const nameOf = useCallback((id: string | null): string | null =>
+    id == null ? null
+      : sales.rows.find((r) => r.client_id === id)?.client_name
+      ?? receipts.rows.find((r) => r.clientId === id)?.paidBy
+      ?? null,
+  [sales.rows, receipts.rows]);
+
   /** Every client id that appears in any of the three sources, once each. */
   const ranked = useMemo<RankedClient[]>(() => {
     const ids = new Set<string>();
     sales.rows.forEach((r) => { if (r.client_id) ids.add(r.client_id); });
     renewals.rows.forEach((r) => { if (r.client_id) ids.add(r.client_id); });
     receipts.rows.forEach((r) => { if (r.clientId) ids.add(r.clientId); });
-    // The name comes from whichever source holds one. `client_purchases` joins
-    // `profiles` for it; a receipt carries the name the coach TYPED, which is a
-    // snapshot and is deliberately not a join — see part 138 on `bill_to`. A
-    // renewal carries neither, so a client known only from renewals shows as a
-    // dash and the money beside them is still real.
-    const nameOf = (id: string): string | null =>
-      sales.rows.find((r) => r.client_id === id)?.client_name
-      ?? receipts.rows.find((r) => r.clientId === id)?.paidBy
-      ?? null;
     const rows: RankedClient[] = [...ids].map((id) => ({
       clientId: id,
       name: nameOf(id),
@@ -273,12 +575,31 @@ export default function CoachMoney() {
     }));
     const cur = currenciesIn(rows)[0];
     return cur ? rankByValue(rows, cur) : rows;
-  }, [sales.rows, renewals.rows, receipts.rows, valueReads]);
+  }, [sales.rows, renewals.rows, receipts.rows, valueReads, nameOf]);
+
+  /* ── the board's Recent Payments ───────────────────────────────────────
+   *
+   * Individual payments, newest first, across all three strands — see
+   * `recentPayments`. A LIST, not a figure: it is drawn over a partial read
+   * with the truncation named beside it, and over a failed strand with the
+   * failure named, because a list that vanished with its read would read as
+   * nobody having paid. It is never summed; the hero above is the sum, and it
+   * is `ledger()` that decides whether that may be stated. */
+  const recent = useMemo(
+    () => recentPayments(sales.rows, renewals.rows, receipts.rows, nameOf, RECENT_LIMIT),
+    [sales.rows, renewals.rows, receipts.rows, nameOf],
+  );
 
   const valueCurrencies = useMemo(() => currenciesIn(ranked), [ranked]);
+  // The COUNT and the READ it was counted over, together. Under a truncated
+  // receipts read the count is a floor over a prefix of the rows, and this line
+  // used to state it as a total — on a screen where every per-client amount
+  // beside it had correctly gone to a dash. `unattributedLine` owns which
+  // sentence that is; this only has to stop dropping the half of the fact that
+  // decides it.
   const orphanLine = useMemo(
-    () => unattributedLine(unattributedReceipts(receipts.rows).count),
-    [receipts.rows],
+    () => unattributedLine(unattributedReceipts(receipts.rows).count, receipts.status),
+    [receipts.rows, receipts.status],
   );
 
   // Three strands rather than three figures, because they are one question:
@@ -299,16 +620,76 @@ export default function CoachMoney() {
       rows,
     );
 
-  const monthIn = useMemo(
-    () => ledger(strandsFor({ sale: since(saleRows, from), renewal: since(renewalRows, from), receipt: since(receiptRows, from) })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [saleRows, renewalRows, receiptRows, from, sales.status, renewals.status, receipts.status],
-  );
-  const allIn = useMemo(
-    () => ledger(strandsFor({ sale: saleRows, renewal: renewalRows, receipt: receiptRows })),
+  /** The three strands inside one statement period, through the same split
+   *  the Statement of Record uses. A row with no readable date is kept OUT of
+   *  a period rather than swept into it — a payment this app cannot date is
+   *  not evidence about this month. */
+  const inPeriod = useCallback(
+    (r: ReturnType<typeof periodRange>) => strandsFor({
+      sale: splitByPeriod(saleRows, (x) => x.created_at, r).inside,
+      renewal: splitByPeriod(renewalRows, (x) => x.created_at, r).inside,
+      receipt: splitByPeriod(receiptRows, (x) => x.created_at, r).inside,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [saleRows, renewalRows, receiptRows, sales.status, renewals.status, receipts.status],
   );
+  const monthIn = useMemo(() => ledger(inPeriod(range)), [inPeriod, range]);
+  /* The month before, for the board's delta and for nothing else. It is
+     built from the SAME three reads, so it is whole exactly when this month
+     is — a truncated sales read is a prefix of the newest rows, which is more
+     likely to shortchange last month than this one, and `ledger()` withholds
+     both totals on it rather than letting the older one stand. */
+  const priorIn = useMemo(() => ledger(inPeriod(priorRange)), [inPeriod, priorRange]);
+
+  /**
+   * This month against last, per currency, as a percentage — or null, which
+   * draws nothing.
+   *
+   * Withheld unless BOTH periods are whole reads with no holes: a percentage
+   * between two figures either of which is short is a number about neither
+   * month, and it would sit in green beside the hero looking like the most
+   * certain thing on the screen. Null too when last month has nothing in this
+   * currency — there is no baseline, and `deltaLabel` would say so in words
+   * where the board draws a figure. Never across currencies: AED this month
+   * against GBP last month is not a movement of anything.
+   */
+  const deltaFor = useCallback((currency: string): number | null => {
+    const a = monthIn.total; const b = priorIn.total;
+    if (!a || !b || !isWhole(monthIn.status) || !isWhole(priorIn.status)) return null;
+    if (a.unlabelled || a.unpriced || b.unlabelled || b.unpriced) return null;
+    const cur = a.pots.find((p) => p.currency === currency)?.minorUnits;
+    const before = b.pots.find((p) => p.currency === currency)?.minorUnits;
+    if (cur == null || before == null || before <= 0) return null;
+    return ((cur - before) / before) * 100;
+  }, [monthIn, priorIn]);
+  /* ── the hero's trend: the six WHOLE months before this one ──────────────
+   *
+   * This month is left out on purpose — on the 3rd it is three days, and a
+   * line that ends on three days of takings ends on a cliff. Each month goes
+   * through the same `inPeriod` and the same `ledger()` as the hero, so a
+   * month is a point only when all three reads were whole; one withheld month
+   * withholds the line, because a trend with a hole in it is drawn through
+   * the hole. Null is "no trend", and the hero already says why. */
+  const trend = useMemo(() => {
+    const months = Array.from({ length: TREND_MONTHS }, (_, k) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (TREND_MONTHS - k), 1);
+      return calendarMonth(d.getFullYear(), d.getMonth() + 1);
+    });
+    const totals = months.map((m) => { const r = periodRange(m); return r ? ledger(inPeriod(r)).total : null; });
+    if (totals.some((x) => x == null)) return null;
+    return { months, totals: totals as Taken[] };
+  }, [now, inPeriod]);
+  /** One currency's six months, in minor units. A month with nothing in this
+   *  currency under a whole read is a counted nought, not a gap. */
+  const trendFor = (currency: string): number[] | null =>
+    trend ? trend.totals.map((x) => x.pots.find((p) => p.currency === currency)?.minorUnits ?? 0) : null;
+
+  const allStrands = useMemo(
+    () => strandsFor({ sale: saleRows, renewal: renewalRows, receipt: receiptRows }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [saleRows, renewalRows, receiptRows, sales.status, renewals.status, receipts.status],
+  );
+  const allIn = useMemo(() => ledger(allStrands), [allStrands]);
 
   const recordedByHand = useMemo(() => receiptsTaken(receipts.rows), [receipts.rows]);
   const landed = useMemo(() => payoutSummary(payouts.rows, payouts.status), [payouts.rows, payouts.status]);
@@ -326,7 +707,7 @@ export default function CoachMoney() {
   /* ── going out ─────────────────────────────────────────────────────────── */
 
   const spend = useMemo(() => sumSpend(codes.rows), [codes.rows]);
-  const owed = dues ?? [];
+  const owed = dues;
 
   // What the coach recorded their own business costing them. Through
   // `costsTaken`, which is `sumTaken` under the same two rules everything else
@@ -334,6 +715,22 @@ export default function CoachMoney() {
   // is counted rather than dropped. Dated by the day the coach says the money
   // went out, never by the day the row was written.
   const costTaken = useMemo(() => costsTaken(costs.rows), [costs.rows]);
+
+  /* ── the page's period and currencies, said before any figure ───────────
+     The data-layout review's first item for this screen. The currencies are
+     the ones ON what was read: owed, coming in, landed and going out, each
+     only where its read gave a figure. No default is assumed (white-label,
+     per-tenant currency), and while any of the four is unread the line says
+     "so far" rather than presenting a partial list as the whole of it. */
+  const currencyLine = useMemo(() => {
+    const sources = [owedBook.pots, allIn.total?.pots, landed.arrived?.pots, isWhole(costs.status) ? costTaken.pots : null];
+    const codes = [...new Set(sources.flatMap((p) => (p ?? []).map((x) => x.currency)))].sort();
+    const complete = sources.every((p) => p != null);
+    if (!codes.length) return complete ? 'Nothing recorded yet, so there is no currency to show.' : 'Currencies are shown once your money has been read.';
+    const list = codes.length === 1 ? codes[0] : `${codes.slice(0, -1).join(', ')} and ${codes[codes.length - 1]}`;
+    const lead = complete ? `In ${list}.` : `In ${list} so far. Not everything has been read.`;
+    return codes.length > 1 ? `${lead} Mixed currencies. Each is shown on its own and never added together.` : lead;
+  }, [owedBook.pots, allIn.total, landed.arrived, costs.status, costTaken]);
 
   /* ── which channels worked, which is a different question ──────────────── */
 
@@ -373,6 +770,24 @@ export default function CoachMoney() {
       <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount ?? 'not denominated'}</Text>
     </View>
   );
+
+  /** A payment kind's plate and the ink that clears contrast on it. The kit's
+   *  `toneOf` is private, and these are the same three tokens it would give. */
+  const plate = (k: PaymentKind): { soft: string; ink: string } =>
+    k === 'package' ? { soft: t.brandSoft, ink: t.brandText }
+      : k === 'renewal' ? { soft: t.data.blueSoft, ink: t.data.blueInk }
+        : { soft: t.data.amberSoft, ink: t.data.amberInk };
+
+  /** A tile's figure for one side of the book: the money where there is ONE
+   *  currency, the count of currencies where there are several — a tile holds
+   *  one figure and two currencies are not one — "None" for a whole read with
+   *  nothing in it, and null, which is the dash, for a read that was not
+   *  whole. The section under the tiles has every pot and every reason. */
+  const tileOf = (tk: Taken | null): { value: string | null; unit?: string } =>
+    !tk ? { value: null }
+      : tk.pots.length === 1 ? { value: minorMoney(tk.pots[0].minorUnits, tk.pots[0].currency) }
+        : tk.pots.length === 0 ? { value: 'None' }
+          : { value: String(tk.pots.length), unit: 'currencies' };
 
   /** One ledger drawn: its pots, or the reason there is no figure. */
   const drawIn = (l: ReturnType<typeof ledger>, side: 'in' | 'out') => {
@@ -421,98 +836,288 @@ export default function CoachMoney() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What comes in, and what goes out</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Money</Text>
-          </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* ── the board's head: back at the leading edge, the title centred ──
+            Board page 14 opens with a chevron and "Payments" centred over it;
+            the eyebrow this screen had ("What comes in, and what goes out")
+            was a second line of prose in the first viewport, and the two
+            ledgers it named are still both here, in the Notice further down. */}
+        {/* "Money", not "Payments": this is a tab root now — it took the slot
+            Videos gave up (app/(trainer)/_layout.tsx says why) — and the bar
+            under it says Money, so the page must not argue with the bar.
+            Payments is one of the nine screens BELOW this one and still
+            carries that name. No back control: a tab root has nothing to go
+            back to, so the leading slot is a blank of the control's width and
+            the trailing one is the search every tab root now carries. */}
+        <BusinessHead current="money" />
+
+        {/* Period and currency context, first. The hero is this calendar
+            month; the tiles and sections under it are all time, which the
+            tiles' own comment says and the coach could not see. */}
+        <View accessible style={{ marginTop: sp.md }}>
+          <Text style={{ ...ty.caption, color: t.ink2, ...font('600') }}>
+            Total Taken covers {period.label}. Coming In, Landed and Going Out are all time.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{currencyLine}</Text>
         </View>
 
-        <View style={{ marginTop: sp.lg }}>
-          <Notice kicker="How to read this" title="Two ledgers, kept apart" note={NO_NET_NOTE} />
-        </View>
+        {/* ── what is owed, before what was taken ─────────────────────────
+            The tab leads with the question a coach opens it to ask. Every
+            figure comes from `homeMoney` over the ageing book — the same
+            function and the same rows app/(trainer)/dashboard.tsx draws its
+            card from, so the two screens cannot disagree — and the sum is over
+            the OVERDUE rows alone, per currency, never added across
+            currencies. Nothing is computed here.
 
-        <Rule />
+            It renders NOTHING when there is nothing outstanding and the read
+            was whole (`homeMoneyDrawn`), because a card that permanently says
+            "all clear" is a card people stop reading. A FAILED read still
+            draws, in the critical tone, with the reason — silence there would
+            read as "nobody owes you anything", which is the one wrong thing
+            this card could say. */}
+        {homeMoneyDrawn(owedBook) ? (
+          <Card onPress={() => router.push('/(trainer)/invoices')} tone={owedBook.failed ? t.crit : t.s3} style={{ marginTop: sp.md }}>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{homeMoneyTitle(owedBook)}</Text>
+            {(owedBook.pots ?? []).map((p) => {
+              const amount = minorMoney(p.minorUnits, p.currency);
+              if (!amount) return null;
+              return (
+                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count} in {p.currency}</Text>
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount}</Text>
+                </View>
+              );
+            })}
+            {(owedBook.pots?.length ?? 0) > 1 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                These are separate amounts of money and are deliberately not added together.
+              </Text>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{homeMoneyNote(owedBook)}</Text>
+          </Card>
+        ) : null}
 
-        {/* ── COMING IN ──────────────────────────────────────────────────── */}
+        {/* ── THE FIGURE ─────────────────────────────────────────────────
+            The board's hero: a head, one big figure, the movement against
+            last month under it, and "This Month" under that. The
+            head is "Total Taken" and not the board's "Total Earnings",
+            because this app has never been told a coach's earnings — the
+            figure is what clients were CHARGED, gross, before Stripe's fee
+            and the platform's, plus what the coach recorded by hand — and
+            `Taken` in src/lib/coachMoney.ts says why that word is the only
+            honest one. `TAKINGS_IS_GROSS` says the same on the card.
 
-        <Section>
-          <SectionHead title="Coming In" note={`Charged to clients in ${monthName(now)}`} />
-          {sales.status === 'partial' || renewals.status === 'partial' ? (
+            One figure per currency, never one figure over all of them; a dash
+            and the reason where `ledger()` withholds the total; and the
+            delta only where both months are whole — see `deltaFor`. */}
+        {/* Round five: the approved look's night hero in place of the white
+            figure card. Eyebrow, the Sora figure, the movement as a chip, and
+            the six whole months before this one as a line on night. The money
+            rules did not move with it: ONE FIGURE PER CURRENCY, each on its
+            own line of the headline and each with its own chip and its own
+            line, never one figure over all of them; a dash and `ledger()`'s
+            reason where the total is withheld; the chip only where both
+            months are whole — see `deltaFor`. The truncation notice sits OVER
+            the card: it is about every figure below it.
+
+            What came OFF the card: the two paragraphs on what "taken" counts
+            and how a payment is dated. They are behind How to Read This, under
+            the list, word for word. "Gross" stays on the card as one word,
+            because that one is a caveat about the figure and not a manual. */}
+        {sales.status === 'partial' || renewals.status === 'partial' || receipts.status === 'partial' ? (
+          <View style={{ marginTop: sp.md }}>
             <PartialRead what="payments" onPress={load} />
-          ) : null}
-          {drawIn(monthIn, 'in')}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PERIOD_NOTE}</Text>
+          </View>
+        ) : null}
+        {(() => {
+          const pots = range && monthIn.total ? monthIn.total.pots : [];
+          const paid = pots.reduce((n, x) => n + x.count, 0);
+          return (
+            <HeroCard
+              eyebrow={`TOTAL TAKEN · ${period.label.toUpperCase()}`}
+              // One line per currency. They share a headline and are not a sum.
+              title={pots.length ? pots.map((x) => minorMoney(x.minorUnits, x.currency) ?? `${x.currency} Not Denominated`).join('\n') : fig(null)}
+              meta={!range
+                ? 'This month could not be read as two dates, so no figure is stated.'
+                : !monthIn.total
+                  ? monthIn.reason ?? undefined
+                  : !pots.length
+                    // One line in the hero. The full sentence (why cash and
+                    // transfers are not here) is Recent Payments' own, just
+                    // below; it was printed twice, word for word.
+                    ? (monthIn.status === 'ready' ? 'Nothing recorded as paid to you yet.' : ledgerEmptyLine('in', monthIn.status))
+                    : `Gross · ${paid} ${plural(paid, 'payment', 'payments')}${pots.length > 1 ? ` · ${pots.length} currencies, never added` : ''}`}>
+              {pots.map((x) => {
+                const pct = deltaFor(x.currency);
+                // `since: null` is a decision, not an omission: the words
+                // beside the chip name the month it is measured from.
+                const moved = pct == null ? null : deltaLabel(pct, { since: null, unit: '%', decimals: 0 });
+                const series = trendFor(x.currency);
+                return (
+                  <View key={x.currency} style={{ marginTop: sp.md }}>
+                    {moved ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm }}>
+                        {/* Green for up. Down takes the neutral plate and not
+                            the alarm colour: a quieter month is a fact about
+                            the month, not a fault on the screen. */}
+                        <TonedChip label={moved} tone={deltaSign(pct, 0) === '+' ? 'brand' : 'neutral'} />
+                        <Text style={{ ...ty.caption, color: t.nightInk2 }}>
+                          {pots.length > 1 ? `${x.currency} against ${prior.label}` : `against ${prior.label}`}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {series && trend ? (
+                      <NightSpark values={series}
+                        from={trend.months[0].label} to={trend.months[trend.months.length - 1].label}
+                        spoken={`Taken in ${x.currency} over the ${TREND_MONTHS} months before this one: ${trend.months.map((m, k) => `${m.label} ${minorMoney(series[k], x.currency) ?? 'no figure'}`).join(', ')}`} />
+                    ) : null}
+                  </View>
+                );
+              })}
+            </HeroCard>
+          );
+        })()}
+        {monthIn.total ? missingNote(monthIn.total) : null}
+
+        {/* ── RECENT PAYMENTS ────────────────────────────────────────────
+            The board's list: a round avatar, the client, the amount at the
+            trailing edge. Each row also says what KIND of record it is and
+            when, because a cash payment the coach typed in and a card Stripe
+            charged are different facts and this screen never blurs them.
+            All amounts are in ink — the board paints some green, and this
+            app holds no status that would make one payment greener than
+            another. */}
+        <Section>
+          <SectionHead title="Recent Payments" note={recent.rows.length ? `Newest ${recent.rows.length}` : undefined} />
+          {(() => {
+            const reads = strandsFor({ sale: [], renewal: [], receipt: [] });
+            const failed = reads.filter((s) => s.status === 'error').map((s) => s.label);
+            const short = reads.filter((s) => s.status === 'partial');
+            const loadingStill = reads.some((s) => s.status === 'loading');
+            return (<>
+              {failed.length ? (
+                <Flag style={{ marginBottom: sp.sm }}>
+                  Your {joinLabels(failed)} could not be read, so none of them are listed here. This is not a statement that nobody has paid you.
+                </Flag>
+              ) : null}
+              {short.length ? (
+                <PartialRead what="payments" onPress={load} />
+              ) : null}
+              {recent.rows.map((p, i) => (
+                <View key={p.key} accessible
+                  accessibilityLabel={`${p.name ?? 'Name not read'}, ${p.amount ?? 'amount not stated'}. ${p.chip}. ${p.note}`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  {/* The monogram on its kind's plate, in that hue's INK — the
+                      mark colour as 13pt text does not clear contrast. */}
+                  <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: plate(p.kind).soft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.micro, color: plate(p.kind).ink }}>{monogram(p.name)}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: p.name ? 'capitalize' : 'none' }}>{p.name ?? NO_NAME}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.note}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>{fig(p.amount)}</Text>
+                    <TonedChip label={p.chip} tone={KIND_TONE[p.kind]} />
+                  </View>
+                </View>
+              ))}
+              {!recent.rows.length && !failed.length && !short.length ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  {loadingStill ? ledgerEmptyLine('in', 'loading') : ledgerEmptyLine('in', 'ready')}
+                </Text>
+              ) : null}
+              {recent.undated > 0 ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {recent.undated} {plural(recent.undated, 'payment carries', 'payments carry')} no readable date, so {plural(recent.undated, 'it is', 'they are')} in no month and not in this list. {plural(recent.undated, 'It is', 'They are')} still counted under All Recorded.
+                </Flag>
+              ) : null}
+            </>);
+          })()}
         </Section>
 
+        {/* Under the figure and the list rather than above them, so nothing
+            procedural sits in the first viewport. This explains what the
+            figures mean — chiefly "Too early to say", which reads as a
+            missing feature and is a statistical refusal. */}
+        <ScreenHelp screen="coach-money" />
+
+        {/* ── the three sides of the book, as tiles ───────────────────────
+            Coming in, what landed, going out: the three sections below, each
+            as one figure on the ground between the cards. They are three
+            DIFFERENT figures from three sources and the tiles sit apart for
+            that reason — nothing here subtracts one from another, which is
+            what How to Read This says. All time, like the sections they
+            summarise; the hero above is the month. */}
+        <KpiRow tiles items={([
+          { label: 'Coming In', tone: 'brand', tk: allIn.total },
+          { label: 'Landed', tone: 'blue', tk: landed.arrived },
+          { label: 'Going Out', tone: 'amber', tk: isWhole(costs.status) ? costTaken : null },
+        ] as { label: string; tone: Tone; tk: Taken | null }[]).map(({ tk, ...k }) => ({ ...k, value: fig(tileOf(tk).value), unit: tileOf(tk).unit }))} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>All time, from three separate records. Never subtracted from each other.</Text>
+
+        {/* How the screen is SHAPED, and what "taken" counts — the three
+            paragraphs that used to stand on the page, behind one fold. */}
+        <Expandable title="How to Read This" note="Two ledgers kept apart, and gross rather than earnings">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{NO_NET_NOTE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{TAKINGS_IS_GROSS}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_NOTE}</Text>
+        </Expandable>
+
         <Section>
-          <SectionHead title="All Recorded" note="Every payment Repple has a record of" />
+          <SectionHead title="All Recorded" note="Every Payment Repple Has a Record of" />
           {drawIn(allIn, 'in')}
+          {/* Where it came from, per currency: each strand's pot as a share of
+              that currency's own total. Only under a stated total — `ledger()`
+              gives one only when all three reads were whole — so a bar is
+              never a share of part of the book. */}
+          {allIn.total ? allIn.total.pots.map((pot) => (
+            <View key={pot.currency} style={{ marginTop: sp.sm }}>
+              {allIn.total!.pots.length > 1 ? <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{pot.currency}</Text> : null}
+              {allStrands.map((st) => {
+                const part = st.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+                return (
+                  <Meter key={st.key} label={STRAND_NAME[st.key] ?? st.label} val={part} target={pot.minorUnits}
+                    tone={STRAND_TONE[st.key] ?? 'neutral'} note={minorMoney(part, pot.currency) ?? 'not denominated'} />
+                );
+              })}
+            </View>
+          )) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{STRIPE_AUTHORITY_NOTE}</Text>
         </Section>
 
-        {/* ── THE HALF STRIPE NEVER SAW ──────────────────────────────────
-            For most self-employed coaches this is the bigger half. It is drawn
-            as its own section as well as being inside the two ledgers above,
-            because a coach reading a total needs to see how much of it is their
-            own word rather than Stripe's — the two are different KINDS of fact
-            and this screen's whole design is about not blurring those. */}
-        <Section>
-          <SectionHead title="Recorded by You" note="Cash, transfers and anything taken at a gym" />
-          {receipts.status === 'partial' ? (
-            <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
-          ) : null}
-          {receipts.status !== 'ready' ? (
-            <Flag>{receiptsEmptyLine(receipts.status)}</Flag>
-          ) : recordedByHand.pots.length ? (
-            <View>
-              {recordedByHand.pots.map((p) => potRow(
-                p.currency,
-                `${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency}`,
-                minorMoney(p.minorUnits, p.currency),
-              ))}
-              {recordedByHand.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{receiptsEmptyLine(receipts.status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
-          <ListRow icon="grid" title="Cash and Transfers"
-            note="Record a payment that did not go through this app"
-            onPress={() => router.push('/(trainer)/receipts')} />
-        </Section>
-
-        <Section>
-          <ListRow icon="grid" title="Payments & Packages"
-            note="Who bought what, who is subscribed, and the price list they buy from"
-            onPress={() => router.push('/(trainer)/payments')} />
-          <ListRow icon="grid" title="Invoices"
-            note={issued.status === 'error'
-              ? 'Your issued documents could not be counted just now'
-              : issued.count > 0
-                ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
-                : 'Issue a document for what somebody paid you, including cash and transfers'}
-            onPress={() => router.push('/(trainer)/invoices')} />
-        </Section>
-
-        <Rule />
+        {/* ── THE ORDER FROM HERE DOWN ───────────────────────────────────
+            The data-layout review's, and it is the order the money moves in:
+            what was charged and what is still owed (coming in), what reached
+            the coach (Stripe's payouts, then their own cash and transfers,
+            then a gym's settlements — three sections, never one figure), what
+            goes out, what each client has paid, and the documents last. The
+            statement and the invoice list are where a coach goes AFTER the
+            figures, so they close the page instead of interrupting the two
+            ledgers half way down. Nothing was added, removed or re-worded by
+            the move, and no section reads another's figure. */}
 
         {/* ── RECORDED, NOT COLLECTED ────────────────────────────────────── */}
 
         <Section>
-          <SectionHead title="Recorded Against Clients" note="Late cancellations you settle yourself" />
+          <SectionHead title="Recorded Against Clients" note="Late Cancellations You Settle Yourself" />
           {fees.status === 'error' ? (
             <Flag>
-              Your late-cancellation fees could not be read. This is not a statement that there are none — anything already recorded still stands against the client it was recorded against.
+              Your late-cancellation fees could not be read. This is not a statement that there are none. Anything already recorded still stands against the client it was recorded against.
             </Flag>
           ) : fees.status === 'partial' ? (
             <PartialRead what="recorded fees" shown={fees.charges.length} onPress={fees.reload} />
+          ) : fees.status === 'loading' ? (
+            /* The one empty state on this screen whose copy is inlined rather
+               than coming from a pure module, and the one that skipped
+               'loading'. `useLateCancelCharges` starts at 'loading' and reads
+               in an effect, so "Nothing has been recorded against a client"
+               was the first thing drawn here on every mount and after every
+               auth revision — a flat denial that anybody owes the coach
+               anything, made before the read had come back. Every sibling
+               section says "Still reading." through `receiptsEmptyLine`,
+               `costsEmptyLine`, `payoutsEmptyLine` or `ledgerEmptyLine`. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>Still reading.</Text>
           ) : !standingFees.length ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing has been recorded against a client. A fee is only recorded when your policy is switched on and somebody cancels inside your notice window.
@@ -524,6 +1129,19 @@ export default function CoachMoney() {
                 `${p.count} ${plural(p.count, 'fee', 'fees')} in ${p.currency}`,
                 wholeMoney(p.units, p.currency),
               ))}
+              {/* The one pot list on this screen that did not carry this, and
+                  the five siblings above and below it all do. A coach who
+                  charges in two currencies — one gym in AED, private clients in
+                  GBP — read two fee rows with nothing between them saying they
+                  are not to be added, on the only section whose amounts are
+                  WHOLE units rather than minor ones, which is already the
+                  easiest figure here to mistake. Same words as the others, so
+                  the rule reads as one rule rather than five. */}
+              {feeSum.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
               {!feeSum.pots.length && feeDenom.ok === false ? (
                 <Flag>{feeDenom.note}</Flag>
               ) : null}
@@ -540,334 +1158,13 @@ export default function CoachMoney() {
             </Flag>
           ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Repple records these and never collects them. No card is charged and nothing arrives in your Stripe account — the client sees what they owe and who to settle it with.
+            Repple records these and never collects them. No card is charged and nothing arrives in your Stripe account. The client sees what they owe and who to settle it with.
           </Text>
           <ListRow icon="calendar" title="Schedule"
             note="Where a recorded fee is listed, and where you waive one"
             onPress={() => router.push('/(trainer)/calendar')} />
         </Section>
 
-        <Rule />
-
-        {/* ── GOING OUT ──────────────────────────────────────────────────── */}
-
-        <Section>
-          <SectionHead title="Going Out" note="What you pay, and what you have told us your ads cost" />
-          {plan?.error ? (
-            <Flag>
-              Your own plan could not be read, so nothing here says what you are on. This is not a statement that you have no subscription.
-            </Flag>
-          ) : plan?.sub ? (
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
-              <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Your Repple plan</Text>
-              <Text style={{ ...ty.label, color: t.ink }}>
-                {plan.sub.plan ?? 'unnamed'}{plan.sub.status ? ` · ${plan.sub.status}` : ''}
-              </Text>
-            </View>
-          ) : plan ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              You are not on a paid Repple plan, so nothing is billed to you here.
-            </Text>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Still reading.</Text>
-          )}
-
-          {duesRead === 'error' ? (
-            <Flag style={{ marginTop: sp.sm }}>
-              Whether anything is outstanding on your account could not be read. An empty space here is not a clear account.
-            </Flag>
-          ) : owed.length ? (
-            <View style={{ marginTop: sp.sm }}>
-              {/* The words carry the warning and the tone only marks it. A
-                  figure inked in the critical colour reads at 3:1, which is a
-                  mark's contrast and not a text's — and an amount somebody owes
-                  is the last thing on this page that should be hard to read. */}
-              <Flag tone={t.crit}>
-                {owed.length} {plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding.
-              </Flag>
-              {owed.map((i) => (
-                <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>
-                    Outstanding · {i.status ?? 'unknown'}
-                  </Text>
-                  <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{platformMoney(i.amount_due, i.currency)}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-          <ListRow icon="chart" title="Billing & Subscription"
-            note="Your own plan, payment method and Repple invoices"
-            onPress={() => router.push('/(trainer)/billing')} />
-        </Section>
-
-        <Section>
-          <SectionHead title="Ad Spend" note="What you recorded, per join code" />
-          {codes.status === 'error' ? (
-            <Flag>{codes.reason ?? 'What your codes cost could not be read, so nothing here is a figure.'}</Flag>
-          ) : codes.status === 'partial' ? (
-            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
-          ) : spend.pots.length ? (
-            <View>
-              {spend.pots.map((p) => potRow(
-                p.currency,
-                `${p.count} ${plural(p.count, 'code', 'codes')} in ${p.currency}`,
-                minorMoney(p.minorUnits, p.currency),
-              ))}
-              {spend.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{ledgerEmptyLine('out', codes.status)}</Text>
-          )}
-          {spend.unrecorded > 0 ? (
-            <Flag style={{ marginTop: sp.sm }}>
-              {spend.unrecorded} {plural(spend.unrecorded, 'code has', 'codes have')} no cost recorded. That is not a cost of nothing — until a figure is entered or synced, what {plural(spend.unrecorded, 'that code', 'those codes')} cost you is unknown and is in no total here.
-            </Flag>
-          ) : null}
-          <ListRow icon="trending" title="Ad Spend"
-            note="Connect an ad account, and see the spend that matched no code"
-            onPress={() => router.push('/(trainer)/ad-spend')} />
-        </Section>
-
-        {/* ── WHAT THE BUSINESS COSTS ────────────────────────────────────
-            Rent or a chair fee, insurance, CPD, equipment, kit, travel, an
-            accountant. Part 450, and until it existed the outgoing half of
-            this screen was the Repple plan and ad spend and nothing else —
-            which for a self-employed coach leaves out the largest single line
-            of their year and makes the Statement of Record one-sided.
-
-            NOTHING HERE IS SUBTRACTED FROM ANYTHING. There is no profit figure
-            on this screen and there must never be one: the takings above are
-            gross of Stripe's fee and the platform's, both sides are only as
-            complete as what the coach wrote down, and the two can be in
-            currencies this app holds no rate between. `NO_NET_NOTE` has been
-            the rule since before this table existed and this is the feature
-            that makes breaking it possible for the first time. */}
-        <Section>
-          <SectionHead title="What Your Business Costs" note="What you have recorded going out" />
-          {costs.status === 'error' ? (
-            <Flag>{costsEmptyLine('error')}</Flag>
-          ) : costs.status === 'partial' ? (
-            <PartialRead what="recorded costs" shown={costs.rows.length} onPress={load} />
-          ) : costTaken.pots.length ? (
-            <View>
-              {costTaken.pots.map((p) => potRow(
-                p.currency,
-                `${p.count} ${plural(p.count, 'cost', 'costs')} in ${p.currency}`,
-                minorMoney(p.minorUnits, p.currency),
-              ))}
-              {costTaken.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{costsEmptyLine(costs.status)}</Text>
-          )}
-          {costTaken.unlabelled > 0 || costTaken.unpriced > 0 ? (
-            <Flag style={{ marginTop: sp.sm }}>
-              {costTaken.unlabelled + costTaken.unpriced} recorded {plural(costTaken.unlabelled + costTaken.unpriced, 'cost has', 'costs have')} an amount this app cannot put a currency on, so {plural(costTaken.unlabelled + costTaken.unpriced, 'it is', 'they are')} in no figure above.
-            </Flag>
-          ) : null}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COSTS_ARE_NEVER_NETTED}</Text>
-          <ListRow icon="grid" title="What It Costs You"
-            note="Rent, insurance, courses, equipment, kit, travel, your accountant"
-            onPress={() => router.push('/(trainer)/costs')} />
-        </Section>
-
-        <Rule />
-
-        {/* ── WHAT EACH CLIENT HAS PAID ──────────────────────────────────
-            The one figure this app could not produce. Three lists existed —
-            sales, renewals, cash — on three screens, and no per-person total
-            anywhere, so the decision a coach makes when somebody goes quiet or
-            asks for a discount was made without the number that would change
-            it.
-
-            It is a SUM OF ROWS THAT ALREADY EXIST. Not a projection, not a
-            model, not "lifetime value" in the sense anybody else uses the
-            phrase — every figure is money already charged or already handed
-            over, and `VALUE_IS_PAST` says so on the screen because a coach who
-            reads it as a forecast will act on it as one.
-
-            The cash half is not optional. A total from Stripe alone is wrong
-            for most coaches and wrong in the direction that makes them
-            undervalue the person in front of them, so a receipts read that did
-            not come back whole withholds the total exactly as a failed sales
-            read does. src/lib/clientValue.ts carries the argument. */}
-        <Section>
-          <SectionHead title="What Each Client Has Paid" note="All time" />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{VALUE_IS_PAST}</Text>
-
-          {ranked.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {valueEmptyLine(clientValue('', [], [], [], valueReads))}
-            </Text>
-          ) : (<>
-            {/* Ranked within ONE currency. Sorting a mixed book by "amount"
-                would put AED 5,000 above GBP 900 because five thousand is more
-                than nine hundred, and the order would be a fact about exchange
-                rates nobody supplied. A coach paid in two currencies gets the
-                leading one ranked and is told the other exists. */}
-            {ranked.map((r, i) => {
-              const total = r.value.ledger.total;
-              const pots = total?.pots ?? [];
-              return (
-                <View key={r.clientId} style={{
-                  paddingVertical: sp.md,
-                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-                }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1, textTransform: 'capitalize' }} numberOfLines={1}>
-                      {r.name ?? '—'}
-                    </Text>
-                    <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
-                      {pots.length
-                        ? pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
-                        : '—'}
-                    </Text>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                    {total ? (valueSpanLine(r.value, now) ?? '') : valueEmptyLine(r.value)}
-                  </Text>
-                  {/* An amount with no currency on it is a hole in the figure
-                      and the size of the hole is what is worth reporting. It is
-                      never summed into a unit nobody stated. */}
-                  {total && (total.unlabelled > 0 || total.unpriced > 0) ? (
-                    <Flag style={{ marginTop: sp.sm }}>
-                      {total.unlabelled > 0 ? `${total.unlabelled} ${plural(total.unlabelled, 'payment has', 'payments have')} no currency recorded and ${plural(total.unlabelled, 'is', 'are')} in no figure above. ` : ''}
-                      {total.unpriced > 0 ? `${total.unpriced} ${plural(total.unpriced, 'payment has', 'payments have')} no amount recorded at all.` : ''}
-                    </Flag>
-                  ) : null}
-                </View>
-              );
-            })}
-            {valueCurrencies.length > 1 ? (
-              <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                You have been paid in {valueCurrencies.join(' and ')}. Those are separate amounts of money, they are never added together, and the order above is by {valueCurrencies[0]} alone.
-              </Flag>
-            ) : null}
-          </>)}
-
-          {/* Cash from somebody the coach bills by hand has a typed name and no
-              Repple account, so it can be attached to nobody in the list above.
-              Counted and reported rather than dropped: a per-client breakdown
-              that silently omits most of the cash is the same defect this whole
-              section exists to close, one level down. */}
-          {orphanLine ? <Flag style={{ marginTop: sp.md }}>{orphanLine}</Flag> : null}
-
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
-        </Section>
-
-        <Rule />
-
-        {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
-        {/* The figures above say what the coach's advertising COST. They say
-            nothing about whether any of it worked, and that is the question a
-            coach opens a money screen holding.
-
-            Every function drawn here already existed and is untouched:
-            src/lib/codeReturn.ts has answered it per code since part 98 —
-            what each cost, who came in on it, what they paid, and
-            enoughToTell(), which declines to rank two channels until the split
-            could be told from a coin toss. All of it was reachable only by
-            opening the Add a Client sheet on the Clients screen, three taps
-            from here and behind a button whose label is about adding somebody.
-            Nothing about this section is new arithmetic except the roll-up in
-            src/lib/coachChannels.ts, which is the one sentence that set could
-            not produce: what the whole of it cost against what the whole of it
-            returned, withheld the moment either side has a hole in it.
-
-            It is read-only on purpose. The spend field per code stays on the
-            Clients screen, beside the figures it feeds — app/(trainer)/ad-spend.tsx
-            gives the reason and it applies twice over here: two places to type
-            the same number is how they come to disagree. */}
-        <Section>
-          <SectionHead title="Which Codes Worked" note="Named codes only" />
-
-          {/* First, before any figure. Every number below is last touch, and a
-              coach about to move a budget on them is owed that sentence before
-              they read them rather than under them. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
-
-          {codes.status === 'error' ? (
-            <Flag>{codes.reason ?? channelEmptyLine('error')}</Flag>
-          ) : codes.status === 'partial' ? (
-            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
-          ) : !namedCodes.length ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{channelEmptyLine(codes.status)}</Text>
-          ) : (
-            <View>
-              {/* The verdict, and it is a refusal far more often than it is a
-                  ranking. A coach with twelve clients told "Instagram is your
-                  best channel" off a four-versus-one split has been handed a
-                  coin toss dressed as a finding, and they spend real money on
-                  it. enoughToTell() is what declines to say it. */}
-              {codeTell.rankable ? (
-                <Notice tone={t.good} kicker="Enough to tell"
-                  title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`}
-                  note={codeTell.note} />
-              ) : (
-                <Notice tone={t.s3} kicker="Not enough yet"
-                  title="Too early to say which is working" note={codeTell.note} />
-              )}
-
-              {/* The whole of it against the whole of it, or the reason there
-                  is no such figure. `against` refuses on an unrecorded cost
-                  before anything else, because that is the hole that makes a
-                  coach's advertising look cheaper than it was — the direction
-                  that loses them money. */}
-              <Text style={{ ...ty.label, color: against.statable ? t.ink2 : t.ink3, marginBottom: sp.sm }}>
-                {againstLine(against)}
-              </Text>
-              {channelReachLine(codes.status, channels) ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                  {channelReachLine(codes.status, channels)}
-                </Text>
-              ) : null}
-              {channels.unnamed > 0 ? (
-                <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
-                  Your main code is left out of everything in this section. It is not a channel — it collects everybody no named code claims, including codes you have since replaced — so setting what it earned against what it cost would compare real money with nothing.
-                </Flag>
-              ) : null}
-
-              {namedCodes.map((c) => {
-                const fgs = codeFigures(codes.status, c);
-                const line = returnLine(codes.status, c);
-                return (
-                  <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
-                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
-                      {codeFig('Spent', fgs.spent)}
-                      {codeFig('Clients', fgs.clients)}
-                      {codeFig('They paid', fgs.revenue)}
-                      {codeFig('Each cost', fgs.perClient)}
-                    </View>
-                    {line ? (
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {/* Both ways out, because the two halves of a missing figure are
-              fixed in two different places. A cost nobody has typed is typed on
-              the Clients screen; a cost that should have arrived on its own is
-              an ad account that is not connected. */}
-          <ListRow icon="people" title="Clients"
-            note="Where you make a code, and where you record what it cost you"
-            onPress={() => router.push('/(trainer)/dashboard')} />
-        </Section>
-
-        <Rule />
 
         {/* ── WHERE IT LANDS ─────────────────────────────────────────────── */}
 
@@ -885,7 +1182,7 @@ export default function CoachMoney() {
             three numbers. `PAYOUT_IS_NOT_A_SALE` is that sentence on the page,
             and this is the same discipline `NO_NET_NOTE` keeps at the top. */}
         <Section>
-          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as each payout happens" />
+          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as Each Payout Happens" />
           {payouts.status === 'partial' ? (
             <PartialRead what="payouts" shown={payouts.rows.length} onPress={load} />
           ) : null}
@@ -955,15 +1252,23 @@ export default function CoachMoney() {
 
         <Section>
           <SectionHead title="Where It Lands" />
-          {connect.read === 'error' ? (
+          {/* Four sentences, and there used to be three. 'error' was branched
+              and 'loading' was not, so for the length of the read `acct` was
+              null and this fell to the last arm — a coach opening the screen
+              was told, in the app's own confident type, that they have no
+              payout account. Loading, failed and empty are three different
+              sentences; src/lib/payoutAccount.ts resolves which. */}
+          {payoutStage(connect.acct, connect.read) === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your payout account…</Text>
+          ) : payoutStage(connect.acct, connect.read) === 'unreadable' ? (
             <Flag>
-              Your payout account could not be read. This is not a statement that you have none — if you had set one up it is still set up.
+              Your payout account could not be read. This is not a statement that you have none. If you had set one up, it is still set up.
             </Flag>
-          ) : connect.acct?.charges_enabled ? (
+          ) : payoutStage(connect.acct, connect.read) === 'active' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
               Your Stripe payout account is active, so a client can be charged. When each payment reaches your bank, and what Stripe took for it, are things only Stripe knows.
             </Text>
-          ) : connect.acct?.stripe_account_id ? (
+          ) : payoutStage(connect.acct, connect.read) === 'started' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
               Your Stripe payout account is started but not finished, so nobody can be charged yet. Finish it on the Payments screen.
             </Text>
@@ -974,10 +1279,470 @@ export default function CoachMoney() {
           )}
         </Section>
 
+        {/* ── THE HALF STRIPE NEVER SAW ──────────────────────────────────
+            For most self-employed coaches this is the bigger half. It is drawn
+            as its own section as well as being inside the two ledgers above,
+            because a coach reading a total needs to see how much of it is their
+            own word rather than Stripe's — the two are different KINDS of fact
+            and this screen's whole design is about not blurring those. */}
+        <Section>
+          <SectionHead title="Recorded by You" note="Cash, Transfers and Anything Taken at a Gym" />
+          {receipts.status === 'partial' ? (
+            <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
+          ) : null}
+          {receipts.status !== 'ready' ? (
+            <Flag>{receiptsEmptyLine(receipts.status)}</Flag>
+          ) : recordedByHand.pots.length ? (
+            <View>
+              {recordedByHand.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {recordedByHand.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{receiptsEmptyLine(receipts.status)}</Text>
+          )}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+          <ListRow icon="grid" title="Cash and Transfers"
+            note="Record a payment that did not go through this app"
+            onPress={() => router.push('/(trainer)/receipts')} />
+        </Section>
+
+        {/* ── WHAT A GYM HAS PAID THEM ───────────────────────────────────
+            The third kind of money that reaches a coach, and the only one this
+            app had never shown them. It sits here, beside the half Stripe never
+            saw, because both answer "money that came in that Repple did not
+            take" — and it is a SECTION rather than a strand for the reason in
+            src/ui/PaidRuns.tsx: a settlement is a gym's word that it handed
+            money over, and the ledger above is Stripe's record of a card being
+            charged. Nothing adds the two.
+
+            For a coach with no gym this draws one sentence saying so. That is
+            the common case today — every payroll table in this database is
+            empty and all seven live coaches are alone in their own tenant — and
+            an empty list under this heading would read as a gym that has paid
+            them nothing. */}
+        <PaidRuns paid={paid} />
+
+        {/* ── GOING OUT ──────────────────────────────────────────────────── */}
+
+        <Section>
+          <SectionHead title="Going Out" note="What You Pay, and What You Have Told Us Your Ads Cost" />
+          {plan?.error ? (
+            <Flag>
+              Your own plan could not be read, so nothing here says what you are on. This is not a statement that you have no subscription.
+            </Flag>
+          ) : plan?.sub ? (
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
+              <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Your Repple Plan</Text>
+              <Text style={{ ...ty.label, color: t.ink }}>
+                {plan.sub.plan ?? 'unnamed'}{plan.sub.status ? ` · ${plan.sub.status}` : ''}
+              </Text>
+            </View>
+          ) : plan ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              You are not on a paid Repple plan, so nothing is billed to you here.
+            </Text>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Still reading.</Text>
+          )}
+
+          {duesRead === 'error' ? (
+            <Flag style={{ marginTop: sp.sm }}>
+              Whether anything is outstanding on your account could not be read. An empty space here is not a clear account.
+            </Flag>
+          ) : owed.length ? (
+            <View style={{ marginTop: sp.sm }}>
+              {/* The words carry the warning and the tone only marks it. A
+                  figure inked in the critical colour reads at 3:1, which is a
+                  mark's contrast and not a text's — and an amount somebody owes
+                  is the last thing on this page that should be hard to read. */}
+              <Flag tone={t.crit}>
+                {/* 'partial' says the list came back at its ceiling, so
+                    `owed.length` is how many are ON THIS SCREEN and not how
+                    many are outstanding. A coach reading a bare number here is
+                    deciding what they owe, and a floor printed as a total is
+                    the one thing that stops them looking for the rest. */}
+                {duesRead === 'partial'
+                  ? `At least ${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding. There are more than fitted in one read, so this is a floor and not a count of them.`
+                  : `${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding.`}
+              </Flag>
+              {owed.map((i) => (
+                <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>
+                    Outstanding · {i.status ?? 'unknown'}
+                  </Text>
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{platformMoney(i.amount_due, i.currency)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <ListRow icon="chart" title="Billing & Subscription"
+            note="Your own plan, payment method and Repple invoices"
+            onPress={() => router.push('/(trainer)/billing')} />
+        </Section>
+
+        <Section>
+          <SectionHead title="Ad Spend" note="What You Recorded, per Join Code" />
+          {codes.status === 'error' ? (
+            <Flag>{codes.reason ?? 'What your codes cost could not be read, so nothing here is a figure.'}</Flag>
+          ) : codes.status === 'partial' ? (
+            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
+          ) : spend.pots.length ? (
+            <View>
+              {spend.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'code', 'codes')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {spend.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{ledgerEmptyLine('out', codes.status)}</Text>
+          )}
+          {spend.unrecorded > 0 ? (
+            <Flag style={{ marginTop: sp.sm }}>
+              {spend.unrecorded} {plural(spend.unrecorded, 'code has', 'codes have')} no cost recorded. That is not a cost of nothing. Until a figure is entered or synced, what {plural(spend.unrecorded, 'that code', 'those codes')} cost you is unknown and is in no total here.
+            </Flag>
+          ) : null}
+          <ListRow icon="trending" title="Ad Spend"
+            note="Connect an ad account, and see the spend that matched no code"
+            onPress={() => router.push('/(trainer)/ad-spend')} />
+        </Section>
+
+        {/* ── WHAT THE BUSINESS COSTS ────────────────────────────────────
+            Rent or a chair fee, insurance, CPD, equipment, kit, travel, an
+            accountant. Part 450, and until it existed the outgoing half of
+            this screen was the Repple plan and ad spend and nothing else —
+            which for a self-employed coach leaves out the largest single line
+            of their year and makes the Statement of Record one-sided.
+
+            NOTHING HERE IS SUBTRACTED FROM ANYTHING. There is no profit figure
+            on this screen and there must never be one: the takings above are
+            gross of Stripe's fee and the platform's, both sides are only as
+            complete as what the coach wrote down, and the two can be in
+            currencies this app holds no rate between. `NO_NET_NOTE` has been
+            the rule since before this table existed and this is the feature
+            that makes breaking it possible for the first time. */}
+        <Section>
+          <SectionHead title="What Your Business Costs" note="What You Have Recorded Going Out" />
+          {costs.status === 'error' ? (
+            <Flag>{costsEmptyLine('error')}</Flag>
+          ) : costs.status === 'partial' ? (
+            <PartialRead what="recorded costs" shown={costs.rows.length} onPress={load} />
+          ) : costTaken.pots.length ? (
+            <View>
+              {costTaken.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'cost', 'costs')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {costTaken.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{costsEmptyLine(costs.status)}</Text>
+          )}
+          {costTaken.unlabelled > 0 || costTaken.unpriced > 0 ? (
+            <Flag style={{ marginTop: sp.sm }}>
+              {costTaken.unlabelled + costTaken.unpriced} recorded {plural(costTaken.unlabelled + costTaken.unpriced, 'cost has', 'costs have')} an amount this app cannot put a currency on, so {plural(costTaken.unlabelled + costTaken.unpriced, 'it is', 'they are')} in no figure above.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COSTS_ARE_NEVER_NETTED}</Text>
+          <ListRow icon="grid" title="What It Costs You"
+            note="Rent, insurance, courses, equipment, kit, travel, your accountant"
+            onPress={() => router.push('/(trainer)/costs')} />
+        </Section>
+
+
+        {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
+        {/* The figures above say what the coach's advertising COST. They say
+            nothing about whether any of it worked, and that is the question a
+            coach opens a money screen holding.
+
+            Every function drawn here already existed and is untouched:
+            src/lib/codeReturn.ts has answered it per code since part 98 —
+            what each cost, who came in on it, what they paid, and
+            enoughToTell(), which declines to rank two channels until the split
+            could be told from a coin toss. All of it was reachable only by
+            opening the Add a Client sheet on the Clients screen, three taps
+            from here and behind a button whose label is about adding somebody.
+            Nothing about this section is new arithmetic except the roll-up in
+            src/lib/coachChannels.ts, which is the one sentence that set could
+            not produce: what the whole of it cost against what the whole of it
+            returned, withheld the moment either side has a hole in it.
+
+            It is read-only on purpose. The spend field per code stays on the
+            Clients screen, beside the figures it feeds — app/(trainer)/ad-spend.tsx
+            gives the reason and it applies twice over here: two places to type
+            the same number is how they come to disagree. */}
+        <Section>
+          <SectionHead title="Which Codes Worked" note="Named Codes Only" />
+
+          {/* First, before any figure. Every number below is last touch, and a
+              coach about to move a budget on them is owed that sentence before
+              they read them rather than under them. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
+
+          {codes.status === 'error' ? (
+            <Flag>{codes.reason ?? channelEmptyLine('error')}</Flag>
+          ) : codes.status === 'partial' ? (
+            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
+          ) : !namedCodes.length ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{channelEmptyLine(codes.status)}</Text>
+          ) : (
+            <View>
+              {/* The verdict, and it is a refusal far more often than it is a
+                  ranking. A coach with twelve clients told "Instagram is your
+                  best channel" off a four-versus-one split has been handed a
+                  coin toss dressed as a finding, and they spend real money on
+                  it. enoughToTell() is what declines to say it. */}
+              {codeTell.rankable ? (
+                <Notice tone={t.good} kicker="Enough to Tell"
+                  title={`${codeTell.best.label} Is Ahead of ${codeTell.runnerUp.label}`}
+                  note={codeTell.note} />
+              ) : (
+                <Notice tone={t.s3} kicker="Not Enough Yet"
+                  title="Too Early to Say Which Is Working" note={codeTell.note} />
+              )}
+
+              {/* The whole of it against the whole of it, or the reason there
+                  is no such figure. `against` refuses on an unrecorded cost
+                  before anything else, because that is the hole that makes a
+                  coach's advertising look cheaper than it was — the direction
+                  that loses them money. */}
+              <Text style={{ ...ty.label, color: against.statable ? t.ink2 : t.ink3, marginBottom: sp.sm }}>
+                {againstLine(against)}
+              </Text>
+              {channelReachLine(codes.status, channels) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  {channelReachLine(codes.status, channels)}
+                </Text>
+              ) : null}
+              {channels.unnamed > 0 ? (
+                <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
+                  Your main code is left out of everything in this section. It is not a channel (it collects everybody no named code claims, including codes you have since replaced), so setting what it earned against what it cost would compare real money with nothing.
+                </Flag>
+              ) : null}
+
+              {namedCodes.map((c) => {
+                const fgs = codeFigures(codes.status, c);
+                const line = returnLine(codes.status, c);
+                return (
+                  <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                      {codeFig('Spent', fgs.spent)}
+                      {codeFig('Clients', fgs.clients)}
+                      {codeFig('They Paid', fgs.revenue)}
+                      {codeFig('Each Cost', fgs.perClient)}
+                    </View>
+                    {line ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Both ways out, because the two halves of a missing figure are
+              fixed in two different places. A cost nobody has typed is typed on
+              the Clients screen; a cost that should have arrived on its own is
+              an ad account that is not connected. */}
+          <ListRow icon="people" title="Clients"
+            note="Where you make a code, and where you record what it cost you"
+            onPress={() => router.push('/(trainer)/dashboard')} />
+        </Section>
+
+
+        {/* ── WHAT EACH CLIENT HAS PAID ──────────────────────────────────
+            The one figure this app could not produce. Three lists existed —
+            sales, renewals, cash — on three screens, and no per-person total
+            anywhere, so the decision a coach makes when somebody goes quiet or
+            asks for a discount was made without the number that would change
+            it.
+
+            It is a SUM OF ROWS THAT ALREADY EXIST. Not a projection, not a
+            model, not "lifetime value" in the sense anybody else uses the
+            phrase — every figure is money already charged or already handed
+            over, and `VALUE_IS_PAST` says so on the screen because a coach who
+            reads it as a forecast will act on it as one.
+
+            The cash half is not optional. A total from Stripe alone is wrong
+            for most coaches and wrong in the direction that makes them
+            undervalue the person in front of them, so a receipts read that did
+            not come back whole withholds the total exactly as a failed sales
+            read does. src/lib/clientValue.ts carries the argument.
+
+            And it is the ONE figure on this screen that is net of refunds.
+            Everything under Coming In above is gross — what a client was
+            charged — and app/(trainer)/payments.tsx carries that policy at
+            length. A fully refunded ten-pack used to read here as AED 2,400
+            somebody had paid, and rank them above the clients who kept nothing
+            back, on the very line that tells a coach how hard to fight to keep
+            them. `VALUE_IS_NET_OF_REFUNDS` says which of the two figures is
+            which, on the screen rather than only here. */}
+        <Section>
+          <SectionHead title="What Each Client Has Paid" note="All Time" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{VALUE_IS_PAST}</Text>
+
+          {/* The BOOK's empty state, not a person's. This was
+              `valueEmptyLine(clientValue('', …))`, which reaches the per-client
+              branch — so a coach who has never been paid by anybody read
+              "Nothing has been recorded as paid to you by this person" with no
+              person on the screen. `valueBookEmptyLine` keeps every withheld
+              sentence identical and rewords only the confident one. */}
+          {ranked.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {valueBookEmptyLine(valueReads)}
+            </Text>
+          ) : (<>
+            {/* Ranked within ONE currency. Sorting a mixed book by "amount"
+                would put AED 5,000 above GBP 900 because five thousand is more
+                than nine hundred, and the order would be a fact about exchange
+                rates nobody supplied. A coach paid in two currencies gets the
+                leading one ranked and is told the other exists. */}
+            {ranked.map((r, i) => {
+              const total = r.value.ledger.total;
+              const pots = total?.pots ?? [];
+              return (
+                <View key={r.clientId} style={{
+                  paddingVertical: sp.md,
+                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1, textTransform: 'capitalize' }} numberOfLines={1}>
+                      {r.name ?? '—'}
+                    </Text>
+                    <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
+                      {pots.length
+                        ? pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                        : '—'}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {total ? (valueSpanLine(r.value, now) ?? '') : valueEmptyLine(r.value)}
+                  </Text>
+                  {/* An amount with no currency on it is a hole in the figure
+                      and the size of the hole is what is worth reporting. It is
+                      never summed into a unit nobody stated. */}
+                  {/* What has gone back, beside the figure it has already come
+                      off. A netted number with nothing on it to say so reads
+                      as a bug to the coach who remembers the sale — and this
+                      is the one figure on the screen that is net, which is why
+                      `VALUE_IS_NET_OF_REFUNDS` is under the list as well.
+                      Null for nearly everybody. */}
+                  {refundedLine(r.value) ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{refundedLine(r.value)}</Text>
+                  ) : null}
+                  {total && (total.unlabelled > 0 || total.unpriced > 0) ? (
+                    <Flag style={{ marginTop: sp.sm }}>
+                      {total.unlabelled > 0 ? `${total.unlabelled} ${plural(total.unlabelled, 'payment has', 'payments have')} no currency recorded and ${plural(total.unlabelled, 'is', 'are')} in no figure above. ` : ''}
+                      {total.unpriced > 0 ? `${total.unpriced} ${plural(total.unpriced, 'payment has', 'payments have')} no amount recorded at all.` : ''}
+                    </Flag>
+                  ) : null}
+                </View>
+              );
+            })}
+            {valueCurrencies.length > 1 ? (
+              <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                You have been paid in {valueCurrencies.join(' and ')}. Those are separate amounts of money, they are never added together, and the order above is by {valueCurrencies[0]} alone.
+              </Flag>
+            ) : null}
+          </>)}
+
+          {/* Cash from somebody the coach bills by hand has a typed name and no
+              Repple account, so it can be attached to nobody in the list above.
+              Counted and reported rather than dropped: a per-client breakdown
+              that silently omits most of the cash is the same defect this whole
+              section exists to close, one level down. */}
+          {orphanLine ? <Flag style={{ marginTop: sp.md }}>{orphanLine}</Flag> : null}
+
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
+          {/* Two figures on one page arrived at differently have to say which
+              is which. Everything above under Coming In is GROSS — what a
+              client was charged, which is what a takings line has always meant
+              in this app — and this section alone takes refunds off, because
+              "what has this person paid me and not had back" is the question a
+              coach makes a retention decision on. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_IS_NET_OF_REFUNDS}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+        </Section>
+
+
+        {/* ── the rest of a coach's money, named ──────────────────────────
+            This Section had no head at all, which was survivable while Money
+            hung off Profile and Analytics and was survivable for exactly as
+            long. It is a tab root now, so the drawer of screens under it has
+            to say it is one. Billing, Ad Spend, Cash and Transfers and What It
+            Costs You are NOT repeated here: each already has its row inside
+            the section that holds its figures, and two rows to one screen is
+            how a coach comes to think they are two screens. */}
+        <Section>
+          <SectionHead title="Everything Else About Money" />
+          <ListRow icon="grid" title="Payments & Packages"
+            note="Who bought what, who is subscribed, and the price list they buy from"
+            onPress={() => router.push('/(trainer)/payments')} />
+          <ListRow icon="grid" title="Invoices"
+            /* `isWhole`, not `!== 'error'`. This is a count of the coach's
+               own gapless document sequence and an assertion that they have
+               issued none, and neither survives the other two statuses.
+               `issued` starts at `{ count: 0, status: 'loading' }` and the
+               read runs from `useFocusEffect`, so the third arm — "Issue a
+               document…" — was what a coach with forty invoices read every
+               single time they opened this screen. And `fetchMyInvoices` ends
+               `.limit(capLimit())`, so a truncated read arrives as 'partial'
+               and printed "1000 issued" as a fact. app/(trainer)/invoices.tsx
+               gates the same figure on `isWhole(status)` and says why. */
+            note={issued.status === 'error'
+              ? 'Your issued documents could not be counted just now'
+              : !isWhole(issued.status)
+                ? 'Your own statement of a charge, never a payment receipt'
+                : issued.count > 0
+                  ? `${issued.count} issued: your own statement of a charge, never a payment receipt`
+                  : 'Issue a document for what somebody paid you, including cash and transfers'}
+            onPress={() => router.push('/(trainer)/invoices')} />
+          {/* The document this whole screen is the working copy of.
+              app/(trainer)/statement.tsx existed and was reachable from the
+              profile hub and from search, and from nowhere on the Money screen
+              — so a coach standing on the page that holds every figure it is
+              built from had no way to get to it, and the one moment they want
+              it is the moment they are looking at their takings. */}
+          <ListRow icon="chart" title="Statement of Record"
+            note="What this app recorded in a year or a quarter, to hand to an accountant, never a tax return"
+            onPress={() => router.push('/(trainer)/statement')} />
+          {/* The ninth money screen, and the only one this page did not reach.
+              Which Codes Worked above answers what a coach PAID for a client;
+              this answers who they got for nothing. It was reachable from the
+              Clients screen's tools drawer and from Analytics, neither of
+              which is where a coach asks where their business comes from. */}
+          <ListRow icon="people" title="Who Brings You Clients"
+            note="The clients who referred somebody, and what those referrals have been worth"
+            onPress={() => router.push('/(trainer)/referrals')} />
+        </Section>
+
+        <CoachPosts />
+
+
         <Section>
           <SectionHead title="What Is Not Here" />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Cash, bank transfers and work paid for through a gym never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Nothing on this page is a projection or a forecast — it is what has been recorded, over the period each heading names.
+            Cash and bank transfers never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Work paid for through a gym is now here, but only as the runs your gym has closed, which is their word for what they handed over and not a record of anything arriving. Nothing on this page is a projection or a forecast: it is what has been recorded, over the period each heading names.
           </Text>
         </Section>
       </ScrollView>

@@ -8,7 +8,8 @@
 import {
   canOfferMove, rescheduleRefusalLine, rescheduleLines, moveConfirm, noSlotsLine,
   pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
-  NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine,
+  pauseRangeRefusal, pauseRangeConfirm,
+  NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine, queueLength,
   type RescheduleReport, type RescheduleRefusal, type PauseReport, type CoachMoveReport,
 } from './reschedule';
 import type { CancellationPolicy } from './booking';
@@ -81,6 +82,13 @@ ok(/GBP 30/.test(late), 'and quotes what that path costs, in the currency it is 
 const noCcy = rescheduleRefusalLine(refusal('inside_notice', { noticeHours: 24, fee: 30, currency: null }), '7:00 am');
 ok(!/[$£€]/.test(noCcy), 'a fee with no currency is never given a symbol');
 ok(/30/.test(noCcy), 'though the figure itself is still stated');
+// And the figure alone is not enough in a SENTENCE. booking.ts states the rule
+// — "a slot may print the figure alone; a sentence may not" — and this is the
+// sentence a member reads immediately before deciding to cancel and rebook.
+ok(/ask them what that amount is in/.test(noCcy),
+  'and a bare figure in a sentence carries the clause saying nobody set a currency');
+ok(!/ask them what that amount is in/.test(late),
+  'while a stated currency adds no such clause');
 
 // A policy that applies with no amount behind it quotes nothing at all.
 const unpriced = rescheduleRefusalLine(refusal('inside_notice', { noticeHours: 24, fee: null, currency: 'GBP' }), '7:00 am');
@@ -110,6 +118,81 @@ ok(/back on your coach/.test(rescheduleLines(moved, 'a', 'b').join(' ')),
   'an unwanted slot with nobody waiting goes back on the calendar');
 ok(/gone straight to them/.test(rescheduleLines({ ...moved, promoted: true }, 'a', 'b').join(' ')),
   'and one somebody was waiting for is reported as gone, from the server’s own answer');
+
+/* ── the member's third arm: a freed slot whose queue nobody counted ────── */
+//
+// `RescheduleReport.waiting` was a plain `number` and both providers read it as
+// `Number(r.waiting) || 0` (src/ui/sessions.tsx:703 and :733), so an absent
+// key, a null, an empty string and a NaN all arrived here as a counted zero.
+// The coach's side of the same act grew its third sentence first; this is the
+// member's, and it is the same rule: a count nobody took is not an empty queue.
+
+const uncountedMine = rescheduleLines({ ...moved, waiting: null }, 'Tue 7:00 am', 'Thu 6:00 pm').join(' ');
+ok(/back on your coach/.test(uncountedMine), 'the slot is still said to be back on the calendar, which is known');
+ok(!/nobody was waiting/.test(uncountedMine), 'an uncounted queue is never called empty');
+ok(!/gone straight to them|somebody was waiting/i.test(uncountedMine),
+  'and no queue is invented either; nobody knows which way it goes');
+ok(/cannot say whether anybody else is in line/.test(uncountedMine), 'it says the app could not find out');
+ok(!/null|undefined|NaN/.test(uncountedMine), 'without rendering the gap as a word');
+
+// The counted arms, so all four states read differently and none is the others.
+const queuedMine = rescheduleLines({ ...moved, waiting: 2 }, 'a', 'b').join(' ');
+ok(/2 other people are waiting for it/.test(queuedMine), 'a counted queue is stated as the number it is');
+ok(!/nobody was waiting/.test(queuedMine), 'and is not called empty while two people are in line');
+ok(/one other person is waiting for it/.test(rescheduleLines({ ...moved, waiting: 1 }, 'a', 'b').join(' ')),
+  'one is singular');
+ok(/nobody was waiting for it/.test(rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' ')),
+  'a counted empty queue may still be called empty, because somebody counted it');
+
+const mineStates = new Set([
+  rescheduleLines({ ...moved, promoted: true, waiting: 1 }, 'a', 'b').join(' '),
+  queuedMine,
+  rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' '),
+  rescheduleLines({ ...moved, waiting: null }, 'a', 'b').join(' '),
+]);
+eq(mineStates.size, 4, 'promoted, queued, counted-empty and uncounted each read differently');
+
+// The ordering trap, pinned here as it is pinned on the coach's side: `null > 0`
+// is false, so a null tested after the `> 0` branch falls into the
+// counted-empty sentence. If the null check moves below it, or any caller
+// coalesces the null to 0 on the way here, this assertion fails.
+ok(rescheduleLines({ ...moved, waiting: null }, 'a', 'b').join(' ')
+   !== rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' '),
+  'an uncounted queue does not collapse into the counted-empty sentence');
+
+// A promotion answers the question by itself: somebody has the slot.
+ok(/gone straight to them/.test(rescheduleLines({ ...moved, promoted: true, waiting: null }, 'a', 'b').join(' ')),
+  'a promotion is stated even with no count beside it');
+ok(!/cannot say whether/.test(rescheduleLines({ ...moved, promoted: true, waiting: null }, 'a', 'b').join(' ')),
+  'and does not also admit to not knowing something it was not asked');
+
+// The sentinel. A move that never reached the server counted nobody.
+eq(NOT_MOVED.waiting, null, 'the fallback report carries no count rather than a zero');
+
+/* ── the reading itself ─────────────────────────────────────────────────── */
+//
+// The rule both providers now use for the server's `waiting` key, identical to
+// `queueLength` in src/ui/coachMoveAt.ts. Everything that is not a count of
+// people comes back null, and nothing that is not a count settles to zero.
+
+eq(queueLength(0), 0, 'a reported zero is a count and survives as one');
+eq(queueLength(3), 3, 'and so is three');
+eq(queueLength('0'), 0, 'a digit string is the server having counted, via jsonb');
+eq(queueLength('12'), 12, 'and so is a longer one');
+eq(queueLength(' 4 '), 4, 'with surrounding space tolerated');
+eq(queueLength(undefined), null, 'an absent key is not a count');
+eq(queueLength(null), null, 'a null is not a count, which is the whole defect');
+eq(queueLength(''), null, 'an empty string is not a count, though Number("") is 0');
+eq(queueLength('   '), null, 'and neither is whitespace');
+eq(queueLength(NaN), null, 'a NaN is not a count');
+eq(queueLength(Infinity), null, 'nor is an infinity');
+eq(queueLength(-1), null, 'a negative is not a number of people');
+eq(queueLength(2.5), null, 'and neither is half a person');
+eq(queueLength('two'), null, 'a word is not a count');
+eq(queueLength('3.0'), null, 'nor is a decimal string, which this server never sends');
+eq(queueLength(true), null, 'and a boolean is not a count, though Number(true) is 1');
+eq(queueLength({}), null, 'nor is an object');
+eq(queueLength([]), null, 'nor an array, though Number([]) is 0');
 
 const mc = moveConfirm('Tue 7:00 am', 'Thu 6:00 pm');
 ok(/Nothing is charged/.test(mc.body), 'the confirm says it before the tap as well as after');
@@ -191,6 +274,25 @@ const partly = pauseOutcomeLines({ ...base, freed: 1, notFreed: 2 }).join(' ');
 ok(/2 could not be cancelled/.test(partly), 'sessions that could not be freed are counted, never hidden');
 ok(/Check your calendar/.test(partly), 'and the member is told to look');
 
+// A report that carried no counts. `null === 0` is false and `null > 0` is
+// false, so every one of these would otherwise fall into the arm that says
+// nothing was booked, nothing was charged and nothing failed to cancel — three
+// claims about a member's own calendar, printed under the heading Paused after
+// an irreversible act.
+const unread = pauseOutcomeLines({ ...base, freed: null, charged: null, notFreed: null }).join(' ');
+ok(/could not read back how many sessions were booked/.test(unread),
+  'an unread freed count says so rather than saying nothing was booked');
+ok(!/Nothing was booked in them/.test(unread), 'and never claims the dates were empty');
+ok(/cannot say whether a late fee was recorded/.test(unread),
+  'an unread charged count says so rather than saying nothing was charged');
+ok(!/Nothing was charged/.test(unread), 'and never makes that claim about money');
+ok(/could not read back whether any of them failed to cancel/.test(unread),
+  'an unread not-freed count is said out loud rather than dropped by `null > 0`');
+ok(!/\b0\b/.test(unread), 'and no zero is printed anywhere in it');
+// The mutation this pins: settling the null back to 0 at the read.
+const settled = pauseOutcomeLines({ ...base, freed: 0, charged: 0, notFreed: 0 }).join(' ');
+ok(settled !== unread, 'a measured zero and an unread count do not read the same');
+
 /* ── the pause, and lifting it ─────────────────────────────────────────── */
 
 eq(pausedRangeLine('7 Sep', '7 Sep', null), 'Paused on 7 Sep.', 'a single day reads as one day');
@@ -206,6 +308,9 @@ ok(/no sessions were booked back in/.test(resumedLine(0)),
   'lifting a pause that had nothing left in it says so rather than implying a failure');
 ok(/one session has been booked back in/.test(resumedLine(1)), 'one is singular');
 ok(/3 sessions have been booked back in/.test(resumedLine(3)), 'and more than one is not');
+ok(/could not read back how many sessions were booked in again/.test(resumedLine(null)),
+  'and a resume that answered without a count does not claim there was nothing still to come');
+ok(!/nothing still to come/.test(resumedLine(null)), 'which is the sentence the zero arm makes');
 
 /* ── the coach moving a client's hour ───────────────────────────────────── */
 
@@ -247,6 +352,122 @@ ok(/nobody was waiting/.test(untold), 'and an empty waitlist is stated rather th
 const openAgain = coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7am', '8am', true);
 ok(/open again/.test(openAgain), 'an unpromoted hour is reported as open');
 ok(!/nobody was waiting/.test(openAgain), 'and is not called empty while two people are in line');
+
+/* ── the third arm: a freed hour whose queue nobody counted ─────────────── */
+//
+// `waiting` used to be a plain `number`, and every way of not being told one —
+// an absent key, a null, an empty string, a NaN — arrived here as 0 and came
+// out of this function as "nobody was waiting for it". That is the one sentence
+// on this screen a coach acts on irreversibly: they offer the hour to the next
+// person who asks. It is now `number | null`, and null has its own sentence.
+
+const uncounted = coachMovedLine(moveRep({ moved: true, waiting: null }), 'Ana', '7am', '8am', true);
+ok(/Ana moved from 7am to 8am/.test(uncounted), 'the move itself is still stated plainly');
+ok(!/nobody was waiting/.test(uncounted),
+  'an uncounted queue is never called empty — the whole point of the arm');
+ok(!/somebody was waiting|straight to/i.test(uncounted),
+  'and it does not invent a queue either; nobody knows which way it goes');
+ok(/cannot say whether anybody is still in line/.test(uncounted),
+  'it says the app could not find out');
+ok(/check the waitlist before you offer that hour to somebody else/i.test(uncounted),
+  'and tells the coach what to do before giving the hour away');
+ok(!/null|undefined|NaN/.test(uncounted), 'without rendering the gap as a word');
+
+// Three states of the freed hour, three sentences, no two alike.
+const hours = new Set([
+  coachMovedLine(moveRep({ moved: true, promoted: true, waiting: 1 }), 'Ana', '7am', '8am', true),
+  coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7am', '8am', true),
+  coachMovedLine(moveRep({ moved: true, waiting: 0 }), 'Ana', '7am', '8am', true),
+  uncounted,
+]);
+eq(hours.size, 4, 'promoted, queued, counted-empty and uncounted each read differently');
+
+// The ordering trap, pinned on its own: `null > 0` is false in JavaScript, so a
+// null falls through a `waiting > 0` test into the counted-empty arm. If the
+// null check is ever moved below it, or the null coalesced to 0 at any call
+// site on the way here, this is the assertion that fails.
+ok(uncounted !== coachMovedLine(moveRep({ moved: true, waiting: 0 }), 'Ana', '7am', '8am', true),
+  'an uncounted queue does not collapse into the counted-empty sentence');
+
+// A promoted hour is answered by the promotion, whatever the count did or did
+// not say: somebody has it, and that is the fact the coach needs.
+const promotedUncounted = coachMovedLine(
+  moveRep({ moved: true, promoted: true, waiting: null }), 'Ana', '7am', '8am', true);
+ok(/waitlist/.test(promotedUncounted), 'a promotion is stated even with no count beside it');
+ok(!/cannot say whether/.test(promotedUncounted),
+  'and does not also admit to not knowing something it was not asked');
+
+// The sentinel says it too. An unreachable move counted nobody; it did not
+// count nobody waiting.
+eq(COACH_NOT_MOVED.waiting, null, 'the fallback report carries no count rather than a zero');
+
+/* ── a pause previewed off a calendar that was not read whole ──────────── */
+//
+// `inRange` in app/(client)/standing.tsx is counted out of THIS DEVICE'S
+// `sessions`. `useSessions` publishes 'error' for a read that failed and
+// 'partial' for one PostgREST cut off at its thousand-row cap, and under either
+// the count is a FLOOR. Two of the sentences above are money claims sitting
+// immediately over a destructive confirm, and a floor produces both of them as
+// readily as the truth does.
+
+const notWhole = pausePreviewLine(0, 0, charges, false);
+ok(/could not read your own calendar/.test(notWhole),
+  'an uncountable calendar says so rather than reporting a count');
+ok(!/do not expect anything to be cancelled/.test(notWhole),
+  'and never tells a member with four sessions booked that nothing will be cancelled');
+// The sharper half: a SHORT list still has rows in it, so the ordinary
+// "N sessions … all outside the notice period, so this costs nothing" branch is
+// reachable with a `late` that is simply too low.
+const shortAndFree = pausePreviewLine(4, 0, charges, false);
+ok(!/costs nothing/.test(shortAndFree),
+  'a truncated read never produces "this costs nothing" — the late ones may be the rows that did not come back');
+// It says the words "late fee" only to say it cannot tell you about one. What
+// it must never do is assert a count of them or a price.
+ok(!/would carry their late fee|would each carry their late fee|inside your coach’s notice period/.test(shortAndFree),
+  'and it does not assert how many are inside the notice period: a floor supports neither claim, in either direction');
+ok(!/\d+ of them/.test(shortAndFree), 'and it prices nothing off a partial count');
+// It must still point at the authority, because the server counts again and its
+// account afterwards is the one that is true.
+ok(/authority/.test(notWhole), 'and it still says whose calendar decides');
+
+// The default keeps every caller and every assertion above meaning what it
+// meant. A screen that has not been taught the difference is not silently
+// switched into the cautious sentence.
+eq(pausePreviewLine(4, 2, charges), pausePreviewLine(4, 2, charges, true),
+  'omitting the flag is the same as saying the read was whole');
+
+// ── a pause over dates the member chose ────────────────────────────────────
+//
+// The three fixed durations let the server pick the dates. A named range is the
+// other half, and the only two mistakes a member can make with two taps are
+// naming them backwards and naming a week that has gone.
+eq(pauseRangeRefusal('2026-06-12', '2026-06-26', '2026-06-01'), null,
+  'a fortnight in the future is fine');
+eq(pauseRangeRefusal('2026-06-12', '2026-06-12', '2026-06-12'), null,
+  'a single day, today, is still to come — it has not happened yet');
+ok(/other order/.test(pauseRangeRefusal('2026-06-26', '2026-06-12', '2026-06-01') ?? ''),
+  'a backwards range says so, and says what to do');
+ok(/already passed/.test(pauseRangeRefusal('2026-05-01', '2026-05-08', '2026-06-01') ?? ''),
+  'a range that has gone is refused rather than written to do nothing');
+ok(/Pick both dates/.test(pauseRangeRefusal('', '2026-06-26', '2026-06-01') ?? ''),
+  'a missing date is named as missing, not as backwards');
+ok(/Pick both dates/.test(pauseRangeRefusal('12/06/2026', '2026-06-26', '2026-06-01') ?? ''),
+  'and a date in another format is not read as though it parsed');
+// The refusal never runs the range through a Date: 2026-03-29 is the day the
+// clocks go forward in London, and a range that starts on it must be treated
+// as the string it is.
+eq(pauseRangeRefusal('2026-03-29', '2026-03-29', '2026-03-29'), null,
+  'a clock-change day is a date like any other here');
+{
+  const c = pauseRangeConfirm('Tuesdays at 6pm', 'Fri 12 Jun', 'Fri 26 Jun');
+  ok(/12 Jun/.test(c.title) && /26 Jun/.test(c.title), 'the confirm names both ends');
+  ok(/NOT ended/.test(c.body), 'and promises the arrangement survives, which is the fear');
+}
+{
+  const one = pauseRangeConfirm('Tuesdays at 6pm', 'Fri 12 Jun', 'Fri 12 Jun');
+  ok(!/between/.test(one.body), 'a single day is not described as a range');
+  ok(/on Fri 12 Jun/.test(one.body), 'it is described as that day');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('reschedule.test.ts — ok');

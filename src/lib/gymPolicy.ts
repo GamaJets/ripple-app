@@ -6,6 +6,14 @@
 // coach for, what colour is it, and how does a screen write any of them without
 // inventing an answer.
 //
+// A fifth joined them: what timezone is it in. Its parsing lives in
+// src/lib/gymZone.ts rather than here, because unlike a currency code or a hex
+// colour a zone is not checkable with a regex — the answer is whatever the
+// runtime's IANA database holds, and there is a whole file's worth of day and
+// hour arithmetic that follows from it. What lives here is the same thing that
+// lives here for the other four: the read, the patch, and the record of who may
+// change it and what happens to what was there before.
+//
 // Framework-agnostic like the rest of src/lib: the Supabase client arrives as
 // an argument, so the web console and the phone app can both use this and
 // neither owns it. That matters more here than usual — `tenants.currency` is
@@ -131,7 +139,7 @@ export function parseTenantCurrency(input: string | null | undefined): CurrencyI
   if (!/^[A-Z]{3}$/.test(code)) {
     return {
       kind: 'bad',
-      reason: 'A currency is its three-letter ISO code — GBP, AED, EUR, USD. Not a symbol and not a name.',
+      reason: 'A currency is its three-letter ISO code: GBP, AED, EUR, USD. Not a symbol and not a name.',
     };
   }
   return { kind: 'currency', currency: code };
@@ -171,7 +179,7 @@ export function parseBrandColor(input: string | null | undefined): BrandColorInp
   if (!color) {
     return {
       kind: 'bad',
-      reason: 'A brand colour is a hex code — #1e88e5 or #1b5, with the hash. Not a colour name and not rgb().',
+      reason: 'A brand colour is a hex code: #1e88e5 or #1b5, with the hash. Not a colour name and not rgb().',
     };
   }
   return { kind: 'color', color };
@@ -189,6 +197,29 @@ export interface GymProfile {
    *  answers null for a value this build does not know. */
   payPolicy: string | null;
   brandColor: string | null;
+  /**
+   * The IANA zone the gym's own day is measured in, or null because it has not
+   * said. Null is NOT UTC and is NOT the reader's zone — see
+   * supabase/parts/710 and `NO_ZONE_NOTE` in src/lib/gymZone.ts. A screen that
+   * gets null here must say whose day it is actually drawing.
+   *
+   * As stored, unvalidated, exactly as `payPolicy` is. A value the column holds
+   * that this runtime cannot resolve is still what is stored, and a screen has
+   * to be able to show the owner the string that is in there before offering to
+   * replace it.
+   */
+  timezone: string | null;
+  /**
+   * Hours of notice before a class inside which the gym may charge, or null
+   * because they have not said. Null is NOT "no notice period" — see
+   * supabase/parts/2615, which refuses a default on this column for exactly
+   * that reason, and `CLASS_POLICY_UNKNOWN_NOTE` in src/lib/classCancel.ts,
+   * which is what a member is told while it is null.
+   */
+  classCancelHours: number | null;
+  /** What a late cancellation costs, in `currency`. Null is unstated; 0 is a
+   *  stated policy of no charge, and the two must not be collapsed. */
+  classCancelFee: number | null;
 }
 
 /**
@@ -205,7 +236,7 @@ export async function fetchGymProfile(
 ): Promise<{ profile: GymProfile | null; error: string | null }> {
   const { data, error } = await sb
     .from('tenants')
-    .select('name, currency, session_fee, session_pay_policy, brand_color')
+    .select('name, currency, session_fee, session_pay_policy, brand_color, timezone, class_cancel_hours, class_cancel_fee')
     .eq('id', tenantId)
     .single();
   if (error) {
@@ -224,6 +255,20 @@ export async function fetchGymProfile(
         : Number.isFinite(Number(fee)) ? Number(fee) : null,
       payPolicy: (r.session_pay_policy as string | null) ?? null,
       brandColor: (r.brand_color as string | null) ?? null,
+      // Trimmed to null so '' and null are one answer, which is what
+      // `tenants_timezone_check` already guarantees on the way in — restated
+      // here for a row written before part 710 existed.
+      timezone: String((r.timezone as string | null) ?? '').trim() || null,
+      // Same numeric-from-PostgREST care as `sessionFee` above, and the same
+      // refusal to invent: a value that will not parse becomes null, which the
+      // screens read as "not stated" rather than as a zero-hour window or a
+      // free cancellation.
+      classCancelHours: r.class_cancel_hours == null || r.class_cancel_hours === ''
+        ? null
+        : Number.isFinite(Number(r.class_cancel_hours)) ? Number(r.class_cancel_hours) : null,
+      classCancelFee: r.class_cancel_fee == null || r.class_cancel_fee === ''
+        ? null
+        : Number.isFinite(Number(r.class_cancel_fee)) ? Number(r.class_cancel_fee) : null,
     },
     error: null,
   };
@@ -264,6 +309,19 @@ export async function fetchGymProfile(
  *                  payable, INCLUDING for months already worked but not yet
  *                  settled. Clearing it is "the gym has not decided" and every
  *                  dependent figure is withheld rather than guessed.
+ *   timezone     · the owner, from this console only. NOT retrospective and not
+ *                  retroactive in the way the currency is: every timestamp in
+ *                  this database is an instant, so nothing is re-denominated
+ *                  and nothing is rewritten. What changes is which DAY a screen
+ *                  files an instant under — so setting it, or changing it, moves
+ *                  figures between days and between hours from that moment on,
+ *                  in both directions and for the past as well as the future.
+ *                  That is correct: the past always did happen at the gym's own
+ *                  hour, and every screen that showed otherwise was showing the
+ *                  reader's. Clearing it returns every date and hour on every
+ *                  screen to whichever device is reading them, which is where
+ *                  they were before part 710 and is a state screens must say
+ *                  out loud rather than render as the gym's.
  *   brandColor   · the owner, and the phone (app/(owner)/brand.tsx). Overwrites
  *                  the previous colour on every device that owner's gym signs in
  *                  on, this console included; there is no history and nothing to
@@ -299,6 +357,18 @@ export interface GymProfilePatch {
   /** Lower-case `#rgb` or `#rrggbb`, per `parseBrandColor`. Null clears it, and
    *  a cleared colour is a gym that has not chosen one — never a default. */
   brandColor?: string | null;
+  /** An IANA zone name, per `parseGymZone` in src/lib/gymZone.ts. Null clears
+   *  it, and a cleared zone is a gym whose days are the reader's again — never
+   *  UTC. `tenants_timezone_check` refuses anything `pg_timezone_names` does not
+   *  hold, so a value that got past the client is still refused at the write. */
+  timezone?: string | null;
+  /** Null clears it back to "this gym has not said", which is a real thing an
+   *  owner may want to do and is why these are nullable rather than defaulted.
+   *  `tenants_class_cancel_hours_check` refuses a negative or an absurd one
+   *  (over two weeks) at the write, so a value that got past the screen is
+   *  still refused by the database. */
+  classCancelHours?: number | null;
+  classCancelFee?: number | null;
 }
 
 /**
@@ -330,6 +400,18 @@ export async function saveGymProfile(
   // between an owner's typing and the column, which is why it lower-cases rather
   // than leaving that to a trigger that will not do it.
   if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
+  // `tenants_timezone_check` (part 710) trims this, folds '' to null and
+  // REFUSES anything pg_timezone_names does not hold. Unlike the colour, this
+  // column has a guarantee behind it — so a bad value arrives as a raised
+  // exception with the zone named in it rather than as a silently stored
+  // string, and `parseGymZone` exists to say so before the round trip rather
+  // than to be the only thing standing in the way.
+  if (patch.timezone !== undefined) row.timezone = patch.timezone;
+  // Neither column is normalised by a trigger, and both are checked by the
+  // database — a negative or >336 hours, or a negative fee, is raised rather
+  // than stored. Nothing is coerced here: `null` means the owner cleared it.
+  if (patch.classCancelHours !== undefined) row.class_cancel_hours = patch.classCancelHours;
+  if (patch.classCancelFee !== undefined) row.class_cancel_fee = patch.classCancelFee;
   if (Object.keys(row).length === 0) return;
 
   const r = await sb.from('tenants').update(row, { count: 'exact' }).eq('id', tenantId);

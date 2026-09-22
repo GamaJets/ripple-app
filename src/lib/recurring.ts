@@ -39,6 +39,7 @@ import {
   insideNoticeWindow, lateCancelFee, noticeHoursOf, noticeLabel,
   feeAmountLine, unstatedCurrency, type CancellationPolicy, type FeeVerdict,
 } from './booking';
+import { fmtClock, weekdayName } from './format';
 
 /** Sunday-first, matching `extract(dow)` in Postgres and `Date.getDay()`, so
  *  nothing anywhere has to translate between two conventions. */
@@ -142,6 +143,30 @@ export function clockLabel(hour: number, minute: number): string {
 export function seriesLabel(s: Pick<RecurringSeries, 'dow' | 'hour' | 'minute'>): string {
   const day = DOW_NAMES[((s.dow % 7) + 7) % 7];
   return `Every ${day} at ${clockLabel(s.hour, s.minute)}`;
+}
+
+/**
+ * The same arrangement, written in the READER'S language and clock.
+ *
+ * `seriesLabel` above is English and 12-hour by construction, and it was the
+ * title of every row on app/(client)/standing.tsx, the subject of the pause
+ * confirmation, of the end confirmation and of the "ended" alert — directly
+ * above "Next Tue 09:00", which the same screen renders through the app's own
+ * locale formatters. So a member in Milan read their own clock on one line and
+ * an English "Every Tuesday at 7:00 am" on the line above it, about the same
+ * arrangement.
+ *
+ * The hour is NOT converted: it is a wall-clock hour in the SERIES' zone, which
+ * is the argument `clockLabel` makes and it is right. `fmtClock` takes the hour
+ * and the minute as numbers for exactly this reason — it never touches a zone —
+ * so what changes is the writing, not the time.
+ *
+ * `seriesLabel` stays because the coach's screens and the tests are written on
+ * it, and because a series belongs to the coach's own diary where their wording
+ * is the one on the invoice.
+ */
+export function memberSeriesLabel(s: Pick<RecurringSeries, 'dow' | 'hour' | 'minute'>): string {
+  return `Every ${weekdayName(s.dow)} at ${fmtClock(s.hour, s.minute)}`;
 }
 
 /**
@@ -308,6 +333,17 @@ export function cancelOptions(o: {
 }): CancelOption[] {
   const now = o.now ?? Date.now();
   const notice = noticeHoursOf(o.policy);
+  // Whether there is a session to talk about at all. The caller hands this an
+  // empty string when the arrangement has nothing written out yet, and
+  // `insideNoticeWindow` answers false for an unparseable instant BY DESIGN —
+  // so the verdict came back 'in-time' and the sheet printed "Frees this one
+  // only … This is more than 24 hours away, so no fee applies", plus "Affects
+  // 1 booked session", about an hour that does not exist. The fee sentence is
+  // the dangerous one: a specific claim about the member's money over a session
+  // with no date. `seriesDetail` below has always handled the same missing
+  // value correctly; this half did not.
+  const hasNext = typeof o.startsAt === 'string' && o.startsAt.trim().length > 0
+    && Number.isFinite(Date.parse(o.startsAt));
   const inside = insideNoticeWindow(o.startsAt, notice, now);
   const verdict = lateCancelFee(o.policy, inside);
 
@@ -324,6 +360,21 @@ export function cancelOptions(o: {
   // arrangement two months out starts pricing sessions nobody cancelled.
   const later = Math.max(0, o.upcoming - 1);
 
+  const series: CancelOption = {
+    scope: 'series',
+    label: 'End the standing appointment',
+    detail: seriesDetail(later, o.startsAt),
+    charges: false,
+    verdict: null,
+    affects: later,
+  };
+
+  // No next occurrence, no occurrence option. Withheld rather than reworded:
+  // every field on it — the label, the fee verdict, the count of one — is a
+  // statement about a specific session, and there is none. The caller says so
+  // in its own words instead. See `cancelOptions` callers for that sentence.
+  if (!hasNext) return [series];
+
   return [
     {
       scope: 'occurrence',
@@ -333,14 +384,7 @@ export function cancelOptions(o: {
       verdict,
       affects: 1,
     },
-    {
-      scope: 'series',
-      label: 'End the standing appointment',
-      detail: seriesDetail(later, o.startsAt),
-      charges: false,
-      verdict: null,
-      affects: later,
-    },
+    series,
   ];
 }
 
@@ -349,15 +393,15 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
   const w = noticeLabel(noticeHours);
   switch (v.kind) {
     case 'in-time':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is more than ${w} away, so no fee applies.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is more than ${w} away, so no fee applies.`;
     case 'no-policy':
-      return 'Frees this one only — the rest of the standing appointment is untouched. Your coach doesn’t charge for a late cancellation.';
+      return 'Frees this one only. The rest of the standing appointment is untouched. Your coach doesn’t charge for a late cancellation.';
     case 'unknown':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w} and we couldn’t read your coach’s policy, so we can’t say whether a fee applies.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w} and we couldn’t read your coach’s policy, so we can’t say whether a fee applies.`;
     case 'unpriced':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so your coach’s policy applies; they haven’t set an amount, so ask them.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w}, so your coach’s policy applies; they haven’t set an amount, so ask them.`;
     case 'fee':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
   }
 }
 
@@ -377,7 +421,7 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
 export function seriesDetail(later: number, nextStartsAt: string | null | undefined): string {
   const hasNext = typeof nextStartsAt === 'string' && nextStartsAt.trim().length > 0
     && Number.isFinite(Date.parse(nextStartsAt));
-  const keeps = ' The next session stays booked — cancel that one separately if you need to.';
+  const keeps = ' The next session stays booked. Cancel that one separately if you need to.';
   if (later <= 0) {
     return hasNext
       ? `Stops it repeating. There are no sessions after this one on the books, so nothing is removed and nothing is charged.${keeps}`
@@ -412,7 +456,7 @@ export const RECURRING_END_RULE =
  */
 export const RECURRING_CREDIT_NOTE =
   'A standing appointment books the time, not the sessions. Nothing comes off a session pack when the dates '
-  + 'are put in the diary — a credit is drawn as each session is marked done, one at a time, so weeks that '
+  + 'are put in the diary. A credit is drawn as each session is marked done, one at a time, so weeks that '
   + 'have not happened yet are not paid for in advance.';
 
 /** What happens to a date the coach was already busy on. */

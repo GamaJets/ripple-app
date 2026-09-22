@@ -109,5 +109,50 @@ const FULL: PlanEdits = {
   ok(/see it\./.test(one), 'in the singular all the way through the sentence');
 }
 
+
+/**
+ * THE TABLE — a member writing 60 / 65 / 65 into their own plan.
+ *
+ * `setRows` arrived after the other three keys, and the whole safety of adding
+ * it is that an edit written before it round-trips unchanged: absent stays
+ * absent, and every correction already on a phone still means "N of the same
+ * set".
+ */
+{
+  const withTable: PlanEdits = {
+    ...EMPTY_PLAN_EDITS,
+    exEdits: { '0:squat': { sets: 3, reps: '8', loadKg: 60, setRows: [
+      { reps: '8', loadKg: 60 }, { reps: '8', loadKg: 65 }, { reps: '6', loadKg: 65 },
+    ] } },
+  };
+  const back = readPlanEdits(writePlanEdits(withTable));
+  ok(back.read, 'a table round-trips');
+  eq(JSON.stringify(back.edits.exEdits['0:squat'].setRows), JSON.stringify(withTable.exEdits['0:squat'].setRows),
+    'and comes back row for row, each with its own load');
+
+  // The case every existing correction is in.
+  const old = readPlanEdits(JSON.stringify({ swaps: {}, exEdits: { '0:squat': { sets: 3, reps: '8', loadKg: 60 } }, removed: [], custom: [] }));
+  ok(!('setRows' in old.edits.exEdits['0:squat']),
+    'an edit written before the table has no setRows key at all — absent, not null');
+
+  // A row with a null load is "nothing on the bar", which is not the same as a
+  // row that has not said. Both survive JSON, which is why the shape is what it
+  // is; see src/lib/setRows.ts.
+  const nulls = readPlanEdits(JSON.stringify({ exEdits: { '0:dip': { setRows: [{ reps: '10', loadKg: null }] } } }));
+  eq(JSON.stringify(nulls.edits.exEdits['0:dip'].setRows), JSON.stringify([{ reps: '10', loadKg: null }]),
+    'a row with nothing on the bar keeps its null');
+
+  // The blob also arrives from the server, where a jsonb column will hold
+  // anything at all.
+  const junk = readPlanEdits(JSON.stringify({ exEdits: { '0:row': { sets: 2, setRows: ['nope', 7, null, { reps: '8' }] } } }));
+  eq(JSON.stringify(junk.edits.exEdits['0:row'].setRows), JSON.stringify([{ reps: '8' }]),
+    'rows that are not objects are dropped rather than carried into the plan');
+  const empty = readPlanEdits(JSON.stringify({ exEdits: { '0:row': { sets: 2, setRows: [] } } }));
+  ok(!('setRows' in empty.edits.exEdits['0:row']),
+    'an empty table is not a table — a movement with no sets to log against is worse than the old fields');
+  const notArray = readPlanEdits(JSON.stringify({ exEdits: { '0:row': { sets: 2, setRows: 'three' } } }));
+  ok(!('setRows' in notArray.edits.exEdits['0:row']), 'and neither is a string');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('planEdits.test.ts ok');

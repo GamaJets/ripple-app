@@ -57,17 +57,18 @@ import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag, PageHead, Donut, Legend, Meter, Expandable, type Slice, type Tone } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { UNMATCHED_NOTE, unmatchedReasonNote } from '../../src/lib/adMatch';
 import {
-  AD_CHANNELS, NO_TOTAL_NOTE, channelLabel, channelPlaces, channelStateNote,
+  AD_CHANNELS, NO_TOTAL_NOTE, channelLabel, channelPlaces, channelSetupNote, channelStateNote,
   combineRefusalNote, coverageNote, type AdChannel,
 } from '../../src/lib/adChannels';
 import {
-  APP_REVIEW_NOTE, READ_ONLY_NOTE, chooseAdAccount, connectAdChannel, disconnectAdChannel,
+  APP_REVIEW_NOTE, READ_ONLY_NOTE, channelClientId, chooseAdAccount, connectAdChannel, disconnectAdChannel,
   fetchAdSpend, runAdSync, useSyncedSpend, asChannelRun,
   type AdAccountChoice, type AdSpendRead, type ChannelState,
 } from '../../src/ui/adSpend';
@@ -76,6 +77,7 @@ import {
 } from '../../src/ui/joinCode';
 import { worstStatus } from '../../src/ui/loadStatus';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const DASH = '—';
 
@@ -92,7 +94,10 @@ const EMPTY_READ: AdSpendRead = {
   channels: AD_CHANNELS.map((c) => ({ channel: c, account: null, run: null, matched: [], unmatched: [] })),
   sources: [],
   combined: { ok: false, reason: 'no-channels', missing: [], currencies: [], channels: [] },
+  unmatchedWhole: true,
 };
+
+const SPEND_TONES: Tone[] = ['orange', 'blue', 'purple', 'teal', 'pink'];
 
 export default function TrainerAdSpend() {
   const t = useTheme();
@@ -124,8 +129,8 @@ export default function TrainerAdSpend() {
     setBusy(`connect:${c}`);
     const r = await connectAdChannel(c);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Not connected', r.reason); return; }
-    if (r.warning) Alert.alert('Connected, with a catch', r.warning);
+    if (!r.ok) { Alert.alert('Not Connected', r.reason); return; }
+    if (r.warning) Alert.alert('Connected, with a Catch', r.warning);
     setChoices(r.chosen ? null : { channel: c, accounts: r.accounts });
     await load();
   };
@@ -134,7 +139,7 @@ export default function TrainerAdSpend() {
     setBusy(`choose:${id}`);
     const r = await chooseAdAccount(c, id);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    if (!r.ok) { Alert.alert('Not Saved', r.reason); return; }
     setChoices(null);
     await load();
   };
@@ -145,7 +150,7 @@ export default function TrainerAdSpend() {
     setBusy(null);
     // The failure is recorded server-side as a failed run, so the screen below
     // shows "last check failed" rather than the previous success's date.
-    if (!r.ok) Alert.alert(`Could not check your ${channelLabel(c)} spend`, r.reason);
+    if (!r.ok) Alert.alert(`Could Not Check Your ${channelLabel(c)} Spend`, r.reason);
     await load();
   };
 
@@ -153,7 +158,7 @@ export default function TrainerAdSpend() {
     setBusy(`disconnect:${c}`);
     const r = await disconnectAdChannel(c);
     setBusy(null);
-    if (!r.ok) Alert.alert('Still connected', r.reason);
+    if (!r.ok) Alert.alert('Still Connected', r.reason);
     await load();
   };
 
@@ -161,7 +166,7 @@ export default function TrainerAdSpend() {
     setBusy(`use:${codeId ?? 'default'}`);
     const r = await useSyncedSpend(codeId);
     setBusy(null);
-    if (!r.ok) Alert.alert(`${label} is unchanged`, r.reason);
+    if (!r.ok) Alert.alert(`${label} Is Unchanged`, r.reason);
     await load();
   };
 
@@ -181,6 +186,14 @@ export default function TrainerAdSpend() {
   const loadOrganic = useCallback(async () => { setOrganic(await fetchOrganicCodes()); }, []);
   useEffect(() => { void loadOrganic(); }, [loadOrganic]);
 
+  // Three reads, all of them: the spend, the code returns and the organic set.
+  // Refreshing the spend alone would leave the currency comparison below
+  // running half on the new figures and half on the old.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), loadOrganic()]),
+    [load, loadOrganic],
+  ));
+
   const toggleOrganic = async (id: string, next: boolean) => {
     const r = await setCodeOrganic(id, next);
     if (!r.ok) { setOrganicMsg(r.reason); return; }
@@ -194,98 +207,51 @@ export default function TrainerAdSpend() {
   const revenueFor = (codeId: string | null) => returns.rows.find((r) => (r.id ?? null) === (codeId ?? null))?.revenue ?? null;
 
   const connected = read.channels.filter((c) => !!c.account);
+  /* Whether ANY of the three can be signed in to on this build at all. Not a
+     fact about the coach — a fact about what the owner has supplied — and the
+     header of this screen has to stop promising a connection when it is
+     false. See the ChannelCard note below. */
+  const anyChannelSetUp = AD_CHANNELS.some((c) => !!channelClientId(c));
   const combined = read.combined;
-  const settled = read.status === 'ready';
+  // Finished, not necessarily whole. 'partial' here means one thing and one
+  // thing only — the itemised unmatched ads came back a prefix — because a
+  // truncated MATCHED read is refused outright in fetchAdSpend rather than
+  // reported as a smaller total. Everything on this screen except that one list
+  // is therefore as good under 'partial' as under 'ready', and blanking it all
+  // would take working figures away to say nothing about the list.
+  const settled = read.status === 'ready' || read.status === 'partial';
+  /** One slice per code for the ring. Empty unless `combined.ok`, which is the
+   *  one-currency, every-channel-read guarantee the ring depends on. The five
+   *  biggest keep a hue; the rest share the grey one. */
+  const spendSlices: Slice[] = !combined.ok ? [] : (() => {
+    const ranked = [...combined.codes].sort((a, b) => b.cents - a.cents);
+    const whole = ranked.reduce((n, x) => n + x.cents, 0);
+    const rest = ranked.slice(SPEND_TONES.length).reduce((n, x) => n + x.cents, 0);
+    return [
+      ...ranked.slice(0, SPEND_TONES.length).map((x, i): Slice => ({ label: x.code, value: x.cents, tone: SPEND_TONES[i], shown: sharePercent(x.cents, whole) })),
+      ...(rest ? [{ label: 'Other Codes', value: rest, tone: 'neutral' as const, shown: sharePercent(rest, whole) }] : []),
+    ];
+  })();
+  /** How many ads could not be placed against a code, and whether that number
+   *  is a count or a floor. See `unmatchedCount` at the foot of the file. */
+  const unmatched = unmatchedCount(read);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What your ads cost</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Ad Spend</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by
-          the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.
-        </Text>
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{READ_ONLY_NOTE}</Text>
-
-        {/* Said first, and not softened. A coach who is refused by Meta after a
-            successful sign-in must know why before it happens to them. It names
-            Meta, because the other two are not waiting on it. */}
-        <View style={{ marginTop: sp.xl }}>
-          <Notice tone={t.warn} kicker="Meta only" title="Meta has to approve this first" note={APP_REVIEW_NOTE} />
-        </View>
-
-        {/* The three words on this screen a coach reads as the same thing and
-            which are not: matched, unmatched, and cost unknown. One dismissible
-            row; src/lib/screenHelp.ts holds the sentences. */}
-        <ScreenHelp screen="coach-adspend" />
-
-        {/* ── The connections, one card each ─────────────────────────────── */}
-        <Section>
-          <SectionHead
-            title="Your ad accounts"
-            note={settled ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} connected` : undefined}
-          />
-          {status === 'loading' ? (
-            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} />
-          ) : read.status === 'error' ? (
-            <Flag tone={t.crit}>
-              {read.reason || 'We could not check whether your ad accounts are connected, so nothing on this screen says whether they are. If they were connected, they still are.'}
-            </Flag>
-          ) : (
-            read.channels.map((s, i) => (
-              <View key={s.channel} style={{ marginTop: i ? sp.lg : 0 }}>
-                {i > 0 ? <Rule /> : null}
-                <View style={{ marginTop: i > 0 ? sp.lg : 0 }}>
-                  <ChannelCard
-                    state={s}
-                    busy={busy}
-                    onConnect={() => { if (!busy) connect(s.channel); }}
-                    onSync={() => { if (!busy) sync(s.channel); }}
-                    onDisconnect={() => { if (!busy) disconnect(s.channel); }}
-                  />
-                </View>
-              </View>
-            ))
-          )}
-        </Section>
-
-        {/* Several ad accounts on one login. Picking for them would decide which
-            business's money the coach is shown, silently. */}
-        {choices && choices.accounts.length > 1 ? (
-          <Section>
-            <SectionHead title="Which ad account?" note={`This ${channelLabel(choices.channel)} login can see more than one`} />
-            {choices.accounts.map((c) => (
-              <View key={c.id} style={{ marginTop: sp.md }}>
-                <Card>
-                  <Text style={{ ...ty.head, color: t.ink }}>{c.name || c.id}</Text>
-                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
-                    {c.id}{c.currency ? ` · ${c.currency}` : ' · currency not stated'}{c.active ? '' : ' · not active'}
-                  </Text>
-                  <View style={{ marginTop: sp.md }}>
-                    <Ghost
-                      label={busy === `choose:${c.id}` ? 'Saving…' : 'Use This One'}
-                      a11yLabel={`Use ${c.name || c.id} for ${channelLabel(choices.channel)}`}
-                      onPress={() => { if (!busy) choose(choices.channel, c.id); }}
-                    />
-                  </View>
-                </Card>
-              </View>
-            ))}
-          </Section>
-        ) : null}
-
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is in
+            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
+        <PageHead title="Ad Spend" subtitle="What your ads cost" />
         {/* ── What it all came to, or why there is no such figure ────────── */}
         {settled ? (
           <Section>
             <SectionHead
-              title="Spent, by code"
+              title="Spent, by Code"
               note={combined.ok ? `${num(combined.codes.length)} ${combined.codes.length === 1 ? 'code' : 'codes'}` : undefined}
             />
 
@@ -324,6 +290,21 @@ export default function TrainerAdSpend() {
               </Text>
             ) : (
               <View>
+                {/* The matched spend as a ring, one slice per code. `combined.ok`
+                    is what makes this drawable at all: it is only true when
+                    every connected channel was read and they all bill in ONE
+                    currency, so the slices are amounts of the same money and
+                    may be added into the centre. 'ready' as well, because a
+                    ring looks final and a short read is not. It is the MATCHED
+                    spend — what could not be placed on a code is listed under
+                    this card and is in no slice. */}
+                {read.status === 'ready' ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginBottom: sp.md }}>
+                    <Donut slices={spendSlices} centre={money(spendSlices.reduce((n, x) => n + (x.value ?? 0), 0), combined.currency)} sub="matched"
+                      spoken={`Matched ad spend by code: ${spendSlices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`} />
+                    <Legend items={spendSlices} />
+                  </View>
+                ) : null}
                 <Text style={{ ...ty.label, color: t.ink3 }}>{coverageNote(combined.channels)}</Text>
                 {combined.codes.map((m, i) => {
                   const src = sourceFor(m.codeId);
@@ -346,13 +327,9 @@ export default function TrainerAdSpend() {
                           a single number only says the total is high. */}
                       {m.parts.length > 1 ? (
                         <View style={{ marginTop: sp.sm }}>
-                          {m.parts.map((p) => (
-                            <View key={p.channel} style={{
-                              flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, marginTop: 2,
-                            }}>
-                              <Text style={{ ...ty.caption, color: t.ink3 }}>{channelLabel(p.channel)}</Text>
-                              <Text style={{ ...ty.caption, color: t.ink2 }}>{money(p.cents, m.currency) ?? DASH}</Text>
-                            </View>
+                          {m.parts.map((p, k) => (
+                            <Meter key={p.channel} label={channelLabel(p.channel)} val={p.cents} target={m.cents}
+                              tone={SPEND_TONES[k % SPEND_TONES.length]} note={money(p.cents, m.currency) ?? DASH} />
                           ))}
                         </View>
                       ) : null}
@@ -361,10 +338,28 @@ export default function TrainerAdSpend() {
                           one is in use — never a silent replacement. */}
                       {overridden ? (
                         <View style={{ marginTop: sp.md }}>
+                          {/* The unreadable figure gets its own sentence rather
+                              than a dash mid-clause. `src.cents` is
+                              `number | null` because the row can come back
+                              without an amount on it, and "You entered AED 0.00
+                              for this code" — which is what `?? 0` produced —
+                              is a specific, wrong claim about what the coach
+                              typed, made where it says that figure is the one
+                              being used. */}
                           <Flag tone={t.warn}>
-                            You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure being
-                            used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it has
-                            not replaced anything.
+                            {src!.cents == null ? (
+                              <>
+                                Your own figure for this code is the one being used, and we couldn’t read it back to show you
+                                here. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it
+                                has not replaced anything.
+                              </>
+                            ) : (
+                              <>
+                                You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure
+                                being used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported
+                                and it has not replaced anything.
+                              </>
+                            )}
                           </Flag>
                           <View style={{ marginTop: sp.md }}>
                             <Ghost
@@ -388,7 +383,7 @@ export default function TrainerAdSpend() {
                         <View style={{ marginTop: sp.md }}>
                           <Flag tone={t.crit}>
                             This spend is in {m.currency} and the clients off this code paid in {rev!.currency}. Repple will
-                            not divide one by the other, so there is no return shown for it — record this code’s spend in{' '}
+                            not divide one by the other, so there is no return shown for it. Record this code’s spend in{' '}
                             {rev!.currency} yourself if you want the comparison.
                           </Flag>
                         </View>
@@ -401,21 +396,150 @@ export default function TrainerAdSpend() {
           </Section>
         ) : null}
 
+        {/* The opening sentence is an offer, and it is only made where the
+            offer exists. With no app id supplied for any of the three, the
+            original line invited a coach to connect an account that nothing on
+            this build can sign in to, and the cards below then said "Not
+            connected" — which reads as something the coach has not got round
+            to. Neither half is a promise about a future version, because none
+            is owed: what is missing is configuration, not code. */}
+        {/* Behind a fold since round five, word for word: the page opens on
+            what was spent, and the offer is one tap under it. `READ_ONLY_NOTE`
+            stays on the page as the fold's own line — it is the one sentence
+            here that is a fact about the coach's ad account and not a manual. */}
+        <Expandable title="Collecting It Automatically" note={READ_ONLY_NOTE}>
+          <Text style={{ ...ty.label, color: t.ink3 }}>
+          {anyChannelSetUp
+            ? 'Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.'
+            : 'Collecting ad spend automatically needs an ad account to sign in to, and none of Meta, Google Ads or TikTok is set up here. Each card below says what is missing and who has to supply it. Typing what you spent into a code’s spend field works exactly as it always has, and every figure on this screen is built from those.'}
+          </Text>
+        </Expandable>
+
+        {/* Said first, and not softened. A coach who is refused by Meta after a
+            successful sign-in must know why before it happens to them. It names
+            Meta, because the other two are not waiting on it. */}
+        <View style={{ marginTop: sp.xl }}>
+          <Notice tone={t.warn} kicker="Meta Only" title="Meta Has to Approve This First" note={APP_REVIEW_NOTE} />
+        </View>
+
+        {/* The three words on this screen a coach reads as the same thing and
+            which are not: matched, unmatched, and cost unknown. One dismissible
+            row; src/lib/screenHelp.ts holds the sentences. */}
+        <ScreenHelp screen="coach-adspend" />
+
+        {/* ── The connections, one card each ─────────────────────────────── */}
+        <Section>
+          <SectionHead
+            title="Your Ad Accounts"
+            note={!settled
+              ? undefined
+              : anyChannelSetUp
+                ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} Connected`
+                : 'None of the Three Is Set Up Here'}
+          />
+          {status === 'loading' ? (
+            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} accessible accessibilityRole="progressbar" accessibilityLabel="Checking which ad accounts are connected…" />
+          ) : read.status === 'error' ? (
+            <Flag tone={t.crit}>
+              {read.reason || 'We could not check whether your ad accounts are connected, so nothing on this screen says whether they are. If they were connected, they still are.'}
+            </Flag>
+          ) : (
+            read.channels.map((s, i) => (
+              <View key={s.channel} style={{ marginTop: i ? sp.lg : 0 }}>
+                {i > 0 ? <Rule /> : null}
+                <View style={{ marginTop: i > 0 ? sp.lg : 0 }}>
+                  <ChannelCard
+                    state={s}
+                    busy={busy}
+                    onConnect={() => { if (!busy) connect(s.channel); }}
+                    onSync={() => { if (!busy) sync(s.channel); }}
+                    onDisconnect={() => { if (!busy) disconnect(s.channel); }}
+                  />
+                </View>
+              </View>
+            ))
+          )}
+        </Section>
+
+        {/* Several ad accounts on one login. Picking for them would decide which
+            business's money the coach is shown, silently.
+
+            ── And the ONE-account case, which had no door at all ─────────────
+
+            `length > 1` was the only gate. supabase/functions/ads-oauth returns
+            `{ ok: true, connected: true, accounts, warning }` with NO `chosen`
+            when `choose_ad_account` errors — which happens on a single-account
+            login — and ads-google does the same. So `choices` was stored with
+            one account in it, the picker was withheld because one is not more
+            than one, and ChannelCard went on telling the coach to connect again
+            and pick one. They reconnect, get the same warning, reconnect again;
+            ad spend for that channel can never be collected and every
+            cost-per-enquiry figure downstream of it stays missing.
+            app/(trainer)/share-kit.tsx tests `pages?.length` for this identical
+            shape, so the two screens disagreed about what one item means. */}
+        {choices && choices.accounts.length > 0 ? (
+          <Section>
+            <SectionHead
+              title={choices.accounts.length > 1 ? 'Which Ad Account?' : 'Confirm Your Ad Account'}
+              note={choices.accounts.length > 1
+                ? `This ${channelLabel(choices.channel)} Login Can See More Than One`
+                : `This ${channelLabel(choices.channel)} Login Found One, and It Was Not Saved`} />
+            {choices.accounts.length === 1 ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                Nothing is wrong with the connection. The account below simply was not stored when you
+                connected, and spend cannot be collected until it is. This is the tap that fixes it;
+                connecting again will not.
+              </Text>
+            ) : null}
+            {choices.accounts.map((c) => (
+              <View key={c.id} style={{ marginTop: sp.md }}>
+                <Card>
+                  <Text style={{ ...ty.head, color: t.ink }}>{c.name || c.id}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+                    {c.id}{c.currency ? ` · ${c.currency}` : ' · currency not stated'}{c.active ? '' : ' · not active'}
+                  </Text>
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost
+                      label={busy === `choose:${c.id}` ? 'Saving…' : 'Use This One'}
+                      a11yLabel={`Use ${c.name || c.id} for ${channelLabel(choices.channel)}`}
+                      onPress={() => { if (!busy) choose(choices.channel, c.id); }}
+                    />
+                  </View>
+                </Card>
+              </View>
+            ))}
+          </Section>
+        ) : null}
+
         {/* ── What it could not match. The point of the screen. ───────────── */}
         {settled && read.channels.some((s) => s.run?.status === 'ok') ? (
           <Section>
             <SectionHead
-              title="Not matched to any code"
-              note={unmatchedCount(read) ? `${num(unmatchedCount(read))} ${unmatchedCount(read) === 1 ? 'ad' : 'ads'}` : undefined}
+              title="Not Matched to Any Code"
+              note={unmatched.n
+                ? `${unmatched.exact ? '' : 'At least '}${num(unmatched.n)} ${unmatched.n === 1 ? 'ad' : 'ads'}`
+                : undefined}
             />
-            {unmatchedCount(read) === 0 ? (
+            {unmatched.n === 0 ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Every ad these checks saw pointed at one of your join links, so all of the spend they found is credited to a
-                code.
+                {unmatched.exact
+                  ? 'Every ad these checks saw pointed at one of your join links, so all of the spend they found is credited to a code.'
+                  : 'How many ads these checks could not place is not known, so this does not say that all of your spend is credited to a code. Check again and the number comes back.'}
               </Text>
             ) : (
               <View>
                 <Text style={{ ...ty.label, color: t.ink3 }}>{UNMATCHED_NOTE}</Text>
+                {/* The list is a prefix and the figures above it are not. Said
+                    where the list is, because the count and the per-channel
+                    total come off the run itself and are about all of them. */}
+                {!read.unmatchedWhole ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Flag tone={t.warn}>
+                      Too many ads went unmatched to list them all here. The most expensive of them are below, and the
+                      figures above cover every one. What is short is the list, not the money.
+                    </Flag>
+                  </View>
+                ) : null}
                 {read.channels.filter((s) => s.run?.status === 'ok' && s.unmatched.length > 0).map((s) => (
                   <View key={s.channel} style={{ marginTop: sp.lg }}>
                     <Rule />
@@ -440,7 +564,7 @@ export default function TrainerAdSpend() {
                     {s.unmatched.map((u, i) => (
                       <View key={`${u.adId ?? 'ad'}-${i}`} style={{ marginTop: sp.md }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                          <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{u.adName || 'Unnamed ad'}</Text>
+                          <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{u.adName || 'Unnamed Ad'}</Text>
                           <Text style={{ ...ty.body, color: t.ink }}>
                             {u.cents != null && u.currency ? (money(u.cents, u.currency) ?? DASH) : DASH}
                           </Text>
@@ -460,15 +584,15 @@ export default function TrainerAdSpend() {
 
         {/* ── Typing it in yourself, which never stops working ────────────── */}
         <Section>
-          <SectionHead title="Entering it yourself" />
+          <SectionHead title="Entering It Yourself" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             Every code’s spend field is on the Clients screen, beside the figures it feeds, and it works whether or not an ad
-            account is connected. A figure you type there is never replaced by a collected one — it wins, and this screen
+            account is connected. A figure you type there is never replaced by a collected one. It wins, and this screen
             shows you when the two disagree. Clearing the field hands that code back to the checks.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Ads are not the only thing a code costs you. A code you read out in a class or put in a caption will never appear
-            in an ad account, and its absence here says nothing about what it cost — no ad spend is unknown, not free.
+            in an ad account, and its absence here says nothing about what it cost. No ad spend is unknown, not free.
           </Text>
         </Section>
 
@@ -487,7 +611,7 @@ export default function TrainerAdSpend() {
             read as a coach with no codes. */}
         {returns.status === 'ready' && returns.rows.length > 0 ? (
           <Section>
-            <SectionHead title="Codes that cost you nothing" />
+            <SectionHead title="Codes That Cost You Nothing" />
             <Text style={{ ...ty.body, color: t.ink2 }}>
               A code you read out in a class, put in a caption or printed on a card you had anyway is free, and that is a
               real answer rather than a gap. Marked codes stop being reported as unpriced, so what is left in that list is
@@ -516,7 +640,7 @@ export default function TrainerAdSpend() {
                       paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
                     }}>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{row.label}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{row.label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {row.code}{on ? ' · marked free' : row.spend ? ' · you have entered a cost' : ' · cost unknown'}
                         </Text>
@@ -538,7 +662,7 @@ export default function TrainerAdSpend() {
             reads here as a total failure, and it is not one: it is an
             onboarding problem, and the two need opposite responses. */}
         <Section>
-          <SectionHead title="Who asked and did not join" />
+          <SectionHead title="Who Asked and Did Not Join" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             These figures count clients. Somebody who clicked a join link and left their details without making an account
             is not among them and never will be, so a code with real interest behind it and nobody through the door looks
@@ -561,9 +685,34 @@ export default function TrainerAdSpend() {
   );
 }
 
-/** Every unmatched ad across every channel that answered. */
-function unmatchedCount(read: AdSpendRead): number {
-  return read.channels.reduce((n, s) => n + (s.run?.status === 'ok' ? s.unmatched.length : 0), 0);
+/**
+ * How many ads the checks could not place, and whether that is a count or a
+ * floor.
+ *
+ * This used to be `s.unmatched.length` summed, printed flatly as "1,000 ads" —
+ * which is the row cap wearing a total's clothes. `coach_ad_unmatched` had no
+ * `.limit()` on it, so PostgREST's silent 1000-row ceiling was the number a
+ * coach read as the number of ads outside their codes, and the true figure
+ * could be any larger number at all.
+ *
+ * The count is on the RUN. record_ad_run() sets `unmatched_ads` from every row
+ * it inserted, so it is a fact about all of the ads that could not be placed,
+ * whatever the list below manages to fetch — the same reason `unmatchedCents`
+ * is read off the run rather than added up from the rows. Where a run does not
+ * carry one, the rows are counted instead, and that is a floor whenever the
+ * list came back truncated; `exact` false is what makes the screen say so, in
+ * the words `paymentsFloorLine` uses for the same shape of fact.
+ */
+function unmatchedCount(read: AdSpendRead): { n: number; exact: boolean } {
+  let n = 0;
+  let exact = true;
+  for (const s of read.channels) {
+    if (s.run?.status !== 'ok') continue;
+    if (s.run.unmatchedAds != null) { n += s.run.unmatchedAds; continue; }
+    n += s.unmatched.length;
+    if (!read.unmatchedWhole) exact = false;
+  }
+  return { n, exact };
 }
 
 /**
@@ -587,6 +736,37 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
   const run = state.run;
   const chosen = !!account?.externalAccountId;
   const label = channelLabel(c);
+
+  /* ── a channel this build has no app id for ────────────────────────────
+     "Not connected." with a Connect button under it is the coach's own state:
+     an account they have not linked yet, and a button that links it. Where the
+     owner has supplied no app id there is no account to link and the button
+     opens nothing — `connectAdChannel` refuses immediately with
+     `channelSetupNote`, so the only true sentence on the screen was behind a
+     tap, and everything a coach could see before that tap said they simply had
+     not connected.
+
+     That is the shape app/(trainer)/calendar.tsx withdrew the Google Calendar
+     row over: a live-looking control leading nowhere teaches a coach that the
+     screen is broken. The row is not withdrawn here, because unlike that one it
+     has something to say — which of the three is unavailable, and that this
+     screen's typed figures are unaffected — and because ONE channel can be set
+     up while the others are not, so the list is where the difference shows.
+     app/(trainer)/share-kit.tsx takes exactly this decision for Instagram's
+     'unconfigured' state: the sentence, and no dead button.
+
+     Nothing here mentions a version or an update. No build fixes this; an app
+     id and a Supabase secret do, and `channelSetupNote` names both. */
+  if (!account && !channelClientId(c)) {
+    return (
+      <View>
+        <Text style={{ ...ty.head, color: t.ink3 }}>{label}</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+          {channelSetupNote(c)}
+        </Text>
+      </View>
+    );
+  }
 
   if (!account) {
     return (
@@ -649,7 +829,7 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
             <View>
               <Flag tone={t.crit}>{run.failure || `${label} did not say why the check on ${when(run.startedAt)} failed.`}</Flag>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Nothing was recorded from it — a failed check knows no figures, so it writes none. While this channel is
+                Nothing was recorded from it. A failed check knows no figures, so it writes none. While this channel is
                 unread there is no combined figure at all, because one that left it out would be a smaller number that looks
                 like a real one.
               </Text>
@@ -662,14 +842,14 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
               </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {run.windowFrom && run.windowTo
-                  ? `Covering ${when(run.windowFrom)} to ${when(run.windowTo)} — the whole life of the account, so it lines up with the lifetime revenue your codes are measured on.`
+                  ? `Covering ${when(run.windowFrom)} to ${when(run.windowTo)}: the whole life of the account, so it lines up with the lifetime revenue your codes are measured on.`
                   : 'This covers the whole life of the account, which is what the lifetime revenue your codes are measured on needs. The exact days were not reported.'}
               </Text>
               {run.adsSeen === 0 ? (
                 <View style={{ marginTop: sp.sm }}>
                   <Flag tone={t.ink3}>
                     The check worked and this ad account has no ads in it. Codes you promote organically will never appear
-                    here at all — a code with no ad spend is unknown, not free.
+                    here at all. A code with no ad spend is unknown, not free.
                   </Flag>
                 </View>
               ) : null}
@@ -692,7 +872,7 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
         />
       </View>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-        Disconnecting stops future checks on {label}. What has already been recorded stays — what a campaign cost last month
+        Disconnecting stops future checks on {label}. What has already been recorded stays. What a campaign cost last month
         did not stop being true.
       </Text>
     </View>

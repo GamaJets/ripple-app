@@ -2,10 +2,45 @@
 // Repple's in-app AI coach. Knows the client's stats/goal/program (passed as
 // context) and answers training + nutrition questions. Deploy:
 //   supabase functions deploy coach-chat
-// Uses the same ANTHROPIC_API_KEY secret you already set.
+// Uses the same ANTHROPIC_API_KEY secret you already set — or, when
+// CHEAPER_INFERENCE_API_KEY is set, the Cheaper Inference gateway instead. That
+// choice, the two wire formats and the model defaults live in one place, in
+// src/lib/llmGateway.ts, because all three AI functions face it.
 //
 // Request JSON: { messages: [{role:'user'|'assistant', content:string}], context: object }
 // Response JSON: { reply: string }
+//
+// ── WHO MAY SPEND THE ANTHROPIC KEY ───────────────────────────────────────
+//
+// A signed-in person, and nobody else. This function used to check nothing at
+// all, and `verify_jwt` at the platform gate is not the check people assume it
+// is: it verifies that the bearer token was signed by this project, and the
+// project's ANON KEY is exactly such a token. It is public by design — it is
+// inlined into the app bundle — so "verified by Supabase" and "a Repple user"
+// were two different sentences, and only the first was true here.
+//
+// supabase/functions/wearable-oauth spells the same fact out at length, and
+// supabase/functions/ocr-scan already refuses on it in one line ("Signed in
+// users only — this spends a metered quota"). This is that line. What it costs
+// an attacker to skip it was: unpack the app, take the anon key, and POST
+// arbitrary `messages` with an arbitrary `system` context to Repple's Anthropic
+// account, for as long as they like, on Repple's bill — a general-purpose
+// Claude proxy with no account, no rate limit and nothing in this database
+// naming who did it.
+//
+// It is deliberately only IDENTITY. The health context in the body is not read
+// from the database and never has been: the caller sends their own numbers, so
+// there is no other person's record for a server-side check to protect here.
+// What the check protects is the KEY.
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
+import { providerFor, modelFor, buildCall, readReply, replyProblem } from '../../../src/lib/llmGateway.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -13,45 +48,149 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5';
 
 function systemPrompt(ctx: any): string {
   const c = ctx || {};
+
+  // ── say what you were given, and nothing about what you were not ─────────
+  //
+  // This function serves FOUR different asks and used to be written for one:
+  //
+  //   a member about themselves        → FITNESS_KEYS
+  //   the same, having consented       → + HEALTH_KEYS
+  //   a coach about one client         → COACH_CLIENT_KEYS
+  //   a coach about their own business → COACH_BUSINESS_KEYS
+  //
+  // The two coach vocabularies were dropped on the floor by the one component
+  // that had already been handed them. Asked "how is my month going?", the
+  // assistant answered — correctly, under its own "never invent data" rule —
+  // that it had not been given any figures, while every one of them sat in the
+  // request body.
+  //
+  // And the half that is a safety defect: COACH_CLIENT_KEYS carries
+  // `injuryAreas`, the REDACTED injury — area and severity, never the note.
+  // src/lib/coachShare.ts argues that it belongs in the fitness tier precisely
+  // because "a coach asking 'what should they train next' and getting an answer
+  // that loads an injured knee is the failure this whole feature would be
+  // judged on". This prompt read `c.injuries`, which is on the list documented
+  // as NEVER sent on a coach ask — so the model was told "none disclosed",
+  // under the rule below telling it to always train around them, about a client
+  // whose injured knee the app had just described to it under another name.
+  //
+  // So: a line is emitted only when its field arrived. That serves all four
+  // shapes without the function having to know which it got, and it means a
+  // fallback can never quietly assert something — "none disclosed" is now said
+  // only when somebody actually said it, and a field nobody sent is simply
+  // absent, which is what "never invent data you were not given" needs to be
+  // true of the prompt as well as of the reply.
+  //
+  // No name: src/lib/coachShare.ts removed it deliberately and no filter sends
+  // one. This used to print "Name: the client" on every request in the product.
+  const has = (v: unknown) => v !== undefined && v !== null && v !== '';
+  const lines: string[] = [];
+  const say = (label: string, v: unknown, suffix = '') => { if (has(v)) lines.push(`- ${label}: ${v}${suffix}`); };
+
+  // What the person is working towards, and how they are coached. `coaching` is
+  // the member's phrase; `coachedMode` is the coach-side field for the same
+  // fact, and both are read because both are sent, by different callers.
+  say('Goal', c.goal);
+  say('How they are coached', has(c.coaching) ? c.coaching : c.coachedMode);
+  say('Diet style', c.diet);
+  say('Meals a day', c.mealsPerDay);
+  say('Daily targets', has(c.kcal) ? `${c.kcal} kcal · P${c.protein ?? '?'} / C${c.carbs ?? '?'} / F${c.fat ?? '?'}` : null);
+  say('Eaten so far today', c.eatenToday);
+  say('Program', has(c.programTitle) ? `${c.programTitle}${c.programFocus ? ' · focus: ' + c.programFocus : ''}` : null);
+  say('Suggested next progression', c.nextLift);
+  say('Training streak', has(c.streak) ? `${c.streak} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}` : null);
+  say('Sessions in the last 30 days', c.sessionsLast30);
+  say('Adherence to their plan', c.adherence);
+
+  // Health, only ever present when the member consented (the member ask) — and
+  // `injuryAreas`, which is the redacted form a coach ask carries instead.
+  say('Current weight', c.weightKg, ' kg');
+  say('Body fat', c.bodyFatPct, '%');
+  say('Skeletal muscle', c.muscleKg, ' kg');
+  say('Readiness today', c.readiness);
+  say('What is holding readiness back', c.readinessGaps);
+  say('Sleep', c.sleep);
+  say('Injuries / limitations', has(c.injuries) ? c.injuries : c.injuryAreas);
+  say('Focus areas to emphasise (from progress photo)', c.focusAreas);
+  // The member's own list and their coach's notes, combined. Health tier on a
+  // member ask (so absent when they declined) and sent on a coach ask; absent
+  // too when either half could not be read. An absent line is NOT "none": the
+  // rule below makes the model say it does not know, which is the same
+  // null-is-not-zero rule every figure in this app runs on.
+  say('Allergies (their own list and their coach\'s notes combined)', c.allergens);
+
+  // The coach's own business. None of this was read before, which is why the
+  // assistant could not answer the most obvious question a coach would ask it.
+  say('Sessions delivered this month', c.sessionsDeliveredThisMonth);
+  say('Sessions still unmarked', c.sessionsStillUnmarked);
+  say('Revenue at their own rate this month', has(c.revenueAtOwnRate) ? `${c.currency ?? ''} ${c.revenueAtOwnRate}`.trim() : null);
+  say('Taken this month', has(c.takenThisMonth) ? `${c.currency ?? ''} ${c.takenThisMonth}`.trim() : null);
+  say('Clients on their book', c.clients);
+  say('Average adherence across the book', c.avgAdherence);
+  say('Clients at risk', c.atRiskClients);
+  say('On track / watch / at risk', has(c.onTrack) ? `${c.onTrack} / ${c.watch ?? '?'} / ${c.atRiskLow ?? '?'}` : null);
+  say('New clients this month', c.newClientsThisMonth);
+  say('Coaching relationships ended this month', c.endedThisMonth);
+  say('How they coach', c.howTheyCoach);
+
+  const known = lines.length
+    ? ['You have been given the following, and nothing else:', ...lines].join('\n')
+    : 'You have been given no figures about this person or this business.';
+
   return [
-    "You are Repple's AI fitness coach — warm, direct, and practical. You give concise, actionable training and nutrition guidance.",
-    'You know this client:',
-    `- Name: ${c.name ?? 'the client'}`,
-    `- Goal: ${c.goal ?? 'general fitness'}`,
-    `- Current weight: ${c.weightKg ?? '?'} kg · body fat: ${c.bodyFatPct ?? '?'}% · skeletal muscle: ${c.muscleKg ?? '?'} kg`,
-    `- Diet style: ${c.diet ?? 'unspecified'} · ${c.mealsPerDay ?? 4} meals/day`,
-    `- Daily targets: ${c.kcal ?? '?'} kcal · P${c.protein ?? '?'} / C${c.carbs ?? '?'} / F${c.fat ?? '?'}`,
-    `- Program: ${c.programTitle ?? 'their plan'}${c.programFocus ? ' — focus: ' + c.programFocus : ''}`,
-    // The app has always known whether anybody is coaching this person and how,
-    // and never sent it. So the same "ask your coach to watch your setup" went
-    // to a client training alone at 6am and to one whose trainer is in the room
-    // with them — advice that is either impossible or redundant. The client
-    // sends a phrase, not a code, so this line needs no vocabulary of its own.
-    `- How they are coached: ${c.coaching ?? 'unknown'}`,
-    `- Readiness today: ${c.readiness ?? 'unknown'}`,
-    `- Eaten so far today: ${c.eatenToday ?? 'not logged yet'}`,
-    `- Training streak: ${c.streak ?? '?'} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}`,
-    `- Suggested next progression: ${c.nextLift ?? 'n/a'}`,
-    `- Injuries / limitations: ${c.injuries ?? 'none disclosed'}`,
-    `- Focus areas to emphasise (from progress photo): ${c.focusAreas ?? 'none set'}`,
+    "You are Repple's AI fitness coach. You are warm, direct and practical, and you give concise, actionable training and nutrition guidance.",
+    known,
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
-    'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
+    'When relevant, factor in their readiness, what they have eaten today, and their streak. For example, suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
     'Match your advice to how they are coached: never tell a client training alone to ask their coach, or to book a session they have no coach to book with; for a client coached in person, defer form checks and loading decisions to the session they already have; for a hybrid client, say which of the two a suggestion belongs to. ' +
     'If the client has disclosed injuries or limitations, ALWAYS train around them: avoid or regress exercises that load the injured area, suggest pain-free alternatives, and never program through pain. ' +
-    'Give practical next steps. You are not a doctor — for pain, injury, or medical questions, advise seeing a professional. Never invent data you were not given.',
+    'Allergies are a hard rule. If you were given an allergy line, never suggest a food, meal, recipe, snack or supplement that contains a listed allergen, not even as an option, a swap or a small amount. If you are asked for one, say plainly that it contains their allergen and offer something that does not. ' +
+    'If you were not given an allergy line, you do not know their allergies. That is not the same as having none. Before naming a specific food, meal, recipe or supplement, say that you do not know their allergies and ask, or keep the suggestion general. Never assume they have no allergies because none were listed. ' +
+    'Give practical next steps. You are not a doctor, so for pain, injury or medical questions, advise seeing a professional. Never invent data you were not given, and do not describe a figure you were not given as zero or as unknown-but-fine. Say plainly that you were not given it. ' +
+    'Write the way a good coach talks: short, plain sentences. Never use an em dash or an en dash. Where you might reach for one, use a full stop, a comma or a colon instead.',
   ].join('\n');
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!key) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
+  // Which provider, and on whose key. Unset CHEAPER_INFERENCE_API_KEY and this
+  // is byte-for-byte the Anthropic call it always was; that is the rollback.
+  const gatewayKey = Deno.env.get('CHEAPER_INFERENCE_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const provider = providerFor(gatewayKey, anthropicKey);
+  if (!provider) return json({ error: 'No AI provider is configured on the server.' }, 500);
+  const key = (provider === 'cheaper-inference' ? gatewayKey : anthropicKey) as string;
+
+  // Signed-in users only — this spends a metered quota on Repple's account.
+  // `getUser` RESOLVES with a null user for a token it cannot turn into a
+  // person (it does not throw), which is what the anon key does, so the answer
+  // is checked rather than the call being wrapped and forgotten.
+  const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  let userId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
+    + 'Your message has not been sent. Try again in a moment.';
+  try {
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return json({ error: CANNOT_ASK }, 503);
+    } else {
+      userId = data?.user?.id || '';
+    }
+  } catch { return json({ error: CANNOT_ASK }, 503); }
+  if (!userId) return json({ error: 'Sign in to Repple to use the AI coach.' }, 401);
 
   let messages: any[] = [], context: any = {};
   try {
@@ -62,20 +201,28 @@ Deno.serve(async (req: Request) => {
   if (!messages.length) return json({ error: 'messages required' }, 400);
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        system: systemPrompt(context),
-        messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
-      }),
+    const call = buildCall(provider, key, {
+      system: systemPrompt(context),
+      messages: messages.map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+        content: String(m.content || ''),
+      })),
+      maxTokens: 500,
+      model: modelFor(provider, 'text', Deno.env.get(
+        provider === 'cheaper-inference' ? 'CHEAPER_INFERENCE_MODEL' : 'ANTHROPIC_MODEL')),
     });
+    const res = await fetch(call.url, { method: 'POST', headers: call.headers, body: call.body });
     if (!res.ok) return json({ error: 'Coach API error', detail: await res.text() }, 502);
-    const data = await res.json();
-    const reply = (data?.content?.[0]?.text) ?? "I couldn't come up with a reply — try again?";
-    return json({ reply });
+
+    // A reply, or the NAMED reason there is none. This used to answer every
+    // failure with "I couldn't come up with a reply — try again?", which reads
+    // to a member as the model having nothing to say. On a reasoning model that
+    // spent its whole budget thinking, the truth is that the answer was cut in
+    // half and thrown away, and a member acting on half a training instruction
+    // is the failure worth telling them about.
+    const reply = readReply(provider, await res.json());
+    if (!reply.ok) return json({ error: replyProblem(reply.why) }, 502);
+    return json({ reply: reply.text });
   } catch (e) {
     return json({ error: 'Coach failed', detail: String(e) }, 500);
   }

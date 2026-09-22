@@ -36,7 +36,7 @@ import { useWorkoutLog } from './workoutLog';
 import { isWhole } from './loadStatus';
 import { cancelReminders, pushAvailable, scheduleLocal } from './pushNotifications';
 import { useNotifyPrefs } from './notifyPrefs';
-import { currentStreak } from '../lib/streaks';
+import { shownStreak } from '../lib/streaks';
 import { motivationNudges } from '../lib/motivationNudge';
 
 /** The ids armed last time, so this launch can take them back. */
@@ -88,7 +88,9 @@ export function MotivationNudgeProvider({ children }: { children: ReactNode }) {
 
       const plan = motivationNudges({
         now,
-        streak: currentStreak(log, now),
+        // The same figure the app shows. A nudge naming a streak the member's
+        // own Home screen does not recognise is a nudge about somebody else.
+        streak: shownStreak(log, now),
         trainedToday,
         daysSinceLastSession,
         eveningHour: EVENING_HOUR,

@@ -3,7 +3,8 @@
 // account + profile row (via the on_auth_user_created trigger), sign-in
 // establishes a persisted session (AsyncStorage), and the session is rehydrated
 // on launch. Screens are unchanged — they just read { authed, user }.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Alert } from 'react-native';
 import { BRAND } from '../lib/brands';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
@@ -20,9 +21,20 @@ import {
 } from '../lib/supabase';
 import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
+import { writeFailure } from '../lib/wroteRows';
 import { phoneAuthError, digitsOnly } from '../lib/phone';
+// Read at the moment of the failure, not at the last render — `observedFetch`
+// (src/lib/supabase.ts) files the verdict for the very request that just failed
+// before supabase-js hands the error back here, so this is the freshest answer
+// there is. A hook would only be needed to re-render, and none of these
+// sentences is re-rendered: each is produced once and carried in `reason`.
+import { currentReach } from '../lib/reachability';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
+import { clearPersonalDeviceState } from './signOutState';
+import { signOutOutcome, type SignOutOutcome } from '../lib/signOutFate';
+import { SIGN_OUT_UNCONFIRMED_HANDSET, SIGN_OUT_UNCONFIRMED_TITLE } from '../lib/signOutSay';
+import { readMyProfileRow, forgetMyRows } from './myProfile';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
@@ -77,7 +89,25 @@ interface AuthValue {
    * throttled resend is the common case and must never read as a sent one.
    */
   resendEmailCode: (email: string) => Promise<OtpOutcome>;
-  signOut: () => void;
+  /**
+   * End the session, and take this person's device-local state with it.
+   *
+   * Returns WHAT IT ESTABLISHED, and a caller that navigates or says "signed
+   * out" has to read it. This used to resolve `void` with the failure swallowed
+   * into `reportError`, so all nine call sites in the three apps navigated to
+   * /welcome whatever had happened — and a person was told they had signed out
+   * by being shown the sign-in screen. The tree does gate on `user` being
+   * cleared, so the screens go; what survives a failed sign-out is the STORED
+   * SESSION, which the next launch rehydrates. See src/lib/signOutFate.ts for
+   * which errors mean the session is gone and which establish nothing, and
+   * src/lib/signOutSay.ts for what may be said about the second kind.
+   *
+   * `'ended'` — the session is gone. Navigate, and say so.
+   * `'unconfirmed'` — nothing was established. Navigating is still right (the
+   * user is already cleared from the tree and there is nowhere else to stand),
+   * but the person must be told that this phone may still be signed in.
+   */
+  signOut: () => Promise<SignOutOutcome>;
   /**
    * Why the last session was refused, when nobody was there to be told.
    *
@@ -114,6 +144,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // In live mode we don't know the persisted session until we've checked storage.
   const [loading, setLoading] = useState<boolean>(USE_SUPABASE);
 
+  // ── Who is leaving, kept for the one path that cannot ask ────────────────
+  //
+  // `onAuthStateChange` fires with no session, and there is nothing in that
+  // event to say whose session it was. The sweep needs a name for exactly one
+  // purpose — to recognise that the push token for THIS account was already
+  // revoked a moment ago by `signOut`, rather than filing a false alarm about a
+  // registration nobody left behind.
+  //
+  // A ref rather than the `user` state because the listener is registered once,
+  // from an effect with no dependencies, and closes over the first render's
+  // state forever. Written wherever a session is actually read, and deliberately
+  // NOT cleared on sign-out: the account whose session has just ended is the
+  // whole of what the remote sweep needs to know.
+  const leavingUid = useRef<string | null>(null);
+
   // Build an AuthUser from the current Supabase session (+ profile row if present).
   //
   // Every way into this app converges here — email, phone, a rehydrated session
@@ -123,6 +168,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: auth } = await supabase.auth.getUser();
     const u = auth.user;
     if (!u) { setUser(null); return { user: null, refused: null }; }
+    // Before the brand guard, because the mismatch branch below ends this very
+    // session and the sweep that follows it has to be attributable.
+    leavingUid.current = u.id;
 
     // Asked BEFORE the user is published to the tree. A provider that set
     // `user` first and signed out a moment later would flash the wrong brand's
@@ -133,6 +181,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Sign out rather than merely refuse: leaving the session alive would
       // have the next launch rehydrate it and refuse again forever, and the
       // token would still be a valid token for another brand's data.
+      //
+      // ── And take their things off the handset, which this did not ─────────
+      //
+      // This branch ended the session and swept NOTHING, so a white-label
+      // mismatch left all seven personal keys on the phone — including
+      // `repple.spotify.token`, which is not a preference at all but a live
+      // access and refresh token for an account outside Repple entirely, with
+      // scopes that let this app rewrite that person's playlists and control
+      // playback on their devices. A member who signs in to the wrong gym's
+      // build and is bounced has not consented to leaving any of that behind.
+      //
+      // BEFORE `sbSignOut()`, and that ordering is the same one `signOut` keeps
+      // for the same reason: `getUser()` above has just answered with a user, so
+      // the session is alive here and the `push_tokens` delete — which is only
+      // possible from inside the session being ended — can still be made and
+      // still be proven. After the sign-out it could only be attempted.
+      try { await clearPersonalDeviceState({ cause: 'brand-mismatch', uid: u.id }); }
+      catch (e) { reportError('auth.brandGuard.clear', e); }
       try { await sbSignOut(); } catch (e) { reportError('auth.brandGuard.signOut', e); }
       setUser(null);
       setBrandNotice(verdict.message);
@@ -186,8 +252,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!active) return;
-      if (!session) setUser(null);
-      else refreshFromSession().catch((e) => reportError('auth.onAuthStateChange', e));
+      if (!session) {
+        setUser(null);
+        // ── A session that ended somewhere else ────────────────────────────
+        //
+        // This used to be `setUser(null)` and nothing more, so a session ended
+        // remotely — a revoked token, an expiry, or a member signing this
+        // handset out FROM A LAPTOP BECAUSE THEY HAVE LOST IT — swept nothing
+        // off the device. That is the case the sweep matters most in and the
+        // one it was missing from entirely.
+        //
+        // The LOCAL half is all this path can do, and it does all of it: the
+        // keys, the scheduled reminders cancelled by id first, the two consents
+        // out of `repple.settings`, the in-process latches. The half it CANNOT
+        // do is the `push_tokens` delete, because `pt_self` is
+        // `user_id = auth.uid()` and there is no session here to be that uid —
+        // so it is not attempted and pretended about. `clearPersonalDeviceState`
+        // files the disposition as 'no-session', reports it, and names the
+        // reconciler in src/ui/settings.tsx that removes the row at the next
+        // launch on which somebody is signed in on this handset with
+        // notifications off. Until then this phone is still on that account's
+        // delivery list, and the record says so rather than looking done.
+        //
+        // Floating on purpose — nothing here can wait on it, and the listener
+        // must not become async. The `.catch` is belt and braces: the sweep's
+        // contract is that it never throws.
+        void clearPersonalDeviceState({ cause: 'remote', uid: leavingUid.current })
+          .catch((e) => reportError('auth.sessionEnded.clear', e));
+      } else refreshFromSession().catch((e) => reportError('auth.onAuthStateChange', e));
     });
     return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);
@@ -274,11 +366,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so no code was sent.` };
     try {
       const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: { ...brandSignUpMetadata(), role: VARIANT } } });
-      if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
+      if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message, { reach: currentReach(), step: 'send' }) }; }
       return { ok: true };
     } catch (e: any) {
       reportError('auth.sendPhoneCode', e);
-      return { ok: false, reason: phoneAuthError(e?.message) };
+      return { ok: false, reason: phoneAuthError(e?.message, { reach: currentReach(), step: 'send' }) };
     }
   };
 
@@ -293,7 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so the code could not be checked.` };
     try {
       const { data, error } = await supabase.auth.verifyOtp({ phone: e164, token: code, type: 'sms' });
-      if (error) return { ok: false, reason: phoneAuthError(error.message) };
+      if (error) return { ok: false, reason: phoneAuthError(error.message, { reach: currentReach(), step: 'check' }) };
       if (!data?.session) {
         // verifyOtp resolving without a session is not success. Saying "signed
         // in" here would drop somebody into an app with no session behind it.
@@ -302,12 +394,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const wanted = (name || '').trim();
       if (wanted) {
-        // Only fills a blank. See the note above on not overwriting a name.
+        // ── Only fills a blank, and only when it KNOWS the blank is real ────
+        //
+        // Two things were wrong here and they compounded.
+        //
+        // The read carried `no-error-ok: an unreadable profile leaves the name
+        // unset, which is the same outcome as it already having one`. That
+        // sentence is not true of this code. A refused read gives `prof =
+        // null`, `(null)?.full_name` is undefined, `|| ''` makes it empty, and
+        // the `!` turns the failure into "there is no name" — so the branch
+        // below RUNS, and the update overwrites. Not "leaves the name unset":
+        // replaces it. The doc comment four lines above this says in as many
+        // words that an existing member verifying on a new phone must not have
+        // their profile name overwritten by whatever the sign-in screen
+        // happened to have in its field, and a read that merely failed was
+        // enough to do exactly that. Never writing a name is recoverable from
+        // Settings; silently replacing somebody's name with a stranger's typing
+        // is not, because nobody knows to go and look.
+        //
+        // And the write's result went nowhere. That was defended as
+        // "survivable — the sign-in has already succeeded and the name can be
+        // set again later", which is a good argument for NOT FAILING the
+        // sign-in and no argument at all for not looking. This is the only
+        // moment the name is offered: the caller passes it once, on the screen
+        // where it was typed, and nothing retries. A refusal or a zero-row
+        // match here means the member is nameless on every screen that names
+        // them — a coach's thread list, a class register — and the only trace
+        // is that they never had a name. Counted now, and reported; the
+        // sign-in still succeeds, which is the part that was right.
         try {
-          // no-error-ok: an unreadable profile leaves the name unset, which is the same outcome as it already having one — the sign-in itself has already succeeded either way
-          const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
-          if (!((prof as any)?.full_name || '').trim()) {
-            await supabase.from('profiles').update({ full_name: wanted }).eq('id', data.session.user.id);
+          const uid = data.session.user.id;
+          // The shared read (src/ui/myProfile.ts). This one is not a launch
+          // read, but it sits immediately before four providers make theirs —
+          // `refreshFromSession` below bumps the auth revision they all hang
+          // off — so it is the read they join rather than a fifth one.
+          const prof = await readMyProfileRow(uid);
+          if (!prof.ok) {
+            reportError('auth.verifyPhoneCode.name', prof.error);
+          } else if (!((prof.value?.full_name) || '').trim()) {
+            const res = await supabase.from('profiles')
+              .update({ full_name: wanted }, { count: 'exact' })
+              .eq('id', uid);
+            // `count: 'exact'`, because `profiles_self_rw` is `id = auth.uid()`
+            // and a row this session may not write matches nothing and returns
+            // `error: null`. Zero rows and success look identical without it.
+            const why = writeFailure('Your name', res);
+            if (why) reportError('auth.verifyPhoneCode.name', res.error ?? new Error(why));
+            // MANDATORY, and the sharpest case for it in the app: the read a
+            // line above is what the providers are about to join, and it says
+            // this person has no name. Leaving it held would greet somebody by
+            // nothing on the very launch their name was set. Outside the
+            // success check, because a write that could not be read may still
+            // have landed.
+            forgetMyRows(uid);
           }
         } catch (e) { reportError('auth.verifyPhoneCode.name', e); }
       }
@@ -322,7 +461,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (refused) return { ok: false, reason: refused };
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, reason: phoneAuthError(e?.message) };
+      return { ok: false, reason: phoneAuthError(e?.message, { reach: currentReach(), step: 'check' }) };
     }
   };
 
@@ -455,12 +594,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // refreshFromSession(); if (refused) throw new Error(refused);`. The guard
     // itself needs nothing added — every session already funnels through
     // refreshFromSession, including the one onAuthStateChange picks up.
-    throw new Error('Social sign-in is not set up yet — please use email for now.');
+    throw new Error('Social sign-in is not set up yet. Please use email for now.');
   };
 
-  const signOut = () => {
-    if (USE_SUPABASE) sbSignOut().catch(() => {});
+  const signOut = async (): Promise<SignOutOutcome> => {
+    // The tree first. Signing out has to LOOK instant — the screens gate on
+    // `authed`, and making somebody watch a network round trip before the app
+    // admits they have gone is how a second tap arrives.
     setUser(null);
+    // Whoever signs in next on this handset must not be served the rows of the
+    // person signing out. The read is keyed on the account id, so this cannot
+    // reach them anyway — but a shared read that outlives a sign-out is exactly
+    // the sort of thing that stops being true when somebody adds a second key
+    // to it, and it costs one call to be certain. src/ui/myProfile.ts.
+    forgetMyRows();
+    // No backend in this build: there is no session anywhere to survive this,
+    // so the one that existed on this device is genuinely gone.
+    if (!USE_SUPABASE) return 'ended';
+    // ── Before the session ends ───────────────────────────────────────────
+    //
+    // This used to be one line: end the session, clear the user, done. What it
+    // did not do was take anything OFF the handset, and four of this app's
+    // preferences live there on purpose — the notification categories, the
+    // quiet hours, the biometric lock and the reminders, which are scheduled by
+    // the phone itself. So the next person to sign in on that handset inherited
+    // all four, and went on being buzzed at 6am by somebody else's reminders,
+    // while app/(client)/notification-prefs.tsx told them their choices were
+    // "kept on this phone".
+    //
+    // It also left this handset REGISTERED for push under the account that was
+    // leaving. `pt_self` is `user_id = auth.uid()`, so that row can only be
+    // deleted from inside the session being ended — which is why this is
+    // awaited here and not fired after `sbSignOut()`, where it could not
+    // succeed. app/(client)/settings.tsx had `revokePushToken` a scroll away
+    // from its own Sign Out and did not call it; now every sign-out in every
+    // one of the three apps does, because there is one of these.
+    //
+    // `cause` rather than a `revokePush` boolean: the flag said WHAT to do and
+    // left every caller to work out whether it could, which is how the other two
+    // exits came to do nothing at all. The cause says where this is being called
+    // from and src/lib/signOutSweep.ts decides the rest.
+    // ── And what the caller is told ───────────────────────────────────────
+    //
+    // The last line used to end the session inside a `try` whose `catch` handed
+    // the error to `reportError` and resolved void — so every one of the nine
+    // call sites in the three apps navigated to /welcome whatever had happened,
+    // and being returned to /welcome is how this app tells somebody they have
+    // signed out.
+    //
+    // `sbSignOut` rethrows the `error` half of `supabase.auth.signOut()`
+    // verbatim (src/lib/supabase.ts), so the caught value IS the AuthError and
+    // `signOutOutcome` classifies it without anything being re-derived here.
+    // Classified rather than simply counted as a failure, because the library
+    // brands an outage, a DNS failure and every 5xx as an AuthError alongside a
+    // genuine "there was no session to end" — and only the second of those is
+    // safe to report as a sign-out that happened.
+    //
+    // The report stays. A fate returned to a screen is a second recorded fact,
+    // not a replacement for the first.
+    //
+    // Nothing below this comment may move above the sweep: the push-token
+    // delete is `user_id = auth.uid()` and can only be made from inside the
+    // session being ended. src/lib/signOutState.test.ts holds that ordering.
+    try { await clearPersonalDeviceState({ cause: 'deliberate', uid: leavingUid.current }); }
+    catch (e) { reportError('auth.signOut.clear', e); }
+    try { await sbSignOut(); return 'ended'; }
+    catch (e) { reportError('auth.signOut', e); return signOutOutcome(e); }
   };
 
   const sendPasswordReset = async (email: string) => {
@@ -489,8 +688,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (refused) throw new Error(refused);
   };
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useAuth`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.signIn(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset });
+  impl.current = { signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset };
+  const signInStable = useCallback((...a: Parameters<typeof signIn>) => impl.current.signIn(...a), []);
+  const signUpStable = useCallback((...a: Parameters<typeof signUp>) => impl.current.signUp(...a), []);
+  const signInWithProviderStable = useCallback((...a: Parameters<typeof signInWithProvider>) => impl.current.signInWithProvider(...a), []);
+  const sendPhoneCodeStable = useCallback((...a: Parameters<typeof sendPhoneCode>) => impl.current.sendPhoneCode(...a), []);
+  const verifyPhoneCodeStable = useCallback((...a: Parameters<typeof verifyPhoneCode>) => impl.current.verifyPhoneCode(...a), []);
+  const confirmEmailCodeStable = useCallback((...a: Parameters<typeof confirmEmailCode>) => impl.current.confirmEmailCode(...a), []);
+  const resendEmailCodeStable = useCallback((...a: Parameters<typeof resendEmailCode>) => impl.current.resendEmailCode(...a), []);
+  const signOutStable = useCallback((...a: Parameters<typeof signOut>) => impl.current.signOut(...a), []);
+  const sendPasswordResetStable = useCallback((...a: Parameters<typeof sendPasswordReset>) => impl.current.sendPasswordReset(...a), []);
+  const beginPasswordRecoveryWithTokenHashStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithTokenHash>) => impl.current.beginPasswordRecoveryWithTokenHash(...a), []);
+  const beginPasswordRecoveryWithCodeStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithCode>) => impl.current.beginPasswordRecoveryWithCode(...a), []);
+  const beginPasswordRecoveryWithTokensStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithTokens>) => impl.current.beginPasswordRecoveryWithTokens(...a), []);
+  const completePasswordResetStable = useCallback((...a: Parameters<typeof completePasswordReset>) => impl.current.completePasswordReset(...a), []);
+  const value = useMemo<AuthValue>(() => ({ authed: !!user, user, loading, brandNotice, signIn: signInStable, signUp: signUpStable, signInWithProvider: signInWithProviderStable, sendPhoneCode: sendPhoneCodeStable, verifyPhoneCode: verifyPhoneCodeStable, confirmEmailCode: confirmEmailCodeStable, resendEmailCode: resendEmailCodeStable, signOut: signOutStable, sendPasswordReset: sendPasswordResetStable, beginPasswordRecoveryWithTokenHash: beginPasswordRecoveryWithTokenHashStable, beginPasswordRecoveryWithCode: beginPasswordRecoveryWithCodeStable, beginPasswordRecoveryWithTokens: beginPasswordRecoveryWithTokensStable, completePasswordReset: completePasswordResetStable }), [user, loading, brandNotice, signInStable, signUpStable, signInWithProviderStable, sendPhoneCodeStable, verifyPhoneCodeStable, confirmEmailCodeStable, resendEmailCodeStable, signOutStable, sendPasswordResetStable, beginPasswordRecoveryWithTokenHashStable, beginPasswordRecoveryWithCodeStable, beginPasswordRecoveryWithTokensStable, completePasswordResetStable]);
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, brandNotice, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );
@@ -500,4 +731,45 @@ export function useAuth(): AuthValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useAuth must be used inside <AuthProvider>');
   return v;
+}
+
+/**
+ * Sign out, go wherever this screen goes, and say so when none of it was
+ * established.
+ *
+ * ── why every Sign Out button wants this rather than `auth.signOut()` ─────
+ *
+ * There are nine of them across the three apps and they were all the same
+ * line: call it, navigate to /welcome, catch a throw that could not happen.
+ * Being returned to /welcome is how this app says "you are signed out", so all
+ * nine said it whatever had happened — and the failure that matters leaves the
+ * STORED SESSION on the device for the next launch to restore. One button
+ * pressed on a bad connection, one phone handed on, one person inside another
+ * person's account.
+ *
+ * The sentence lives in src/lib/signOutSay.ts and the discrimination in
+ * src/lib/signOutFate.ts; this is the join between them and the screens, so
+ * that adding a tenth Sign Out button does not mean deciding any of it again.
+ *
+ * `after` still runs on an unconfirmed sign-out, and deliberately: `user` is
+ * cleared from the tree before the network is touched, so the screen behind is
+ * already gated and there is nowhere else for this person to stand. What
+ * changes is that they are told, rather than shown a sign-in screen and left
+ * to conclude it.
+ *
+ * `Alert` rather than screen state because the screen that raised this is
+ * usually unmounted by the time the answer arrives.
+ */
+export function useSignOutAndSay(context: string): (after?: () => void) => Promise<SignOutOutcome> {
+  const { signOut } = useAuth();
+  return useCallback(async (after?: () => void) => {
+    let fate: SignOutOutcome = 'unconfirmed';
+    try { fate = await signOut(); }
+    catch (e) { reportError(`${context}.signOut`, e); }
+    if (after) {
+      try { after(); } catch (e) { reportError(`${context}.signOut.after`, e); }
+    }
+    if (fate !== 'ended') Alert.alert(SIGN_OUT_UNCONFIRMED_TITLE, SIGN_OUT_UNCONFIRMED_HANDSET);
+    return fate;
+  }, [signOut, context]);
 }

@@ -1,5 +1,5 @@
 // Tests for assignPicker — the two silent replacements that stand between a
-// coach and the programme they just built.
+// coach and the program they just built.
 //
 // The defects these exist for:
 //
@@ -32,7 +32,7 @@ const ALL: LoadStatus[] = ['loading', 'ready', 'partial', 'error'];
 
 // THE REPORTED BUG. A week laid out with nobody selected, then the client
 // picked. Every status, because the old effect destroyed the draft under all
-// four of them — 'ready' by loading their programme over it, and the other
+// four of them — 'ready' by loading their program over it, and the other
 // three by clearing it outright.
 for (const status of ALL) {
   const d = seedDecision({
@@ -52,18 +52,18 @@ for (const status of ALL) {
     programStatus: 'ready', hasDraft: true, seededFor: null, clientId: 'c1', firstName: 'Priya',
   });
   ok(!!d.replaceLabel, 'the coach is OFFERED the load rather than having it done to them');
-  ok((d.replaceLabel ?? '').includes('Priya'), 'and the control names whose programme it would load');
+  ok((d.replaceLabel ?? '').includes('Priya'), 'and the control names whose program it would load');
   eq(/^[A-Z]/.test(d.replaceLabel ?? ''), true, 'buttons are Title Case, so it opens on a capital');
 }
 
-// And withheld when their programme could not be read: there is nothing to
+// And withheld when their program could not be read: there is nothing to
 // load, so offering to load it would be a control that cannot work.
 for (const status of ['loading', 'partial', 'error'] as LoadStatus[]) {
   const d = seedDecision({
     programStatus: status, hasDraft: true, seededFor: null, clientId: 'c1', firstName: 'Priya',
   });
   eq(d.replaceLabel, null,
-    `NO REPLACE CONTROL WHEN THERE IS NOTHING TO REPLACE IT WITH (${status}) — a button that loads an unread programme would load silence over real work`);
+    `NO REPLACE CONTROL WHEN THERE IS NOTHING TO REPLACE IT WITH (${status}) — a button that loads an unread program would load silence over real work`);
 }
 
 // Contents that came from this same client are not a disagreement, so there is
@@ -91,7 +91,7 @@ for (const status of ['loading', 'partial', 'error'] as LoadStatus[]) {
   eq(seedDecision({
     programStatus: status, hasDraft: false, seededFor: null, clientId: 'c1', firstName: 'Priya',
   }).action, 'clear',
-    `AN UNREAD PROGRAMME LEAVES THE BUILDER EMPTY (${status}) — filling it with a generated plan and calling it theirs is what the overwrite guard exists to stop`);
+    `AN UNREAD PROGRAM LEAVES THE BUILDER EMPTY (${status}) — filling it with a generated plan and calling it theirs is what the overwrite guard exists to stop`);
 }
 
 // Nobody selected is not a state that says anything about anybody.
@@ -134,18 +134,18 @@ eq(assignCtaLabel({ busy: true, picked: 3, exercises: 9, planLabel: null, soleNa
 {
   const l = assignCtaLabel({ busy: false, picked: 3, exercises: 0, planLabel: null, soleName: null });
   ok(/exercise/i.test(l),
-    'AN EMPTY PROGRAMME IS SAID FIRST — there is nothing to assign to anybody, so that is the coach’s next move whoever is ticked');
+    'AN EMPTY PROGRAM IS SAID FIRST — there is nothing to assign to anybody, so that is the coach’s next move whoever is ticked');
 }
 {
   // Both true on a fresh screen, and the order is the order the coach hits
-  // them: there is nothing to assign to anybody, so the programme is asked for
+  // them: there is nothing to assign to anybody, so the program is asked for
   // before the recipients are.
   const l = assignCtaLabel({ busy: false, picked: 0, exercises: 0, planLabel: null, soleName: null });
   ok(/exercise/i.test(l) && !/Pick Who/i.test(l),
-    'THE EMPTY PROGRAMME OUTRANKS THE EMPTY SELECTION — asking who should receive nothing sends the coach to the wrong end of the screen');
+    'THE EMPTY PROGRAM OUTRANKS THE EMPTY SELECTION — asking who should receive nothing sends the coach to the wrong end of the screen');
 }
 eq(assignCtaLabel({ busy: false, picked: 0, exercises: 9, planLabel: null, soleName: null }), 'Pick Who Gets This',
-  'with a programme built and nobody ticked, the button asks for the recipients');
+  'with a program built and nobody ticked, the button asks for the recipients');
 eq(assignCtaLabel({ busy: false, picked: 0, exercises: 9, planLabel: 'Nobody In This Group Yet', soleName: null }),
   'Pick Who Gets This',
   'AND ASKS BEFORE THE FAN-OUT DOES — planFanOut answers an empty list in the Groups screen’s vocabulary, and this screen has no groups in it');

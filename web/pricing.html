@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: light)">
 <title>Repple — pricing</title>
   <link rel="canonical" href="https://www.repplefitness.com/pricing">
-<meta name="description" content="Repple has no published price yet. What we can say: nothing is charged during the first release, a gym is billed per site rather than per member, and a quote comes from a conversation.">
+<meta name="description" content="Repple has no published subscription price yet. What we can say: Repple keeps 10% of anything sold through its own checkout, a gym is billed per site rather than per member, and a quote comes from a conversation.">
 <meta property="og:title" content="Repple — pricing">
 <meta property="og:description" content="No number on this page, because there isn't one yet. Here is what is true instead, and how to get a quote.">
 <meta property="og:url" content="https://www.repplefitness.com/pricing">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="audience-redesign.css?v=82df941359">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,20 +77,30 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="audience-page story-page story-pricing">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
@@ -67,7 +117,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <section class="hero">
   <div class="wrap">
@@ -94,30 +144,76 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="lead-in">
       <div class="eyebrow">What is true today</div>
-      <h2 class="hd">Four things we can<br><span class="serif">say without guessing.</span></h2>
+      <h2 class="hd">Five things we can<br><span class="serif">say without guessing.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">0</div>
-        <div class="lbl"><strong>Nothing is charged.</strong> Not reduced, not trialling &mdash; nothing. No price is configured in the billing system, so the software cannot start a charge even if somebody asked it to.</div>
+        <dt class="stat-n">0</dt>
+        <dd class="lbl"><strong>No subscription is charged.</strong> Not reduced, not trialling &mdash; nothing. No subscription price is configured in the billing system, so the software cannot open a checkout for one even if somebody asked it to. There is one charge that is not nothing, and it is the next panel along.</dd>
       </div>
       <div>
-        <div class="stat-n">Site</div>
-        <div class="lbl"><strong>A gym, not a headcount.</strong> Whatever the number becomes, the thing being priced is the site. Signing up your two hundredth member does not change what your gym owes.</div>
+        <dt class="stat-n">Site</dt>
+        <dd class="lbl"><strong>A gym, not a headcount.</strong> Whatever the number becomes, the thing being priced is the site. Signing up your two hundredth member does not change what your gym owes.</dd>
       </div>
       <div>
-        <div class="stat-n">Free</div>
-        <div class="lbl"><strong>For the person training.</strong> Creating an account and keeping your own training record costs nothing, and that is not planned to change with the price of a gym's console.</div>
+        <dt class="stat-n">10%</dt>
+        <dd class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it &mdash; and on a <em>one-off</em> sale small enough that 10% of it rounds to zero, which means under five minor units of your currency, no fee is sent at all. That relief is on one-off sales only: a recurring plan hands Stripe the percentage and Stripe rounds each invoice itself. What happens on a refund is the part worth reading, and it is below.</dd>
       </div>
       <div>
-        <div class="stat-n">Ask</div>
-        <div class="lbl"><strong>A quote is a conversation.</strong> Tell us the size of the place and what you run, and we will talk plainly about it &mdash; including telling you if Repple is the wrong fit.</div>
+        <dt class="stat-n">Free</dt>
+        <dd class="lbl"><strong>For the person training.</strong> Creating an account and keeping your own training record costs nothing, and that is not planned to change with the price of a gym's console.</dd>
       </div>
-    </div>
+      <div>
+        <dt class="stat-n">Ask</dt>
+        <dd class="lbl"><strong>A quote is a conversation.</strong> Tell us the size of the place and what you run, and we will talk plainly about it &mdash; including telling you if Repple is the wrong fit.</dd>
+      </div>
+    </dl>
     <p class="tiny after-sm">
-      The first of those is checkable rather than promised. The billing code refuses to open a
-      checkout unless a price has been created for it to charge, and none has been.
+      The first and the last are checkable rather than promised. The billing code refuses to open a
+      subscription checkout unless a price has been created for it to charge, and none has been. The
+      10% is the other side of the same code: it is a single figure applied to every sale that goes
+      through Repple&rsquo;s checkout, it is the platform&rsquo;s cut of a payment that otherwise lands in your
+      own Stripe account, and it is the number to ask us about if it is the wrong one for your gym.
     </p>
+
+    <!-- ── what the 10% buys, and the one place it does not come back ─────
+         This page previously said "Refund the sale and our 10% goes back with
+         it" as a flat rule. It is true of exactly one route — a coach pressing
+         refund inside Repple Coach, where the request asks Stripe for the
+         platform fee back in the same call. It is NOT true of a refund made in
+         the seller's own Stripe dashboard, and a gym has no other route: the
+         console's own refund writes a negative row in the gym's ledger and
+         never speaks to Stripe. A sentence that overstates what comes back on
+         a refund is the same class of mistake as the one that said nothing was
+         charged at all, and it is on the same page. -->
+    <div class="tiles two after">
+      <div class="tile">
+        <div class="cap">What it buys</div>
+        <h3>A sale that lands as a row</h3>
+        <p>A card taken from inside the app, on your own Stripe account rather than ours, and a sale
+           that arrives as a record instead of a note to type in later. A membership term is extended
+           or opened for the member who bought it; a pass has its visits credited; a coach&rsquo;s package
+           has its sessions credited. The payment is written into the same ledger the front desk
+           writes into, so the month reconciles against one list rather than two.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">On a refund</div>
+        <h3>Where the 10% does not come back</h3>
+        <p>A coach who refunds a sale <em>inside Repple Coach</em> gets our 10% returned with it: the app
+           asks Stripe for the platform fee back in the same request. A refund made in your own Stripe
+           dashboard does not &mdash; Repple is not part of that request and the fee stays taken &mdash; and a gym
+           today has only that second route, because the gym console has no refund button at all. A
+           refund a gym makes in Stripe comes back into your ledger as a reversing row, so the record
+           stays right; the 10% does not come back with it. That is a gap in the product rather than a
+           policy, and it is written here instead of found later in a settlement report.
+           <a href="mailto:support@repplefitness.com?subject=A%20refunded%20sale">Tell us if it has cost you</a>.</p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -133,7 +229,7 @@ addEventListener('DOMContentLoaded', function () {
           many classes, how much of the record is kept, how hard the console gets worked in a
           month. Nobody has done that yet, so nobody knows.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A guessed price sets a ceiling.</strong> Publish one now and it becomes the number every later conversation argues against, whether or not it was ever right.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -211,26 +307,27 @@ addEventListener('DOMContentLoaded', function () {
         a statement about the present, not a commitment about a price list nobody has written.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-apps">
       <table class="data">
+        <caption class="vh" id="tbl-apps">Each app, who it is for and what it holds</caption>
         <thead>
-          <tr><th>App</th><th>Who it is for</th><th>What it holds</th></tr>
+          <tr><th scope="col">App</th><th scope="col">Who it is for</th><th scope="col">What it holds</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Repple</strong></td>
+            <th scope="row"><strong>Repple</strong></th>
             <td>The person training</td>
             <td>Sessions, sets, meals, scans, measurements, progress photos and habits, in one history that follows the account rather than the gym. Works with no coach and no gym attached. <a href="/client">What it holds</a>.</td>
           </tr>
           <tr>
-            <td><strong>Repple Coach</strong></td>
+            <th scope="row"><strong>Repple Coach</strong></th>
             <td>The trainer</td>
             <td>The roster, program building and assignment, the coaching week, exercise clips that play inside a client's session, and the figures on how the book is actually going. <a href="/trainer">What it does</a>.</td>
           </tr>
           <tr>
-            <td><strong>Repple Studio</strong></td>
+            <th scope="row"><strong>Repple Studio</strong></th>
             <td>The gym</td>
-            <td>Timetable, one-to-one payroll, the price book and memberships, the door log, the equipment register and the CSV import &mdash; on the floor as a phone app and at the desk as a browser console. <a href="/studio">What it runs</a>.</td>
+            <td>Timetable, one-to-one payroll, the price book and memberships, the door log, the equipment register and the CSV import. The browser console runs all of it; the phone app is the part you can carry onto the floor &mdash; members, revenue, class attendance and the equipment register &mdash; and the desk jobs stay at the desk. <a href="/studio">What it runs</a>.</td>
           </tr>
         </tbody>
       </table>
@@ -250,7 +347,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Getting a quote</div>
       <h2 class="hd">Four lines in an email<br><span class="serif">is enough to start.</span></h2>
     </div>
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -294,7 +391,7 @@ addEventListener('DOMContentLoaded', function () {
     <div class="faq">
       <details>
         <summary>Is this a free trial?</summary>
-        <div class="a"><p>No, and calling it one would be a way of implying a price. A trial has a length and a figure waiting at the end of it. This is a first release with no price set, which is a different thing: there is no clock running against you.</p></div>
+        <div class="a"><p>No, and calling it one would be a way of implying a price. A trial has a length and a figure waiting at the end of it; this is a first release with no subscription price set, which is a different thing. One honest caveat: the coach app does show a fourteen-day countdown on its dashboard, left over from the billing work. It gates nothing &mdash; no screen closes and no feature stops when it reaches zero, because there is no price for it to hand you on to. If you are looking at that counter wondering what happens at the end of it, the answer is nothing, and the counter is the thing that is wrong rather than the sentence above.</p></div>
       </details>
       <details>
         <summary>If I start now, what happens when pricing is set?</summary>
@@ -318,7 +415,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Why should we believe there is no hidden number?</summary>
-        <div class="a"><p>Because the same page would have to be lying about something checkable. The billing plumbing exists and is switched off: it refuses to open a checkout because no price has been created for it to charge. There is nowhere for a hidden figure to be hiding.</p></div>
+        <div class="a"><p>Because the one number that does exist is on this page. Repple keeps 10% of anything sold through its own checkout, and that is stated above rather than discovered in a settlement report. The subscription side is the checkable part: the billing plumbing exists and is switched off, and refuses to open a checkout because no price has been created for it to charge. Between the two, the whole of what Repple can take from a gym today is written down.</p></div>
       </details>
     </div>
   </div>
@@ -328,8 +425,9 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <h2 class="display">Ask, and get a<br><em>straight</em> answer.</h2>
     <p class="lede" style="margin:22px auto 0;max-width:52ch">
-      Four lines about your gym is enough. Nothing is charged in the meantime, and creating an
-      account costs nothing at all.
+      Four lines about your gym is enough. No subscription is charged in the meantime, creating an
+      account costs nothing at all, and the only money Repple takes today is 10% of what you sell
+      through its own checkout.
     </p>
     <div class="btn-row">
       <a class="btn primary" href="mailto:support@repplefitness.com?subject=Pricing">Email us about pricing</a>
@@ -346,30 +444,37 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-            </svg>
-          </span>
-          Repple
-        </a>
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
+        <h2 class="fh">Apps</h2>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Getting started</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>
@@ -377,17 +482,24 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

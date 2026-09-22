@@ -34,12 +34,41 @@ export default function ConsoleError({ error, reset }: {
   }, [error]);
 
   return (
-    <div style={{ padding: 40, maxWidth: '62ch' }}>
+    /* A live region, because this swaps in CLIENT-SIDE. There is no
+       document navigation, so focus does not move and nothing is read: the
+       page a person was working on is replaced by an error they are never
+       told about. components/Gate.tsx does the same for its unreachable
+       state and is the pattern this was missing. */
+    <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: 40, maxWidth: '62ch' }}>
       <h1>This screen stopped</h1>
+      {/* ── what this boundary is entitled to say ────────────────────────
+          This paragraph read "Nothing has been written and nothing has been
+          lost", in bold, as the one confident sentence on the page. Neither
+          half of it was established by anything.
+
+          A React error boundary catches a throw during RENDER. It is told
+          nothing about what the screen was doing beforehand, so a page that
+          wrote a row, called setState and then threw on the next render
+          arrives here indistinguishable from one that touched nothing — and
+          this sentence then tells an owner their save did not happen. The
+          console's own rule is that a correction is a second recorded fact:
+          an owner who believes nothing was written saves again, and the
+          second fact is a duplicate row.
+
+          "Nothing has been lost" is false in the ordinary case rather than
+          the rare one. Everything typed into the screen and not yet saved
+          goes with it, every time.
+
+          What the boundary DOES know is the half that is worth saying: it
+          stands in front of the screen and not in front of the database, so
+          nothing already recorded is touched by a failure to draw. */}
       <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
         Something on this page threw an error, so it is showing nothing rather than showing you
-        half of it. <strong style={{ color: 'var(--ink)' }}>Nothing has been written and nothing
-        has been lost</strong> — this is a failure to draw the page, not a failure of the record.
+        half of it. This is a failure to draw the screen, not a failure of the record:{' '}
+        <strong style={{ color: 'var(--ink)' }}>anything already saved is still saved</strong>.
+        What this cannot tell you is whether something you saved a moment ago landed — it knows
+        nothing about what the page was doing when it stopped — so open the screen again and look
+        before you save it a second time. Anything typed in and not yet saved has gone with the page.
       </p>
       <p style={{ color: 'var(--ink3)', marginTop: 10, fontSize: 12.5 }}>
         {/* Named where it can be: `digest` is what a server log can be searched

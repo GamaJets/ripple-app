@@ -63,13 +63,41 @@
 // builds without notifications — a delivery receipt the app never receives. It
 // now reports what it can actually see (the rows written to the threads) and
 // says so plainly when the write fails.
+//
+// ── The facts that put each name on the list ──────────────────────────────
+//
+// The recipient list was `recipients.map((c) => c.name).join(', ')` — names and
+// nothing else, under one sentence defining the band. A coach about to write to
+// fourteen people could not check one of them without leaving the screen and
+// losing the message in the box, so they sent it. Every fact they needed was
+// already here and was being thrown away on the way in: `rankClients` computes
+// a sentence per client and only the band survived, `packLeft` had the number
+// and only the boolean survived, the roster has carried `adherence` all along.
+// src/lib/segmentFacts.ts picks the right one per segment and the list now
+// draws a row per person rather than a paragraph of names.
+//
+// ── And what became of the send, which is not "delivered" ─────────────────
+//
+// The report went into an `Alert` and the screen behind it was left blank —
+// indistinguishable from never having pressed the button. What stays on screen
+// now is src/lib/broadcastOutcome.ts's three figures, which are three separate
+// claims: ADDRESSED (the segment, which the guard above has already refused to
+// let be the size of a read), WRITTEN (rows the server handed back, one
+// `.select('id').single()` each), and DELIVERED — null, always, and said out
+// loud. A `messages` insert fires the trigger from part 26, which calls
+// notify-message, which posts to send-push, which hands it to Expo. Nothing on
+// that chain reports back here, and the last hop would only ever say a
+// notification was accepted — not that a handset was on, not that a banner
+// appeared, not that anybody read it. The gym-side log (src/lib/gymBroadcastLog
+// .ts) keeps addressed and delivered as two columns for the same reason; this
+// is that rule where the second figure can never be filled in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Cta, Ghost, Notice, PageHead, Scrim, FigureCard, Meter } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { useClientTags } from '../../src/ui/clientTags';
@@ -78,22 +106,34 @@ import { guardRecipients, bulkReport, bulkThreadNote, type WriteOutcome } from '
 import { listNames } from '../../src/lib/groupProgram';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import type { StatusLevel } from '../../src/lib/status';
 import { rankClients, readClientActivity, type DriftInput } from '../../src/lib/clientDrift';
 import { packLeft } from '../../src/lib/coachMoney';
 import { fetchClientPurchases } from '../../src/lib/connect';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   COMPUTED_SEGMENTS, segmentDef, segmentMembers, unassessed, unassessedNote,
   type ClientFacts, type SegmentKey,
 } from '../../src/lib/segments';
+import { recipientFact, factsCaption, type Addressed } from '../../src/lib/segmentFacts';
+import {
+  sendOutcome, outcomeLines, outcomeTitle, WHERE_THE_RECORD_IS, type SendOutcome,
+} from '../../src/lib/broadcastOutcome';
+// The coach's saved messages, offered INSIDE this composer — the same library
+// and the same rules as the picker in app/(trainer)/chat.tsx. See `useSaved`.
+import { useMyTemplates } from '../../src/ui/messageTemplates';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import {
+  applyTemplate, orderTemplates, templatesEmptyLine, hasUnfilledToken, UNFILLED_TOKEN_NOTE,
+} from '../../src/lib/messageTemplates';
 
 export default function Broadcast() {
   const t = useTheme();
   const router = useRouter();
-  const { roster, status: rosterStatus } = useRoster();
-  const { allTags, tagsFor, status: tagStatus } = useClientTags();
-  const { tenant } = useTenant();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { allTags, tagsFor, status: tagStatus, reload: reloadTags } = useClientTags();
+  const { tenant, refresh: refreshTenant } = useTenant();
   /**
    * What the coach has chosen to write to.
    *
@@ -111,6 +151,19 @@ export default function Broadcast() {
   const def = sel.kind === 'seg' ? segmentDef(sel.key) : null;
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * `busy`, held where a second tap in the same frame can actually see it.
+   *
+   * `if (… || busy) return` below is React state read inside a handler that
+   * then awaits, so the guard only holds if a re-render lands BETWEEN two taps.
+   * It does not on a double tap, and what gets through is not a wasted request:
+   * `sendCoachMessages` is a per-client `messages` insert plus a push, so the
+   * second run puts the coach's words in every thread a second time and rings
+   * every handset again. There is nothing on the server that would collapse
+   * them — this screen's own retry note says why that matters: it "would look,
+   * from their side, like their coach repeating themselves".
+   */
+  const sending = useRef(false);
   // The clients this screen tried to write to and could not. Held so the
   // recipient list can name them and the retry can go to exactly them — a coach
   // told "8 of 12 went through" and nothing else has no way to reach the four.
@@ -129,12 +182,31 @@ export default function Broadcast() {
    * the guard says "Reading who that is…" and the send is held, which is
    * exactly what a segment whose membership is unknown deserves.
    */
-  const [drift, setDrift] = useState<{ status: LoadStatus; byId: Map<string, StatusLevel | null> } | null>(null);
+  /**
+   * The band AND the sentence behind it.
+   *
+   * It held `StatusLevel | null` and nothing else, so `rankClients` computed
+   * "Nothing for 19 days — was 3.5 days a week" for every client and this
+   * screen dropped it on the floor, leaving a recipient list of bare names that
+   * a coach had no way to check. `reason` is clientDrift's own wording,
+   * carried rather than re-written here: a second set of sentences on this
+   * screen would be free to disagree with the band heading on the Clients tab
+   * about the same person.
+   */
+  const [drift, setDrift] = useState<{
+    status: LoadStatus;
+    byId: Map<string, { status: StatusLevel | null; reason: string }>;
+  } | null>(null);
   const [packs, setPacks] = useState<{ status: LoadStatus; byId: Map<string, { left: number | null; runOut: boolean }> } | null>(null);
   // Started, so an effect that fires twice does not read twice. A ref rather
   // than the state above: the state is set asynchronously and two renders in
   // the same tick would both see null.
   const asked = useRef<{ drift: boolean; packs: boolean }>({ drift: false, packs: false });
+  // Bumped by the pull below, and in the selection effect's dependency array.
+  // Clearing `asked` on its own would not be enough: it is a ref, so nothing
+  // re-runs on the strength of it, and whether the effect fired again would
+  // depend on the roster provider happening to hand back a new array.
+  const [sourceNonce, setSourceNonce] = useState(0);
 
   const readDrift = useCallback(async (ids: string[], tenantId: string | undefined) => {
     setDrift({ status: 'loading', byId: new Map() });
@@ -142,14 +214,21 @@ export default function Broadcast() {
       const read = await readClientActivity(supabase, ids, { tenantId });
       const notAsked = new Set(read.notAsked);
       const inputs: DriftInput[] = ids.map((id) => ({ clientId: id, events: read.byClient[id] ?? [] }));
-      const byId = new Map<string, StatusLevel | null>();
+      const byId = new Map<string, { status: StatusLevel | null; reason: string }>();
       for (const d of rankClients(inputs)) {
         // A client the database was never asked about holds NO assessment. Their
         // empty event list is the absence of a question, not the absence of
         // activity, and letting it fall through as 'idle' would put every
         // hand-added client at the top of a list of people to chase — people who
         // have no thread to be chased in.
-        byId.set(d.clientId, notAsked.has(d.clientId) ? null : d.status);
+        // The reason goes with the band and is blanked in the same breath. A
+        // client nobody asked about has no verdict, so they must not carry a
+        // sentence describing one either — `assessDrift` still writes a reason
+        // for an empty event list, and that sentence is about a read that never
+        // happened.
+        byId.set(d.clientId, notAsked.has(d.clientId)
+          ? { status: null, reason: '' }
+          : { status: d.status, reason: d.reason });
       }
       // Truncated is 'partial' and 'partial' holds the send. The rows past the
       // ceiling are exactly the ones that would disprove somebody's silence.
@@ -204,14 +283,34 @@ export default function Broadcast() {
       asked.current.packs = true;
       void readPacks();
     }
-  }, [def, rosterStatus, roster, tenant?.id, readDrift, readPacks]);
+  }, [def, rosterStatus, roster, tenant?.id, readDrift, readPacks, sourceNonce]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen decides who a message goes to, and every input to that decision
+   * is a read that can be refused: the roster, the tag map the segment chips
+   * are built from, the gym the activity query is scoped by, and — for the two
+   * computed segments — the drift or the packs read behind them.
+   *
+   * The segment read is asked for again only if it has already been asked once.
+   * `asked` exists to stop the effect firing the same expensive read on every
+   * render, and clearing it here rather than calling the reads directly means
+   * the refresh goes back through the same 'roster must be whole' gate: a
+   * refresh that ran the drift read against a partial roster would assess a
+   * page of the coach's book and size a segment by the read, which is the
+   * defect this whole screen is built against. */
+  const pull = usePullToRefresh(useCallback(() => {
+    asked.current = { drift: false, packs: false };
+    setSourceNonce((n) => n + 1);
+    return Promise.all([refreshRoster(), Promise.resolve(reloadTags()), Promise.resolve(refreshTenant())]);
+  }, [refreshRoster, reloadTags, refreshTenant]));
 
   /** Everything a segment asks about one client, in the roster's own order. */
   const facts: ClientFacts[] = useMemo(() => roster.map((c) => {
     const p = packs?.byId.get(c.id);
     return {
       clientId: c.id,
-      drift: drift ? drift.byId.get(c.id) ?? null : null,
+      drift: drift ? drift.byId.get(c.id)?.status ?? null : null,
       packLeft: p?.left ?? null,
       packRunOut: p?.runOut ?? false,
       adherence: c.adherence,
@@ -240,6 +339,31 @@ export default function Broadcast() {
     ? `the “${sel.tag}” segment`
     : def ? def.object : 'your client list';
 
+  /**
+   * The same choice, in the shape src/lib/segmentFacts.ts takes.
+   *
+   * It carries the DEFINITION rather than the key, which is what makes the
+   * fallback below honest: a `SegmentKey` with no definition behind it cannot
+   * describe anybody, so it falls back to 'all' — no fact line at all — rather
+   * than to a segment whose rules nothing here knows.
+   */
+  const addressed: Addressed = sel.kind === 'tag'
+    ? { kind: 'tag', tag: sel.tag }
+    : def ? { kind: 'seg', def } : { kind: 'all' };
+  const factsNote = factsCaption(addressed);
+
+  /**
+   * What became of the last send, for as long as this screen is open.
+   *
+   * Kept in state rather than left in the `Alert`, which is gone the moment a
+   * thumb lands on it: a coach who sent to nineteen and had nineteen land was
+   * left looking at a blank composer, which is the same screen they would see
+   * if they had never pressed the button. Null until something has been sent —
+   * an outcome panel over a send that has not happened would be reporting on
+   * nothing.
+   */
+  const [outcome, setOutcome] = useState<SendOutcome | null>(null);
+
   /* Whether the LIST is trustworthy, as distinct from whether the send worked.
    *
    * Two reads, and both are load-bearing. The roster says who exists; the second
@@ -254,11 +378,22 @@ export default function Broadcast() {
    * A source that has not been asked for yet is 'loading' rather than 'ready'.
    * A segment nobody has computed has no members, and "0 recipients" is not the
    * answer to a question that has not been put. */
+  /** What an unasked source is worth saying.
+   *
+   *  'loading' while the roster is whole, because the effect above starts the
+   *  read the moment a segment on it is selected and one really is in flight.
+   *  But that effect REFUSES to start over a roster that is not whole — rightly
+   *  — so under a truncated book nothing is loading and nothing ever will be,
+   *  and reporting 'loading' put "this takes a moment" under a send that was
+   *  waiting on something else entirely. Deferring to the roster's own status
+   *  (which `guardRecipients` takes the worst of anyway) leaves the sentence
+   *  describing the read that is actually the problem. */
+  const unasked: LoadStatus = rosterStatus === 'ready' ? 'loading' : rosterStatus;
   const sourceStatus: LoadStatus = !def
     ? (sel.kind === 'tag' ? tagStatus : 'ready')
     : def.source === 'roster' ? 'ready'
-    : def.source === 'drift' ? (drift?.status ?? 'loading')
-    : (packs?.status ?? 'loading');
+    : def.source === 'drift' ? (drift?.status ?? unasked)
+    : (packs?.status ?? unasked);
   const claim = guardRecipients(rosterStatus, sourceStatus, segmentLabel);
   // The count the coach reads on the button. It is only a count when the read
   // behind it was whole — under any other status the button is withheld anyway,
@@ -280,7 +415,19 @@ export default function Broadcast() {
    */
   const deliver = async (ids: string[]) => {
     const b = body.trim();
-    if (!b || !ids.length || busy) return;
+    // Synchronous, before anything awaits — see `sending`. `busy` is kept in
+    // the test beside it so the control still refuses while a re-render is
+    // pending for any other reason.
+    if (!b || !ids.length || busy || sending.current) return;
+    sending.current = true;
+    try {
+      await deliverOnce(ids, b);
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const deliverOnce = async (ids: string[], b: string) => {
     // Refuse rather than warn. A message cannot be taken back, and "send to
     // everybody" written against a list we could not read whole is not a
     // smaller version of the thing the coach asked for.
@@ -292,6 +439,11 @@ export default function Broadcast() {
         clientId: r.clientId, name: nameOf(r.clientId), ok: r.ok, why: r.why,
       }));
       const report = bulkReport('message', outcomes);
+      // ADDRESSED is `ids`, not `recipients`. On a retry those differ on
+      // purpose — the retry goes to the threads that failed and to no others —
+      // and this panel is about the send that just happened, not about the
+      // segment it was drawn from an hour ago.
+      setOutcome(sendOutcome(ids.length, outcomes.filter((o) => o.ok).length));
       setFailed(report.retry);
       // The composer is only cleared when there is nothing left to send. A
       // coach whose message half-landed needs the words still in the box —
@@ -299,16 +451,84 @@ export default function Broadcast() {
       // the first, in the threads of the people who got both.
       if (!report.retry.length) setBody('');
       Alert.alert(report.title, report.body);
-    } catch {
-      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent. Check your connection and try again.');
+    } catch (e) {
+      reportError('broadcast.send', e);
+      // The panel above this is headed "Your last send", and the last send is
+      // THIS one. Left standing, an earlier "Written to every thread" would sit
+      // on screen describing a send that has just failed — the one shape this
+      // screen exists to refuse. Cleared rather than replaced with
+      // `sendOutcome(ids.length, 0)`: every per-client insert in
+      // `sendCoachMessages` is caught and reported individually, so anything
+      // reaching here threw AFTER them, and "nothing was written" is a figure
+      // we would be inventing.
+      setOutcome(null);
+      Alert.alert('Not Sent', 'Something went wrong on the way to your clients’ threads, and this screen cannot say how far it got. Open a thread to check before sending it again. A second send would put the same words there twice.');
     } finally { setBusy(false); }
   };
-  const send = () => deliver(recipients.map((c) => c.id));
+  /**
+   * ── REVIEW, BEFORE N THINGS THAT CANNOT BE TAKEN BACK ───────────────────
+   *
+   * The data-layout review's flow for this screen is "audience → context →
+   * compose → review → delivery state", and the fourth step was missing: the
+   * button sent. The count was on it and the names were above it, so the coach
+   * COULD have checked — but a thumb that lands on a full-width button at the
+   * bottom of a form is not a decision, and what it starts is one message per
+   * person that no screen in this app can recall.
+   *
+   * So the press asks once, and says the two things that are being agreed to:
+   * how many, and which audience. The ids are taken at the press and not at
+   * the confirm, so what goes is the list the coach was looking at when they
+   * asked — a roster refresh landing under the alert cannot widen it.
+   *
+   * The retry below does not ask again. It goes to named people the coach has
+   * just been told about, and a second question there is friction on a repair.
+   */
+  const send = () => {
+    const ids = recipients.map((c) => c.id);
+    // Anything the button should not have allowed goes straight to `deliver`,
+    // which already refuses with the guard's own sentence.
+    if (!body.trim() || !ids.length || busy || !claim.allowed) { void deliver(ids); return; }
+    const audience = sel.kind === 'tag' ? `“${sel.tag}”` : def ? def.title : 'All Clients';
+    Alert.alert(
+      ids.length === 1 ? 'Send to 1 Client?' : `Send to ${ids.length} Clients?`,
+      `Audience: ${audience}. Your words go into ${ids.length === 1 ? 'their own thread' : `${ids.length} separate threads, one each`}, exactly as typed, and cannot be taken back once they have gone.`,
+      [
+        { text: 'Not Yet', style: 'cancel' },
+        { text: 'Send', onPress: () => { void deliver(ids); } },
+      ],
+    );
+  };
+
+  /**
+   * ── the saved messages, inside the composer ─────────────────────────────
+   *
+   * The review asks for saved messages to live in the compose flow rather than
+   * as a destination of their own, and the one-to-one composer has had them
+   * since the library was built. This one had not, so the message a coach
+   * writes most often to everybody — the holiday closure, the timetable change
+   * — was the one they had to retype or go and copy.
+   *
+   * Same rules as chat.tsx: it lands IN THE BOX and sends nothing, and it is
+   * appended to what is typed rather than replacing it. One difference, and it
+   * is the honest one: `{name}` cannot be filled here. A broadcast is the same
+   * words in every thread — nothing is composed per client under the coach's
+   * name (see the head of this file) — so the token is left visible and
+   * `UNFILLED_TOKEN_NOTE` says, under the box, that it goes exactly as it
+   * reads. `{coach}` is the coach's own name and is filled.
+   */
+  const saved = useMyTemplates();
+  const { name: coachName } = useMyTrainerProfile();
+  const [savedOpen, setSavedOpen] = useState(false);
+  const useSaved = (tpl: string) => {
+    const filled = applyTemplate(tpl, null, coachName ?? null);
+    setBody((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n\n${filled}` : filled));
+    setSavedOpen(false);
+  };
 
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}
-      style={{ paddingHorizontal: sp.md + 2, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
+      style={{ minHeight: 40, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, ...font(active ? '700' : '500'), color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 
@@ -316,16 +536,27 @@ export default function Broadcast() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Send one message to a whole segment of your clients.</Text>
+        <PageHead title="Broadcast" subtitle="One message, each client’s own thread" />
+
+        {/* ── who this goes to, as a figure ───────────────────────────────────
+            The page opens on the one number that matters before an irreversible
+            send: how many people. It is `countable`'s number and no other: the
+            same guard that withholds the count on the button withholds it here,
+            so the card draws a dash and the guard's own reason rather than the
+            length of a list that is part of a book. The meter is the share of
+            the whole roster, under the same guard; with no whole read it has no
+            fill at all, never an empty bar that reads as "nobody". */}
+        <FigureCard title="Going To"
+          figure={countable ? String(recipients.length) : null}
+          unit={countable ? (recipients.length === 1 ? 'client' : 'clients') : undefined}
+          period={sel.kind === 'all' ? 'All Clients' : sel.kind === 'tag' ? `Tag: ${sel.tag}` : def?.title}
+          detail={countable ? undefined : claim.reason ?? 'Not counted until your client list has loaded in full.'}>
+          <Meter label="Of Your Book" tone="blue" target={roster.length}
+            val={countable ? recipients.length : null}
+            note={countable ? `${recipients.length} of ${roster.length}` : 'Not counted'} />
+        </FigureCard>
 
         {/* ── the segment ──────────────────────────────────────────────────
             Two rows, because they are two different kinds of claim. The top row
@@ -338,7 +569,7 @@ export default function Broadcast() {
         <Section>
           <SectionHead title="Send To" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
-            {chip('All clients', sel.kind === 'all', () => setSel({ kind: 'all' }))}
+            {chip('All Clients', sel.kind === 'all', () => setSel({ kind: 'all' }))}
             {allTags.map((tg) => chip(tg, sel.kind === 'tag' && sel.tag === tg,
               () => setSel(sel.kind === 'tag' && sel.tag === tg ? { kind: 'all' } : { kind: 'tag', tag: tg })))}
           </ScrollView>
@@ -352,7 +583,6 @@ export default function Broadcast() {
           </ScrollView>
         </Section>
 
-        <Rule />
 
         {/* ── who that is ────────────────────────────────────────────────── */}
         <Section>
@@ -362,17 +592,17 @@ export default function Broadcast() {
               a send to two thirds of a segment look complete. */}
           <SectionHead title="Recipients" note={countable && recipients.length ? `${recipients.length}` : undefined} />
           {bookUnread ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your client list could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Client List Could Not Be Read"
               note="Nobody is listed below because the roster did not come back. This is not an empty book, and nothing can be sent until it loads." />
           ) : bookShort ? (
-            <Notice tone={t.warn} kicker="Roster" title="This is part of your book"
-              note="Your roster came back at its row limit, so anyone past the point it stopped is not in this list and would not receive the message. The send is held rather than going to the part that loaded — a message cannot be taken back, and nothing afterwards would say who had been left out." />
+            <Notice tone={t.warn} kicker="Roster" title="This Is Part of Your Book"
+              note="Your roster came back at its row limit, so anyone past the point it stopped is not in this list and would not receive the message. The send is held rather than going to the part that loaded: a message cannot be taken back, and nothing afterwards would say who had been left out." />
           ) : segUnreliable ? (
             <Notice tone={t.warn} kicker={sel.kind === 'tag' ? 'Tags' : 'Segment'}
-              title="This segment could not be read in full"
+              title="This Segment Could Not Be Read in Full"
               note={sel.kind === 'tag'
                 ? 'Your client tags did not all come back, so somebody in this segment may be missing from the list below and the send is held until they load.'
-                : `What decides ${segmentLabel} did not all come back, so this list is the size of the read rather than the size of the segment — and there is nothing on it to say which. The send is held until it loads.`} />
+                : `What decides ${segmentLabel} did not all come back, so this list is the size of the read rather than the size of the segment, and there is nothing on it to say which. The send is held until it loads.`} />
           ) : null}
 
           {/* What the band actually means, said before the names rather than
@@ -385,9 +615,17 @@ export default function Broadcast() {
 
           {/* The people the segment's source could not answer for. Said out
               loud because otherwise the count is quietly smaller than the
-              coach's book with nothing anywhere explaining the gap. */}
-          {def && unassessedNote(def, notAssessed) ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{unassessedNote(def, notAssessed)}</Text>
+              coach's book with nothing anywhere explaining the gap.
+
+              And only once the source read has LANDED. `unassessed` counts
+              clients whose drift is null, and null is unknown — so while the
+              read is in flight, and for ever after it fails, every client on
+              the book counts, and this sentence told a coach that all forty of
+              their clients had been added by hand and had no account. The
+              guard's own sentence covers that moment instead, and says the
+              truthful thing about it. */}
+          {def && unassessedNote(def, notAssessed, isWhole(sourceStatus)) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{unassessedNote(def, notAssessed, isWhole(sourceStatus))}</Text>
           ) : null}
           {/* Every name, not the first two. This list is the last thing between
               the coach and N irreversible writes, and the `numberOfLines={2}`
@@ -402,24 +640,71 @@ export default function Broadcast() {
                the guard's own sentence is already on screen, further down. */
             <Text style={{ ...ty.label, color: t.ink3 }}>No clients in this segment.</Text>
           ) : recipients.length === 0 ? null : (
-            <Text style={{ ...ty.body, color: t.ink2 }}>{recipients.map((c) => c.name).join(', ')}</Text>
+            /* A ROW PER PERSON, and under each name the fact that put them
+               there. This was `.join(', ')` — a paragraph of names under one
+               sentence defining the band, which is a definition and not
+               evidence about anybody on it. The coach's real question at this
+               moment is "is Tuesday's client in this?", and a comma-joined run
+               of fourteen names is the shape that cannot answer it.
+
+               `recipientFact` returns null rather than a dash when there is
+               nothing true to put under a name: an em dash here would be the
+               screen claiming it looked and found nothing, which for a drift
+               segment is exactly the claim it must not make. */
+            <View>
+              {factsNote ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{factsNote}</Text>
+              ) : null}
+              {recipients.map((c, i) => {
+                const line = recipientFact(addressed, {
+                  driftReason: drift?.byId.get(c.id)?.reason ?? null,
+                  packLeft: packs?.byId.get(c.id)?.left ?? null,
+                  adherence: c.adherence,
+                  tags: tagsFor(c.id),
+                });
+                return (
+                  <View key={c.id}
+                    style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{c.name}</Text>
+                    {line ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
           )}
 
           {/* Who it did not reach last time. Named, and still here, so the retry
-              below is about people rather than about a number. */}
+              below is about people rather than about a number.
+
+              The kicker was "Not delivered", which is the one word this screen
+              may not use loosely: what is known about these people is that no
+              `messages` row was written for them, and "delivered" would have
+              been the app claiming knowledge of a handset in the one place it
+              has none. See src/lib/broadcastOutcome.ts. */}
           {failed.length ? (
-            <Notice tone={t.warn} kicker="Not delivered" title={`${failed.length} did not get the last one`}
-              note={`${listNames(failed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
+            <Notice tone={t.warn} kicker="Not Written" title={`${failed.length} Did Not Get the Last One`}
+              note={`${listNames(failed.map(nameOf))}: nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the message ────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Message" />
           <TextInput value={body} onChangeText={setBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.md }} />
+          {/* Directly under the box it fills, and quiet: the one green button
+              in this section is the send. */}
+          <View style={{ alignSelf: 'flex-start', marginBottom: sp.md }}>
+            <Ghost label="Use a Saved Message" icon="pencil" onPress={() => setSavedOpen(true)} />
+          </View>
+          {hasUnfilledToken(body) ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+              {UNFILLED_TOKEN_NOTE} A broadcast is the same words to everyone, so a name cannot be filled in for you here.
+            </Text>
+          ) : null}
 
           {/* What the client will actually see, said to the coach and not added
               to the message. The full argument is on `bulkThreadNote`: appending
@@ -446,6 +731,24 @@ export default function Broadcast() {
               disabled={!body.trim() || !recipients.length || busy || !claim.allowed} onPress={send} />
           </View>
 
+          {/* ── what became of the last send ──────────────────────────────
+              Three figures, three separate claims, and the third is null and
+              stays null. The tone is `t.good` only when every addressed thread
+              was written — and even then the lines under it say that how many
+              of those reached a phone is unknown, because "all 19" is exactly
+              where a coach stops reading. `t.good` is a dot beside ink text,
+              never the ink: the scale reserves status colour for status and
+              none of these clears AA as type. */}
+          {outcome ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Notice
+                tone={outcome.addressed > 0 && outcome.written === outcome.addressed ? t.good : t.warn}
+                kicker="Your Last Send" title={outcomeTitle(outcome)}
+                note={outcomeLines(outcome).join('\n\n')} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{WHERE_THE_RECORD_IS}</Text>
+            </View>
+          ) : null}
+
           {/* Retry goes to the threads that failed and to no others. Sending to
               the segment again would put the same words a second time in the
               thread of everybody it already reached. */}
@@ -457,6 +760,38 @@ export default function Broadcast() {
         </Section>
 
       </ScrollView>
+
+      {/* ── the saved messages ───────────────────────────────────────────
+          A picker and nothing more, as in the chat composer: editing them is
+          on its own screen, because an editor inside a composer is where
+          somebody edits the template while meaning to edit the message. */}
+      <Modal visible={savedOpen} transparent animationType="slide" onRequestClose={() => setSavedOpen(false)}>
+        <Scrim onPress={() => setSavedOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+            Tapping one puts it in your box. Nothing is sent until you press Send, and a client’s name is not filled in. Everybody gets the same words.
+          </Text>
+          <ScrollView>
+            {saved.rows.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(saved.status)}</Text>
+            ) : orderTemplates(saved.rows).map((tpl, i) => (
+              <Pressable key={tpl.id ?? tpl.title} onPress={() => useSaved(tpl.body)}
+                accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
+                style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+                  {applyTemplate(tpl.body, null, coachName ?? null)}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Ghost label="Manage Your Messages" onPress={() => { setSavedOpen(false); router.push('/(trainer)/templates-messages'); }} />
+          <View style={{ height: sp.sm }} />
+          <Cta label="Close" wide onPress={() => setSavedOpen(false)} />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

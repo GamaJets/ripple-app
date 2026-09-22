@@ -183,7 +183,7 @@ export function deviceUnitNote(unit: WeightUnit | LengthUnit, source: UnitSource
   if (source === 'chosen') return null;
   const word = unit === 'kg' ? 'kilograms' : unit === 'lb' ? 'pounds'
     : unit === 'cm' ? 'centimetres' : 'feet and inches';
-  return `Not set yet — showing ${word}, from your phone's region. Tap to choose.`;
+  return `Not set yet. Showing ${word}, from your phone's region. Tap to choose.`;
 }
 
 /**

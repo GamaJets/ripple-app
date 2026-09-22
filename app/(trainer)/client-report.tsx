@@ -38,12 +38,14 @@
 // statement about what could not be read: no rating, no percentage, no
 // attendance rate, no clinical word. See the header of the builder.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Flag, IconPlate, type Tone } from '../../src/ui/kit';
+import type { IconName } from '../../src/ui/Icon';
+import { sp, layout, radius, grown, type as ty, value as sora } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { useBrand } from '../../src/ui/brand';
@@ -51,29 +53,35 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { isoToday } from '../../src/lib/dayPlan';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { sessionsOf, trainingBoard, unitFor } from '../../src/lib/clientTraining';
 import { MEASURE_SITES } from '../../src/lib/clientMeasurements';
 import { areaLabel, type Injury } from '../../src/lib/injuries';
 import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { fetchInvoiceIssuer } from '../../src/ui/coachInvoices';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
-  coachClientReportDoc, coachReportShareBlurb, sessionTally,
+  coachClientReportDoc, coachReportShareBlurb, sessionTally, countableRows,
+  type CoachClientReportDoc,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
-// Written out here rather than imported from a shared constant:
-// scripts/check-schema.mjs resolves a select list that arrives as a named
-// constant only within the file that names it, so a shared one is a select list
-// nothing compares against the SQL or the live database. Every other screen in
-// this group declares its own for the same reason.
+// Written out here because these four lists have one reader each and belong
+// beside it. The `workouts` one does NOT: it is shared with client-week.tsx,
+// client-training.tsx and log-session.tsx, and is imported from
+// src/lib/workoutRow.ts. All five used to be local, on the argument that
+// scripts/check-schema.mjs could only resolve a select list declared in the
+// file that used it — true when it was written, and no longer: the gate now
+// follows one import hop. The note on WORKOUT_COLS says what the copies cost.
 const SESSION_COLS = 'starts_at, outcome';
-const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg, source';
 const MEAS_COLS = 'taken_at, kind, value';
 const CLIENT_COLS = 'injuries, weight_unit, length_unit';
@@ -108,6 +116,7 @@ const EMPTY: Reads = {
 
 export default function ClientReport() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const r = useRoster();
   const { appName } = useBrand();
@@ -117,7 +126,17 @@ export default function ClientReport() {
   const st = useSettings();
   const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
 
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
   const [reads, setReads] = useState<Reads>(EMPTY);
   const [issuer, setIssuer] = useState<{ name: string | null; status: LoadStatus }>({ name: null, status: 'loading' });
   const logo = useMyCoachLogo();
@@ -131,19 +150,27 @@ export default function ClientReport() {
   // sent. Same guard as client-body.tsx and client-training.tsx.
   const wanted = useRef<string | null>(null);
 
-  useEffect(() => { void (async () => { setIssuer(await fetchInvoiceIssuer()); })(); }, []);
+  const loadIssuer = useCallback(async () => { setIssuer(await fetchInvoiceIssuer()); }, []);
+  useEffect(() => { void loadIssuer(); }, [loadIssuer]);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setReads(EMPTY);
     setToday(isoToday(new Date()));
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value. Nothing is asked for them, and
-    // every section is 'error' — which the document prints as "not read", not
-    // as "nothing on record".
-    if (!isQueryableId(id)) {
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, every read ran, each came back with
+    // zero rows and NO error, and this screen rendered that as a fact about the
+    // person. The roster is the only thing that knows which table the row came
+    // from — see src/lib/clientRecord.ts.
+    // Every section is 'error' here, which the document prints as "not read"
+    // rather than as "nothing on record".
+    if (!askable) {
       setReads({
         sessions: { rows: null, status: 'error' },
         training: { log: null, status: 'error' },
@@ -154,30 +181,66 @@ export default function ClientReport() {
       return;
     }
 
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id ?? null;
+    /* Who the coach is, with the failure kept rather than collapsed.
+     *
+     * This was `const { data: auth } = await supabase.auth.getUser()` — `error`
+     * not on the line, therefore discarded — and the sessions read below then
+     * fell back to `uid ?? '00000000-0000-0000-0000-000000000000'`. That is the
+     * defect src/lib/authReadFate.ts exists for, wearing a document a coach
+     * hands to a client: `getUser()` does not reject on a dropped connection,
+     * it RESOLVES with `{ data: { user: null }, error }`, so a dead gym wifi and
+     * a genuine sign-out both arrived here as `uid === null`. The read then ran
+     * against a uuid no coach has, PostgREST answered zero rows with NO error,
+     * `sesRes.error` was null, and this screen filed that as
+     * `status: 'ready'` — a report stating, at full confidence, that somebody
+     * who trains twice a week has never had a session.
+     *
+     * `signedInUid` is the one call that asks and classifies — no second copy
+     * of the discrimination here, which is what src/lib/authedUid.ts was
+     * written to stop, and it is what reports the outage (and stays silent
+     * about a plain sign-out, which is not a fault). With no uid the read is
+     * not ATTEMPTED: it is handed the fate as an error, which is the one branch
+     * below that prints "not read" instead of a number. */
+    const me = await signedInUid('clientReport.whoami');
 
     const [sesRes, woRes, scanRes, measRes, cliRes] = await Promise.all([
       // Scoped to this coach as well as this client. RLS already narrows it,
       // and the extra predicate is about WHICH sessions belong on the document:
       // a client who has trained with two coaches in the same gym has sessions
       // that are not this coach's to report.
-      supabase.from('sessions').select(SESSION_COLS)
-        .eq('trainer_id', uid ?? '00000000-0000-0000-0000-000000000000')
-        .eq('client_id', id)
-        .order('starts_at', { ascending: false })
-        .limit(capLimit()),
+      me.uid !== null
+        ? supabase.from('sessions').select(SESSION_COLS)
+          .eq('trainer_id', me.uid)
+          .eq('client_id', id)
+          .order('starts_at', { ascending: false })
+          .limit(capLimit())
+        : Promise.resolve({
+          data: null,
+          error: { message: `the signed-in coach could not be established (${me.fate})` },
+        }),
       supabase.from('workouts').select(WORKOUT_COLS)
         .eq('user_id', id)
         .order('performed_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
+      // `.order('id')` behind each date, and it is not decoration. Both of
+      // these columns are a bare postgres DATE, so ties are the ordinary case
+      // rather than the rare one — `measurements` writes ONE ROW PER SITE PER
+      // DAY, so a member who tapes eight sites files eight rows carrying the
+      // identical `taken_at`. An order with ties in it is not an order: at the
+      // cap the server may break them however it likes and differently on the
+      // next read, so the oldest day on this document would carry a random
+      // subset of the sites measured that morning, and a second look would
+      // carry a different subset. Every other capped read of these two tables
+      // in the app already settles the ties this way — client-body.tsx:172,
+      // client-goals.tsx:246 and :262, clientData.tsx:642 — and this is the
+      // screen that turns them into a PDF a coach hands to somebody.
       supabase.from('scans').select(SCAN_COLS)
         .eq('client_id', id)
-        .order('taken_at', { ascending: false })
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       supabase.from('measurements').select(MEAS_COLS)
         .eq('user_id', id)
-        .order('taken_at', { ascending: false })
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       supabase.from('clients').select(CLIENT_COLS).eq('id', id).limit(1),
     ]);
@@ -270,10 +333,19 @@ export default function ClientReport() {
     setReads(next);
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving an empty screen standing as a fact about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useFocusEffect(useCallback(() => {
     if (!USE_SUPABASE || !picked) return;
-    void load(picked);
-  }, [picked, load]));
+    void load(picked, askable);
+  }, [picked, askable, load]));
 
   useEffect(() => {
     if (!USE_SUPABASE || picked) return;
@@ -281,7 +353,18 @@ export default function ClientReport() {
     setReads(EMPTY);
   }, [picked]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This screen composes a document that gets SENT, so every figure on it is
+   * one somebody outside the app will hold the coach to. Four reads sit behind
+   * it: the client's own history, the issuer name on the letterhead, the logo
+   * beside it and the roster the name comes from — and the document is one
+   * artefact, so a refresh that moved the body figures and left the issuer
+   * would produce a page assembled out of two different moments. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), loadIssuer(), Promise.resolve(logo.reload()),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, loadIssuer, logo, picked, askable, load]));
   const fullName = client?.name || (typeof name === 'string' ? name : '') || '';
   const who = (fullName || 'They').split(' ')[0];
 
@@ -355,20 +438,40 @@ export default function ClientReport() {
     coachNote: note.trim() || null,
   });
 
+  /* ── the document, before it leaves ────────────────────────────────────
+   *
+   * n=41. This screen could describe the report — how many sessions, how many
+   * scans, which reads failed — and a coach could not READ it. The one control
+   * on it built the document and handed it straight to the share sheet, so the
+   * first person ever to see the page was the client, or the coach taking them
+   * on. A document with somebody's body on it and a coach's own words at the
+   * bottom is the last thing in this app that should be sent unseen.
+   *
+   * The confirming Alert it replaces said the right things and showed none of
+   * them: a blurb ABOUT the document is not the document, and the caveat
+   * "2 parts could not be read" is unactionable without seeing where the holes
+   * fell.
+   *
+   * ── Why the TEXT and not the HTML ────────────────────────────────────
+   *
+   * There is no WebView in this app and this is not the screen to add one to.
+   * `coachClientReportDoc` builds both halves off one pass — every figure, every
+   * caveat and every standing statement is written into `T` beside the `H` it
+   * writes into the page — which is why the Alert this replaces could already
+   * tell a coach that the plain-text fallback leaves nothing out. So the text
+   * IS the document: same sections, same order, same words, without the
+   * typesetting. Showing the typeset page and sending a different one would be
+   * the worse failure of the two.
+   */
+  const [preview, setPreview] = useState<CoachClientReportDoc | null>(null);
   const send = () => {
     if (!picked) return;
-    const doc = build();
-    Alert.alert(
-      'Send this record',
-      coachReportShareBlurb(doc, fullName) + '\n\n'
-      + (pdfExportAvailable()
-        ? 'It goes as a PDF through your phone’s share sheet, so it can reach them, or the coach taking them on, however you choose.'
-        : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every figure and every caveat is in the text.'),
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, 'Coaching record'); } },
-      ],
-    );
+    // Built at the moment the coach asks to see it, and the SAME object is what
+    // gets shared — not rebuilt on the way out. A rebuild would re-read `reads`
+    // and `note` as they stand a second later, so a coach could approve one
+    // document and send another, which is precisely the gap this control exists
+    // to close.
+    setPreview(build());
   };
 
   const overall = worstStatus(
@@ -376,31 +479,36 @@ export default function ClientReport() {
     reads.measures.status, reads.client.status, issuer.status,
   );
   const tally = sessionTally(reads.sessions.rows, reads.sessions.status);
+  // Null under anything but a whole read — see `countableRows`. The scans are
+  // counted as rows; the measurements are counted as DAYS, because that is what
+  // the row beside them is labelled and what the pivot above produced. Both are
+  // withheld by the same rule, since the pivot cannot restore a day whose rows
+  // fell off the end of the read.
+  const scanCount = countableRows(reads.scans.rows, reads.scans.status);
+  const measureDayCount = countableRows(reads.measures.rows, reads.measures.status);
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Pick a client'}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their record</Text>
-          </View>
-        </View>
-
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="Everything on record, on one page"
-            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment — only what was entered, and by whom. Anything that could not be read says so on the page."
-          />
-        </View>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the note is the last thing on this screen and the button
+          that sends the report is under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them takes the page while nobody
+            is chosen. */}
+        <PageHead title="Report" subtitle={fullName || undefined} />
 
         {!picked ? (
           <Section>
-            <SectionHead title="Who is it for?" />
+            <SectionHead title="Who Is It For?" />
             {r.status === 'error' ? (
               <Flag>Your client list could not be read, so this is not a list of everyone you coach.</Flag>
             ) : null}
@@ -411,45 +519,87 @@ export default function ClientReport() {
               </Pressable>
             ))}
             {!r.roster.length && r.status === 'ready' ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>You have nobody on your book yet.</Text>
+              <EmptyRoster lacks="there is no report to write" />
             ) : null}
           </Section>
+        ) : !askable ? (
+          /* ── the third answer ────────────────────────────────────────────
+             Not "part of this could not be read" and not "there is nothing on
+             record". This person is a name the coach typed into their own book:
+             a `coach_clients` row with no account behind it, so there is no
+             record to put on a page — and nothing was refused, because nothing
+             was ever entitled to be asked.
+
+             `load` sets all five sections to 'error', which is right for the
+             reads and wrong for this screen: it drew six rows of "not read"
+             with a crit dot beside each and left Send It live, so a coach could
+             produce and hand somebody a document whose every section says their
+             own record could not be opened. There is no document to write, so
+             there is no Send here.
+
+             The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+             from `unreadable` in src/lib/coachWellness.ts. */
+          <>
+            <Rule />
+            <Section>
+              <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
+                note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to, and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
+            </Section>
+            <View style={{ marginTop: layout.section, flexDirection: 'row' }}>
+              <Ghost label="Someone Else" onPress={() => { setPicked(null); setNote(''); }} />
+            </View>
+          </>
         ) : (
           <>
             <Rule />
 
             <Section>
-              <SectionHead title="What will be on it" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
-              <Row t={t} label="Sessions booked with you"
+              <SectionHead title="What Will Be on It" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
+              <Row t={t} icon="calendar" tone="brand" label="Sessions Booked with You"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.booked == null ? 'more than could be read'
                   : String(tally.booked)} />
-              <Row t={t} label="Of those, with no outcome recorded"
+              <Row t={t} icon="clock" tone="amber" label="Of Those, with No Outcome Recorded"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.unrecorded == null ? '—' : String(tally.unrecorded)} />
-              <Row t={t} label="Days trained"
+              <Row t={t} icon="dumbbell" tone="purple" label="Days Trained"
                 value={reads.training.status === 'error' ? 'not read'
                   : reads.training.status === 'loading' ? '…'
                   : board.dayCount == null ? '—' : String(board.dayCount)} />
-              <Row t={t} label="Body-composition scans"
+              {/* `countableRows`, not `.rows.length`. These two rows were the
+                  only figures in this panel not computed by a module that owns
+                  the truncation rule, and they were the two that broke it: a
+                  'partial' read fell straight through the 'error' and 'loading'
+                  arms and printed its page as a total. `measurements` is one row
+                  per site per day, so ten sites over a hundred measuring days
+                  reaches the cap — and the panel then said "1000 scans" about
+                  the very document that prints no total for that section and
+                  states on its front page that what it holds is not all of it.
+                  'more than could be read' is the sentence the Sessions row two
+                  above has always used for the same silence. */}
+              <Row t={t} icon="scale" tone="blue" label="Body-composition Scans"
                 value={reads.scans.status === 'error' ? 'not read'
-                  : reads.scans.status === 'loading' ? '…' : String(reads.scans.rows.length)} />
-              <Row t={t} label="Days with tape measurements"
+                  : reads.scans.status === 'loading' ? '…'
+                  : scanCount == null ? 'more than could be read'
+                  : String(scanCount)} />
+              <Row t={t} icon="ruler" tone="teal" label="Days with Tape Measurements"
                 value={reads.measures.status === 'error' ? 'not read'
-                  : reads.measures.status === 'loading' ? '…' : String(reads.measures.rows.length)} />
-              <Row t={t} label="Injuries they have disclosed"
+                  : reads.measures.status === 'loading' ? '…'
+                  : measureDayCount == null ? 'more than could be read'
+                  : String(measureDayCount)} />
+              <Row t={t} icon="heart" tone="red" label="Injuries They Have Disclosed"
                 value={reads.client.status === 'error' ? 'not read'
                   : reads.client.status === 'loading' ? '…' : String(injuries.length)} />
               {tally.unrecorded != null && tally.unrecorded > 0 ? (
                 <Flag style={{ marginTop: sp.sm }}>
-                  A session with no outcome recorded is one nobody marked either way. The document counts those separately and does not treat them as missed — and it states no attendance percentage, because a percentage over them would not measure anything.
+                  A session with no outcome recorded is one nobody marked either way. The document counts those separately and does not treat them as missed. It states no attendance percentage, because a percentage over them would not measure anything.
                 </Flag>
               ) : null}
               {overall === 'error' ? (
                 <Flag style={{ marginTop: sp.sm }}>
-                  Part of this could not be read. The document will say so on its own front page rather than looking complete — but you may prefer to open this again in a moment.
+                  Part of this could not be read. The document will say so on its own front page rather than looking complete, but you may prefer to open this again in a moment.
                 </Flag>
               ) : null}
               {overall === 'partial' ? (
@@ -462,42 +612,148 @@ export default function ClientReport() {
             <Rule />
 
             <Section>
-              <SectionHead title="Anything you want to say" note="Optional. Printed in your own words, attributed to you." />
+              <SectionHead title="Anything You Want to Say" note="Optional. Printed in your own words, attributed to you." />
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder={`Twelve weeks with ${who}. What you would want the next coach to know.`}
                 placeholderTextColor={t.ink3}
                 accessibilityLabel="Your own note for the report"
                 style={[inp, { minHeight: 110, textAlignVertical: 'top' }]} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                This is the only opinion on the page. Everything else is a figure, a date, or a line saying something could not be read — the document states that outright, so nothing you write is mistaken for the app’s own verdict.
+                This is the only opinion on the page. Everything else is a figure, a date, or a line saying something could not be read. The document states that outright, so nothing you write is mistaken for the app’s own verdict.
               </Text>
             </Section>
 
-            <View style={{ marginTop: layout.section, flexDirection: 'row', gap: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Cta label="Someone Else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Cta label="Send It" wide disabled={overall === 'loading'} onPress={send} />
-              </View>
+            {/* One primary action, full width, the board's way; switching
+                client is the quiet form under it rather than a second green
+                button beside the one that sends. */}
+            <View style={{ marginTop: layout.section }}>
+              <Cta label="Send It" wide disabled={overall === 'loading'} onPress={send} />
+            </View>
+            <View style={{ marginTop: sp.md, flexDirection: 'row' }}>
+              <Ghost label="Someone Else" onPress={() => { setPicked(null); setNote(''); }} />
             </View>
           </>
         )}
+
+        {/* What the document is, below the counts: the board opens a record
+            page on the record, and this explains it once the coach has seen
+            what is in it. */}
+        <View style={{ marginTop: sp.lg }}>
+          <Notice
+            kicker="What This Is"
+            title="Everything on record, on one page"
+            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment: only what was entered, and by whom. Anything that could not be read says so on the page."
+          />
+        </View>
       </ScrollView>
+
+      {/* ── the document, on the screen, before it goes ───────────────────
+          n=41. What a coach saw before this existed was a panel of counts and
+          a confirming Alert, and the first human being to read the actual page
+          was whoever it was sent to.
+
+          A full-screen Modal rather than a Section on the scroll: the point is
+          that the coach reads the document, and a preview competing with the
+          form that produced it invites them to skim it. It is also the
+          confirmation step — there is no second Alert — so the two controls at
+          the bottom are the whole decision, and the one that sends is the one
+          that has to be reached past the text.
+
+          `preview` is the doc built at the moment the coach asked to see it,
+          and it is the object that gets shared. Rebuilding on the way out would
+          let the reads move underneath an approved document. */}
+      <Modal visible={!!preview} animationType="slide" onRequestClose={() => setPreview(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
+          <View style={{ paddingHorizontal: layout.gutter }}>
+            {/* The same head as the page under it. The back control returns
+                to the report, and says so. */}
+            <PageHead title="The Document" subtitle="Before you send it"
+              backLabel="Back to the report" onBack={() => setPreview(null)} />
+          </View>
+
+          {preview ? (
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                {coachReportShareBlurb(preview, fullName)}
+              </Text>
+
+              {/* The caveats again, where the decision is made. They are on the
+                  document's own front page as well; a coach about to press
+                  Send should not have to find them by reading down. */}
+              {preview.caveats.length ? (
+                <View style={{ paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                  <Flag>
+                    {preview.caveats.length} part{preview.caveats.length === 1 ? '' : 's'} of this could not be read
+                    and the document says so where the figures would have been. Sending it is not wrong (an
+                    honest gap is better than a missing page), but it is worth trying again first.
+                  </Flag>
+                </View>
+              ) : null}
+
+              <ScrollView
+                style={{ flex: 1, marginTop: sp.md }}
+                contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}
+                showsVerticalScrollIndicator
+              >
+                {/* The text the share sheet carries, verbatim. Not a summary of
+                    it and not a second rendering of the same facts: a preview
+                    that is assembled separately is a preview that can disagree
+                    with what was sent, which is worse than no preview at all.
+
+                    `selectable` so a coach can lift a line out of it into the
+                    message thread without sending the whole document. */}
+                {/* `grown`, not a pinned 21: React Native never scales a
+                    lineHeight, so a reader who has turned their text up would get
+                    larger letters inside the same gaps and a document that
+                    overlaps itself. This is the one screen where somebody reads
+                    several hundred lines in a row. */}
+                <Text selectable style={{ ...ty.label, color: t.ink2, lineHeight: 21 }}>
+                  {preview.text}
+                </Text>
+              </ScrollView>
+
+              <View style={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, flexDirection: 'row', gap: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Cta label="Not Yet" tone={t.surface2} wide onPress={() => setPreview(null)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Cta
+                    label="Send It"
+                    wide
+                    onPress={() => {
+                      const doc = preview;
+                      setPreview(null);
+                      void shareDoc(doc.html, doc.text, 'Coaching record');
+                    }}
+                  />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                {pdfExportAvailable()
+                  ? 'It goes as a PDF through your phone\u2019s share sheet, typeset with your mark on it. The words are the ones above.'
+                  : 'This build cannot produce a PDF, so it goes as the plain text above, exactly as you are reading it. Nothing is left out of it.'}
+              </Text>
+            </>
+          ) : null}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 /** One "what will be on it" line. A value that could not be read says so in
  *  words rather than showing a zero — a zero here is a claim. */
-function Row({ t, label, value }: { t: ReturnType<typeof useTheme>; label: string; value: string }) {
+function Row({ t, label, value, icon, tone }: { t: ReturnType<typeof useTheme>; label: string; value: string; icon: IconName; tone: Tone }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: 6 }}>
+      {/* The plate names the section of the document the count is about, in
+          the colour that section's record page uses. */}
+      <IconPlate icon={icon} tone={tone} size={34} />
       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{label}</Text>
       {/* "not read" says it in words; crit goes in the dot beside it. crit as
           label text is 3.03–4.05:1 on every one of the ten palettes. */}
-      {value === 'not read' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginRight: 6 }} /> : null}
-      <Text style={{ ...ty.label, color: value === 'not read' ? t.ink2 : t.ink }}>{value}</Text>
+      {value === 'not read' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginEnd: 6 }} /> : null}
+      <Text style={{ ...(/^\d/.test(value) ? sora(17) : ty.label), color: value === 'not read' ? t.ink2 : t.ink }}>{value}</Text>
     </View>
   );
 }

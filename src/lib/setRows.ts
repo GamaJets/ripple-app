@@ -12,7 +12,7 @@
  * ── What could not be written down before ─────────────────────────────────
  *
  * `ProgramExercise` carries `sets: number`, `reps: string` and one `loadKg`,
- * so every set of a movement is the same set. A coach could not programme a
+ * so every set of a movement is the same set. A coach could not program a
  * top set heavier than its back-offs, could not ramp, and — since `method`
  * arrived — could not say that set 1 is a warm-up and set 4 is a drop set,
  * which is the single most useful thing the method catalogue can express and
@@ -22,7 +22,7 @@
  *
  * `setRows` is OPTIONAL and everything below falls back to `sets`/`reps`/
  * `loadKg` when it is absent. That is not politeness about legacy data, it is
- * the only safe reading: programmes live in `program_templates` and on
+ * the only safe reading: programs live in `program_templates` and on
  * assignments in the database AND in an on-device draft in AsyncStorage, and
  * there is no migration that can reach all three. An exercise with no
  * `setRows` must therefore render and run in a new build exactly as it does in
@@ -75,7 +75,7 @@ import { intensityOf, type Intensity } from './setIntensity';
  * src/lib/setIntensity.ts, which owns every parse, every bound and the one
  * sentence a coach has to be told: the CLIENT'S renderer does not draw them
  * yet. Adding them here was safe precisely because absence round-trips through
- * jsonb and AsyncStorage unchanged, so every programme written before them
+ * jsonb and AsyncStorage unchanged, so every program written before them
  * expands exactly as it did before.
  */
 export type SetRow = {
@@ -131,7 +131,7 @@ export type PlannedSet = {
    * Carried as one object rather than three loose keys so that a renderer
    * cannot draw two of them and forget the third — which is precisely how
    * `tempo` came to exist as a set METHOD with no notation behind it. Every one
-   * of the three is null on every programme written before src/lib/setIntensity.ts,
+   * of the three is null on every program written before src/lib/setIntensity.ts,
    * and `intensityLine` returns null for that case so nothing renders at all.
    */
   intensity: Intensity;
@@ -145,7 +145,7 @@ const own = (o: object, k: string): boolean =>
  *
  * An EMPTY array is not one. `setRows: []` would otherwise mean an exercise
  * with no sets at all — nothing to display, nothing to log against — and a
- * client opening their programme to a movement they cannot record is a worse
+ * client opening their program to a movement they cannot record is a worse
  * answer than the one the old fields already give. So an empty array falls
  * back like an absent one, and `removeSetRow` refuses to create it in the
  * first place.

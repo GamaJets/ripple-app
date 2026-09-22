@@ -27,19 +27,59 @@
 // empty" and "the read failed" render differently everywhere on this page,
 // because a failed roster query drawn as an empty roster would report that not
 // one pass holder has ever joined this gym.
+//
+// The page also answers a second question the console could not ask at all:
+// what each pass TYPE sold, and what it brought in. /money renders the price
+// book — a name, a price, a credit count — and nothing anywhere said how many
+// of a pack the desk had actually sold. See `Sold` below. It takes a fifth
+// read, the price book itself, held outside the record and outside the
+// freshness stamp on the same footing as the contact read, because it is the
+// only input that can put a row on that table reading zero.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
-import { fetchMemberships, fetchPlans, money } from '@lib/gymRecord';
+import { fetchMemberships, fetchPlans, money, summarise } from '@lib/gymRecord';
 import { fetchPassVisits } from '@lib/passVisits';
-import { fetchPasses } from '@lib/gymPasses';
+import { fetchPasses, fetchPassTypes, type PassType } from '@lib/gymPasses';
+// What each type actually SOLD, as against what the price book says it costs.
+// The rule lives in src/lib and is asserted under plain node, because every
+// figure it produces is one an owner would withdraw a product over: two
+// currencies are never added, an unpriced sale is never counted as a free one,
+// and a type nobody has bought still gets a row.
+import {
+  passTypeSales, salesTotals, PASS_KIND_LABEL,
+  BOOK_UNREAD_NOTE, LOST_TYPE_NOTE, PRICE_MOVED_NOTE,
+  type PassTypeSale,
+} from '@lib/passTypeSales';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
-import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { toCsv } from '@lib/gymExport';
+import { sliceLoading, sliceReady, sliceFailed, rowsOf, type Slice } from '@lib/memberView';
+// The one rule about what a SUM is denominated in, and the one wording for
+// the silence a mixed ledger produces. Imported rather than restated: the
+// sentence under a withheld total is the whole point of the module, and a
+// screen that writes its own drifts into blaming the gym's currency setting
+// for something that setting has nothing to do with.
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '@lib/sumCurrency';
+import { noGymNote } from '@lib/gymLink';
+// The gym's own calendar day, which is what a pass expiry is compared against
+// everywhere else in this product. `isoDate` is the fallback arm only — the
+// reader's clock for a gym that has never set a zone.
+import { gymDay, parseGymZone } from '@lib/gymZone';
+import { isoDate } from '@lib/format';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { Banner } from '@/components/Banner';
+import { num } from '@/lib/num';
 import {
   buildPassConversion, suppressionSentence,
+  // The credits a member has paid for and is about to lose — the one pass
+  // report a desk acts on the same day, and the one this console had no
+  // version of at all. Pure, and asserted under plain node.
+  expiringPasses, expiringExclusions, EXPIRY_HORIZON_DAYS, type ExpiringPass,
   CAUSAL_CAVEAT, MONEY_NOTE, CONVERSION_LABEL, CONVERSION_COST,
   type PassConversionRecord, type PassConversion, type PassHolder,
   type HostGuests, type HolderOutcome, type ConversionPart,
@@ -72,18 +112,70 @@ const OUTCOME_ORDER: HolderOutcome[] = ['joined-after', 'undecided', 'no-members
 
 export default function Passes() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   // `tenants.currency`. The Paid column sums a person's passes, so it has no
   // single row's currency to borrow and inherits the gym's — or prints nothing.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /**
+   * `tenants.timezone`, or null when the gym has not set one.
+   *
+   * Read here because a PASS EXPIRES AT THE END OF A DAY AT THE GYM, and this
+   * screen was the last one in the console still asking a different clock.
+   * `buildPassConversion` defaults its `today` to `isoDay(new Date())` — the
+   * calendar day on whichever laptop has the tab open — and nothing here was
+   * passing one, so:
+   *
+   *   · `summarisePasses` counted live and expired passes on the reader's day
+   *     while /door and /members counted the same rows on the gym's. An owner
+   *     in Sydney reading a Dubai gym saw a pass called expired that the
+   *     turnstile was still admitting, for hours either side of midnight.
+   *   · `hasLivePass` is what makes a holder UNDECIDED rather than a failure,
+   *     so the same hour moved people on and off the call list this page
+   *     exists to produce — and changed the denominator of the percentage
+   *     above it. Somebody whose pass ran out at a Dubai midnight was rung
+   *     about it from Sydney a day early.
+   *
+   * The gym's day, with the reader's as the FALLBACK for a gym that has never
+   * set a zone, where the reader's clock is the only clock there is — the same
+   * pair, in the same order, as studio-web/app/members/page.tsx.
+   */
+  const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<PassConversionRecord>(EMPTY);
   // Null is "not read", never an empty Map: "no phone number recorded" and
   // "we could not ask" send an owner to two different places.
   const [contacts, setContacts] = useState<Map<string, GymMemberRecord> | null>(null);
   const [contactsErr, setContactsErr] = useState<string | null>(null);
+  /**
+   * The pass PRICE BOOK — `gym_pass_types`.
+   *
+   * Held beside `rec` rather than inside it, and read on the same footing as
+   * `contacts` above, for the reason that read gives: one section degrading is
+   * better than a page that will not load. It is the only input that can say a
+   * pass type sold NOTHING — the passes alone can only show the types that did
+   * — so null here is not an empty book. It is `BOOK_UNREAD_NOTE`: a table of
+   * the products that sold, presented as such, rather than a claim that these
+   * are the products the gym offers.
+   */
+  const [types, setTypes] = useState<PassType[] | null>(null);
+  const [typesErr, setTypesErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
-    setRec(EMPTY);
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // Four reads, deliberately not one Promise.all behind a single catch. A
     // price book that 500s must not take the pass counts down with it — the
     // page may be partial, but only if it says which part and what that costs.
@@ -106,28 +198,86 @@ export default function Passes() {
       slice(() => fetchPlans(supabase, tenantId)),
     ]);
     setRec({ passes, memberships, visits, plans });
+
+    // The price book, on its own error and outside the wholeness stamp below.
+    //
+    // Outside it deliberately: the stamp is the age of the last read that was
+    // whole, and every FIGURE it stands over — the conversion counts, the
+    // interval, the two money tiles — is computed without this. Folding a fifth
+    // read into that boolean would move the stamp for a read none of those
+    // tiles depend on. The sales table is the one section that does depend on
+    // it, and it states its own failure in its own words, which is the same
+    // trade the contact read makes one screen down.
+    try {
+      const book = await fetchPassTypes(supabase, tenantId);
+      setTypes(book);
+      setTypesErr(null);
+    } catch (e: any) {
+      // Null, never `[]`. An empty book says the gym has defined no pass types
+      // — a fact about the gym — and this is a query that did not come back.
+      setTypes(null);
+      setTypesErr(e?.message ?? 'The pass price book could not be read.');
+    }
+
+    // Whole only when all four came back. The stamp under the tiles is the age
+    // of the last read that was whole, so a refresh in which the price book
+    // failed does not move it — the banner beside it names which part is
+    // missing, which is the sentence this screen already knew how to write.
+    return passes.state === 'ready' && memberships.state === 'ready'
+      && visits.state === 'ready' && plans.state === 'ready';
   }, []);
+
+  /*
+   * The pass list, kept current.
+   *
+   * /door redeems against the same `gym_passes` rows and re-reads them every
+   * thirty seconds; this screen read once and stopped, so the two screens in
+   * the same building disagreed by however long this tab had been open. The
+   * report it produces is a call list of people whose passes ran out and did
+   * not join — and somebody who came in this morning and bought a membership at
+   * the desk was on it, and got phoned about it.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    { everyMs: 2 * 60_000 },
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setRec({
-          passes: sliceReady([]), memberships: sliceReady([]),
-          visits: sliceReady([]), plans: sliceReady([]),
-        });
-        return;
-      }
+      // An account with no gym ran NONE of the four reads, and this wrote
+      // `sliceReady([])` for all four — four reads reported as having succeeded
+      // and found nothing. `buildPassConversion` then produced its full report
+      // over that: conversion counts, the suppression sentence and an empty
+      // call list. A receptionist whose account lost its gym link was told this
+      // gym has issued no passes and converted nobody, which is a specific
+      // finding about the business assembled out of a fact about their profile
+      // — the same substitution the last roadmap found on /accounting, /costs
+      // and /close. The render below stops before the report and says which it
+      // is; the record is left in its opening state, which is honest, because
+      // nothing was read.
+      if (!who?.tenantId) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
       // supabase-js RESOLVES on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+        // `parseGymZone` and not the raw column: an abbreviation or an offset
+        // is not a zone this runtime can resolve, and `gymDay` would answer
+        // null for it anyway — which is the reader's day arriving through the
+        // fallback without anybody having decided that.
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       // The gym's own contact details, read separately. This page produces a
       // CALL LIST and had no way to call anybody: nothing in the schema carried
@@ -143,19 +293,32 @@ export default function Passes() {
       } catch (e: any) {
         if (live) { setContacts(null); setContactsErr(e?.message ?? 'The gym’s contact details could not be read.'); }
       }
-      await load(who.tenantId);
+      // Through `refresh`, so the first read stamps the same way every later
+      // one does.
+      refresh();
     })();
     return () => { live = false; };
-  }, [load]);
+  }, [load, refresh]);
 
-  const c = useMemo(() => buildPassConversion(rec), [rec]);
+  /** The instant these four reads landed, and the one every pass on this page
+   *  is judged at. Named rather than left to `buildPassConversion`'s default,
+   *  which is read inside a memo keyed on the ROWS — so on a console left open
+   *  at a front desk the day never turned over, and a pass that ran out at
+   *  midnight stayed live until somebody reloaded the tab. */
+  const nowMs = readAt ?? Date.now();
+  /** The GYM's calendar day, with the reader's as the fallback. See `zone`. */
+  const today = gymDay(nowMs, zone) ?? isoDate(new Date(nowMs));
+  const c = useMemo(() => buildPassConversion(rec, { today }), [rec, today]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/passes">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/passes">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -168,7 +331,7 @@ export default function Passes() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/passes">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/passes">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           This page carries pass income and the membership roster, so it is owner-only.
@@ -177,10 +340,21 @@ export default function Passes() {
     );
   }
 
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/passes">
+        <h1>Passes</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('passes, memberships or door visits')}
+        </p>
+      </Shell>
+    );
+  }
+
   const rate = c.joinedAfterRate;
 
   return (
-    <Shell me={me} gymName={gymName} current="/passes">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/passes">
       <h1>Passes</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Guest passes and day passes, who held them, and which of those people
@@ -190,6 +364,10 @@ export default function Passes() {
       {/* Printed first and always, including on an empty gym: the reader will
           supply the causal reading themselves if the page does not refuse it. */}
       <Banner>{CAUSAL_CAVEAT}</Banner>
+
+      {/* When these figures were read. /door redeems against the same rows
+          every thirty seconds; this screen used to read once and stop. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh} what="the pass record" />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {c.loading.length ? (
@@ -211,12 +389,28 @@ export default function Passes() {
           text={c.passes ? String(c.passes.issued) : null}
           note={stateNote(rec.passes, 'passes not read', c.passes ? `${c.passes.live} still live` : undefined)}
         />
+        {/* The four tiles below hand-rolled a TWO-arm version of `stateNote`,
+            which is directly under this file and keeps four states apart. Two
+            costs, both of them the page's own headline claim made out of a read
+            that did not happen:
+
+              · `=== 'failed'` admitted 'loading' and 'partial'. Under a
+                truncated pass read every one of these figures is withheld
+                (`buildPassConversion` returns null for the lot when
+                `rowsOf(rec.passes)` is null) and the note read as though the
+                query had been fine.
+              · "Typical gap" and "Held a pass, then joined" branched on the
+                MEMBERSHIPS slice alone, and both are null when the PASSES read
+                fails too — so a gym whose pass query was refused, with a
+                perfectly healthy roster, was told "nobody has joined after a
+                pass". That is a finding about the business produced by a broken
+                query, and it is the sentence this whole page exists to make. */}
         <Kpi
           label="Used at least once"
           text={c.redeemedPasses == null ? null : String(c.redeemedPasses)}
           note={
-            rec.passes.state === 'failed' ? 'passes not read'
-              : c.redemptionVisits == null ? 'door log not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : c.redemptionVisits == null ? stateNote(rec.visits, 'door log not read')
               : `${c.redemptionVisits} seen by the door log`
           }
         />
@@ -224,7 +418,7 @@ export default function Passes() {
           label="To a walk-in"
           text={c.anonymousPasses == null ? null : String(c.anonymousPasses)}
           note={
-            rec.passes.state === 'failed' ? 'passes not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
               : c.anonymousPasses ? 'no account — excluded below'
               : 'every pass carries an account'
           }
@@ -233,7 +427,8 @@ export default function Passes() {
           label="Held a pass, then joined"
           text={c.counts == null ? null : String(c.counts.joinedAfter)}
           note={
-            rec.memberships.state === 'failed' ? 'roster not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : rec.memberships.state !== 'ready' ? stateNote(rec.memberships, 'roster not read')
               : c.counts == null ? undefined
               : `of ${c.counts.decided} whose pass has run out`
           }
@@ -242,9 +437,11 @@ export default function Passes() {
           label="Typical gap"
           text={c.interval == null ? null : `${c.interval.medianDays}d`}
           note={
-            c.interval == null
-              ? (rec.memberships.state === 'ready' ? 'nobody has joined after a pass' : 'roster not read')
-              : `median of ${c.interval.n}, ${c.interval.minDays}–${c.interval.maxDays} days`
+            c.interval != null
+              ? `median of ${c.interval.n}, ${c.interval.minDays}–${c.interval.maxDays} days`
+              : rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : rec.memberships.state !== 'ready' ? stateNote(rec.memberships, 'roster not read')
+              : 'nobody has joined after a pass'
           }
         />
       </div>
@@ -261,6 +458,8 @@ export default function Passes() {
           <Failed reason={reasonOf(rec.memberships)} part="memberships" />
         ) : null}
         {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+        <Truncated s={rec.memberships} part="the roster" />
+        <Truncated s={rec.passes} part="passes" />
 
         {c.counts ? (
           <div style={{ padding: '18px 16px' }}>
@@ -302,6 +501,8 @@ export default function Passes() {
         {rec.memberships.state === 'failed' ? (
           <Failed reason={reasonOf(rec.memberships)} part="memberships" />
         ) : null}
+        <Truncated s={rec.memberships} part="the roster" />
+        <Truncated s={rec.passes} part="passes" />
         {rec.memberships.state === 'ready' && rec.passes.state === 'ready' ? (
           c.interval ? (
             <div style={{ padding: '18px 16px' }}>
@@ -323,10 +524,16 @@ export default function Passes() {
         ) : null}
       </Section>
 
+      {/* Before the call list, deliberately. That list is people the gym has
+          already lost; this one is people it has not lost yet, and only one of
+          the two can still be changed by a phone call this afternoon. */}
+      <RunningOut rec={rec} today={today} contacts={contacts} contactsErr={contactsErr} />
+
       <CallList c={c} rec={rec} contacts={contacts} contactsErr={contactsErr} />
       <Holders c={c} rec={rec} ccy={ccy} contacts={contacts} />
       <Hosts c={c} rec={rec} />
-      <Money c={c} rec={rec} />
+      <Money c={c} rec={rec} ccy={ccy} />
+      <Sold rec={rec} types={types} typesErr={typesErr} />
     </Shell>
   );
 }
@@ -353,10 +560,13 @@ function reasonOf(s: Slice<unknown>): string {
   return s.state === 'failed' ? s.reason : '';
 }
 
-/** A KPI footnote that keeps the three states apart. */
+/** A KPI footnote that keeps the four states apart. */
 function stateNote(s: Slice<unknown>, failed: string, ready?: string): string | undefined {
   if (s.state === 'failed') return failed;
   if (s.state === 'loading') return undefined;
+  // Its own arm, and not `ready`'s. A truncated read used to fall through to
+  // the ready sentence — "1,240 still live" over a figure taken from a prefix.
+  if (s.state === 'partial') return `only the first ${s.cap} rows came back, so this is a prefix and the figure is withheld`;
   return ready;
 }
 
@@ -541,13 +751,31 @@ function Holders({ c, rec, ccy, contacts }: {
         : <span className="dash">none</span>,
     },
     {
-      key: 'paid', header: 'Paid for passes', value: (h) => h.paidCents, numeric: true,
-      // `amount`, not `money`: this is a sum over one person's passes with no
-      // currency of its own, and `money()` was writing the currency it defaults
-      // to over it. Two silences, and they are different — nobody recorded a
-      // price, or the gym never said what money it takes.
-      render: (h) => amount(h.paidCents, ccy)
-        ?? <span className="dash">{h.paidCents == null ? 'no price recorded' : NO_CURRENCY_NOTE}</span>,
+      // Sorted on the figure only where the figure is one — a cross-currency
+      // sum is not a bigger number and must not order the table either.
+      key: 'paid', header: 'Paid for passes', value: (h) => (h.paidCurrency ? h.paidCents : null), numeric: true,
+      /* ── the currency the PASSES agree on, never the gym's setting ──────
+         This was `amount(h.paidCents, ccy)`. `paidCents` is `passRevenueCents`'s
+         blind sum over every priced pass this person holds, and `ccy` is
+         `tenants.currency` as it stands today, so:
+
+           · a holder with a GBP pass and an AED pass had the two ADDED and the
+             result printed in whatever the gym charges in now — and adding
+             minor units across a two-place and a zero-place currency is wrong
+             twice over;
+           · a gym that has ever changed its currency had every holder's figure
+             silently re-denominated.
+
+         The "Taken for passes" tile at the top of this same screen already
+         refuses both, on `money(m.passCents, m.currency)`, and /members carries
+         the identical repair with the identical reasoning. This was the row
+         that was left. */
+      render: (h) => h.paidCents == null
+        ? <span className="dash">no price recorded</span>
+        : money(h.paidCents, h.paidCurrency)
+          ?? <span className="dash">{h.paidMixed
+            ? `priced in ${h.paidCurrencies.length ? h.paidCurrencies.join(' and ') : 'more than one currency'} — not one figure`
+            : NO_CURRENCY_NOTE}</span>,
     },
   ];
 
@@ -561,11 +789,160 @@ function Holders({ c, rec, ccy, contacts }: {
       {rec.memberships.state === 'failed' ? (
         <Failed reason={reasonOf(rec.memberships)} part="memberships" />
       ) : null}
+      <Truncated s={rec.passes} part="passes" />
+      <Truncated s={rec.memberships} part="the roster" />
       {c.holders ? (
-        <DataTable
+        <DataTable noun="pass holders"
           rows={c.holders} columns={cols} rowKey={(h) => h.holderId}
           empty="No pass has been issued to somebody with an account. Passes sold to walk-ins are listed nowhere here, because there is no person for them to be a row about."
         />
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── credits a member is about to lose ─────────────────────────────────────── */
+
+/**
+ * Live passes with credits on them whose last day is close.
+ *
+ * ── The gap this closes ───────────────────────────────────────────────────
+ *
+ * Every leading gym console leads with this list and this one had no version of
+ * it at all. /door answers about one pass in front of one person, /money draws
+ * the price book, and this page measured what pass-giving CONVERTED to after
+ * the fact. Nothing anywhere said which members have paid for credits they are
+ * about to lose — which is the one pass report a desk acts on the same day,
+ * because the member is still a member and the credits are still spendable.
+ *
+ * No new read and no new column: `fetchPasses` already brings back every
+ * `gym_passes` row for the report above, each one carrying `expires_on`,
+ * `uses_total` and `uses_spent`, and the contact read two sections down is
+ * already in hand.
+ *
+ * `rowsOf` and not `rowsToShow`: a truncated pass read is a PREFIX, and "six
+ * members are about to lose credits" computed over the first thousand rows is a
+ * subtotal with a call list's authority. The section states the truncation and
+ * withholds, exactly as `Sold` below does.
+ */
+function RunningOut({ rec, today, contacts, contactsErr }: {
+  rec: PassConversionRecord; today: string;
+  contacts: Map<string, GymMemberRecord> | null; contactsErr: string | null;
+}) {
+  const passes = rowsOf(rec.passes);
+  const x = useMemo(
+    () => (passes ? expiringPasses(passes, today) : null),
+    [passes, today],
+  );
+
+  const cols: Column<ExpiringPass>[] = [
+    {
+      key: 'who', header: 'Who', value: (p) => p.name ?? '￿',
+      render: (p) => (
+        <a href={`/members?member=${encodeURIComponent(p.holderId)}`} style={{ color: 'var(--brand)' }}>
+          {p.name ?? 'unnamed account'}
+        </a>
+      ),
+    },
+    {
+      key: 'contact', header: 'Reach them on',
+      value: (p) => contactLine(contacts?.get(p.holderId) ?? null),
+      render: (p) => {
+        // The same three answers as every other contact column on this page:
+        // the gym has a number, the gym has none, or nobody could read the
+        // records. Only the middle one is a fact about this person.
+        if (contacts === null) return <span className="dash">not read</span>;
+        const line = contactLine(contacts.get(p.holderId) ?? null);
+        if (!line) {
+          return (
+            <a href={`/members?member=${encodeURIComponent(p.holderId)}`} style={{ color: 'var(--ink3)' }}>
+              add a number
+            </a>
+          );
+        }
+        const rc = contacts.get(p.holderId);
+        return rc?.phone
+          ? <a href={`tel:${rc.phone.replace(/\s+/g, '')}`} style={{ color: 'var(--brand)' }}>{line}</a>
+          : <span>{line}</span>;
+      },
+    },
+    {
+      key: 'pass', header: 'Pass', value: (p) => p.passTypeName ?? '￿',
+      render: (p) => (
+        <>
+          {p.passTypeName ?? <span className="dash">the pass type could not be read</span>}
+          <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 2 }}>
+            {/* What the credits actually buy, on the row. A door credit and a
+                PT hour are different goods and this table never adds them. */}
+            {p.covers === 'pt' ? 'personal training'
+              : p.covers === 'visit' ? 'door and classes'
+              : 'what it covers could not be read'}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: 'left', header: 'Credits left', value: (p) => p.creditsLeft, numeric: true,
+      render: (p) => `${num(p.creditsLeft)} of ${num(p.usesTotal)}`,
+    },
+    // A bare YYYY-MM-DD off a `date` column. Printed as the string it is —
+    // `gymDateText` would move it onto a zone a calendar day does not have.
+    { key: 'last', header: 'Last day', value: (p) => p.expiresOn },
+    {
+      key: 'days', header: 'Days left', value: (p) => p.daysLeft, numeric: true,
+      render: (p) => (
+        <span style={{ color: p.daysLeft <= 7 ? 'var(--warn)' : 'var(--ink2)' }}>
+          {p.daysLeft === 0 ? 'today' : p.daysLeft === 1 ? 'tomorrow' : `${num(p.daysLeft)}d`}
+        </span>
+      ),
+    },
+  ];
+
+  const exclusions = x ? expiringExclusions(x) : null;
+
+  return (
+    <Section
+      title="Credits about to be lost"
+      sub={`Live passes with credits still on them whose last day falls inside ${EXPIRY_HORIZON_DAYS} days, at this gym's own calendar day. The member has paid for these and is about to stop being able to spend them.`}
+    >
+      {rec.passes.state === 'loading' ? <Loading /> : null}
+      {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
+
+      {x ? (
+        <>
+          {x.soon.length ? (
+            <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink2)' }}>
+              {/* People, not passes, because the job is phone calls and one
+                  member holding three expiring packs is one call. Both figures
+                  are given rather than one standing for the other. */}
+              <strong style={{ color: 'var(--ink)' }}>{num(x.people)}</strong>{' '}
+              {x.people === 1 ? 'member is' : 'members are'} about to lose credits, across{' '}
+              {num(x.soon.length)} {x.soon.length === 1 ? 'pass' : 'passes'}. Nothing here expires
+              anything or reminds anybody — this product sends no mail and the console cannot push.
+            </p>
+          ) : null}
+
+          {contactsErr ? (
+            <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--warn)' }}>
+              Contact details could not be read: {contactsErr}. The column below says &ldquo;not
+              read&rdquo; rather than &ldquo;nothing recorded&rdquo; — this is not a list of people the
+              gym has no number for.
+            </p>
+          ) : null}
+
+          <DataTable
+            noun="passes about to run out"
+            rows={x.soon} columns={cols} rowKey={(p) => p.passId}
+            empty={`Nobody with an account is inside ${EXPIRY_HORIZON_DAYS} days of losing credits. That is a reading of the pass book, not a gap in it — the line below says what is counted out of this list.`}
+          />
+
+          {exclusions ? (
+            <p style={{ margin: 0, padding: '12px 14px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+              {exclusions}
+            </p>
+          ) : null}
+        </>
       ) : null}
     </Section>
   );
@@ -636,17 +1013,21 @@ function CallList({ c, rec, contacts, contactsErr }: {
       render: (h) => h.firstUsedOn ?? <span className="dash">no door record</span> },
   ];
 
+  // Written by `toCsv`, having been a third hand-rolled writer with the same
+  // two omissions as the roster segment: no byte-order mark and `'\n'` endings.
+  // Excel opens a BOM-less UTF-8 file in the machine's legacy code page, so
+  // this call list — the thing this whole page exists to produce — arrived at a
+  // Gulf gym with half its names unreadable. /export advertises the correct
+  // writer; there is now one of it.
   const csv = () => {
-    const cell = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const lines = [['Member id', 'Name', 'Passes', 'Used', 'Last pass', 'Phone', 'Email'].map(cell).join(',')];
-    for (const h of shown) {
-      const rc = contacts?.get(h.holderId) ?? null;
-      lines.push([
-        cell(h.holderId), cell(h.name), cell(String(h.passes)), cell(String(h.redeemed)),
-        cell(h.lastPassOn), cell(rc?.phone), cell(rc?.email),
-      ].join(','));
-    }
-    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+    const text = toCsv(
+      ['Member id', 'Name', 'Passes', 'Used', 'Last pass', 'Phone', 'Email'],
+      shown.map((h) => {
+        const rc = contacts?.get(h.holderId) ?? null;
+        return [h.holderId, h.name, h.passes, h.redeemed, h.lastPassOn, rc?.phone, rc?.email];
+      }),
+    );
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = `pass-holders-who-did-not-join-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -663,7 +1044,7 @@ function CallList({ c, rec, contacts, contactsErr }: {
       sub={`The call list this page exists to produce: ${all.length} ${all.length === 1 ? 'person' : 'people'} whose passes ran out without a membership. People whose pass is still live are not here — they have not decided anything yet, and asking them why they did not join is the wrong conversation.`}
     >
       {contactsErr ? (
-        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: '#f0c04e' }}>
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--warn)' }}>
           Contact details could not be read: {contactsErr}. The column below says
           &ldquo;not read&rdquo; rather than &ldquo;nothing recorded&rdquo; — this is not a list of
           people the gym has no number for.
@@ -686,7 +1067,15 @@ function CallList({ c, rec, contacts, contactsErr }: {
       </div>
       {note ? <p style={{ margin: 0, padding: '0 14px 8px', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
 
-      <DataTable rows={shown} columns={cols} rowKey={(h) => h.holderId} empty="Nobody to call." />
+      {/* `shown` is post-search, so "Nobody to call." over a query that matched
+          nothing was a statement about the gym made out of what somebody typed
+          — on the call list this whole page exists to produce. */}
+      <DataTable noun="pass holders who never joined"
+        rows={shown} columns={cols} rowKey={(h) => h.holderId}
+        empty={q.trim()
+          ? `Nothing in this list matches “${q.trim()}”. Clear the search before concluding there is nobody to call.`
+          : 'Nobody to call.'}
+      />
     </Section>
   );
 }
@@ -735,8 +1124,10 @@ function Hosts({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
           &ldquo;later joined&rdquo; column is unknown rather than nought.
         </p>
       ) : null}
+      <Truncated s={rec.passes} part="passes" />
+      <Truncated s={rec.memberships} part="the roster" />
       {c.hosts ? (
-        <DataTable
+        <DataTable noun="hosts"
           rows={c.hosts} columns={cols} rowKey={(h) => h.hostMemberId}
           empty="No guest pass records who brought the guest. Recording the host at the desk is what makes this table possible."
         />
@@ -747,8 +1138,50 @@ function Hosts({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
 
 /* ── money: two figures, and no total ──────────────────────────────────────── */
 
-function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
+function Money({ c, rec, ccy }: {
+  c: PassConversion; rec: PassConversionRecord; ccy: TenantCurrency;
+}) {
   const m = c.money;
+  /**
+   * What the MEMBERSHIP figure is denominated in — which is not what the
+   * PASSES were sold in.
+   *
+   * The second tile below rendered `money(m.followingMrrCents, m.currency)`.
+   * `m.currency` is what the priced PASSES agree on; `followingMrrCents` is the
+   * sum of the PLAN prices of the memberships those holders now hold. Two
+   * different sets of rows, so a gym selling day passes in EUR at the door and
+   * billing memberships in GBP had its recurring figure labelled EUR — wrong
+   * before `passRevenueCents` was corrected, and newly EXPENSIVE after it: that
+   * field now goes null the moment the passes hold two moneys, which withheld a
+   * membership figure that is perfectly sound and printed a note about the
+   * passes underneath the hole.
+   *
+   * The contributing rows are the plans, and `summarise` in gymRecord already
+   * reports what they share, as `mrrCurrency`. `moneyOf` in
+   * src/lib/passConversion.ts computes exactly that summary and keeps only the
+   * cents; `PassMoney` has no field to carry the currency. So the same summary
+   * is asked again here, over the same rows read from the same slices through
+   * the same `rowsOf` — the same function and the same inputs, so this label
+   * and the figure it labels cannot disagree.
+   */
+  const mrrStated = useMemo(() => {
+    const memberships = rowsOf(rec.memberships);
+    const plans = rowsOf(rec.plans);
+    if (!c.holders || !memberships || !plans) return null;
+    const joiners = new Set(
+      c.holders.filter((h) => h.outcome === 'joined-after').map((h) => h.holderId),
+    );
+    return summarise([], memberships.filter((mm) => joiners.has(mm.memberId)), plans).mrrCurrency;
+  }, [c.holders, rec.memberships, rec.plans]);
+  // `emptyTotalMoney` where there is no figure at all: nothing has contradicted
+  // the gym's own setting, and that is the currency the dash would have been in.
+  // `totalMoney` everywhere else — it withholds the label when the plans state
+  // more than one money, and never substitutes the tenant's code for a figure
+  // whose own rows disagree. The same pair, in the same order, as
+  // app/(owner)/financials.tsx.
+  const mrrCcy = m == null || m.followingMrrCents == null
+    ? emptyTotalMoney(ccy)
+    : totalMoney(m.followingMrrCents, mrrStated, ccy);
   return (
     <Section
       title="The money, in two parts"
@@ -756,6 +1189,7 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
     >
       {rec.passes.state === 'loading' ? <Loading /> : null}
       {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
       {m ? (
         <>
           <div style={{
@@ -768,21 +1202,53 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
               note={
                 m.passCents == null
                   ? 'no pass carries a recorded price — which is not the same as free'
-                  // The total is known and the money it is in is not, so the
-                  // tile shows a dash rather than a figure the reader
-                  // denominates for themselves.
-                  : !m.currency ? NO_CURRENCY_NOTE
-                  : `from ${m.passesPriced} of ${m.passesTotal} passes${m.mixedCurrency ? ', across more than one currency' : ''}`
+                  /* ── two silences, and neither of them is an Ops field ──────
+                     This dash used to be explained with NO_CURRENCY_NOTE —
+                     "this gym has not set its currency". `m.currency` has never
+                     come from the tenant: it is what the PRICED passes agree
+                     on. So that sentence sent an owner to Ops to fix a field
+                     that is very often already set and was never the reason,
+                     and it now fires in a second state as well, because
+                     `passRevenueCents` returns null here whenever the priced
+                     passes hold more than one money. The two are kept apart the
+                     way app/(owner)/financials.tsx keeps its own silences
+                     apart, and with the wording studio-web/app/close/page.tsx
+                     settled on for the same tile: a month genuinely holding two
+                     moneys is not a mistake and there is nothing to correct,
+                     while priced passes that state no currency at all is a desk
+                     taking money without recording in what. */
+                  : m.mixedCurrency ? MIXED_CURRENCY_NOTE
+                  : !m.currency
+                    ? `${num(m.passesPriced)} of ${num(m.passesTotal)} passes ${m.passesPriced === 1 ? 'carries' : 'carry'} a recorded price, but not one of those rows says what money it was taken in, so there is no figure to write here. The gym’s own currency is not the answer: it is not evidence about what somebody was charged at the desk.`
+                    /* The mixed-currency clause that used to trail this line is
+                       gone rather than repaired. `mixedCurrency` and a non-null
+                       `currency` can no longer both be true — mixed rows are
+                       exactly the case that withholds the code — so it could
+                       never render again; and making it reachable would mean
+                       printing a total under one code while saying underneath
+                       that it spans several, which is the figure the gate now
+                       exists to withhold. The state is not lost: it is the
+                       MIXED_CURRENCY_NOTE branch above and the red paragraph
+                       below. */
+                    : `from ${num(m.passesPriced)} of ${num(m.passesTotal)} passes`
               }
             />
             <Kpi
               label="Memberships that followed, per month"
-              text={money(m.followingMrrCents, m.currency)}
+              text={money(m.followingMrrCents, mrrCcy.currency)}
               note={
                 rec.plans.state === 'failed' ? 'price book not read'
                   : rec.memberships.state === 'failed' ? 'roster not read'
-                  : m.followingMrrCents != null && !m.currency ? NO_CURRENCY_NOTE
                   : m.followingMrrCents == null ? 'none of them is on a priced plan'
+                  // The PLANS behind this figure are not all in one money.
+                  // Nothing about the passes withholds it, and there is nothing
+                  // in Ops to go and correct.
+                  : mrrCcy.gap === 'unstated' ? MIXED_CURRENCY_NOTE
+                  // The figure is known, the rows behind it stated nothing to
+                  // contradict the gym's own setting, and the gym has not set
+                  // one — the only branch on this tile that really is an Ops
+                  // field, and the only one entitled to say so.
+                  : mrrCcy.gap === 'no_gym_currency' ? NO_CURRENCY_NOTE
                   : `${m.followingActive} active membership${m.followingActive === 1 ? '' : 's'}`
               }
             />
@@ -790,11 +1256,26 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
           <p style={{ margin: 0, padding: '14px 16px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: 820 }}>
             {MONEY_NOTE}
           </p>
+          {/* ── what this paragraph may say, now that the tile withholds ─────
+              It read: "the pass total above adds unlike amounts. Read it as a
+              count of takings, not as a sum." That was true of the tile it was
+              written under and is not true of the tile that is there now.
+              `passRevenueCents` returns a null CURRENCY the moment the priced
+              passes hold more than one, `money()` withholds without a code, and
+              `Kpi` draws a missing figure as a dash — so under a mix there is
+              no total above this line at all. The sentence sent an owner
+              looking for a blended number to distrust, found them a dash, and
+              then told them to read the dash as "a count of takings".
+              What is worth saying is the thing the dash cannot: WHICH moneys,
+              and that the per-type table further down still names every one of
+              them. Nothing here is missing from the record. */}
           {m.mixedCurrency ? (
-            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12.5, color: 'var(--crit)' }}>
-              These passes were sold in more than one currency, so the pass total
-              above adds unlike amounts. Read it as a count of takings, not as a
-              sum.
+            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12.5, color: 'var(--ink2)' }}>
+              These passes were sold in more than one currency, so the figure above is withheld
+              rather than blended — there is no rate in this product to blend them with, and a
+              gym that changed its currency legitimately has both on its books. The takings are
+              not lost: <strong style={{ color: 'var(--ink)' }}>What each pass type sold</strong>{' '}
+              below names one amount per currency, per product, and never adds two of them.
             </p>
           ) : null}
         </>
@@ -803,7 +1284,231 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
   );
 }
 
+/**
+ * What each pass type actually sold.
+ *
+ * ── the question nothing answered ─────────────────────────────────────────
+ *
+ * A gym defines a pass type with a price and a number of credits, and
+ * studio-web/app/money/page.tsx renders that definition — the price book. That
+ * was the whole of it: no screen in the console said how many of a pack the
+ * desk has sold, or what those sales brought in, so a product that has sold
+ * twice since March looked exactly like the one that sells every week.
+ *
+ * Both halves of the answer were already in this page's memory. `fetchPasses`
+ * reads every `gym_passes` row for the conversion report above and each one
+ * carries `pass_type_id`, `paid_cents` and its own `currency`. The price book
+ * is the one thing that was missing, and it is here only so that a type which
+ * sold NOTHING can have a row: that row is the most actionable one on the
+ * table, and it cannot be derived from the sales.
+ *
+ * ── what this table refuses ───────────────────────────────────────────────
+ *
+ *  · It never adds two currencies. A type sold in both has two amounts on its
+ *    row, side by side, and `salesTotals` keeps them apart at the bottom too.
+ *    The whole-gym tile above WITHHOLDS under a mix, which is right for a
+ *    headline; a per-product table whose best-selling row is blank is useless,
+ *    so this names both instead.
+ *  · It never multiplies the price by the count. `issuePass` copies the price
+ *    onto the pass at the moment of sale, so a repriced type has older sales at
+ *    the older price — see PRICE_MOVED_NOTE.
+ *  · It never counts an unpriced pass as a free one. "Sold 40, 12 of them
+ *    priced" is on the row; a zero would say the pack earns nothing.
+ */
+function Sold({ rec, types, typesErr }: {
+  rec: PassConversionRecord; types: PassType[] | null; typesErr: string | null;
+}) {
+  // `rowsOf` and not `rec.passes.rows`: a loading, failed or TRUNCATED read
+  // hands back null, and a sales table computed over the first page of a gym's
+  // passes is a set of subtotals with product names on them.
+  const passes = rowsOf(rec.passes);
+  const rows = useMemo(
+    () => (passes ? passTypeSales(types, passes) : null),
+    [types, passes],
+  );
+  const tot = useMemo(() => (rows ? salesTotals(rows) : null), [rows]);
+
+  const cols: Column<PassTypeSale>[] = [
+    {
+      key: 'type', header: 'Pass type',
+      // The unattributable row has no name and must not sort as an empty
+      // string, which would put it at the top of the gym's product table.
+      value: (r) => r.name ?? 'zzz',
+      render: (r) => (
+        <>
+          {r.name ?? <span className="dash">— type could not be read</span>}
+          <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 2 }}>
+            {r.kind ? PASS_KIND_LABEL[r.kind] : 'kind not read'}
+            {r.inBook
+              ? (r.active ? '' : ' · withdrawn from sale')
+              : r.typeId ? ' · no longer in the price book' : ''}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: 'price', header: 'Price now', numeric: true,
+      value: (r) => r.listPriceCents,
+      // The ROW's own currency, not the gym's. A type priced before the gym
+      // changed currency is still priced in the old one, and `money()` withholds
+      // rather than borrowing a code.
+      render: (r) => r.listPriceCents == null
+        ? <span className="dash">{r.typeId ? '— not in the book' : '—'}</span>
+        : money(r.listPriceCents, r.listCurrency) ?? <span className="dash">— no currency on this type</span>,
+    },
+    {
+      key: 'credits', header: 'Credits each', numeric: true,
+      value: (r) => r.uses,
+      render: (r) => r.uses == null ? <span className="dash">—</span> : num(r.uses),
+    },
+    {
+      key: 'sold', header: 'Sold', numeric: true,
+      value: (r) => r.sold,
+      render: (r) => (
+        <>
+          {num(r.sold)}
+          {r.sold > r.priced ? (
+            <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 2 }}>
+              {num(r.sold - r.priced)} with no price recorded
+            </div>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: 'took', header: 'Took',
+      // Sorted by CURRENCY CODE and never by amount. Ranking this column by the
+      // integer would put 86,000 fils above 24,000 pence, which is not a
+      // comparison — there is no rate anywhere in this product that would make
+      // it one. Count is the ranking that survives two moneys, and it is the
+      // column beside this one.
+      value: (r) => r.take[0]?.currency ?? '',
+      render: (r) => <Take take={r.take} />,
+    },
+    {
+      key: 'used', header: 'Credits used', numeric: true,
+      value: (r) => r.creditsSpent,
+      render: (r) => r.creditsSold === 0
+        ? <span className="dash">—</span>
+        : `${num(r.creditsSpent)} of ${num(r.creditsSold)}`,
+    },
+  ];
+
+  return (
+    <Section
+      title="What each pass type sold"
+      sub="The price book is what a pass costs. This is what the desk actually sold and what came in — the two are not the same question, and only the first one had a screen."
+    >
+      {rec.passes.state === 'loading' ? <Loading /> : null}
+      {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
+
+      {/* Printed above the table rather than under it. A reader who takes this
+          for the gym's product list and then reads the correction has already
+          drawn the conclusion this sentence exists to stop. */}
+      {typesErr ? (
+        <div style={{
+          margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)',
+          borderLeft: '3px solid var(--crit)', fontSize: 12.5, color: 'var(--ink2)',
+        }}>
+          {BOOK_UNREAD_NOTE}
+          <div className="mono" style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ink3)' }}>{typesErr}</div>
+        </div>
+      ) : null}
+
+      {rows ? (
+        <>
+          <DataTable
+            noun="pass types"
+            rows={rows}
+            columns={cols}
+            rowKey={(r) => r.typeId ?? 'unattributable'}
+            empty={types && types.length === 0
+              ? 'No pass types and no passes. Until a type exists on the Money screen the desk cannot sell a drop-in, so there is nothing here to have sold.'
+              : 'No pass has ever been issued on any of these types.'}
+          />
+          {tot ? (
+            <p style={{ margin: 0, padding: '14px 16px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: 820 }}>
+              {/* `namedTypes`, not `types`. `types` is how many ROWS the table
+                  has, and one of those rows can be the unattributable bucket —
+                  passes with no pass type on them, or a type that could not be
+                  read. That bucket is not a product the gym sells, and counting
+                  it here told a gym with three pass types that it had four.
+                  LOST_TYPE_NOTE below is where that row is accounted for. */}
+              {num(tot.sold)} pass{tot.sold === 1 ? '' : 'es'} sold across {num(tot.namedTypes)} type{tot.namedTypes === 1 ? '' : 's'}
+              {tot.sold > tot.priced ? `, ${num(tot.sold - tot.priced)} of them with no price recorded` : ''}
+              {tot.neverSold > 0
+                ? `. ${num(tot.neverSold)} type${tot.neverSold === 1 ? ' has' : 's have'} never been sold at all`
+                : ''}
+              {tot.take.length ? <> — that came to <Take take={tot.take} inline />.</> : '.'}
+            </p>
+          ) : null}
+          <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+            {PRICE_MOVED_NOTE}
+          </p>
+          {rows.some((r) => r.typeId === null) ? (
+            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+              {LOST_TYPE_NOTE}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </Section>
+  );
+}
+
+/**
+ * An amount of one money per line, and never a sum of two.
+ *
+ * The unstated bucket prints the INTEGER, said to be minor units, rather than a
+ * figure with a decimal point invented two places from the right: a ¥60,000
+ * sale rendered "600.00" is a different number, not an amount whose currency is
+ * unknown. studio-web/app/coach/roster/page.tsx reached the same wall on
+ * `client_purchases` and answers it the same way.
+ */
+function Take({ take, inline }: { take: PassTypeSale['take']; inline?: boolean }) {
+  if (!take.length) return <span className="dash">— nothing priced</span>;
+  return (
+    <>
+      {take.map((t, i) => (
+        <span
+          key={t.currency ?? 'unstated'}
+          style={inline ? undefined : { display: 'block' }}
+        >
+          {i > 0 && inline ? ' and ' : null}
+          {t.currency
+            ? money(t.cents, t.currency)
+            : <span className="mono" style={{ color: 'var(--warn)' }}>{String(t.cents)} in minor units, currency not recorded</span>}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /* ── the three states, once ────────────────────────────────────────────────── */
+
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * Not the failure banner and not the empty sentence: the rows are real and
+ * there are more of them. Every figure on this page is gated on
+ * `state === 'ready'`, so a truncated read already withholds them — what it
+ * could not do until this existed is SAY SO, and a section that quietly draws
+ * nothing is the same blank screen a failure used to produce.
+ */
+function Truncated({ s, part }: { s: Slice<unknown>; part: string }) {
+  if (s.state !== 'partial') return null;
+  return (
+    <div style={{
+      margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)',
+      borderLeft: '3px solid var(--warn)', fontSize: 12.5, color: 'var(--ink2)',
+    }}>
+      Only the first {s.cap} rows of {part} were read, and there are more. Everything below would
+      be computed over a <strong>prefix</strong>, so it is withheld rather than shown as a total.
+    </div>
+  );
+}
 
 function Failed({ reason, part }: { reason: string; part: ConversionPart }) {
   return (
@@ -821,12 +1526,14 @@ function Failed({ reason, part }: { reason: string; part: ConversionPart }) {
   );
 }
 
-/** A table cell that keeps "not read", "not loaded" and "nothing there" apart. */
+/** A table cell that keeps "not read", "not loaded", "part read" and "nothing
+ *  there" apart — four states, four cells. */
 function Cell({ state, value, empty }: {
   state: Slice<unknown>['state']; value: string | null; empty: string;
 }) {
   if (state === 'loading') return <span className="dash">…</span>;
   if (state === 'failed') return <span className="dash">not read</span>;
+  if (state === 'partial') return <span className="dash">part read</span>;
   if (value == null) return <span className="dash">{empty}</span>;
   return <>{value}</>;
 }
@@ -863,28 +1570,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

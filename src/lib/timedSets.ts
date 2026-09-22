@@ -14,7 +14,7 @@
 // reps box — which is a claim that they performed forty-five plank repetitions,
 // counted into the rep totals on History, and eligible to be read as a rep
 // record. The alternative was not logging the movement at all, which is what
-// most people did, so the one exercise in a beginner's programme they could
+// most people did, so the one exercise in a beginner's program they could
 // actually complete was the one their log never mentioned.
 //
 // ── Why a flag, and not a third number in the pair ─────────────────────────
@@ -53,6 +53,13 @@
 // ./bodyweightSets.ts: the honest record of work that cannot be priced is the
 // work, stated in its own units.
 import type { WorkoutEntry } from './mockData';
+// The other flag that changes what `sets[i][1]` MEANS. Consulted rather than
+// re-implemented: a bodyweight set's second number is what was ADDED to the
+// body, and two files deciding separately how to print that is how the saved
+// chips came to disagree with the draft chips they sit six inches from. Both
+// modules only reach into the other from inside a function body, so the cycle
+// resolves at call time and neither is half-built when it is read.
+import { bodyweightSetLabel, isBodyweightSet } from './bodyweightSets';
 
 /** True when the person said this set was held for a time rather than
  *  repeated. `sets[i][0]` is then SECONDS. */
@@ -72,7 +79,7 @@ export function hasTimedSet(e: Pick<WorkoutEntry, 'timed'>): boolean {
  *
  * Read from the prescription STRING because that is where the app already
  * says it: `'45 sec'`, `'30 sec/side'`, `'1 min'`, `'90s'`, `'2 min hold'`.
- * Nothing writes a machine-readable duration onto a programme, three years of
+ * Nothing writes a machine-readable duration onto a program, three years of
  * templates are already stored as prose, and a coach typing "45 sec" into the
  * builder means the same thing today as they did then.
  *
@@ -151,7 +158,7 @@ export function readHold(text: string): HoldRead {
   }
   if (secs <= 0) return { ok: false, reason: 'A hold has to be at least one second.' };
   if (secs > MAX_HOLD_SECONDS) {
-    return { ok: false, reason: `That is over two hours. Type the hold in seconds — 45 for forty-five seconds — or as minutes and seconds like 1:30.` };
+    return { ok: false, reason: `That is over two hours. Type the hold in seconds (45 for forty-five seconds) or as minutes and seconds like 1:30.` };
   }
   return { ok: true, secs };
 }
@@ -174,6 +181,101 @@ export function timedSetLabel(secs: number, loadLabel: string | null, bodyweight
   const hold = `${holdLabel(secs)} hold`;
   if (bodyweight) return loadLabel ? `${hold} at bodyweight +${loadLabel}` : `${hold} at bodyweight`;
   return loadLabel ? `${hold} with ${loadLabel}` : hold;
+}
+
+/**
+ * One SAVED set, as it reads on a chip in the log.
+ *
+ * ── The bug this is the fix for ───────────────────────────────────────────
+ *
+ * The draft chips in app/(client)/workouts.tsx already knew: a hold is printed
+ * as a clock and never as "45×", which is what a reps chip would say about a
+ * plank the app itself asked for. The two places that render a SAVED entry did
+ * not — they read `set[0]` and `set[1]` straight out of the row, so the moment
+ * a plank was saved it came back as "45×— kg". The app prescribes the hold,
+ * asks for it in seconds, prints it correctly while it is a draft, and then
+ * showed it back as forty-five repetitions of nothing. A coach reading the same
+ * rows sees forty-five plank reps.
+ *
+ * `loadLabel` is passed in rather than imported, because the number has to be
+ * rendered in the member's own unit and in the app's own "no figure" glyph, and
+ * neither of those belongs in a pure module. It is given null when the row
+ * carries no load, so the caller's own em-dash convention is what shows.
+ */
+export function setChipLabel(
+  e: Pick<WorkoutEntry, 'sets' | 'timed' | 'bw'>,
+  i: number,
+  loadLabel: (kg: number | null) => string,
+  unit: string,
+): string {
+  const set = e.sets?.[i];
+  const first = Number(set?.[0]) || 0;
+  const load = Number(set?.[1]) || 0;
+  const bw = isBodyweightSet(e, i);
+  const added = load > 0 ? `${loadLabel(load)} ${unit}` : null;
+  if (isTimedSet(e, i)) {
+    // The seconds are the measurement. The load, when there is one, is what was
+    // held ON TOP of the member — "45 s × 10 kg" — and never a multiplicand.
+    //
+    // On a hold the person SAID was their own bodyweight, "45 s × 10 kg" is
+    // the second half of the same mistake: it presents the ten as the whole of
+    // the load when it is a plate on somebody's back. `HoldRecord.bodyweight`
+    // has carried that distinction since it was written, and its own comment
+    // asks for exactly this phrasing.
+    if (bw && added) return `${holdLabel(first)} at bodyweight +${added}`;
+    return added ? `${holdLabel(first)} × ${added}` : holdLabel(first);
+  }
+  // A set whose load was the person. `bw[i] === true` is testimony — see
+  // ./bodyweightSets.ts — and printing it as `8×— kg` states two false things
+  // at once: that a bar was involved, and that nobody recorded what was on it.
+  // A pull-up is not an unrecorded bench press. The draft chips in
+  // app/(client)/workouts.tsx have always got this right and the SAVED chips
+  // beside them did not, which is the same split `setChipLabel` was written to
+  // close for holds.
+  if (bw) return bodyweightSetLabel(first, load, added);
+  return `${first}×${loadLabel(load > 0 ? load : null)} ${unit}`;
+}
+
+/**
+ * Every set of an entry on one line, for the compact strip.
+ *
+ * The unit is stated once at the end and only when something on the line is a
+ * load, so an all-holds entry does not read "1:00  45 s kg".
+ *
+ * A bodyweight set carries its own unit inside its own phrase — the added
+ * kilograms are a clause, not the line's subject — so it does not put the unit
+ * on the end either. Without that a member's page of pull-ups read "8 reps at
+ * bodyweight  8 reps at bodyweight kg".
+ */
+export function setListLabel(
+  e: Pick<WorkoutEntry, 'sets' | 'timed' | 'bw'>,
+  loadLabel: (kg: number | null) => string,
+  unit: string,
+): string {
+  const rows = e.sets ?? [];
+  const parts: string[] = [];
+  let anyLoaded = false;
+  for (let i = 0; i < rows.length; i++) {
+    const first = Number(rows[i]?.[0]) || 0;
+    const load = Number(rows[i]?.[1]) || 0;
+    const bw = isBodyweightSet(e, i);
+    const added = load > 0 ? `${loadLabel(load)} ${unit}` : null;
+    if (isTimedSet(e, i)) {
+      if (bw && added) parts.push(`${holdLabel(first)} at bodyweight +${added}`);
+      else if (added) { parts.push(`${holdLabel(first)} × ${loadLabel(load)}`); anyLoaded = true; }
+      else parts.push(holdLabel(first));
+    } else if (bw) {
+      // Never `8×— kg`. See setChipLabel above: the dash is the right answer
+      // for an ordinary set nobody described, and the wrong one for a set the
+      // person told us was their own body.
+      parts.push(bodyweightSetLabel(first, load, added));
+    } else {
+      parts.push(`${first}×${loadLabel(load > 0 ? load : null)}`);
+      anyLoaded = true;
+    }
+  }
+  const line = parts.join('  ');
+  return anyLoaded && line ? `${line} ${unit}` : line;
 }
 
 /** Total seconds held across an entry. Zero when nothing in it was timed —

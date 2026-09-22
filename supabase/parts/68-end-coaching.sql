@@ -106,7 +106,7 @@
 -- former coach kept read and write on the feedback, macro adjustments and
 -- assigned programs they wrote for this client. Those are their own words about
 -- their own work, which is arguable either way, but the WRITE half was not: a
--- coach who had been let go could still assign a programme.
+-- coach who had been let go could still assign a program.
 --
 -- 69-coach-content-scope.sql — which sorts and runs immediately after this file
 -- — closed it. It drops `prog_rw` / `nutri_rw` / `feedback_rw` and replaces each

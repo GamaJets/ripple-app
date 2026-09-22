@@ -7,6 +7,7 @@
 // the owner's payroll recorded zero.
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
+import { capLimit, isTruncated } from './rowCap';
 
 export interface RosterMember { userId: string; name: string; status: string; attended: boolean }
 
@@ -41,24 +42,27 @@ export async function classRoster(classId: string): Promise<RosterMember[] | nul
   } catch { return null; }
 }
 
-/**
- * Mark a member present or absent for a class. Returns whether it actually
- * saved.
- *
- * This used to return void and swallow every failure, which made the calling
- * screen structurally incapable of knowing whether a tick stuck — it moved the
- * row optimistically and told the trainer "Check-ins are saved as you tap".
- * That is the same defect the header of this file describes: attendance is what
- * the trainer is paid on, so a tick that did not save costs someone money, and
- * silence is the one response that guarantees nobody notices.
- */
-export async function setAttendance(classId: string, userId: string, present: boolean): Promise<boolean> {
-  if (!USE_SUPABASE || !classId || classId === UNLINKED_CLASS) return false;
-  try {
-    const { error } = await supabase.rpc('set_class_attendance', { p_class: classId, p_user: userId, p_present: present });
-    return !error;
-  } catch { return false; }
-}
+// ── `setAttendance` lived here, and is gone ──────────────────────────────
+//
+// It called `set_class_attendance` directly and returned a boolean, and the
+// boolean was the defect: it collapsed the two answers that matter in a gym
+// basement into one. A refusal the server MADE and a request that never reached
+// it both came back `false`, the screen said "that change did not save" for
+// both, and a coach with no signal was right to believe it and wrong about what
+// to do next. Attendance is what a trainer is paid on.
+//
+// `app/(trainer)/class-checkin.tsx` now ticks through the floor queue
+// (`{ kind: 'class-attendance' }`), which keeps them apart: a refusal leaves the
+// row where it was, and a request nobody answered is kept on the phone and goes
+// up on the next launch with signal — with a banner saying plainly that the gym
+// cannot see it yet, because a trainer who believes the gym has the attendance
+// does not check it.
+//
+// The dead-export ratchet carried this as "either the register saves through
+// this or it goes". It is the second half: the register already saves through
+// something better, and wiring this would route the one write the queue exists
+// for straight past it. `UNLINKED_CLASS` is still refused by name — the queue's
+// sender does it, on the same argument this function made.
 
 // ── Owner analytics + payroll ──────────────────────────────────────────────
 // The row shape and the rate maths live in classRates.ts, which imports
@@ -73,14 +77,51 @@ import type { ClassSummaryRow } from './classRates';
  * be read** — and the payroll hero on class-analytics is computed from this, so
  * the difference is the difference between "nobody is owed anything this week"
  * and "we do not know what anybody is owed".
+ *
+ * ── Why the RPC is capped, and why a truncated range is also null ──────────
+ *
+ * This was a bare `.rpc(...)` with no bound of any kind, and PostgREST answers
+ * an unbounded request with at most 1000 rows while saying nothing about it
+ * (see src/lib/rowCap.ts). One row here is one CLASS, and the two callers
+ * aggregate: `summariseClassRows` prices the whole set into the Trainer Payroll
+ * hero on app/(owner)/class-analytics.tsx, and app/(trainer)/my-register.tsx
+ * counts a coach's own teaching from it. A busy timetable crosses a thousand
+ * classes inside a 90-day range — five studios, ten classes a day, is 900 in a
+ * quarter before anything unusual happens — and the read came back at exactly
+ * that, cleanly, as a subtotal presented in the type used when it is whole. The
+ * owner pays it.
+ *
+ * `class_attendance_summary` was checked for a `limit` of its own, because a
+ * ceiling written INSIDE a `create function` body is invisible to everything in
+ * rowCap.ts — the server can never answer with cap + 1 no matter what the
+ * client asks — and `scripts/check-sql-caps.mjs` exists for exactly that pair.
+ * Its effective definition (supabase/parts/460, the highest-numbered one) ends
+ * `order by gc.starts_at desc` and carries no `limit`, so there is no server
+ * ceiling to mirror and no constant to pair: the cap is PostgREST's own, and
+ * the probe row is the right instrument.
+ *
+ * A truncated read joins `null` rather than becoming a fifth answer, and that
+ * is a deliberate limit on this change rather than an oversight. Both callers
+ * are built on `ClassSummaryRow[] | null` and both already render null as "this
+ * could not be read", which is a true sentence about a truncated range — the
+ * rows are real, but the SET is a prefix, and every figure either screen draws
+ * from it is a total. A 'partial' answer would need somewhere on both screens
+ * to say what a partial payroll total means, and there is no honest sentence
+ * for "this is some of what you owe" on a screen an owner pays from.
  */
 export async function classSummary(fromISO: string, toISO: string): Promise<ClassSummaryRow[] | null> {
   if (USE_SUPABASE) {
     try {
-      const { data, error } = await supabase.rpc('class_attendance_summary', { p_from: fromISO, p_to: toISO });
+      const { data, error } = await supabase
+        .rpc('class_attendance_summary', { p_from: fromISO, p_to: toISO })
+        .limit(capLimit());
       // The RPC resolves with { data, error }; the old `const { data }` could
       // not tell a refusal from a quiet week, and both became [].
       if (error) return null;
+      // One row more than we are willing to accept came back, so the range is
+      // larger than the read. Refused, not trimmed: a prefix of a payroll range
+      // is not a smaller payroll figure, it is a wrong one.
+      if (isTruncated(data as unknown[] | null)) return null;
       if (Array.isArray(data)) return data.map((r: any) => ({
         classId: String(r.class_id), title: String(r.title || 'Class'), kind: String(r.kind || ''),
         branch: String(r.branch || '—'), trainerId: String(r.trainer_id || ''), trainerName: String(r.trainer_name || 'Trainer'),

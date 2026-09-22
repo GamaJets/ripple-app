@@ -24,9 +24,14 @@
 // rate is a bare number the coach types about a payment Repple does not make.
 import {
   parseRate, rateText, payEstimate, parseGoal, goalText, goalPct,
-  goalsEmptyLine, rateFieldNote,
+  goalsEmptyLine, goalSaveLine, rateFieldNote,
   parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN,
+  TRAINER_GOALS_CACHE_PREFIX, LEGACY_TRAINER_GOALS_KEY, trainerGoalsCacheKey,
+  trainerGoalsCache, isTrainerGoalsCacheKey,
 } from './coachPrefs';
+import {
+  cacheHydrated, mayWriteCache, pushUpDecision, type DeviceCache,
+} from './deviceAccountCache';
 import { paceFor, cooldownFloor, MIN_COOLDOWN_DAYS, MAX_COOLDOWN_DAYS, DEFAULT_COOLDOWN_DAYS } from './interventions';
 import { mutedDaysFor, DISMISS_FLOOR_DAYS } from './nudge';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -233,6 +238,162 @@ eq(mutedDaysFor('sent', drift, { minCooldownDays: 45 }), 45, 'sending honours it
 // No preference must behave exactly as it did before this existed.
 eq(mutedDaysFor('sent', drift), mutedDaysFor('sent', drift, null),
   'an absent preference changes nothing at all');
+
+/* ── a target that never left the phone ─────────────────────────────────── */
+//
+// Setting a goal was a void call behind a sheet that closed itself, and two
+// silent ways of keeping the target on one handset for good sat behind it: the
+// account write is skipped for the rest of a session whose prefs read failed,
+// and the write itself was un-awaited and unchecked.
+
+eq(goalSaveLine('saved'), null, 'a target that reached the account says nothing — the bars speak for themselves');
+
+{
+  const dev = goalSaveLine('device-only') ?? '';
+  ok(dev.length > 0, 'a target that was never sent says so');
+  ok(/this phone/i.test(dev), 'and names where it actually is');
+  ok(!/saved to your account|stored on your account/i.test(dev), 'and never claims the account has it');
+}
+
+{
+  const bad = goalSaveLine('failed') ?? '';
+  ok(/did NOT reach your account|not reach your account/i.test(bad), 'a refused write says the account does not have it');
+  ok(/reinstall|another phone/i.test(bad), 'and what that costs the coach');
+}
+
+for (const o of ['saved', 'device-only', 'failed'] as const) {
+  const line = goalSaveLine(o);
+  ok(line === null || (!line.includes('undefined') && !line.includes('null')),
+    `${o} is either silent or a real sentence`);
+}
+
+/* ── whose targets these are, across sign-in → sign-out → sign-in ─────────
+ *
+ * The defect: `useTrainerGoals` cached the coach's monthly revenue and client
+ * targets under one device-wide key, and its BACKFILL — the branch that
+ * publishes targets this device holds to an account that has none — wrote them
+ * into `coach_prefs` for whoever was signed in. On a gym's shared handset the
+ * previous coach's targets arrived in this coach's account and rendered under
+ * "Your goals" with a progress arc, as though this coach had set them.
+ *
+ * Driven below: the real key composition and the real backfill gate, against a
+ * fake store, over ONE long-lived provider object — because the provider is
+ * mounted above the sign-out, so the whole bug is in what the second sign-in
+ * inherits from the first.
+ */
+
+interface Targets { revenue: number; clients: number }
+class GoalsStore {
+  private m = new Map<string, string>();
+  refuse = false;
+  get(k: string): string | null {
+    if (this.refuse) { this.refuse = false; throw new Error('storage refused'); }
+    return this.m.has(k) ? this.m.get(k)! : null;
+  }
+  set(k: string, v: string) { this.m.set(k, v); }
+  keys(): string[] { return [...this.m.keys()].sort(); }
+}
+interface GoalsProvider { store: GoalsStore; cache: DeviceCache; goals: Targets }
+
+const NO_TARGETS: Targets = { revenue: 0, clients: 0 };
+
+/** The head of the effect, synchronous, on every account change. */
+const goalsAccount = (p: GoalsProvider, uid: string | null) => {
+  p.cache = trainerGoalsCache(uid);
+  // The numbers leave the screen with the key: this provider outlives a
+  // sign-out, and an inherited revenue target is drawn as an arc with the new
+  // coach's own revenue measured against it.
+  p.goals = NO_TARGETS;
+};
+const goalsRead = (p: GoalsProvider, o: { throws?: boolean } = {}) => {
+  if (!p.cache.key) return;
+  p.store.refuse = !!o.throws;
+  try {
+    const raw = p.store.get(p.cache.key);
+    p.goals = raw ? (JSON.parse(raw) as Targets) : NO_TARGETS;
+    p.cache = cacheHydrated(p.cache);
+  } catch { /* not hydrated: nothing is written over bytes nobody read */ }
+};
+const goalsSave = (p: GoalsProvider, next: Targets) => {
+  p.goals = next;
+  if (mayWriteCache(p.cache)) p.store.set(p.cache.key, JSON.stringify(next));
+};
+/** The backfill gate. `serverHas` is whether the ACCOUNT already has targets. */
+const goalsBackfill = (p: GoalsProvider, writeUid: string | null, serverHas: boolean | null) =>
+  pushUpDecision({
+    cache: p.cache,
+    writeUid,
+    hasCached: p.goals.revenue > 0 || p.goals.clients > 0,
+    serverHas,
+  });
+
+const COACH_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const COACH_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+eq(trainerGoalsCacheKey(COACH_A), `${TRAINER_GOALS_CACHE_PREFIX}${COACH_A}`,
+  'a key is the prefix and the account');
+ok(trainerGoalsCacheKey(COACH_A) !== trainerGoalsCacheKey(COACH_B),
+  'two coaches on one handset do not share a key');
+eq(trainerGoalsCacheKey(null), null, 'signed out there is no key, and no key means do not persist');
+eq(trainerGoalsCacheKey(''), null, 'an empty id is not an account');
+eq(trainerGoalsCacheKey('unknown'), null, "and 'unknown' is not one either");
+ok(!isTrainerGoalsCacheKey(LEGACY_TRAINER_GOALS_KEY),
+  'the legacy unqualified key is not one of the per-account family');
+ok(isTrainerGoalsCacheKey(trainerGoalsCacheKey(COACH_A)!), 'an account key is');
+
+{
+  const p: GoalsProvider = { store: new GoalsStore(), cache: trainerGoalsCache(null), goals: NO_TARGETS };
+
+  // Coach A sets a revenue target on the gym's handset.
+  goalsAccount(p, COACH_A);
+  goalsRead(p);
+  goalsSave(p, { revenue: 4000, clients: 12 });
+  eq(p.store.keys().join(','), `${TRAINER_GOALS_CACHE_PREFIX}${COACH_A}`,
+    "A's targets are stored under A's key and nowhere else");
+
+  // A signs out.
+  goalsAccount(p, null);
+  eq(p.goals.revenue, 0, "the departing coach's target leaves the Analytics hero with their key");
+  goalsSave(p, { revenue: 4000, clients: 12 });
+  eq(p.store.keys().length, 1, 'and a signed-out write lands nowhere');
+
+  // B signs in on the same handset, with no targets of their own anywhere.
+  goalsAccount(p, COACH_B);
+  goalsRead(p);
+  eq(p.goals.revenue, 0, "B's section is empty, because A's numbers are behind A's key");
+  eq(goalsBackfill(p, COACH_B, false), 'nothing-cached',
+    "so the backfill has nothing to publish — A's targets never reach B's coach_prefs row");
+
+  // B's own target, and A's is untouched.
+  goalsSave(p, { revenue: 900, clients: 4 });
+  eq(goalsBackfill(p, COACH_B, false), 'push', "B's own cached target may be published as B's");
+  eq(goalsBackfill(p, COACH_A, false), 'other-account',
+    'and the same blob may not be written as A — this is the defect, caught');
+  eq(goalsBackfill(p, COACH_B, true), 'server-has-rows',
+    'an account that already has targets keeps them; the server wins');
+  eq(goalsBackfill(p, COACH_B, null), 'server-unknown',
+    'and a prefs read that failed is never treated as an account with none — a failed read is not an empty list');
+  eq(JSON.parse(p.store.get(trainerGoalsCacheKey(COACH_A)!)!).revenue, 4000,
+    "A's targets survive B's session intact");
+
+  // The flag must not survive the key change: B's stored targets must outlast
+  // an account switch back whose read never lands.
+  goalsAccount(p, COACH_A);
+  ok(!p.cache.hydrated, 'the arming flag is false the instant the key changes');
+  goalsSave(p, NO_TARGETS);
+  eq(JSON.parse(p.store.get(trainerGoalsCacheKey(COACH_A)!)!).revenue, 4000,
+    "and {0,0} is not written over the new account's stored targets before its read comes back");
+
+  // A refused read arms nothing.
+  goalsAccount(p, COACH_B);
+  goalsRead(p, { throws: true });
+  ok(!mayWriteCache(p.cache), 'a refused read does not arm the device write');
+  eq(goalsBackfill(p, COACH_B, false), 'not-hydrated',
+    'and targets nobody managed to read are never published to the account');
+  goalsSave(p, NO_TARGETS);
+  eq(JSON.parse(p.store.get(trainerGoalsCacheKey(COACH_B)!)!).revenue, 900,
+    "B's stored targets survive a session that could not read them");
+}
 
 if (errors.length) {
   console.error(`coachPrefs.test.ts — ${errors.length} failure(s):`);

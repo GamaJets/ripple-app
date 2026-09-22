@@ -82,6 +82,13 @@
 // subscriptions and a rule like that has to be assertable in a test.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { refusalFor } from '../../../src/lib/subscriptionScope.ts';
 import {
   normaliseCode, checkoutCodeBlocker, codeAppliesTo, oneOffDiscount,
@@ -91,6 +98,7 @@ import {
 import {
   modelForAccount, optionsForObject, platformFeePct, applicationFeeCents, canTakeDirectCharges,
 } from '../../../src/lib/directCharges.ts';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -144,13 +152,37 @@ Deno.serve(async (req) => {
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
-  // The signed-in caller, and nothing more than that. Which SIDE of a
-  // subscription they are on is a question about the row, not about the token.
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
+      + 'Nothing has been charged. Try again in a moment.' }, 503);
+  }
   const uid = auth?.user?.id;
   if (!uid) return json({ error: 'no user' }, 401);
 
   const action = String(body.action || 'checkout');
+
+  // Every return address this function hands Stripe — two portals and the
+  // checkout pair — comes out of the request body, and each used to be
+  // `String(body.x || 'repple://…')` with nothing between a body and a payments
+  // API. src/lib/redirectTarget.ts holds the rule and is honest about what it
+  // is and is not: an unset REDIRECT_ALLOW still refuses the four schemes that
+  // are never a redirect target, and setting it makes the list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  /** One line at each of the four sites. A refusal is a 400 carrying the
+   *  module's own sentence, which already says nothing has been charged. */
+  const backTo = (offered: unknown, fallback: string) => checkRedirect(offered, fallback, redirectAllow);
 
   // ── the billing portal for a ONE-OFF sale ─────────────────────────────────
   //
@@ -203,9 +235,11 @@ Deno.serve(async (req) => {
     // `accountForObject` reads the object's own column rather than the coach's
     // current setting.
     try {
+      const back = backTo(body.return_url, 'repple://packages');
+      if (!back.ok) return json({ error: back.reason }, 400);
       const portal = await stripe.billingPortal.sessions.create({
         customer: row.stripe_customer_id,
-        return_url: String(body.return_url || 'repple://packages'),
+        return_url: back.url,
       }, optionsForObject(row));
       return json({ url: portal.url });
     } catch (e) { return stripeError('billing portal', e); }
@@ -276,9 +310,11 @@ Deno.serve(async (req) => {
       // own card to update it and cannot cancel from Stripe's side at all.
       if (!row.stripe_customer_id) return json({ error: 'no billing account on this subscription yet' }, 404);
       try {
+        const back = backTo(body.return_url, 'repple://packages');
+        if (!back.ok) return json({ error: back.reason }, 400);
         const portal = await stripe.billingPortal.sessions.create({
           customer: row.stripe_customer_id,
-          return_url: String(body.return_url || 'repple://packages'),
+          return_url: back.url,
         }, acctOpts);
         return json({ url: portal.url });
       } catch (e) { return stripeError('billing portal', e); }
@@ -401,8 +437,12 @@ Deno.serve(async (req) => {
   // ── buying ────────────────────────────────────────────────────────────────
   const packageId = String(body.package_id || '');
   if (!packageId) return json({ error: 'missing package_id' }, 400);
-  const successUrl = String(body.success_url || 'repple://purchase/success');
-  const cancelUrl = String(body.cancel_url || 'repple://purchase/cancel');
+  const okBack = backTo(body.success_url, 'repple://purchase/success');
+  if (!okBack.ok) return json({ error: okBack.reason }, 400);
+  const cancelBack = backTo(body.cancel_url, 'repple://purchase/cancel');
+  if (!cancelBack.ok) return json({ error: cancelBack.reason }, 400);
+  const successUrl = okBack.url;
+  const cancelUrl = cancelBack.url;
 
   // Load the package and the trainer's connected account.
   //
@@ -525,7 +565,7 @@ Deno.serve(async (req) => {
     // refuses to create one for a coach on that model. Refused here rather than
     // sent to Stripe to come back as "No such promotion code".
     if (model !== 'direct') {
-      return json({ error: 'Your coach’s payment setup does not take discount codes. Nothing has been charged — buy it at the price shown, or ask them about the code.' }, 409);
+      return json({ error: 'Your coach’s payment setup does not take discount codes. Nothing has been charged. Buy it at the price shown, or ask them about the code.' }, 409);
     }
 
     let found: Stripe.PromotionCode | null = null;
@@ -538,7 +578,7 @@ Deno.serve(async (req) => {
       found = list.data[0] ?? null;
     } catch (e) { return stripeError('checking that code', e); }
     if (!found) {
-      return json({ error: 'That code is not one your coach is running, or it has stopped working. Nothing has been charged — check it with them.' }, 404);
+      return json({ error: 'That code is not one your coach is running, or it has stopped working. Nothing has been charged. Check it with them.' }, 404);
     }
     if (!codeAppliesTo(found.metadata?.repple_package_id, packageId)) {
       return json({ error: CODE_IS_FOR_ANOTHER_PACKAGE }, 400);

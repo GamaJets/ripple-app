@@ -1,7 +1,7 @@
 // Trainer · Saved Messages — the library behind the picker in a chat thread.
 //
 // Named `templates-messages` and not `templates`, because `templates` is
-// already the PROGRAMME template library and expo-router has one flat namespace
+// already the PROGRAM template library and expo-router has one flat namespace
 // per group. Two screens called Templates in one coach app would be a coin toss
 // every time somebody navigated, and the route is the part a person cannot
 // disambiguate from the label.
@@ -20,12 +20,13 @@
 // library they cannot tell their own work from. `startersToOffer` drops any
 // whose title the coach already has, so a coach who has written their own
 // Welcome is not offered a second one, and each is added by a tap.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Pressable, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice } from '../../src/ui/kit';
+import { Section, SectionHead, Cta, Ghost, Flag, PageHead, FigureCard, IconPlate, Expandable } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useMyTemplates, saveTemplate, deleteTemplate } from '../../src/ui/messageTemplates';
 import {
@@ -38,6 +39,11 @@ export default function SavedMessages() {
   const t = useTheme();
   const router = useRouter();
   const lib = useMyTemplates();
+  // One read. Under 'error' the library renders empty, which is
+  // indistinguishable from a coach who has saved nothing — and the offer to
+  // install the six starters is withheld for exactly that reason, so a
+  // refused read left the screen with nothing on it and nothing to do.
+  const pull = usePullToRefresh(useCallback(() => lib.reload(), [lib]));
 
   const [editing, setEditing] = useState<MessageTemplate | null>(null);
   const [title, setTitle] = useState('');
@@ -75,7 +81,7 @@ export default function SavedMessages() {
 
   const remove = (tpl: MessageTemplate) => {
     if (!tpl.id) return;
-    Alert.alert('Delete This Message?', `“${tpl.title}” goes for good. Nothing you have already sent is affected — this is the template, not the messages written from it.`, [
+    Alert.alert('Delete This Message?', `“${tpl.title}” goes for good. Nothing you have already sent is affected. This is the template, not the messages written from it.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => { void (async () => {
         const ok = await deleteTemplate(tpl.id as string);
@@ -90,92 +96,116 @@ export default function SavedMessages() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your own words, kept</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Saved Messages</Text>
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is in
+            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
+        <PageHead title="Saved Messages" subtitle="Your own words, kept" />
+
+        {/* The page opens on its figure: how many messages are in the library.
+            Under a read that did not come back it is the dash and the read's
+            own sentence, never a nought, because an unread library is not an
+            empty one. The one action sits in the same card. */}
+        <FigureCard title="In Your Library"
+          figure={lib.status === 'ready' ? String(rows.length) : null}
+          unit={lib.status === 'ready' ? (rows.length === 1 ? 'message' : 'messages') : undefined}
+          // The failed read's sentence is the red flag in the list below; said
+          // once, there, in the tone it needs.
+          detail={lib.status === 'ready' || lib.status === 'error' ? undefined : templatesEmptyLine(lib.status)}>
+          <View style={{ marginTop: sp.lg }}>
+            <Cta label="Write a New One" wide onPress={() => open(null)} />
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          The messages you type every week. Pick one in any thread and it lands in your box with the client’s name filled in. Nothing is ever sent for you.
-        </Text>
-
-        <Rule inset={0} />
+        </FigureCard>
 
         <Section>
-          <SectionHead title="Your Messages" note={lib.status === 'ready' && rows.length ? String(rows.length) : undefined} />
+          <SectionHead title="Your Messages" />
           {rows.length === 0 ? (
             lib.status === 'error'
               ? <Flag tone={t.crit}>{templatesEmptyLine(lib.status)}</Flag>
               : <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(lib.status)}</Text>
           ) : rows.map((tpl, i) => (
-            <View key={tpl.id ?? tpl.title} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tpl.body}</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                <Ghost label="Edit" onPress={() => open(tpl)} />
-                <Ghost label="Delete" onPress={() => remove(tpl)} />
+            <View key={tpl.id ?? tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <IconPlate icon="message" tone="blue" />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{tpl.body}</Text>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                  <Ghost label="Edit" onPress={() => open(tpl)} />
+                  <Ghost label="Delete" onPress={() => remove(tpl)} />
+                </View>
               </View>
             </View>
           ))}
-          <View style={{ marginTop: sp.lg }}>
-            <Cta label="Write A New One" wide onPress={() => open(null)} />
-          </View>
         </Section>
 
         {offers.length ? (<>
-          <Rule />
           <Section>
-            <SectionHead title="Ones To Start From" />
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-              Nothing here is in your library until you add it, and every one of them is meant to be rewritten in your own voice. Only the ones you do not already have are offered.
-            </Text>
+            <SectionHead title="Ones to Start From" note="Not Yours Until You Add One" />
             {offers.map((tpl, i) => (
-              <View key={tpl.title} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tpl.body}</Text>
-                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <Ghost label="Add It" onPress={() => { void save({ id: null, title: tpl.title, body: tpl.body, position: nextPosition(rows) }); }} />
-                  <Ghost label="Edit First" onPress={() => open({ ...tpl, position: nextPosition(rows) })} />
+              <View key={tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <IconPlate icon="sparkle" tone="purple" />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{tpl.title}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{tpl.body}</Text>
+                  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                    <Ghost label="Add It" onPress={() => { void save({ id: null, title: tpl.title, body: tpl.body, position: nextPosition(rows) }); }} />
+                    <Ghost label="Edit First" onPress={() => open({ ...tpl, position: nextPosition(rows) })} />
+                  </View>
                 </View>
               </View>
             ))}
           </Section>
         </>) : null}
 
-        <Rule />
 
-        <Section>
-          <Notice tone={t.brand} kicker="Placeholders" title="Two words the app fills in"
-            note={TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ') + '. Anything else in curly brackets is sent to your client exactly as you typed it, so it is worth checking before you send.'} />
-        </Section>
+        {/* The two explanations, behind folds. The first was the paragraph
+            that opened the page; the second was a notice at its foot. Neither
+            is a figure, a caveat about money or a safety fact, so neither is
+            owed a place above the library itself. */}
+        <Expandable title="How Saved Messages Work">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            The messages you type every week. Pick one in any thread and it lands in your box with the client’s name filled in. Nothing is ever sent for you. The ones to start from are meant to be rewritten in your own voice, and only the ones you do not already have are offered.
+          </Text>
+        </Expandable>
+        <Expandable title="Placeholders" note="Two words the app fills in">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ') + '. Anything else in curly brackets is sent to your client exactly as you typed it, so it is worth checking before you send.'}
+          </Text>
+        </Expandable>
 
       </ScrollView>
 
       {/* ── the editor ────────────────────────────────────────────────────── */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>
-              {editing?.id ? 'Edit This Message' : 'A New Saved Message'}
-            </Text>
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to call it</Text>
-            <TextInput value={title} onChangeText={setTitle} placeholder="Welcome" placeholderTextColor={t.ink3}
-              style={{ ...inp, marginBottom: sp.md }} />
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The message</Text>
-            <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
-              placeholder="Hey {name} — " placeholderTextColor={t.ink3}
-              style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-              {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ')}.
-            </Text>
-            <Cta label={busy ? 'Saving…' : 'Save'} wide onPress={() => { void save(); }} disabled={busy} />
-            <View style={{ height: sp.sm }} />
-            <Ghost label="Cancel" onPress={() => setEditing(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
+            {/* The message box alone is 120pt, and Save sits under it. Writing into
+                that box is exactly when the keyboard is up, and that is exactly when
+                Save was off the bottom of the window with no way to reach it. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>
+                {editing?.id ? 'Edit This Message' : 'A New Saved Message'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to Call It</Text>
+              <TextInput value={title} onChangeText={setTitle} placeholder="Welcome" placeholderTextColor={t.ink3}
+                style={{ ...inp, marginBottom: sp.md }} />
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The Message</Text>
+              <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
+                placeholder="Hey {name}, " placeholderTextColor={t.ink3}
+                style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ')}.
+              </Text>
+              <Cta label={busy ? 'Saving…' : 'Save'} wide onPress={() => { void save(); }} disabled={busy} />
+              <View style={{ height: sp.sm }} />
+              <Ghost label="Cancel" onPress={() => setEditing(null)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

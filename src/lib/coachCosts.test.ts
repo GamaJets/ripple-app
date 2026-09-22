@@ -74,8 +74,16 @@ const draft = (o: Partial<CostDraft> = {}): CostDraft => ({
   // The other end of the same mistake. A Kuwaiti dinar has a THOUSAND fils in
   // it, so a rent of 450.000 is 450000 minor units — not 45000.
   eq(costBlockers(draft({ currency: 'KWD', amountText: '450.000' })).length, 0, 'a three-place amount is an amount');
-  const kw = costBlockers(draft({ currency: 'KWD', amountText: '450.005' }));
-  eq(kw.length, 1, 'and Stripe charges thousandths in tens, so the last place must be a nought');
+  // Stripe's whole-ten rule for the thousandth-unit currencies does NOT apply
+  // to a cost. A cost is a coach stating what already left their own bank, and
+  // a Kuwaiti account can perfectly well have been billed 450.005 KWD — see
+  // coachMoney.ts's header. `draftAmount` in coachInvoice.ts, which this reads
+  // through, passes `chargeable: false`, so the figure goes through instead of
+  // dropping a real cost out of the coach's own cost-per-client.
+  eq(costBlockers(draft({ currency: 'KWD', amountText: '450.005' })).length, 0,
+    'a fils in the last place is a real cost — Stripe is not in this transaction at all');
+  const kw = costBlockers(draft({ currency: 'KWD', amountText: '450.0050' }));
+  eq(kw.length, 1, 'four places is not an amount in a three-place currency, and that refusal stands');
   ok(kw[0].includes('KWD'), 'the refusal names the currency it is talking about');
 }
 

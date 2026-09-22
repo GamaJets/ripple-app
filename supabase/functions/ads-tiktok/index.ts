@@ -41,6 +41,13 @@
 // conversion of its own; src/lib/adChannels.ts holds the reasoning and the test
 // pins it, so a future change to one channel's units cannot be made quietly.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { matchAds, urlsFromCreative, type AdInsight } from '../../../src/lib/adMatch.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
@@ -121,6 +128,43 @@ async function advertisers(token: string, ids: string[]): Promise<Res<Acct[]>> {
   return { ok: true, body: out };
 }
 
+/**
+ * The advertisers this ACCESS TOKEN is authorised for, asked of TikTok.
+ *
+ * ── why this exists, when `advertisers()` is right there ─────────────────
+ *
+ * Because they answer two different questions, and `choose` was asking the
+ * wrong one.
+ *
+ * Meta and Google both verify a chosen account the same way: fetch the list the
+ * login can REACH and look for the id in it (`/me/adaccounts` in ads-oauth,
+ * `listAccessibleCustomers` in ads-google). TikTok's `choose` instead called
+ * `/advertiser/info/` with the id the coach had just named, which asks TikTok
+ * to DESCRIBE that advertiser rather than to say whether this login may have
+ * it. Whether that is also an authorisation check depends on behaviour TikTok
+ * documents nowhere, and "probably scoped" is not a sentence to leave standing
+ * in the one place a coach names an id from a request body.
+ *
+ * `/oauth2/advertiser/get/` is TikTok's own answer to the question actually
+ * being asked. It is the same list the token exchange returns in
+ * `advertiser_ids`, which is why it is trustworthy and why `connect` needs no
+ * second call — that path already has it.
+ *
+ * It is the one endpoint here that does NOT take `Access-Token` as a header:
+ * app id, secret and token all go in the query string, because it is an
+ * authorisation endpoint rather than an Ads API one. Nothing logs the URL.
+ */
+async function reachableAdvertiserIds(token: string, appId: string, secret: string): Promise<Res<string[]>> {
+  const q = `app_id=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`
+    + `&access_token=${encodeURIComponent(token)}`;
+  const r = await tt<{ list?: unknown[] }>(`${API}/oauth2/advertiser/get/?${q}`, { method: 'GET' });
+  if (!r.ok) return r;
+  const ids = (Array.isArray(r.body?.list) ? r.body.list : [])
+    .map((a) => String((a as { advertiser_id?: unknown })?.advertiser_id ?? ''))
+    .filter(Boolean);
+  return { ok: true, body: ids };
+}
+
 /** Every page of a TikTok list endpoint. A page that fails aborts the whole
  *  read: a partial total filed as a total is the failure this feature exists
  *  to prevent. */
@@ -143,7 +187,7 @@ Deno.serve(async (req) => {
   const appId = Deno.env.get('TIKTOK_ADS_APP_ID') || '';
   const secret = Deno.env.get('TIKTOK_ADS_APP_SECRET') || '';
   if (!appId || !secret) {
-    return fail('Connecting a TikTok ad account is not configured on the server yet — the owner sets TIKTOK_ADS_APP_ID and TIKTOK_ADS_APP_SECRET as Supabase secrets, from an app created in the TikTok for Business developer portal.');
+    return fail('Connecting a TikTok ad account is not configured on the server yet. The owner sets TIKTOK_ADS_APP_ID and TIKTOK_ADS_APP_SECRET as Supabase secrets, from an app created in the TikTok for Business developer portal.');
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -152,10 +196,24 @@ Deno.serve(async (req) => {
   // request body is a request to connect somebody else's ad account to your own
   // coaching profile.
   let trainerId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
+    + 'Nothing has been connected and your existing ad accounts are untouched. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    trainerId = data?.user?.id || '';
-  } catch { /* handled below */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return fail(CANNOT_ASK);
+    } else {
+      trainerId = data?.user?.id || '';
+    }
+  } catch { return fail(CANNOT_ASK); }
   if (!trainerId) return json({ ok: false, error: 'Sign in to Repple and try again.' }, 401);
 
   let body: any = {};
@@ -174,7 +232,7 @@ Deno.serve(async (req) => {
     );
     if (!tok.ok) {
       if (/auth_code|expired|used/i.test(tok.error)) {
-        return fail(`TikTok would not accept that sign-in code (${tok.error}). A code is single-use and short-lived — tap Connect again to start a fresh sign-in.`);
+        return fail(`TikTok would not accept that sign-in code (${tok.error}). A code is single-use and short-lived. Tap Connect again to start a fresh sign-in.`);
       }
       return fail(`TikTok refused the sign-in: ${tok.error}`);
     }
@@ -233,6 +291,19 @@ Deno.serve(async (req) => {
     // Verified against TikTok rather than trusted from the body. Without this a
     // coach could name any advertiser id and Repple would try to read it every
     // check, reporting a stranger's spend or a permanent permission error.
+    //
+    // Two calls, in this order, and the order is the point. The first asks
+    // TikTok which advertisers this LOGIN may have and looks for the named id
+    // in that list — the same intersection ads-oauth and ads-google do, and the
+    // check `/advertiser/info/` alone was standing in for. Only then is the
+    // advertiser described, because a name and a currency are worth having and
+    // are not an authorisation.
+    const reachable = await reachableAdvertiserIds(conn.body.token, appId, secret);
+    if (!reachable.ok) return fail(`TikTok would not say which ad accounts your login can reach: ${reachable.error}`);
+    if (!reachable.body.includes(wanted)) {
+      return fail('That ad account is not one this TikTok login can see. Pick one from the list.');
+    }
+
     const one = await advertisers(conn.body.token, [wanted]);
     if (!one.ok) return fail(`TikTok refused to describe that ad account: ${one.error}`);
     const chosen = one.body.find((a) => a.id === wanted);
@@ -289,7 +360,7 @@ Deno.serve(async (req) => {
   if (!report.ok) {
     const gated = /permission|not authoriz|scope/i.test(report.error);
     return record('failed', gated
-      ? `TikTok refused to report your ad spend: ${report.error}. Reading spend needs the Ads Reporting permission on the app the coach authorised — the owner grants it in the TikTok for Business developer portal and the coach then reconnects.`
+      ? `TikTok refused to report your ad spend: ${report.error}. Reading spend needs the Ads Reporting permission on the app the coach authorised. The owner grants it in the TikTok for Business developer portal and the coach then reconnects.`
       : `TikTok refused to report your ad spend: ${report.error}`,
       null, null, null, null, [], []);
   }

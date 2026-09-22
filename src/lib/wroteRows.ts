@@ -61,7 +61,7 @@ export function writeFailure(what: string, r: WriteResult): string | null {
     return `${what} was sent, but the server did not say whether it changed anything.`;
   }
   if (r.count === 0) {
-    return `${what} was not changed — the server accepted the request and matched no rows, which usually means it is not yours to change or it is no longer there.`;
+    return `${what} was not changed. The server accepted the request and matched no rows, which usually means it is not yours to change or it is no longer there.`;
   }
   return null;
 }

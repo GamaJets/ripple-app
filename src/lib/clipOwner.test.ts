@@ -95,6 +95,37 @@ const local: OwnableClip = { id: 'vx-4444', trainerId: null };
   ok(!canManageClip({ id: 'zz-9', trainerId: ME }, ME), 'so it is not managed');
 }
 
+/* ── a clip with no id cannot be asked about at all ─────────────────────── */
+
+// `OwnableClip.id` is required, and the requirement is the fix rather than a
+// detail of it. The id prefix is the ONLY thing separating an Academy row from
+// a handset entry — `trainerId` is null on both — so a clip that states no id
+// has not stated which it is, and there is no honest answer to give about it.
+//
+// `exerciseId.ts` briefly let one through: its `VideoLike.id` was optional, and
+// when it was absent the classifier fell back to reading `trainerId` alone —
+// which is precisely the test that called a stranded upload the Academy's on
+// four screens. The fallback is gone and both `id` fields are required.
+//
+// There is nothing to RUN here, so this is a type assertion rather than a
+// runtime one: `@ts-expect-error` fails the build when the error it expects
+// stops happening. Make either `id` optional again and tsc stops on the two
+// lines below — which is the whole point, since nothing else would notice.
+//
+// The body is never invoked, deliberately. An id-less clip cannot be built, so
+// `clipOwner` would throw on `clip.id.startsWith` if these lines ever ran; they
+// exist to be type-checked and nothing else.
+const idIsRequired = () => {
+  // @ts-expect-error — a clip with no id has not said whether there is a row
+  // behind it, and `clipOwner` must not be able to be asked.
+  const noId: OwnableClip = { trainerId: null };
+  void noId;
+
+  // @ts-expect-error — and the same at the call site, not only the annotation.
+  return clipOwner({ trainerId: null }, ME);
+};
+void idIsRequired;
+
 // A row that is genuinely this coach's is not lost to any of the above — the
 // useful half of the predicate has to survive the fix.
 {

@@ -29,6 +29,14 @@
 // thing on the sheet, and `client_nudges` is written AFTER the message lands,
 // never before and never instead.
 //
+// "Lands" means one of two things and deliberately not three. The row is on the
+// server, OR the words are in the outbox and this phone has undertaken to send
+// them (src/ui/messaging.ts · `keepForLater`, which answers `queued`). Both are
+// events; a send that simply failed is not one, and records nothing. Writing
+// the record FIRST is what this cannot do — see the note on `onSent` below for
+// why part 2300's ordering does not carry over to two round trips with no
+// transaction around them.
+//
 // ── The three states this screen must keep apart ───────────────────────────
 //
 // Everything here is a prompt to contact a person, so a wrong one costs a phone
@@ -53,15 +61,16 @@
 // again on the draft sheet, and the draft itself never names a cause — see
 // `NEVER_SAYS` in src/lib/nudge.ts, which is checked against every sentence
 // this screen can print.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Card } from '../../src/ui/kit';
+import { Section, SectionHead, Ghost, Cta, Notice, Flag, Card, PageHead, KpiRow, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useNudges } from '../../src/ui/nudges';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useThread } from '../../src/ui/messaging';
 import { DRIFT_LABEL, bandNote, type Drift } from '../../src/lib/clientDrift';
 import {
@@ -71,17 +80,21 @@ import {
 import { paceNote } from '../../src/lib/interventions';
 import { cadenceLine, overdueNote } from '../../src/lib/cadence';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { OvernightChecks } from '../../src/ui/OvernightChecks';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
-/** The mark beside a verdict. A coloured dot beside ink text, never coloured
- *  text: the scale reserves status colour for status and none of these clears
- *  AA as type. Matches driftTone on the Clients tab so one client does not
- *  change colour between two screens. */
-function driftTone(t: ReturnType<typeof useTheme>, d: Drift): string {
+/** The mark beside a verdict, as a NAMED tone for the chip that carries the
+ *  verdict's word: red needs you, amber is slipping, grey is "could not tell"
+ *  (`idle` is labelled Unknown, and an unknown must not wear a warning). The
+ *  chip draws the tone's INK on its pale plate, never the mark colour as type,
+ *  which is the rule the dot this replaced existed to keep. The word is
+ *  `DRIFT_LABEL`'s, so the colour never stands alone. */
+function driftChipTone(d: Drift): Tone {
   switch (d.status) {
-    case 'at_risk': return t.crit;
-    case 'idle': return t.warn;
-    case 'watch': return t.serious;
-    default: return t.good;
+    case 'at_risk': return 'red';
+    case 'watch': return 'amber';
+    case 'idle': return 'neutral';
+    default: return 'brand';
   }
 }
 
@@ -89,6 +102,10 @@ export default function Nudges() {
   const t = useTheme();
   const router = useRouter();
   const n = useNudges();
+  // One read, and it is about SILENCE — who has not been heard from. Nothing
+  // the coach does on this screen changes it; what changes it is a client
+  // finally training or replying, somewhere else.
+  const pull = usePullToRefresh(useCallback(() => n.reload(), [n]));
 
   // Two sheets, two independent flags. A sibling pair whose `visible`
   // expressions share an identifier is the bug check-runtime-traps.mjs exists
@@ -97,24 +114,40 @@ export default function Nudges() {
   const [drafting, setDrafting] = useState<Nudge | null>(null);
   const [explaining, setExplaining] = useState<Nudge | MutedRow | null>(null);
   const [showMuted, setShowMuted] = useState(false);
-  // The watch digest opens itself when it is due for the week and is otherwise
-  // a section the coach may open. Its own flag: sharing one with `showMuted`
-  // would make closing one close the other.
-  const [showWatch, setShowWatch] = useState(false);
+  /** Clients whose message is on this phone waiting for signal, this sitting.
+   *  See the ordering note on `onSent` below: it is what keeps this screen's
+   *  "Nobody is suggested twice" true in the window where the server has not
+   *  been told anything yet. */
+  const [queuedFor, setQueuedFor] = useState<string[]>([]);
+  /**
+   * Whether the watch digest is open, or null for "whatever the week says".
+   *
+   * A tri-state and not a boolean, because the section has a default that is
+   * not always closed: it opens itself when the week's digest is still owed.
+   * As a boolean this was `n.watchDigestDue || showWatch`, so while the digest
+   * was due the rows were open no matter what the flag said — the heading
+   * offered "hide", a coach tapped it, and the section did not move. A control
+   * that reads as broken on the one screen whose whole argument is that a coach
+   * should keep reading it.
+   *
+   * Null means nobody has touched it this sitting, so the week decides. Once
+   * they have, their choice decides, in both directions.
+   */
+  const [showWatch, setShowWatch] = useState<boolean | null>(null);
 
   const board = n.board;
 
   const setAside = (item: Nudge) => {
     Alert.alert(
-      `Set ${item.name ?? 'this client'} aside?`,
-      `They will not be suggested again for ${item.mutedDaysIfDismissed} days. They stay on your Clients tab throughout — this only stops the prompt.`,
+      `Set ${item.name ?? 'This Client'} Aside?`,
+      `They will not be suggested again for ${item.mutedDaysIfDismissed} days. They stay on your Clients tab throughout. This only stops the prompt.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Set aside',
+          text: 'Set Aside',
           onPress: () => {
             void n.recordDismissed(item.clientId, item.drift, item.observed).then((r) => {
-              if (!r.ok) Alert.alert('Not recorded', r.reason);
+              if (!r.ok) Alert.alert('Not Recorded', r.reason);
             });
           },
         },
@@ -124,17 +157,16 @@ export default function Nudges() {
 
   const bringBack = (m: MutedRow) => {
     void n.undismiss(m.clientId).then((r) => {
-      if (!r.ok) Alert.alert('Not brought back', r.reason);
+      if (!r.ok) Alert.alert('Not Brought Back', r.reason);
     });
   };
 
   const nudgeCard = (item: Nudge, i: number) => (
     <View key={item.clientId}
       style={{ paddingVertical: sp.lg, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: driftTone(t, item.drift) }} />
-        <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>{item.name ?? 'Unnamed client'}</Text>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{DRIFT_LABEL[item.drift.status]}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
+        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>{item.name ?? 'Unnamed Client'}</Text>
+        <TonedChip label={DRIFT_LABEL[item.drift.status]} tone={driftChipTone(item.drift)} />
       </View>
 
       {/* What was OBSERVED. clientDrift's own sentence, so this screen and the
@@ -156,8 +188,22 @@ export default function Nudges() {
           normally. src/lib/interventions.ts owns the sentence. */}
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{paceNote(item.pace)}</Text>
 
+      {/* A message already written to this person is sitting on this phone. No
+          second draft is offered — not because the app is being careful with
+          the coach, but because the two would both go when the signal comes
+          back and the client would read the same sentence twice. Said in words,
+          not by the button quietly disappearing. */}
+      {queuedFor.includes(item.clientId) ? (
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
+          Your message to {item.name ?? 'them'} is saved on this phone and goes as soon as you are back
+          online. Nothing else is drafted for them until it has gone.
+        </Text>
+      ) : null}
+
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
-        <Cta label="Write a Message" onPress={() => setDrafting(item)} />
+        {queuedFor.includes(item.clientId) ? null : (
+          <Cta label="Write a Message" onPress={() => setDrafting(item)} />
+        )}
         <Ghost label="Why Them?" onPress={() => setExplaining(item)} />
         <Ghost label="Set Aside" onPress={() => setAside(item)} />
       </View>
@@ -166,22 +212,38 @@ export default function Nudges() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Quiet Clients</Text>
-          </View>
-        </View>
+        <PageHead title="Quiet Clients" subtitle="Your book" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Clients whose training record has gone quiet, with a message drafted for you. Nothing here
-          sends: you read it, change it, and send it yourself. Nobody is suggested twice.
-        </Text>
+        {/* ── the book at a glance ────────────────────────────────────────────
+            Three tiles on the ground, the mockups' row under a page head: who
+            is worth a message (red, needs you), who is late against their own
+            rhythm (amber) and who is slipping (orange). Drawn only from a
+            `board`, which exists only over a whole read, so none of the three
+            can be a count of part of a book; `dueBack` is its own read and
+            draws the dash while it has no answer. Each figure is the length of
+            the list under the heading of the same name below. */}
+        {USE_SUPABASE && board ? (
+          <KpiRow tiles items={[
+            { label: 'Worth a Message', value: String(board.nudges.length), tone: 'red' },
+            { label: 'Due Back', value: n.dueBack ? String(n.dueBack.length) : fig(null), tone: 'amber' },
+            { label: 'Slipping', value: String(board.watching.length), tone: 'orange' },
+          ]} />
+        ) : null}
 
-        <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{n.note}</Text>
+        {/* The read's own sentence: what was assessed and when. Data, so it
+            stays on the page, one line under the figures it qualifies. */}
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{n.note}</Text>
+
+        {/* What this screen is, behind a fold. It was the first paragraph on
+            the page, above every figure. */}
+        <Expandable title="How This List Works">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            Clients whose training record has gone quiet, with a message drafted for you. Nothing here
+            sends: you read it, change it, and send it yourself. Nobody is suggested twice.
+          </Text>
+        </Expandable>
 
         {/* What "quiet" is measured against, in one dismissible row. The banners
             below already say what a failed read means; this says what the word
@@ -191,17 +253,20 @@ export default function Nudges() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Who has gone quiet is worked out from training records that live on the server, and there is no local copy of somebody else's. Nothing below is a claim that everybody is fine." />
           </Section>
         ) : n.status === 'loading' ? (
           <Section>
-            <ActivityIndicator color={t.brand} />
+            {/* Named. The error branch below is emphatic that an empty screen must
+                not read as a quiet week, and an unnamed spinner draws exactly that
+                for a reader: nothing at all. */}
+            <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Working out who has gone quiet…" />
           </Section>
         ) : n.status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Unreadable" title="Nothing is suggested, because nothing was read"
-              note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet — pull back and open this again once you are connected.">
+            <Notice tone={t.crit} kicker="Unreadable" title="Nothing Is Suggested, Because Nothing Was Read"
+              note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet. Pull back and open this again once you are connected.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
               </View>
@@ -209,7 +274,7 @@ export default function Nudges() {
           </Section>
         ) : n.status === 'partial' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Incomplete" title="Only part of the record came back"
+            <Notice tone={t.warn} kicker="Incomplete" title="Only Part of the Record Came Back"
               note="No client is suggested from a partial read. A gap in a training record looks exactly like silence, and this is the one screen where telling those apart is the whole point.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
@@ -220,13 +285,13 @@ export default function Nudges() {
           <>
             {board.withheld.length ? (
               <Section>
-                <Notice tone={t.warn} kicker="Not assessed"
-                  title={`${board.withheld.length} on your book could not be assessed`}
-                  note="They are not below, and they are not fine — nothing could be read about them. This list is not your whole book.">
+                <Notice tone={t.warn} kicker="Not Assessed"
+                  title={`${board.withheld.length} on Your Book Could Not Be Assessed`}
+                  note="They are not below, and they are not fine. Nothing could be read about them. This list is not your whole book.">
                   <View style={{ marginTop: sp.md }}>
                     {board.withheld.map((w) => (
                       <Flag key={w.clientId} tone={t.warn} style={{ marginTop: sp.sm }}>
-                        {(w.name ?? 'Unnamed client') + ' — ' + w.note}
+                        {(w.name ?? 'Unnamed client') + ' · ' + w.note}
                       </Flag>
                     ))}
                   </View>
@@ -250,24 +315,20 @@ export default function Nudges() {
                 to justify a message written for somebody, and a per-client
                 prompt at this sensitivity is the nagging src/lib/nudge.ts
                 refuses. What this offers is the client's own screen. */}
-            <Rule />
-
             {n.dueBack && n.dueBack.length ? (
               <Section>
-                <SectionHead title="Due back" note={`${n.dueBack.length}`} />
+                <SectionHead title="Due Back" note={`${n.dueBack.length}`} />
                 <Text style={{ ...ty.label, color: t.ink2 }}>{overdueNote(n.dueBack)}</Text>
                 <View style={{ marginTop: sp.md }}>
                   {n.dueBack.map((d, i) => (
                     <View key={d.clientId}
                       style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
-                        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
-                          {d.name ?? 'Unnamed client'}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
+                        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>
+                          {d.name ?? 'Unnamed Client'}
                         </Text>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>
-                          {d.cadence.overdueDays} day{d.cadence.overdueDays === 1 ? '' : 's'} late
-                        </Text>
+                        <TonedChip tone="amber" icon="clock"
+                          label={`${d.cadence.overdueDays} Day${d.cadence.overdueDays === 1 ? '' : 's'} Late`} />
                       </View>
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{cadenceLine(d.cadence)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHAT_IT_CANNOT_SEE}</Text>
@@ -282,11 +343,10 @@ export default function Nudges() {
               </Section>
             ) : null}
 
-            {n.dueBack && n.dueBack.length ? <Rule /> : null}
 
             <Section>
-              <SectionHead title="Worth a message"
-                note={board.nudges.length ? `${board.nudges.length}` : 'none'} />
+              <SectionHead title="Worth a Message"
+                note={board.nudges.length ? `${board.nudges.length}` : 'None'} />
               {board.nudges.length === 0 ? (
                 <Text style={{ ...ty.body, color: t.ink2 }}>
                   {board.assessed
@@ -318,25 +378,26 @@ export default function Nudges() {
                 vanishes is worse than one that arrives a frame late. */}
             {board.watching.length ? (
               <>
-                <Rule />
                 <Section>
+                  {/* One expression, used by the heading and by the rows, so
+                      the word on the control and what the control does cannot
+                      come apart. `?? !!n.watchDigestDue` is the default until
+                      the coach touches it; `watchDigestDue` is null while the
+                      stored week is still being read, and null is not "due". */}
                   <SectionHead
                     title="Slipping"
-                    note={showWatch || n.watchDigestDue ? (showWatch ? 'hide' : `${board.watching.length}`) : `${board.watching.length}`}
-                    onPress={() => setShowWatch((v) => !v)}
+                    note={(showWatch ?? !!n.watchDigestDue) ? 'Hide' : `${board.watching.length}`}
+                    onPress={() => setShowWatch((v) => !(v ?? !!n.watchDigestDue))}
                   />
                   <Text style={{ ...ty.body, color: t.ink2 }}>{watchDigestNote(board.watching)}</Text>
-                  {n.watchDigestDue || showWatch ? (
+                  {(showWatch ?? !!n.watchDigestDue) ? (
                     <View style={{ marginTop: sp.md }}>
                       {board.watching.map((w, i) => (
                         <View key={w.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
-                            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
-                              {w.name ?? 'Unnamed client'}
-                            </Text>
-                          </View>
+                          <Text style={{ ...ty.head, color: t.ink }}>
+                            {w.name ?? 'Unnamed Client'}
+                          </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{w.observed}</Text>
                           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                             <Ghost label="Open Their Record"
@@ -350,7 +411,7 @@ export default function Nudges() {
                           <Ghost label="Read for This Week" onPress={n.dismissWatchDigest} />
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                             This closes until next week. Nobody here is removed from your book and nothing changes for
-                            them — it is this section that goes quiet, not them.
+                            them. It is this section that goes quiet, not them.
                           </Text>
                         </View>
                       ) : null}
@@ -365,11 +426,10 @@ export default function Nudges() {
                 is the difference between a record and a nag. */}
             {board.muted.length ? (
               <>
-                <Rule />
                 <Section>
                   <SectionHead
-                    title="Set aside"
-                    note={showMuted ? 'hide' : `${board.muted.length}`}
+                    title="Set Aside"
+                    note={showMuted ? 'Hide' : `${board.muted.length}`}
                     onPress={() => setShowMuted((v) => !v)}
                   />
                   <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -381,8 +441,8 @@ export default function Nudges() {
                       {board.muted.map((m, i) => (
                         <View key={m.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
-                            {m.name ?? 'Unnamed client'}
+                          <Text style={{ ...ty.head, color: t.ink }}>
+                            {m.name ?? 'Unnamed Client'}
                           </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>
                             {ACTION_LABEL[m.muted.record.action]} · back in{' '}
@@ -412,6 +472,22 @@ export default function Nudges() {
             ) : null}
           </>
         ) : null}
+
+        {/* ── what ran while nobody was looking ─────────────────────────────
+            OUTSIDE the chain above on purpose. Everything before this is the
+            drift read; this reads the coach's own `notifications` rows, and
+            the state it exists for is precisely the one where the two
+            disagree — a screen saying "nobody has broken their own pattern"
+            while the nightly pass that decides that has raised on every run
+            since Tuesday.
+
+            That is not hypothetical. For a day and a night in September all
+            five overnight passes failed on every single run (see the header of
+            supabase/parts/2560), and to every coach in the product it looked
+            like a calm week. src/lib/nightlyPasses.ts carries the whole
+            argument, including the part Repple cannot answer: whether a pass
+            RAN is kept in a table the app is not allowed to read. */}
+        <OvernightChecks />
       </ScrollView>
 
       <Modal visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
@@ -419,10 +495,55 @@ export default function Nudges() {
           <DraftSheet
             nudge={drafting}
             onClose={() => setDrafting(null)}
-            onSent={async (body) => {
-              const r = await n.recordSent(drafting.clientId, drafting.drift, drafting.observed);
+            onSent={async (body, queued, queuedReason) => {
+              const clientId = drafting.clientId;
+              /* ── THE ORDER, and why it is not part 2300's ─────────────────
+               *
+               * supabase/parts/2300 writes `coach_invoice_ageing_notices`
+               * BEFORE the notification it records, and argues it: a bookkeeping
+               * row that fails takes the notification down with it, because both
+               * are statements inside one plpgsql function and the whole
+               * iteration rolls back. There is no transaction here. Two
+               * independent round trips from a phone, and reversing them would
+               * buy the one outcome part 140 refuses to let anybody undo — a
+               * 'sent' row for a message the server then DECLINED (a coach who
+               * has been blocked, a thread that no longer exists), permanently
+               * muting a client who was never written to, with no delete policy
+               * to take it back. So the record stays second, which is what this
+               * file's header has always said.
+               *
+               * What changes is what counts as the thing being recorded. It was
+               * "the row is on the server"; it is now "the words are somewhere
+               * they will go from" — which the outbox has genuinely promised by
+               * the time `queued` comes back, because `enqueue` answered
+               * 'queued' and the intent is on disk. That is a real event and it
+               * is the one the never-nag record exists to remember. A send that
+               * merely FAILED still records nothing, because nothing happened.
+               */
+              const r = await n.recordSent(clientId, drafting.drift, drafting.observed);
               setDrafting(null);
-              if (!r.ok) Alert.alert('Sent, but not recorded', r.reason);
+              if (!queued) {
+                if (!r.ok) Alert.alert('Sent, but Not Recorded', r.reason);
+                return body;
+              }
+              /* Queued. The record write goes over the same connection that
+               * just refused the message, so it usually fails too — and the
+               * hook's own sentence for that opens "Your message was sent",
+               * which is the one thing that is not true here. This screen owns
+               * the wording for its own case.
+               *
+               * `queuedFor` is what actually holds the promise while the record
+               * cannot: a client whose message is on this phone is not offered a
+               * second draft, whatever the server does or does not know yet. It
+               * is device-local and lasts this sitting, which is honest — and it
+               * is said out loud on the card rather than the row simply
+               * vanishing. */
+              setQueuedFor((prev) => (prev.includes(clientId) ? prev : [...prev, clientId]));
+              const waiting = queuedReason
+                ?? 'That message is saved on this phone and has not been sent yet. It goes as soon as you are back online.';
+              Alert.alert('Waiting to Send', r.ok
+                ? waiting
+                : `${waiting} It could not be written to your record of who you have contacted, so they may be suggested again on another device, though not on this one.`);
               return body;
             }}
           />
@@ -457,13 +578,28 @@ export default function Nudges() {
  * the ROW is on the server, so a refused insert cannot leave this sheet
  * believing a client was contacted — and `client_nudges` is only written after
  * that, so the never-nag record can never mute somebody who was never reached.
+ *
+ * `queued` is the third answer and is neither of those. It is not `ok` — the
+ * client cannot read the message yet — but it is not a failure either: the
+ * words are on this device, counted, and they go on their own. `doSend` below
+ * keeps all three apart, because the coach's next action differs in each and
+ * the wrong heading on the middle one is what makes them send it twice.
  */
 function DraftSheet({ nudge, onClose, onSent }: {
   nudge: Nudge;
   onClose: () => void;
-  onSent: (body: string) => Promise<string>;
+  /**
+   * The send is over, and it either reached the server or is waiting on this
+   * phone. `queued` is the flag and never inferred from the sentence beside it:
+   * `SendResult.reason` is documented as null-able, and reading a null reason as
+   * "delivered" would put the two states back together the wrong way round.
+   * `reason` is the sentence `useThread` wrote about the wait, passed up rather
+   * than alerted here so the coach reads one alert about their message, not two.
+   */
+  onSent: (body: string, queued: boolean, reason: string | null) => Promise<string>;
 }) {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const { send } = useThread(nudge.clientId, 'coach');
   const [body, setBody] = useState(nudge.draft);
   const [sending, setSending] = useState(false);
@@ -475,39 +611,62 @@ function DraftSheet({ nudge, onClose, onSent }: {
   // unasked, and a coach who typed it deserves to be told the app did not.
   const claims = refusalsIn(body);
 
+  /**
+   * Send it, and tell the truth about which of the THREE things happened.
+   *
+   * `SendResult` has three outcomes and this read two. A message the phone kept
+   * because there was no signal comes back `ok: false, queued: true` with a body
+   * saying it is saved and goes when back online — and this headed that body
+   * "Not sent", which is a heading that tells the coach to type it again. They
+   * do, and the client gets the same "haven't seen you in a while" twice, days
+   * later, when the outbox flushes both. app/(trainer)/chat.tsx has said
+   * "Waiting to send" over this exact case since the outbox landed; the wording
+   * is taken from there rather than invented, because it is one app and the
+   * coach meets both screens.
+   *
+   * And `onSent` was skipped on the queued path, so `client_nudges` recorded
+   * nothing — which is the same defect from the other end. This screen's own
+   * heading promises "Nobody is suggested twice", and an unrecorded send breaks
+   * that promise on every offline draft: the client is still on the board the
+   * next time it is opened, with the same draft, ready to go a second time.
+   */
   const doSend = async () => {
     const text = body.trim();
     if (!text || sending) return;
     setSending(true);
     const r = await send(text);
     setSending(false);
-    if (!r.ok) {
-      Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
+    // Nothing was kept and nothing was sent. The words are still in the box —
+    // this is the one outcome where the sheet stays open, because it is the one
+    // where trying again is the right thing to do.
+    if (!r.ok && !r.queued) {
+      Alert.alert('Not Sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
       return;
     }
-    await onSent(text);
+    await onSent(text, !r.ok, r.ok ? null : (r.reason ?? null));
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{nudge.name ?? 'Client'}</Text>
-          </View>
-        </View>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the message body is what this screen is for, and Send is
+          directly under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive">
+        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft · nothing sent yet" onBack={onClose} backLabel="Close Without Sending" />
 
         <Section>
           <Text style={{ ...ty.label, color: t.ink2 }}>{nudge.observed}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHAT_IT_CANNOT_SEE}</Text>
         </Section>
 
-        <Rule />
 
         <Section>
-          <SectionHead title="Your message" note="edit before sending" />
+          <SectionHead title="Your Message" note="Edit Before Sending" />
           <TextInput
             value={body}
             onChangeText={setBody}
@@ -529,7 +688,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
             <View style={{ marginTop: sp.md }}>
               <Flag tone={t.warn}>
                 {'As written this says something the app cannot know: ' + claims.join('; ')
-                  + '. Yours to send if you know it — the app would not have written it.'}
+                  + '. Yours to send if you know it. The app would not have written it.'}
               </Flag>
             </View>
           ) : null}
@@ -543,7 +702,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Once sent, {nudge.name ?? 'they'} will not be suggested again for{' '}
-            {nudge.mutedDaysIfSent} days — paced from how often they used to train, not from a
+            {nudge.mutedDaysIfSent} days, paced from how often they used to train, not from a
             fixed number.
           </Text>
         </Section>
@@ -572,13 +731,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Why they are here</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name ?? 'Client'}</Text>
-          </View>
-        </View>
+        <PageHead title={name ?? 'Client'} subtitle="Why they are here" onBack={onClose} />
 
         {drift ? (
           <Section>
@@ -591,7 +744,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
         ) : null}
 
         <Section>
-          <SectionHead title="The record" note="what was actually read" />
+          <SectionHead title="The Record" note="What Was Actually Read" />
           {evidence ? (
             <View>
               {evidence.lines.map((l, i) => (
@@ -611,9 +764,8 @@ function WhySheet({ name, drift, evidence, onClose }: {
 
         {evidence && evidence.baselineDays.length ? (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="Every day on record" note="in the window read" />
+              <SectionHead title="Every Day on Record" note="In the Window Read" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
                 {[...evidence.baselineDays, ...evidence.recentDays].map((d) => (
                   <View key={d.day}

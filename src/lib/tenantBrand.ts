@@ -80,7 +80,7 @@ function labelFor(id: string): string | null {
 export function brandMismatchMessage(tenantBrandId: string): string {
   const theirs = labelFor(tenantBrandId);
   return theirs
-    ? `This is the ${BRAND.label} app, but your account belongs to ${theirs}. Sign in with the ${theirs} app — ${BRAND.label} cannot open another brand's gym.`
+    ? `This is the ${BRAND.label} app, but your account belongs to ${theirs}. Sign in with the ${theirs} app. ${BRAND.label} cannot open another brand's gym.`
     : `This is the ${BRAND.label} app, but your account belongs to a different brand (“${tenantBrandId}”). Sign in with that brand's own app.`;
 }
 

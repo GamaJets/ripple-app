@@ -22,6 +22,7 @@ import {
   coachReportCaveats,
   coachReportShareBlurb,
   sessionTally,
+  countableRows,
   COACH_REPORT_LIMITS,
   COACH_REPORT_NO_PHOTOS,
   COACH_REPORT_NO_RATE,
@@ -34,6 +35,7 @@ import {
   type ReportInjury,
 } from './coachClientReport';
 import { escapeHtml } from './clientReport';
+import { isoDay } from './weekStart';
 
 /** The document's own section headings, used to aim an assertion at one table
  *  rather than at the whole page. */
@@ -121,8 +123,35 @@ const base = (over: Partial<CoachClientReportInput> = {}): CoachClientReportInpu
   eq(t.unrecorded, 2, 'the two nobody marked are counted as unrecorded and nowhere else');
   eq((t.completed ?? 0) + (t.noShow ?? 0) + (t.cancelled ?? 0) + (t.lateCancelled ?? 0) + (t.unrecorded ?? 0), t.booked,
     'and the five figures account for every booked session exactly once');
-  eq(t.firstDay, '2026-06-02', 'the earliest day read');
-  eq(t.lastDay, '2026-08-28', 'and the latest');
+  // ── whose calendar day the span is stated in ────────────────────────────
+  //
+  // `sessions.starts_at` is a `timestamptz` and PostgREST serialises it in
+  // UTC, so `String(iso).slice(0, 10)` gave GREENWICH's calendar day. A
+  // session run at 18:00 on 4 March in California arrives as
+  // `2026-03-05T02:00:00Z`, and the period line on the handover document read
+  // "From 5 Mar" — a day that client was never in the gym. The expected value
+  // is therefore DERIVED from the instant rather than written out, because the
+  // right answer honestly differs by reader.
+  //
+  // Why `npm run test:zones` could not have caught this class. A UTC-day bug
+  // is ZONE-INDEPENDENT: `.slice(0, 10)` returns Greenwich's day in all six
+  // zones the suite runs in, so the old literal '2026-06-02' was satisfied in
+  // every one of them. Running the suite in six timezones varies the READER,
+  // and the wrong answer here did not depend on the reader — which is exactly
+  // why six passes said nothing. Only an assertion that names WHOSE day is
+  // meant can fail, which is what these three now do.
+  eq(t.firstDay, isoDay(new Date('2026-06-02T09:00:00Z')), 'the earliest day read, in the reader\u2019s own zone');
+  eq(t.lastDay, isoDay(new Date('2026-08-28T09:00:00Z')), 'and the latest, in the same zone');
+}
+
+{
+  // The regression itself: an instant whose UTC day and whose local day differ
+  // for every reader west of Greenwich. Under the old slice this returned
+  // '2026-03-05' everywhere; it must now be 4 March in Los Angeles and 5 March
+  // in Dubai, and `isoDay` says which of those the machine running this is in.
+  const t = sessionTally([{ startsAt: '2026-03-05T02:00:00Z', outcome: 'completed' }], 'ready');
+  eq(t.firstDay, isoDay(new Date('2026-03-05T02:00:00Z')),
+    'a session at 18:00 Pacific is stated on the day it was run, not on Greenwich\u2019s next one');
 }
 
 {
@@ -144,7 +173,7 @@ const base = (over: Partial<CoachClientReportInput> = {}): CoachClientReportInpu
   eq(p.booked, null, 'but no count is stated — a tally over a prefix is wrong, not small');
   eq(p.completed, null, 'none of them');
   eq(p.unrecorded, null, 'including the unrecorded count');
-  eq(p.firstDay, '2026-06-02', 'the span is still real: both endpoints are sessions that exist');
+  eq(p.firstDay, isoDay(new Date('2026-06-02T09:00:00Z')), 'the span is still real: both endpoints are sessions that exist');
 }
 
 /* ── 2. it never interprets ────────────────────────────────────────────────
@@ -379,6 +408,34 @@ const FORBIDDEN = [
   ok(!d.html.includes('Repple'), 'and the platform name does not appear anywhere on it');
   ok(coachClientReportDoc(base({ brand: '' })).html.includes('Repple'),
     'an empty brand falls back to something rather than printing nothing on a handover');
+}
+
+/* ── 13. the preview panel may not count what the document refuses to ─────
+ *
+ * This is the rule `sessionTally` keeps — "a truncated read may be LISTED and
+ * may not be COUNTED" — asserted for the two figures on
+ * app/(trainer)/client-report.tsx that were reading `.rows.length` off the
+ * state instead. Under 'partial' those printed the PAGE as the total: 1000
+ * body-composition scans, and a day count pivoted from a page of a longer set,
+ * on the panel headed "What will be on it", beside a document that prints no
+ * total for that section at all.
+ *
+ * The pivot is why 'partial' cannot be softened here into "at least this many".
+ * `measures.rows` is one entry per DAY, built from rows that are one per site
+ * per day, so a truncated read does not merely shorten the list — the last day
+ * in it is a day whose sites are half missing, and neither its presence nor the
+ * count is something this app can stand behind.
+ */
+
+{
+  const rows = [1, 2, 3];
+  eq(countableRows(rows, 'ready'), 3, 'a whole read may be counted');
+  eq(countableRows([], 'ready'), 0, 'and an empty whole read counts as none — that is a real answer');
+  eq(countableRows(rows, 'partial'), null, 'a truncated read may not be counted, however many rows came back');
+  eq(countableRows(rows, 'error'), null, 'nor may a refused one, even holding rows from before it failed');
+  eq(countableRows(rows, 'loading'), null, 'nor one still in flight');
+  eq(countableRows(null, 'ready'), null, 'and null rows are not nought rows');
+  eq(countableRows(undefined, 'ready'), null, 'nor are absent ones');
 }
 
 declare const process: { exit(code: number): void };

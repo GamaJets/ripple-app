@@ -46,10 +46,30 @@
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
 import { setLoadKg, isBodyweightSet, type BodyweightHistory } from './bodyweightSets';
+// A hold is not repetitions. This file re-implements the set loop three
+// times, and all three multiplied a plank's SECONDS by a load: the twelve-week
+// grid, lifetime tonnage and the Milestones timeline were each inflated by
+// holds counted as reps, and `est1RM` over forty-five "reps" produced a
+// fictional one-rep max that landed on the timeline as a record the member
+// never set — and that no real set could beat afterwards.
+// src/lib/progression.ts already carried this skip; these three did not.
+import { isTimedSet } from './timedSets';
+import { fmtPointMonth, monthNamesShort } from './format';
 
 const DAY = 86_400_000;
 
-export const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * The twelve short month names for this grid's axis, index-aligned with
+ * `Date#getMonth`, in the reader's own language.
+ *
+ * A function rather than the exported `MONTH_LABELS` array it replaces. Two
+ * reasons: `monthNamesShort()` asks `appLocale()`, which is latched lazily, so
+ * a constant built at import time would pin a member's twelve-week grid to
+ * whatever locale had been resolved before the app started; and the array this
+ * hands back is the one src/lib/format.ts owns, so the axis of this chart and
+ * the axis of every other chart cannot drift into two different Septembers.
+ */
+export const monthLabels = (): readonly string[] => monthNamesShort();
 
 /** How far back the view will reach: three year-rows. Beyond that the screen
  *  says how many earlier months exist rather than drawing a wall of cells. */
@@ -93,7 +113,7 @@ export function nextMonth(key: string): string {
 /** 'Mar 2026'. An unrecognised key is returned as-is rather than guessed at. */
 export function monthLabel(key: string): string {
   const { year, month } = ymOf(key);
-  const name = MONTH_LABELS[month];
+  const name = monthLabels()[month];
   return name && Number.isFinite(year) ? `${name} ${year}` : key;
 }
 
@@ -128,8 +148,21 @@ export interface MonthCell {
   label: string;
   /** At least one session was logged in this month. */
   trained: boolean;
-  /** Distinct sessions. One session writes every exercise with the same
-   *  `performed_at` (see WorkoutEntry.id), so distinct timestamps count them. */
+  /**
+   * Distinct `performed_at` values — SAVES, not sessions.
+   *
+   * This said "Distinct sessions. One session writes every exercise with the
+   * same performed_at", which is true of the write path and false of the
+   * members. app/(client)/workouts.tsx does stamp a whole save with one
+   * timestamp; a member logging as they go makes seven saves out of one visit.
+   * Checked on production: one member's 17 August is seven rows, seven
+   * timestamps, 16:14 to 17:12, one gym.
+   *
+   * Kept because the month chart's description needs SOMETHING countable and
+   * this is the honest name for it, but no screen prints it as a session count
+   * any more — `days` is what they show. See `WeekStats.days` in
+   * src/lib/streaks.ts.
+   */
   sessions: number | null;
   /** Distinct local calendar days trained. */
   days: number | null;
@@ -150,7 +183,7 @@ export interface MonthCell {
 function blankCell(key: string): MonthCell {
   const { year, month } = ymOf(key);
   return {
-    key, year, month, label: MONTH_LABELS[month] ?? key,
+    key, year, month, label: monthLabels()[month] ?? key,
     trained: false, sessions: null, days: null, volumeKg: null, kcal: null,
     best1RM: null, topLift: null, unpricedSets: 0,
   };
@@ -177,6 +210,9 @@ function cellFrom(key: string, entries: WorkoutEntry[], history: BodyweightHisto
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // A hold's "reps" are seconds. Skipped before the load is resolved, so a
+      // plank can reach neither the tonnage nor the estimated max.
+      if (isTimedSet(e, i)) continue;
       // The LOAD, which on a bodyweight set is the person plus whatever they
       // hung off themselves. Reading `set[1]` directly is what this did, and on
       // a pull-up that number is zero — so a month of calisthenics reported no
@@ -421,7 +457,7 @@ export function historyNote(log: WorkoutEntry[], now: number = Date.now()): stri
   const cells = monthlyHistory(log, now);
   const months = trainedMonths(cells).length;
   if (stage === 'starting') {
-    return `Day ${span.days} — this is the start of your history, and it fills out as the months go by.`;
+    return `Day ${span.days}. This is the start of your history, and it fills out as the months go by.`;
   }
   return `${months} month${months === 1 ? '' : 's'} with training, back to ${monthLabel(monthKey(span.firstAt)!)}.`;
 }
@@ -431,6 +467,7 @@ export function historyNote(log: WorkoutEntry[], now: number = Date.now()): stri
 export interface Lifetime {
   firstAt: string;
   lastAt: string;
+  /** Distinct `performed_at` values — SAVES, not sessions. See MonthCell.sessions. */
   sessions: number;
   days: number;
   /** Null when nothing weighted has been logged — never 0. */
@@ -460,6 +497,9 @@ export function lifetimeTotals(log: WorkoutEntry[], history: BodyweightHistory =
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // Not lifetime tonnage. A hold is not unpriced work either, so it is not
+      // counted in `unpriced` — it is work this total is not about.
+      if (isTimedSet(e, i)) continue;
       const weight = setLoadKg(e, i, set, history, e.t);
       if (weight == null || !(weight > 0)) { if (isBodyweightSet(e, i)) unpriced++; continue; }
       volume += reps * weight; anyVolume = true;
@@ -513,6 +553,10 @@ export function prTimeline(log: WorkoutEntry[], history: BodyweightHistory = [])
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // The worst of the three. `est1RM(80, 45)` is a number no human has ever
+      // lifted, and once it is on the timeline as a personal record no real set
+      // can ever beat it — the member's Milestones list is closed by a plank.
+      if (isTimedSet(e, i)) continue;
       const weight = setLoadKg(e, i, set, history, e.t);
       if (weight == null || !(weight > 0)) continue;
       const one = est1RM(weight, reps);
@@ -564,4 +608,28 @@ export function volumeArc(cells: MonthCell[]): Arc | null {
  *  Null in, null out — this must never turn "unknown" into "0.0 t". */
 export function tonnes(kg: number | null): number | null {
   return kg == null ? null : Math.round(kg / 100) / 10;
+}
+
+/**
+ * The month whose best single-set estimate is the highest in the series.
+ *
+ * Sibling of `bestMonth`, and deliberately a SEPARATE pick rather than a field
+ * read off the one it returns. The heaviest month by tonnage and the month
+ * holding the best estimated single are answers to two different questions and
+ * are routinely different months: a deload block of high-rep work can carry a
+ * member's biggest tonnage of the year while their best single sits in a peak
+ * week that was half the volume. Reading `bestMonth(cells).best1RM` would print
+ * the second question's answer off the first question's month.
+ *
+ * Null when no month carries an estimate at all — a history of cardio,
+ * bodyweight work nobody has been weighed for, or holds, none of which produce
+ * one. Never 0: there is no estimate, and "0 kg" is a lift nobody did.
+ */
+export function peakEstimateMonth(cells: MonthCell[]): MonthCell | null {
+  let best: MonthCell | null = null;
+  for (const c of cells) {
+    if (c.best1RM == null) continue;
+    if (best == null || c.best1RM > (best.best1RM ?? -1)) best = c;
+  }
+  return best;
 }

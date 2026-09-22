@@ -6,11 +6,21 @@
 import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
-// The single copy of "which currencies have no minor unit". It lives in
-// coachMoney.ts because that is where it was first needed and it is tested
-// there; coachStatement.ts and coachInvoice.ts already import it from there
-// rather than keeping their own, and so does this file now.
-import { ZERO_DECIMAL } from './coachMoney';
+// The money path's own auth read, already centralised here for connect.ts and
+// subscriptions.ts. `getUser()` resolves rather than rejecting when the auth
+// host is unreachable — see src/lib/authReadFate.ts — so `!uid` was two
+// different facts wearing one sentence.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
+
+// `currencyDecimals` is the one place that answers "how many minor units make a
+// whole one", and it answers **null** rather than 2 when nobody said which
+// money it is — or said something that is not a currency code. This file used
+// to import the zero-decimal LIST and branch on it by hand, which is how it
+// stayed wrong for the five three-decimal currencies while looking swept.
+import { currencyDecimals } from './coachMoney';
+import { capLimit, capped } from './rowCap';
+import type { LoadStatus } from '../ui/loadStatus';
 
 export interface Subscription { trainer_id: string; plan: string | null; status: string | null; current_period_end: string | null; cancel_at_period_end: boolean }
 export interface Invoice { id: string; trainer_id: string | null; amount_due: number | null; currency: string | null; status: string | null; attempt_count: number | null; hosted_invoice_url: string | null; created_at: string }
@@ -59,9 +69,29 @@ export async function openBillingPortal(): Promise<{ ok: boolean; error?: string
  */
 export async function fetchMySubscription(): Promise<{ sub: Subscription | null; error: string | null }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { sub: null, error: 'Not signed in.' };
+    // ── 'Not signed in.' on a paying trainer's billing screen ───────────────
+    //
+    // The doc comment above is about exactly this defect one layer down — a
+    // failed read rendering the subscribe state at somebody who is already
+    // paying — and the auth read in front of it was doing the same thing with
+    // a sentence instead of a null. `getUser()` resolves with `user: null` and
+    // an `AuthRetryableFetchError` for an unreachable auth host, so an outage
+    // returned the literal string 'Not signed in.', which app/(trainer)/
+    // billing.tsx prints verbatim under a Flag that says the opposite: "If you
+    // are already subscribed you still are." A coach reading those two
+    // sentences together is being told the app has lost their session, on the
+    // screen where the remedy on offer is to buy the plan again.
+    //
+    // `authGateMessage` says whichever of the two is true. Both are still
+    // `{ sub: null, error }`, which the screen already renders as "we could not
+    // read your subscription" rather than as having none.
+    //
+    // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+    const who = await signedInUid('billing.fetchMySubscription');
+    if (who.fate !== null) return { sub: null, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const { data, error } = await supabase.from('subscriptions').select('*').eq('trainer_id', uid).maybeSingle();
+
     if (error) return { sub: null, error: error.message };
     return { sub: (data as Subscription) ?? null, error: null };
   } catch (e) { return { sub: null, error: (e as Error).message }; }
@@ -70,7 +100,8 @@ export async function fetchMySubscription(): Promise<{ sub: Subscription | null;
 /**
  * Owner dunning: invoices that failed or are unpaid, newest first.
  *
- * `[]` means nothing is outstanding. **`null` means we could not find out.**
+ * Empty rows under 'ready' means nothing is outstanding. **'error' means we
+ * could not find out.**
  *
  * This is the worst place in the app to conflate the two. The owner dashboard
  * renders the "Failed payments" callout only when this is non-empty, so a
@@ -78,13 +109,33 @@ export async function fetchMySubscription(): Promise<{ sub: Subscription | null;
  * owner sees a clean dashboard, concludes every payment went through, and
  * chases nobody. The money is missing and the screen that exists to say so is
  * the reason nobody looked.
+ *
+ * ── The third answer this read can give, which it could not say ────────────
+ *
+ * There was no `.limit()`, and no limit is not no ceiling: PostgREST applies
+ * its own 1000 and says nothing about having applied it. app/(trainer)/money.tsx
+ * prints this list's LENGTH as a sentence — "{n} invoices on your own account
+ * are outstanding" — so at a thousand and one unpaid invoices that sentence
+ * states a floor as a total, in the one place somebody is deciding how much
+ * they owe. `capLimit()` asks for one row past the ceiling and `capped()` turns
+ * the overflow into 'partial', which is a thing the screen can say out loud.
+ *
+ * `.in('status', …)` here is two string literals, not an id list, so this one
+ * carries no request-line risk however many invoices exist; the chunking that
+ * belongs on the uuid `.in()`s elsewhere in this repo would be noise here.
  */
-export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
+export async function fetchFailedInvoices(): Promise<{ rows: Invoice[]; status: LoadStatus }> {
   try {
-    const { data, error } = await supabase.from('invoices').select('*').in('status', ['open', 'uncollectible']).order('created_at', { ascending: false });
-    if (error) return null;
-    return (data as Invoice[]) ?? [];
-  } catch { return null; }
+    const { data, error } = await supabase.from('invoices').select('*')
+      .in('status', ['open', 'uncollectible'])
+      // `.order('id')` behind the date, so which invoices the cap drops is the
+      // same on every read rather than whatever Postgres does with a tie.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(capLimit());
+    if (error) return { rows: [], status: 'error' };
+    const page = capped((data as Invoice[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch { return { rows: [], status: 'error' }; }
 }
 
 /**
@@ -111,9 +162,20 @@ export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
  * and for those the amount Stripe sends IS the whole-unit figure. A \u00a55,000
  * subscription was therefore printed as "JPY 50.00": a hundredth of what the
  * customer is actually being charged, on the screen they check to see what they
- * are being charged. `ZERO_DECIMAL` is the list, it is imported rather than
- * copied, and the division now happens only when the currency in hand says it
- * should.
+ * are being charged.
+ *
+ * \u2500\u2500 AND THE FOURTH, WHICH THE THIRD FIX HID \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+ *
+ * That fix imported `ZERO_DECIMAL` and branched on it, which is right for the
+ * sixteen and still wrong for the five currencies with THREE places. BHD, JOD,
+ * KWD, OMR and TND hold thousandths, so dividing by a hundred printed a
+ * subscription at TEN TIMES what the gym is charged \u2014 and the import of the
+ * zero-decimal list is precisely what made it invisible, because the file
+ * looked as though it had been through the currency sweep. It had, for one of
+ * the two lists.
+ *
+ * So the division is `currencyDecimals` and nothing else: one function, which
+ * knows about both lists and returns null rather than a default.
  *
  * With NO currency the scale is unknown as well as the unit, because whether
  * this integer is hundredths or whole units is precisely what the currency
@@ -127,11 +189,40 @@ export const money = (cents: number | null, cur: string | null = null): string =
   // Stripe always sends a currency, so its absence means the read did not land,
   // and guessing is what this whole function exists to refuse.
   if (!c) return `${cents.toLocaleString(undefined)} (currency not read)`;
-  const zero = ZERO_DECIMAL.has(c);
-  const v = zero ? cents : cents / 100;
+  // `currencyDecimals`, not a zero/two branch. This function knew about the
+  // sixteen zero-decimal currencies and not about the five THREE-decimal ones,
+  // so for BHD, JOD, KWD, OMR and TND it divided thousandths by a hundred and
+  // printed a subscription price TEN TIMES what the gym is charged — on a live
+  // billing screen, in a form that reads as a considered figure. Half-adopting
+  // the rule is what made it invisible: the import on line 13 said this file
+  // had been through the currency sweep.
+  const places = currencyDecimals(c);
+  // REACHABLE, and the comment that used to stand here said it was not.
+  //
+  // It said: "Unreachable — currencyDecimals only answers null for an empty
+  // code, which the line above already returned on." That was true of
+  // `currencyDecimals` as it was, and the sentence after it — that the branch
+  // was written out in full "so that if it ever does answer null this prints
+  // the integer it was given" — is why nothing here had to change when it
+  // started doing exactly that. `currencyDecimals` now answers null for a
+  // stated-but-unreadable currency too, so a row whose `currency` is 'pounds'
+  // lands here rather than printing "POUNDS 60.00".
+  //
+  // The branch is kept LENIENT in the sense that matters — the amount is not
+  // dropped. The integer Stripe sent is printed undivided, beside a sentence
+  // saying the currency was not read, because the row still records money
+  // somebody was charged and the whole argument of this file is that an honest
+  // unformatted figure beats a confident wrong one. What is NOT done here is
+  // the other kind of leniency: there is no `?? 2`, and no exception carved out
+  // for this module. Stripe always sends a valid lower-case ISO code, so a
+  // non-code in `invoices.currency` means the row is corrupt rather than that
+  // this screen needs a looser rule, and "POUNDS 60.00" on a billing screen is
+  // precisely the made-up unit the header of this function is about.
+  if (places == null) return `${cents.toLocaleString(undefined)} (currency not read)`;
+  const v = places === 0 ? cents : cents / 10 ** places;
   const amount = v.toLocaleString(undefined, {
-    minimumFractionDigits: !zero && v % 1 ? 2 : 0,
-    maximumFractionDigits: zero ? 0 : 2,
+    minimumFractionDigits: v % 1 ? places : 0,
+    maximumFractionDigits: places,
   });
   const sym = SYMBOLS[c];
   if (sym) return sym + amount;

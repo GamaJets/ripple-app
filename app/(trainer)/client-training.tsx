@@ -51,12 +51,14 @@
 // paying attention. `unitFor` decides it, refuses to read a NULL column as
 // kilograms, and hands back the sentence that says whose unit is on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Flag, PartialRead, DayBars, Meter, Expandable, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAuth } from '../../src/ui/auth';
 import { useSettings } from '../../src/ui/settings';
@@ -64,25 +66,28 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { type LoadStatus } from '../../src/ui/loadStatus';
-import { isQueryableId } from '../../src/lib/clientDrift';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
 import { liftLabel, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { num, fmtTime } from '../../src/lib/format';
+import { num, fmtTime, fmtRelativeDay, weekdayNameShort } from '../../src/lib/format';
 import { dayLabel } from '../../src/lib/adherence';
 import {
   sessionsOf, attributionOf, attributionLabel, trainingBoard, unitFor,
   type LoggedSession, type TrainingDay, type Attribution,
 } from '../../src/lib/clientTraining';
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { fetchFormClipsFor, formClipUrl, type FormClip } from '../../src/ui/formClips';
+import { clipNoteLine } from '../../src/lib/formCheck';
 // ── the two modules the coach could not reach ──────────────────────────────
 //
 // P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
 // only importer was the CLIENT's own history screen — so the person paid to
 // notice a missing posterior chain was the one person the app did not show it
-// to, while the client, who cannot rewrite the programme, could. `longView.ts`
+// to, while the client, who cannot rewrite the program, could. `longView.ts`
 // draws twelve months of tonnage and its only importer was the same screen, so
 // the renewal conversation — which is won with an arc, not a fortnight — had
 // nothing behind it.
@@ -90,7 +95,19 @@ import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHi
 // Neither module is changed. Both are pure, both are tested, and this screen
 // reads them exactly as app/(client)/history.tsx does.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+// ── the finer grain, and the picture of it ─────────────────────────────────
+//
+// `muscleBoard` above keys on the catalogue's eleven display GROUPS, 200 of
+// whose 608 movements are filed under 'Full body' — right for "have they
+// trained legs this week", unusable for a body. `MuscleWorkPanel` reads the
+// `primary_muscles` and `secondary_muscles` columns instead, which is thirty
+// names rather than eleven, and draws the Training Summary, the diagram, the
+// rankings and the Recovery Map off them. The two boards answer two questions
+// and both stay; see the header of src/lib/muscleWork.ts on why widening one
+// into the other would have been a silent double count rather than a refactor.
+import { MuscleWorkPanel } from '../../src/ui/MuscleWorkPanel';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useToday, useNow } from '../../src/ui/today';
 import {
   monthlyHistory, monthLabel, bestMonth, trainedMonths, longestGap,
   historySpan, stageOf, lifetimeTotals, volumeArc, tonnes, MAX_MONTHS,
@@ -98,7 +115,7 @@ import {
 // ── the four things this screen could not say before ───────────────────────
 //
 // It had the RECORD and nothing to compare it against. The assignment was on a
-// different screen, the programme checks ran once in the builder and never
+// different screen, the program checks ran once in the builder and never
 // again, the block's start date did not exist, and what somebody had been on
 // before was destroyed by the next assign. All four of those are readable from
 // here, and every one of them is a claim about a person, so each arrives with
@@ -118,21 +135,44 @@ import {
 } from '../../src/lib/programStart';
 import { isoToday } from '../../src/lib/dayPlan';
 import {
-  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
+  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual, prescribedTempo,
   loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from '../../src/lib/planVsActual';
+// ── the speed they actually moved at ──────────────────────────────────────
+//
+// `tempoVerdict` is the comparison and nothing here repeats it: it returns met,
+// differed or unrecorded, refuses to read silence as compliance, and spells the
+// four digits out in words, which is what stops a coach and a member reading
+// them in opposite orders. `tempoSummary` is the same file's line for a set of
+// tempos with nothing to judge them against. See src/lib/performedTempo.ts.
+import { recordedTempo, tempoSummary, tempoVerdict } from '../../src/lib/performedTempo';
+import { dayKeyOf } from '../../src/lib/entryEdit';
+import { coachMayAmend } from '../../src/lib/coachAmend';
+import { CoachAmendSheet, confirmWithdraw } from '../../src/ui/CoachAmendSheet';
+// ── the program the client rewrote ──────────────────────────────────────
+//
+// The coach half of `client_plan_edits`. The READER is the member's own —
+// src/ui/planEditsShared.ts, which goes through the one shape parser in
+// src/lib/planEdits.ts — so the two screens cannot disagree about what is
+// stored; src/lib/planEditsDiff.ts is what this screen adds, which is resolving
+// the stored slugs against the assignment above so a coach reads a movement
+// name where the member could only be shown a day and a kind of change.
+import { fetchSharedPlanEdits, type SharedPlanEdits } from '../../src/ui/planEditsShared';
+import {
+  KEY_HAS_NO_WEEK, editAge, planEditDiffLine, planEditsCoachNote, planEditsDiff,
+} from '../../src/lib/planEditsDiff';
+import { agePhrase } from '../../src/lib/freshness';
+import { appLocale } from '../../src/lib/locale';
 import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
-// Written out here, on one line, rather than imported from the library beside
-// the logic that consumes them. scripts/check-schema.mjs resolves a select list
-// that arrives as a named constant only within the file that names it, so a
-// shared constant is a select list nothing compares against the SQL or against
-// the live database — which is exactly how `workouts.session_mins` came to be
-// declared, committed, generated into setup.sql and never run, breaking every
-// workout save for two days. Every other screen in this group declares its own
-// (GOAL_COLS, SCAN_COLS, ITEM_COLS) for the same reason.
-const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
+// The `workouts` column list is imported from src/lib/workoutRow.ts rather
+// than copied. It was written out here because scripts/check-schema.mjs could
+// only resolve a select list declared in the file that used it; the gate now
+// follows one import hop, so a copy buys a blind spot and nothing else. The
+// note on WORKOUT_COLS says what the three copies cost — three coach screens
+// reading a client's training without `bw`, `timed` or `tempos`.
 const UNIT_COLS = 'weight_unit';
 
 /**
@@ -151,11 +191,14 @@ const UNIT_COLS = 'weight_unit';
  * screen that quietly showed twelve weeks would be answering a different
  * question from the one it did yesterday without saying so.
  */
-const RANGES: { days: number | null; label: string }[] = [
-  { days: 84, label: '12 Weeks' },
-  { days: 182, label: '6 Months' },
-  { days: 365, label: '12 Months' },
-  { days: null, label: 'Everything' },
+/** `short` is what the segment shows; `label` is what it says aloud. Four
+ *  words in one pill bar do not survive a larger text size, and "12W" read
+ *  out as "twelve W" is not a range. */
+const RANGES: { days: number | null; label: string; short: string }[] = [
+  { days: 84, label: '12 Weeks', short: '12W' },
+  { days: 182, label: '6 Months', short: '6M' },
+  { days: 365, label: '12 Months', short: '12M' },
+  { days: null, label: 'Everything', short: 'All' },
 ];
 
 /** How the attribution reads as a chip: short, and tinted only when it is not
@@ -170,6 +213,10 @@ const CHIP_SHORT: Record<Attribution, string> = {
 
 export default function ClientTraining() {
   const t = useTheme();
+  // Movement names on this screen come out of the client's LOG and out of the
+  // program JSON, both of which store the English identity. A German coach
+  // reads the library in German and read this screen in English.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const r = useRoster();
   // Whose id "You logged it" is allowed to mean. Null while the session is
@@ -203,17 +250,30 @@ export default function ClientTraining() {
   /** How far back the read asks for. Null is everything, which is what this
    *  screen has always done and stays the default. */
   const [rangeDays, setRangeDays] = useState<number | null>(null);
+  /** The coach-logged entry open in the correction sheet. See src/lib/coachAmend.ts. */
+  const [amending, setAmending] = useState<WorkoutEntry | null>(null);
+  /** Swap or drop one entry in the log once the SERVER has confirmed it, so
+   *  every total over it follows the correction and nothing else is re-read. */
+  const replaceEntry = useCallback((id: string, next: WorkoutEntry | null) => {
+    setLog((prev) => prev && (next ? prev.map((x) => (x.id === id ? next : x)) : prev.filter((x) => x.id !== id)));
+  }, []);
 
-  const load = useCallback(async (id: string, days: number | null) => {
+  const load = useCallback(async (id: string, days: number | null, askable: boolean) => {
     wanted.current = id;
     setStatus('loading'); setUnitStatus('loading');
     setLog(null); setClientUnit(null);
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value. Nothing is asked for them, and
-    // the screen says why rather than drawing them as somebody who never trains.
-    if (!isQueryableId(id)) {
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, every read ran, each came back with
+    // zero rows and NO error, and this screen rendered that as a fact about the
+    // person. The roster is the only thing that knows which table the row came
+    // from — see src/lib/clientRecord.ts.
+    if (!askable) {
       setStatus('error'); setUnitStatus('error');
       return;
     }
@@ -292,12 +352,36 @@ export default function ClientTraining() {
   // own: changing the range is a NEW READ, not a filter over the page already
   // on screen, and two effects both calling `load` would fire it twice on every
   // focus.
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving an empty screen standing as a fact about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useFocusEffect(useCallback(() => {
     if (!USE_SUPABASE || !picked) return;
-    void load(picked, rangeDays);
-  }, [picked, rangeDays, load]));
+    void load(picked, rangeDays, askable);
+  }, [picked, rangeDays, askable, load]));
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /**
+   * Read this client's training again — the same read the focus effect above
+   * and the pull-to-refresh below both run, named once so a component can be
+   * handed it.
+   *
+   * `ExerciseHistoryPanel` shows a read stamp and takes an `onRefresh`; without
+   * one the stamp says WHEN the movements were read and offers nothing to do
+   * about it, which is half an answer on a panel a coach is reading with the
+   * client standing in front of them. Stable across renders — an unstable
+   * callback handed to a child is how a render loop starts.
+   */
+  const reloadLog = useCallback(() => {
+    if (!picked) return;
+    void load(picked, rangeDays, askable);
+  }, [picked, rangeDays, askable, load]);
+
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
   const who = (fullName || 'They').split(' ')[0];
   // A name we do not have must not become "They's". The fallback voice is
@@ -343,9 +427,51 @@ export default function ClientTraining() {
    * bare date and the week number is counted in the reader's own days. Nothing
    * else on this screen is computed across that boundary.
    */
+  /* ── the clock this screen reads, and why it is a hook ──────────────────
+   *
+   * Every date on this screen used to come from a bare `new Date()` or
+   * `Date.now()` INSIDE a useMemo whose dependencies were the data. Not an
+   * empty array — so `check:frozen-day`, which looks for `useMemo(…, [])`,
+   * could not see any of them — but the effect is the same and lasts longer:
+   * `client-training` is registered `href: null` in app/(trainer)/_layout.tsx,
+   * which mounts it once and never tears it down. The memo then recomputes only
+   * when the LOG changes, and a client who has not trained is exactly the
+   * client whose log does not change.
+   *
+   * So a coach who opened this screen on Sunday and came back on Wednesday was
+   * shown: which week of the block the client is in, as of Sunday; a "last 28
+   * days" muscle board ending on Sunday; and a plan-versus-actual comparison
+   * asking whether Sunday's session had been logged. All of them stale, none of
+   * them marked, and a pull-to-refresh re-read the server and recomputed
+   * against the same frozen day — which makes the wrong answer look freshly
+   * confirmed. That last part is what makes this worth fixing rather than
+   * noting.
+   *
+   * `useToday` re-reads at the next local midnight and on foreground, and
+   * compares before it sets, so a screen sitting open costs nothing until the
+   * day actually turns. `useNow` additionally moves when the screen is focused,
+   * which is what a rolling "last 28 days" window wants: a coach coming back to
+   * this tab is asking about the 28 days ending now. See src/ui/today.ts.
+   */
+  const today = useToday();
+  const nowMs = useNow().getTime();
+
+  // The last seven local days ending today, oldest first, each with how many
+  // exercises the log holds for it — the DayBars under the Days Trained
+  // figure. A day the board does not hold is 0, and that is only DRAWN under a
+  // whole read (see the card), where absence from the log is a fact.
+  const lastSeven = useMemo(() => {
+    const [y, m, d] = today.split('-').map(Number);
+    const byDay = new Map(board.days.map((day) => [day.day, day.exercises]));
+    return Array.from({ length: 7 }, (_, i) => {
+      const at = new Date(y, m - 1, d - (6 - i));
+      return { label: weekdayNameShort(at.getDay()), value: byDay.get(isoToday(at)) ?? 0, tone: 'purple' as const };
+    });
+  }, [today, board]);
+
   const position = useMemo(
-    () => blockPosition(startsOn, isoToday(new Date()), weekCount(program)),
-    [startsOn, program],
+    () => blockPosition(startsOn, today, weekCount(program)),
+    [startsOn, program, today],
   );
   /**
    * The week of the block the comparison runs against.
@@ -387,7 +513,7 @@ export default function ClientTraining() {
    * P1. Balance is the COACH's job. `muscleVolume.ts` was reachable only from
    * the client's own history screen, so the member could see that they had
    * trained quads four times and hamstrings never, and the person who wrote the
-   * programme could not.
+   * program could not.
    *
    * The catalogue read is separate and fails on its own. "They have not trained
    * their back" over a catalogue that did not come back is an accusation about
@@ -401,22 +527,32 @@ export default function ClientTraining() {
    *  recent window in full — the same reasoning `planVsActual` applies with
    *  `oldestDay`, and the reason a long-history client is not simply refused. */
   const muscleWindowRead = useMemo(() => {
+    // whole-ok: 'partial' is the case the next four lines exist for, and this
+    // guard is deliberately only the first of two. It answers "did anything come
+    // back"; the return below answers "did what came back reach the start of the
+    // window", which is the question 'partial' actually raises and which
+    // `isWhole` would refuse to ask. `capped()` hands back the NEWEST rows, so a
+    // client with four thousand logged sets still has their last 28 days in
+    // full — `oldestDay <= fromDay` lets them have a muscle board, and refuses
+    // only the client whose truncation ate into the window itself. Answering
+    // false for every truncated read would take the board away from exactly the
+    // clients who train the most.
     if (status === 'error' || status === 'loading' || !log) return false;
     if (status === 'ready') return true;
-    const from = new Date(Date.now() - muscleDays * 86_400_000);
+    const from = new Date(nowMs - muscleDays * 86_400_000);
     const p = (x: number) => (x < 10 ? '0' + x : String(x));
     const fromDay = `${from.getFullYear()}-${p(from.getMonth() + 1)}-${p(from.getDate())}`;
     return oldestDay != null && oldestDay <= fromDay;
-  }, [status, log, muscleDays, oldestDay]);
+  }, [status, log, muscleDays, oldestDay, nowMs]);
   const muscles = useMemo(
     () => muscleBoard(log ?? [], cat.rows, {
-      sinceMs: Date.now() - muscleDays * 86_400_000,
+      sinceMs: nowMs - muscleDays * 86_400_000,
       // No weigh-in series is read on this screen, so a bodyweight set carries
       // no load here. `unpricedSets` reports exactly how much work that leaves
       // out of the tonnage, which is the honest answer rather than a silent one.
       catalogueWhole: cat.status === 'ready',
     }),
-    [log, cat.rows, cat.status, muscleDays],
+    [log, cat.rows, cat.status, muscleDays, nowMs],
   );
   const muscleNote = useMemo(() => unmatchedNote(muscles), [muscles]);
 
@@ -433,15 +569,21 @@ export default function ClientTraining() {
    */
   const longWhole = status === 'ready' && log != null;
   const cells = useMemo(
-    () => (longWhole ? monthlyHistory(log ?? [], Date.now(), MAX_MONTHS) : []),
-    [longWhole, log],
+    () => (longWhole ? monthlyHistory(log ?? [], nowMs, MAX_MONTHS) : []),
+    [longWhole, log, nowMs],
   );
   const lifetime = useMemo(() => (longWhole ? lifetimeTotals(log ?? []) : null), [longWhole, log]);
   const arc = useMemo(() => volumeArc(cells), [cells]);
   const best = useMemo(() => bestMonth(cells), [cells]);
   const trainedCells = useMemo(() => trainedMonths(cells), [cells]);
   const worstGap = useMemo(() => longestGap(cells), [cells]);
-  const stage = useMemo(() => stageOf(longWhole ? historySpan(log ?? []) : null), [longWhole, log]);
+  // `nowMs`, not `historySpan`'s defaulted `Date.now()`. The memo three lines
+  // up already carries it; this one read the clock in its own body under a
+  // dependency list of rows that move when the server answers and never when
+  // time passes, so how long this client has been training stopped growing at
+  // whatever moment the read landed. Two facts about the same history, cut on
+  // two different instants, on one screen. `check:frozen-hook`'s entry.
+  const stage = useMemo(() => stageOf(longWhole ? historySpan(log ?? [], nowMs) : null), [longWhole, log, nowMs]);
 
   const pva = useMemo(() => planVsActual({
     days: compareWeek?.days ?? null,
@@ -451,14 +593,28 @@ export default function ClientTraining() {
     // handed above, for the same reason.
     log: status === 'error' ? null : log,
     logStatus: status,
-    todayISO: isoToday(new Date()),
+    todayISO: today,
     oldestDay,
-  }), [compareWeek, assigned.status, status, log, oldestDay]);
+  }), [compareWeek, assigned.status, status, log, oldestDay, today]);
 
-  /* ── the programme checks, re-run against what they are ACTUALLY on ─────
+  /**
+   * The tempo the program asks for, movement by movement and set by set.
+   *
+   * The same week `pva` compares against — the one the client's own Train tab
+   * is showing them — so the transcript below is judged against the
+   * prescription that was in front of the person doing the lifting.
+   *
+   * Only ever used inside `pva`'s window, and the row below enforces that. A
+   * session from March is not evidence about a block written in September, and
+   * drawing "as asked" over it would be this screen inventing a prescription
+   * that did not exist on the day.
+   */
+  const askTempo = useMemo(() => prescribedTempo(compareWeek?.days ?? null), [compareWeek]);
+
+  /* ── the program checks, re-run against what they are ACTUALLY on ─────
      `reviewProgram` ran once, in the builder, against a draft. Its seven rules
      include `volume-jump`, which reads THIS CLIENT'S OWN training history — and
-     that history keeps moving after the programme is assigned. A block that was
+     that history keeps moving after the program is assigned. A block that was
      safe in July against a client training four times a week is a different
      proposition in September against one who has trained twice this month.
 
@@ -475,7 +631,7 @@ export default function ClientTraining() {
    *
    * `client?.injuries ?? []` is an empty list under a failed roster exactly as
    * it is under a client with nothing wrong with them. The same discipline
-   * app/(trainer)/builder.tsx applies before it lets a programme be assigned;
+   * app/(trainer)/builder.tsx applies before it lets a program be assigned;
    * here the consequence is milder — a finding withheld rather than a write
    * permitted — but a check that silently did not run reads exactly like a
    * check that passed.
@@ -494,17 +650,143 @@ export default function ClientTraining() {
     logStatus: status,
     goal: goalToEnum(client?.goal),
   }), [program, picked, clientInjuries, disclosureStatus, log, status, client]);
-  // Only worth drawing when there is a programme to check. A client on nothing
-  // has no findings, and an empty "Programme Checks" heading over them reads as
+  // Only worth drawing when there is a program to check. A client on nothing
+  // has no findings, and an empty "Program Checks" heading over them reads as
   // seven rules that ran and passed.
   const showChecks = !!program && assigned.status !== 'loading';
 
-  /* ── what they were on before ──────────────────────────────────────────── */
-  const history = useProgramHistory(picked);
+  /* ── what they were on before ────────────────────────────────────────────
+   *
+   * `askable`, not `picked`. This was the one read on the screen the guard did
+   * not reach: `load` above refuses a hand-added client, and this hook carries
+   * its own gate — but that gate is `isQueryableId`, the test
+   * src/lib/clientRecord.ts exists because it stopped working.
+   * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so it passed, the
+   * read ran, `assigned_program_history` answered with zero rows and no error
+   * (its policy resolves `is_my_client()`, an EXISTS over `clients`), and
+   * `historyLine` printed the 'none' branch: "No earlier program on record."
+   *
+   * Said about somebody who has never had an account, on a page whose every
+   * other section had already been withheld from them. Passing null instead
+   * asks for nothing, and the `!askable` branch in the render says which of the
+   * three answers this is rather than letting a 'ready' empty stand.
+   */
+  const history = useProgramHistory(askable ? picked : null);
+
+  /* ── and what they made of what they were given ────────────────────────
+   *
+   * `client_plan_edits` holds every swap, removal, addition and corrected set
+   * the member made to the program above. Until today it was written by one
+   * screen (src/ui/planEdits.tsx) and read by nothing at all; the member can now
+   * see their own copy, and this is the coach's — which is the copy that was
+   * the point of storing it.
+   *
+   * The SAME reader the member's screen uses, `fetchSharedPlanEdits`, called
+   * with the client's id. `client_plan_edits_coach_r` (supabase/parts/204) is
+   * SELECT on `is_my_client(client_id)`, so one function serves both sides and
+   * the two cannot grow two opinions about the shape of the blob. No write half
+   * exists and none is added here — see the section below on why.
+   *
+   * Its own state, because it fails on its own: a refused read of these must
+   * never be drawn as a client who has followed the program as written, which
+   * is the one thing a coach would act on immediately.
+   */
+  const [planEdits, setPlanEdits] = useState<SharedPlanEdits | null>(null);
+  const [planEditStatus, setPlanEditStatus] = useState<LoadStatus>('loading');
+  /** The client this answer is allowed to land under. The same guard `wanted`
+   *  gives the log read, and for the same reason: tapping through a book starts
+   *  a read per tap and they do not return in order, so without it one client's
+   *  rewritten program is drawn under another client's name. */
+  const wantedEdits = useRef<string | null>(null);
+  const loadPlanEdits = useCallback(async (id: string | null, ask: boolean) => {
+    wantedEdits.current = id;
+    if (!id) { setPlanEdits(null); setPlanEditStatus('ready'); return; }
+    // A client typed into the book by hand has no account and therefore no row
+    // to read. 'error' rather than 'ready', for the reason `load` gives above:
+    // zero rows with no error is not an answer about that person.
+    if (!ask) { setPlanEdits(null); setPlanEditStatus('error'); return; }
+    setPlanEditStatus('loading'); setPlanEdits(null);
+    const res = await fetchSharedPlanEdits(id);
+    if (wantedEdits.current !== id) return;
+    setPlanEdits(res.shared);
+    setPlanEditStatus(res.status);
+  }, []);
+  useFocusEffect(useCallback(() => {
+    if (!USE_SUPABASE) return;
+    void loadPlanEdits(picked, askable);
+  }, [picked, askable, loadPlanEdits]));
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Seven reads: what this client actually trained (`load`, which is already the
+   * focus read), the book, the program assigned to them, what they were on
+   * before, the movement catalogue, the injury acknowledgements, and the
+   * changes the client has made to the program.
+   *
+   * The plan-versus-actual comparison on this screen is drawn ACROSS the
+   * assignment and the logged sessions, so refreshing the sessions without the
+   * assignment would compare this week's work against last week's plan and
+   * report the difference as the client's. The same holds for the client's own
+   * edits, which are resolved against that assignment by name. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(assigned.reload()), Promise.resolve(history.reload()),
+    cat.reload(), acks.refresh(),
+    ...(picked ? [load(picked, rangeDays, askable), loadPlanEdits(picked, askable)] : []),
+  ]), [r, assigned, history, cat, acks, picked, rangeDays, askable, load, loadPlanEdits]));
   const hist = useMemo(
     () => historyBoard(history.rows, history.status, program, startsOn, assigned.status),
     [history.rows, history.status, program, startsOn, assigned.status],
   );
+
+  /* ── the client's rewrite, against what was assigned ───────────────────
+   *
+   * Resolved against `compareWeek` — the week of the block their own Train tab
+   * is showing them — and not against week one. The stored key is
+   * `dayIdx:exerciseKey` with no week on it (see `KEY_HAS_NO_WEEK`), so week
+   * one would name week one's Monday movement at a coach for a change made in
+   * week six. The same week `planVsActual` above compares against, so the two
+   * sections on this screen cannot be talking about different Mondays.
+   *
+   * Null days under anything but a settled assignment, so the diff answers
+   * 'unmatched' and says the program could not be read rather than listing
+   * changes with no movement names and letting that read as changes to nothing.
+   */
+  const editDiff = useMemo(() => planEditsDiff({
+    edits: planEdits ? planEdits.edits : null,
+    editStatus: planEditStatus,
+    readable: planEdits ? planEdits.readable : false,
+    days: assigned.status === 'ready' ? compareWeek?.days ?? null : null,
+  }), [planEdits, planEditStatus, assigned.status, compareWeek]);
+  const editAged = useMemo(
+    () => editAge(planEdits?.updatedAt ?? null, nowMs),
+    [planEdits, nowMs],
+  );
+  /**
+   * The day the client last changed anything, in the READER's locale.
+   *
+   * Null and never a dash — `planEditsCoachNote` writes a sentence with no date
+   * in it rather than one built around a hole, which is what
+   * scripts/check-prose.mjs exists for. `Date.parse` on a timestamptz is a full
+   * instant, not a bare `YYYY-MM-DD` being compared as a string.
+   */
+  const editWhen = useMemo(() => {
+    const iso = planEdits?.updatedAt ?? null;
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  }, [planEdits]);
+  const editNote = useMemo(() => planEditsCoachNote({
+    diff: editDiff, who, whenWords: editWhen,
+    ageWords: editAged.ageMs == null ? null : agePhrase(editAged.ageMs),
+    stale: editAged.stale,
+  }), [editDiff, who, editWhen, editAged]);
+  /** A load in the CLIENT's unit, like every other figure on this screen: these
+   *  are numbers the client typed into their own phone, and a coach saying
+   *  "how did 100 feel" to somebody whose app said 220 looks like a coach who
+   *  was not paying attention. `unitFor` has already decided whose. */
+  const editLoad = useCallback((v: number | null) => liftLabel(v, unit), [unit]);
 
   /** A finding's figures in the coach's own unit. The rules module deals in
    *  kilograms and formats nothing — the same render boundary the builder
@@ -519,10 +801,60 @@ export default function ClientTraining() {
   };
 
   const G = layout.gutter;
+
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill client-body.tsx draws
+   *  its range bar with, so every record page reads one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
+
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
   });
+
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* Three sentences, and there was one. `r.status !== 'error'` let
+          'loading' AND 'partial' fall into "Nobody is on your book yet",
+          so that sentence flashed on every single open of this screen,
+          for every coach, however full their book — and it is the exact
+          sentence app/(trainer)/log-session.tsx names in its own header
+          as the one that makes a coach put the phone away: "a coach
+          standing on a gym floor being shown 'you have no clients'".
+          app/(trainer)/builder.tsx handles the identical condition
+          correctly and this screen sits beside it.
+
+          'partial' gets the list and no claim about it: the rows are
+          real and may be picked from, and `isWhole` is what says the
+          set is not the book. */}
+      {r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your roster…</Text>
+      ) : r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is no training to look at" />
+      ) : r.roster.length === 0 ? null : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
 
   /** One exercise inside a session: the movement and what was done to it. */
   const exerciseRow = (e: WorkoutEntry, i: number) => {
@@ -543,20 +875,85 @@ export default function ClientTraining() {
     // matched to them, and printing it anyway would attribute "hard" to a set
     // that was not the hard one.
     const effort = e.feel && e.sets && e.feel.length === e.sets.length ? e.feel.join(' · ') : null;
+    /* ── did the tempo they asked for happen ────────────────────────────
+       The other half of a prescription that has only ever had one half on
+       this screen. `tempoVerdict` does the comparing and the wording; this
+       decides only WHETHER there is a comparison to be made, and there are
+       two conditions on that.
+
+       The day has to be inside the window `pva` covers, because the
+       prescription resolved above is the week the client is on NOW and a
+       session from before it was written was done under different
+       instructions. And the movement has to carry a prescribed tempo at all —
+       with none, the verdict per set would be four lines saying what the
+       client did, where `tempoSummary`'s one collapsed line says it better.
+
+       Silence is drawn as silence. A set that was asked for a tempo and
+       recorded none says exactly that, in the member's own words, and gets no
+       mark: it is neither a miss nor compliance, and turning it into either is
+       the one thing this feature must never do. */
+    const day = dayKeyOf(e.t);
+    const judgeable = day != null && pva.fromDay != null && pva.toDay != null
+      && day >= pva.fromDay && day <= pva.toDay;
+    const sets = e.sets ?? [];
+    const asked = judgeable && sets.some((_, n) => askTempo(e.exercise, n) != null);
+    const tempos = asked
+      ? sets.map((_, n) => tempoVerdict(askTempo(e.exercise, n), recordedTempo(e, n)))
+      : [];
+    // What they moved at, when there is no prescription to hold it against.
+    // Still worth drawing: it is a fact about the session the coach has never
+    // been shown, and it claims nothing about a plan.
+    const tempoOnly = asked ? null : tempoSummary(e);
+    const coachId = auth.user?.id ?? null;
+    const mayAmend = coachMayAmend(e, coachId);
     return (
       <View key={`${e.id ?? e.exercise}-${i}`}
         style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.exercise}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink, flexShrink: 1 }}>{movement(e.exercise)}</Text>
+          {/* Only on a set THIS coach logged. A set the member logged is the
+              member's record and carries no coach control at all; the policy
+              in supabase/parts/3200 would refuse the write anyway. */}
+          {mayAmend ? (
+            <View style={{ flexDirection: 'row', gap: sp.lg }}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Correct ${movement(e.exercise)}`} hitSlop={8}
+                onPress={() => setAmending(e)}>
+                <Text style={{ ...ty.caption, ...font('600'), color: t.brandText }}>Correct</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Withdraw ${movement(e.exercise)}`} hitSlop={8}
+                onPress={() => confirmWithdraw({
+                  entry: e, coachId: coachId!, movement: movement(e.exercise), detail: lifted ?? cardio,
+                  day: day ? new Date(e.t).toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' }) : null, who, onGone: () => replaceEntry(e.id!, null),
+                })}>
+                <Text style={{ ...ty.caption, ...font('600'), color: t.ink2 }}>Withdraw</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
         {lifted ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{lifted}</Text> : null}
         {cardio ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{cardio}</Text> : null}
         {!lifted && !cardio ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            Recorded with no sets and no distance — the movement was logged, what was done to it was not.
+            Recorded with no sets and no distance. The movement was logged; what was done to it was not.
           </Text>
         ) : null}
         {effort ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>How it felt, set by set: {effort}</Text>
         ) : null}
+        {tempoOnly ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tempoOnly}</Text>
+        ) : null}
+        {tempos.map((v, n) => (v.state === 'none' ? null : (
+          // The mark is a MARK and the sentence carries the claim on its own.
+          // A green line would be the colour saying it, which fails the
+          // contrast floor and anybody reading it in a gym in daylight — and
+          // only 'met' gets one, so an unrecorded set is never tinted like a
+          // set that answered.
+          <View key={n} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 2 }}>
+            {v.state === 'met' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good, marginTop: 5 }} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{`Set ${n + 1}: ${v.line}`}</Text>
+          </View>
+        )))}
       </View>
     );
   };
@@ -586,7 +983,7 @@ export default function ClientTraining() {
         </View>
         {sn.amendedAt ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            {who} has since changed part of this — the record keeps the mark, and neither app can remove it.
+            Part of this was changed after it was filed. The record keeps that mark.
           </Text>
         ) : null}
 
@@ -647,7 +1044,7 @@ export default function ClientTraining() {
             stop a small figure being read as an easy hour. */}
         {d.volumeKg == null && d.sets > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            No load was recorded against any set, so there is no tonnage to total — a dash rather
+            No load was recorded against any set, so there is no tonnage to total, so a dash rather
             than a nought. Bodyweight work reads exactly like this.
           </Text>
         ) : d.bodyweightSets > 0 ? (
@@ -659,7 +1056,7 @@ export default function ClientTraining() {
         {!alone ? (
           <Flag tone={t.warn} style={{ marginTop: 2 }}>
             Logged in {d.sessions.length} separate entries, listed below. The totals above add all of
-            them up — if {who} saved the same work twice, this day reads high and the entries show it.
+            them up. If {who} saved the same work twice, this day reads high and the entries show it.
           </Flag>
         ) : null}
 
@@ -672,24 +1069,17 @@ export default function ClientTraining() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Your book'}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Training</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Every day {who} has trained, newest first — what they logged themselves and what was
-          logged for them, with the exercises, sets, reps and loads as they were recorded.
-          Read-only: this is their record, and nothing on this screen changes it.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Training" subtitle={fullName || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Training belongs to the client and lives on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never trained." />
           </Section>
         ) : (
@@ -697,28 +1087,11 @@ export default function ClientTraining() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>
-                  Nobody is on your book yet, so there is no training to look at.
-                </Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
             {picked ? (
               <View>
@@ -737,26 +1110,30 @@ export default function ClientTraining() {
                     twelve weeks would be answering a different question from
                     the one it answered yesterday without saying so. */}
                 <Section>
-                  <SectionHead title="How Far Back" note={status === 'partial' ? 'The read is at its limit' : undefined} />
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {RANGES.map((rg) => (
-                      <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
-                        accessibilityRole="button" accessibilityState={{ selected: rangeDays === rg.days }}
-                        accessibilityLabel={rg.label} style={chip(rangeDays === rg.days)}>
-                        <Text style={{ ...ty.micro, color: rangeDays === rg.days ? t.brandInk : t.ink2 }}>{rg.label}</Text>
-                      </Pressable>
-                    ))}
+                  <SectionHead title="How Far Back" note={status === 'partial' ? 'The Read Is at Its Limit' : undefined} />
+                  <View accessibilityRole="tablist"
+                    style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3 }}>
+                    {RANGES.map((rg) => {
+                      const on = rangeDays === rg.days;
+                      return (
+                        <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
+                          accessibilityRole="tab" accessibilityState={{ selected: on }}
+                          accessibilityLabel={rg.label} style={seg(on)}>
+                          <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{rg.short}</Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                   {status === 'partial' ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.md }}>
                       {who} has more training on record than one request returns, so every total on this
                       screen is a dash. Ask for a shorter range and the read comes back whole and the
-                      figures come back with it — the training itself is not going anywhere.
+                      figures come back with it. The training itself is not going anywhere.
                     </Flag>
                   ) : (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                       {rangeDays == null
-                        ? 'Everything on record. A long history can come back at the row limit, at which point every total here becomes a dash — narrow the range and they come back.'
+                        ? 'Everything on record. A long history can come back at the row limit, at which point every total here becomes a dash. Narrow the range and they come back.'
                         : `The last ${rangeDays} days only. Sessions before that are still on record and are not in any figure on this screen.`}
                     </Text>
                   )}
@@ -768,17 +1145,39 @@ export default function ClientTraining() {
                     plan is the shorter half. Every read behind it is separate
                     and each says so for itself. */}
                 {assigned.status === 'loading' ? (
-                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the programme they are on&hellip;</Text></Section>
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the program they are on&hellip;</Text></Section>
                 ) : assigned.status === 'error' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="What they are on could not be read"
-                      note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no programme.`} />
+                      note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no program.`} />
+                  </Section>
+                ) : !program && assigned.status === 'partial' ? (
+                  /* The third way `getProgram` returns null, and the one this
+                     chain went eleven months without. `useAssignedPrograms`
+                     reads every client's assignment in ONE page ordered by
+                     `client_id`, so at a gym past the row cap the clients whose
+                     ids sort last simply are not in the map — and the null they
+                     produce is indistinguishable from the null of a client on
+                     nothing. "The read came back and they are on no program"
+                     was the sentence a coach then got about a client they had
+                     written a block for, with "Writing one in the Program
+                     Builder" underneath it as the suggested fix.
+
+                     Kept separate from the 'error' branch above rather than
+                     folded into it: that one says the plan did not come back at
+                     all, and this one says the plan for THIS client was past the
+                     end of what one request returns, which is a different thing
+                     to do about it. */
+                  <Section>
+                    <SectionHead title="Their Program" note="Not in This Read" />
+                    <Notice tone={t.warn} kicker="Row Limit" title="We could not tell what they are on"
+                      note={`Your clients' programs came back at the row limit and ${who} was past the end of it, so whether ${who} is on a program is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
                   <Section>
-                    <SectionHead title="Their Programme" note="none assigned" />
+                    <SectionHead title="Their Program" note="None Assigned" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
-                      The read came back and {who} is on no coach-assigned programme, so there is nothing
+                      The read came back and {who} is on no coach-assigned program, so there is nothing
                       to compare the sessions below against. Writing one in the Program Builder puts it on
                       their Train tab.
                     </Text>
@@ -786,12 +1185,12 @@ export default function ClientTraining() {
                 ) : (
                   <Section>
                     <SectionHead
-                      title="Programme Versus Record"
+                      title="Program Versus Record"
                       note={pva.state === 'ready' && position.phase === 'during' && position.week
-                        ? `week ${position.week} of ${position.weeks}`
+                        ? `Week ${position.week} of ${position.weeks}`
                         : undefined}
                     />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{program.title || 'An untitled programme'}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{program.title || 'An untitled program'}</Text>
 
                     {/* The block, and the honesty about what a start date does.
                         A coach who believes the date is enforced and assigns a
@@ -829,7 +1228,7 @@ export default function ClientTraining() {
                             <Text style={{ ...ty.label, width: 14, color: m.coverage === 'logged' ? t.good : m.coverage === 'not-logged' ? t.warn : t.ink3 }}>
                               {m.coverage === 'logged' ? '\u2713' : m.coverage === 'not-logged' ? '\u00b7' : '?'}
                             </Text>
-                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{m.name}</Text>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{movement(m.name)}</Text>
                             <Text style={{ ...ty.caption, color: t.ink3 }}>
                               {m.coverage === 'logged'
                                 ? `logged ${m.daysLogged} day${m.daysLogged === 1 ? '' : 's'}`
@@ -842,7 +1241,7 @@ export default function ClientTraining() {
                             since it was built and nothing joined them: the
                             screen compared whether a movement APPEARED, never
                             what went on the bar. The sentence that changes next
-                            week's programme is the second one.
+                            week's program is the second one.
 
                             Rendered only where the plan named a load.
                             "Prescribed 0 kg" is not a prescription, and
@@ -860,7 +1259,7 @@ export default function ClientTraining() {
                           const did = lc.verdict === 'not-logged' ? null : liftLabel(lc.loggedKg, unit);
                           if (!wrote || (lc.verdict !== 'not-logged' && !did)) return null;
                           return (
-                            <View key={`load-${m.slug || m.name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2, paddingLeft: 14 + sp.sm }}>
+                            <View key={`load-${m.slug || m.name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2, paddingStart: 14 + sp.sm }}>
                               {/* A 6pt dot beside the caption ink. The tone is
                                   never the text colour. */}
                               <View style={{
@@ -869,7 +1268,7 @@ export default function ClientTraining() {
                                   : lc.verdict === 'under' ? t.warn
                                   : lc.verdict === 'over' ? t.brand : t.ring,
                               }} />
-                              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{m.name}</Text>
+                              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{movement(m.name)}</Text>
                               <Text style={{ ...ty.caption, color: t.ink3 }}>
                                 {did ? `${wrote} prescribed, ${did} logged` : `${wrote} prescribed, nothing logged`}
                               </Text>
@@ -885,12 +1284,12 @@ export default function ClientTraining() {
                         that half the movements named no load at all. */}
                     {pva.state === 'ready' && loadLine(loadTally(pva.movements), who) ? (
                       <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed load against what was lifted</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed Load Against What Was Lifted</Text>
                         <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>
                           {loadLine(loadTally(pva.movements), who)}
                         </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          The heaviest WORKING set the programme names, against the heaviest {who} logged in
+                          The heaviest WORKING set the program names, against the heaviest {who} logged in
                           the window: a ramp's top set, never its warm-up. Within {LOAD_TOLERANCE * 100}% counts as
                           hitting it, because the finest adjustment anybody can make to a barbell is one pair
                           of the smallest plates on the rack.
@@ -904,16 +1303,132 @@ export default function ClientTraining() {
                         common reason a block does not do what it was meant to. */}
                     {pva.offPlan.length ? (
                       <View style={{ marginTop: sp.lg }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but not prescribed</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.join(' · ')}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the programme is
+                          Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the program is
                           not a fault; it is the part of their training the plan does not describe.
                         </Text>
                       </View>
                     ) : null}
                   </Section>
                 )}
+
+                {/* ── what the client made of it ───────────────────────────
+                    n=26. `client_plan_edits` has been written by the member's
+                    plan screen since supabase/parts/204 and read back by
+                    NOTHING in any of the three apps. The member can now see
+                    their own copy; this is the coach's, and it is the copy the
+                    column was created for — "they have swapped this four weeks
+                    running" was the sentence the header of part 204 said was
+                    being typed into a React state and thrown away.
+
+                    Drawn OUTSIDE the program chain above on purpose. A member
+                    keeps their corrections when a coach unassigns a block, and
+                    a coach who has just taken somebody off a program is
+                    exactly the coach who wants to see what that person had been
+                    quietly fixing about it. `planEditsDiff` answers 'unmatched'
+                    when there is no assignment to resolve names against and the
+                    sentence says so.
+
+                    ── WHAT A COACH MAY DO ABOUT IT, AND WHY IT IS NOTHING ──
+
+                    There is no Accept control here and it is a decision rather
+                    than an omission. Accepting a swap means writing it into
+                    `assigned_programs`, and the stored key cannot say WHICH
+                    WEEK of the block the member made it in: `uid()` in
+                    app/(client)/workouts.tsx is `dayIdx:exerciseKey` where the
+                    index is into the days of whatever week their Train tab was
+                    showing. On a twelve-week block, accepting a change made in
+                    week six would silently rewrite week one — a coach would
+                    press a button labelled "accept what they asked for" and get
+                    a different session changed.
+
+                    Nor could the acceptance be RECORDED. There is no
+                    acknowledgement column on this table, so an accepted change
+                    would go on appearing in this list for ever with no way to
+                    mark it dealt with, and the second read would show the coach
+                    a member still asking for something already given them.
+
+                    Both of those are schema, and this item has none. So the
+                    reading half is what ships, and the two things a coach can
+                    do about a change are the two that already exist and are
+                    honest: rewrite the block themselves, where they can see
+                    which week they are editing, or ask the member about it. */}
+                <Section>
+                  <SectionHead
+                    title="What They Changed"
+                    note={editDiff.state === 'ready' && editDiff.rows.length ? `${editDiff.rows.length}` : undefined}
+                  />
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{editNote}</Text>
+
+                  {/* The week the keys were resolved against, said out loud and
+                      only where there is more than one to confuse. */}
+                  {editDiff.state === 'ready' && editDiff.rows.length && program && weekCount(program) > 1 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{KEY_HAS_NO_WEEK}</Text>
+                  ) : null}
+
+                  {editDiff.rows.length ? (
+                    <View style={{ marginTop: sp.md }}>
+                      {editDiff.rows.map((row) => (
+                        <View key={row.id} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: sp.sm }}>
+                          {/* A mark beside ink-coloured text, never coloured
+                              text: `t.warn` as type fails the contrast gate and
+                              none of these is a fault of the client's anyway.
+                              The kind is carried by the sentence as well as the
+                              glyph, so the glyph is never the only channel. */}
+                          <Text style={{ ...ty.label, width: 14, color: row.resolved ? t.ink3 : t.ring }}>
+                            {row.kind === 'swap' ? '⇄' : row.kind === 'removed' ? '×' : row.kind === 'custom' ? '+' : '≡'}
+                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ ...ty.label, color: t.ink }}>
+                              {planEditDiffLine(row, who, editLoad)}
+                            </Text>
+                            {/* The member's own set-by-set table, as a count.
+                                There is no per-set figure in the program to
+                                put beside it — `ProgramExercise` carries one
+                                `sets` for the whole movement — so a column of
+                                rows against a column of dashes would be a
+                                comparison in shape only. */}
+                            {row.tableRows ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                They keep their own numbers set by set here, {row.tableRows} row
+                                {row.tableRows === 1 ? '' : 's'} of them.
+                              </Text>
+                            ) : null}
+                            {!row.resolved ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                This program no longer names that movement, so the change is about the
+                                block they were on when they made it.
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+
+                      {/* Said rather than left to be discovered by a coach
+                          hunting for a button that is not there. */}
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                        These are {who}&apos;s own corrections to their copy of the plan and nothing here changes
+                        what you assigned. A change is stored against a day and not against a week, so the only
+                        safe place to take one of these into the program is the builder, where you can see
+                        which week you are editing.
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                        <Ghost
+                          label="Edit the Program"
+                          onPress={() => router.push({ pathname: '/(trainer)/builder', params: picked ? { clientId: picked, from: 'trainerClientTraining' } : { from: 'trainerClientTraining' } })}
+                        />
+                        {picked && fullName ? (
+                          <Ghost
+                            label="Ask Them About It"
+                            onPress={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: picked, name: fullName } })}
+                          />
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+                </Section>
 
                 {/* ── the checks, run again ────────────────────────────────
                     Seven rules that ran once against a draft in the builder and
@@ -923,11 +1438,11 @@ export default function ClientTraining() {
                     has. */}
                 {showChecks ? (
                   <Section>
-                    <SectionHead title="Programme Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
+                    <SectionHead title="Program Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
                     <Text style={{ ...ty.caption, color: t.ink3 }}>{checksLine()}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                      Run again here against what {who} is on now and what they have logged since — the same seven
-                      rules the builder runs before a programme is assigned, over a history that has moved since.
+                      Run again here against what {who} is on now and what they have logged since, using the same seven
+                      rules the builder runs before a program is assigned, over a history that has moved since.
                     </Text>
                     {review.findings.length === 0 ? (
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
@@ -955,21 +1470,39 @@ export default function ClientTraining() {
                 ) : null}
 
 
-                {/* The three states, kept apart. Each is a different fact about
-                    this person and each starts a different conversation. */}
-                {status === 'loading' ? (
+                {/* The FOUR states, kept apart. Each is a different fact about
+                    this person and each starts a different conversation.
+
+                    "No account" used to be a sentence tacked onto the end of
+                    the Unreadable notice — "If they were added to your book by
+                    hand they have no account for workouts to belong to, which
+                    reads the same way from here." It does not read the same way
+                    from here any more, because `askable` knows: the roster says
+                    which of its two tables the row came from. So the guess is
+                    gone from the failed-read notice, where it was shown to every
+                    coach whose connection had simply dropped, and the case it
+                    was guessing at has its own branch above it.
+
+                    The same distinction `wellnessPanel`'s `not-asked` kind
+                    keeps apart from `unreadable` in src/lib/coachWellness.ts. */}
+                {!askable ? (
+                  <Section>
+                    <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
+                      note={`You added ${who} to your book by hand, so there is no account for workouts to belong to and nothing of theirs was asked for. That is not an empty training record and not a failed read. A workout row has to hang off an account, and there is not one yet. Invite them from your client list and everything on this page starts filling in from the day they join.`} />
+                  </Section>
+                ) : status === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their logged sessions&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their training could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing — that is a different fact and a different conversation. If they were added to your book by hand they have no account for workouts to belong to, which reads the same way from here.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing. That is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={fullName || 'Their Training'} note="nothing logged" />
+                    <SectionHead title={fullName || 'Their Training'} note="Nothing Logged" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has no logged sessions at all. That is about them
-                      rather than about the connection, which makes it worth raising — and a session
+                      rather than about the connection, which makes it worth raising. A session
                       you run together can go in from Log a Session on their page, which lands in
                       their own record marked as logged by you.
                     </Text>
@@ -977,45 +1510,83 @@ export default function ClientTraining() {
                 ) : (
                   <>
                     {/* ── the figures, and a dash wherever the read cannot
-                        support one ─────────────────────────────────────── */}
-                    <Hero
-                      label="Days Trained"
-                      figure={fig(board.dayCount)}
-                      unit={board.dayCount != null ? (board.dayCount === 1 ? 'day' : 'days') : undefined}
-                      note={board.dayCount == null
-                        ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here. Everything listed below is real.'
-                        : board.newestDay
-                          ? `Last trained ${dayLabel(board.newestDay)}.`
-                          : 'Nothing on record carries a date this build can read.'}
-                      tone={board.dayCount == null ? t.warn : undefined}
-                    />
-                    <KpiRow items={[
-                      { label: 'Sets', value: num(board.sets) },
-                      {
-                        label: 'Volume',
-                        value: board.volumeKg == null ? '—' : num(volumeIn(board.volumeKg, unit)),
-                        unit: board.volumeKg == null ? undefined : unit,
-                      },
-                      { label: 'Last', value: board.newestDay ? dayLabel(board.newestDay) : '—' },
-                    ]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      {board.dayCount == null
-                        ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
-                        : board.volumeKg == null
-                          ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total — a dash rather than a nought.'
-                          : 'Across everything on record, over sets that carried a load. Bodyweight sets count on the left and contribute no tonnage.'}
-                      {board.entryCount != null && board.dayCount != null && board.entryCount > board.dayCount
-                        ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries — some days hold more than one, and the days that do say so.`
-                        : ''}
-                    </Text>
-                    {pick.note ? (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{pick.note}</Text>
-                    ) : null}
+                        support one ───────────────────────────────────────
+                        The board's figure card: days trained at the board's
+                        figure size, the sets, tonnage and last day under it
+                        at the KPI size, and the sentence that qualifies
+                        them. `board.dayCount` is null under a truncated read
+                        and `fig` draws the dash; nothing here counts what
+                        arrived as what there is. */}
+                    <Section>
+                      <SectionHead title="Days Trained"
+                        note={board.dayCount != null && board.newestDay ? `Last ${dayLabel(board.newestDay)}` : undefined} />
+                      <View accessible
+                        accessibilityLabel={`Days trained, ${board.dayCount == null ? 'not counted' : `${fig(board.dayCount)} ${board.dayCount === 1 ? 'day' : 'days'}`}. ${board.dayCount == null
+                          ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here.'
+                          : board.newestDay ? `Last trained ${dayLabel(board.newestDay)}.` : 'Nothing on record carries a date this build can read.'}`}>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                          <Text style={{ ...ty.hero, color: t.ink }}>{fig(board.dayCount)}</Text>
+                          {board.dayCount != null ? (
+                            <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{board.dayCount === 1 ? 'day' : 'days'}</Text>
+                          ) : null}
+                        </View>
+                        {/* The warn tone the Hero carried on a truncated read
+                            goes in a dot beside the sentence, as client-body.tsx
+                            does with a stale reading: warn as caption ink is
+                            under AA on the light palettes. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+                          {board.dayCount == null ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                            {board.dayCount == null
+                              ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here. Everything listed below is real.'
+                              : board.newestDay
+                                ? `Last trained ${dayLabel(board.newestDay)}.`
+                                : 'Nothing on record carries a date this build can read.'}
+                          </Text>
+                        </View>
+                      </View>
+                      {/* The last seven days as bars: how many exercises were
+                          logged on each. Only from a WHOLE read — under a
+                          truncated one the sentence above already says why
+                          nothing is counted, and a bar is a count. A day with
+                          nothing logged is a grey stub, which under a whole
+                          read is a fact about the day. */}
+                      {isWhole(status) ? (
+                        <View style={{ marginTop: sp.lg, marginBottom: sp.md }}>
+                          <DayBars days={lastSeven}
+                            spoken={`Exercises logged on each of the last seven days: ${lastSeven.map((d) => `${d.label} ${d.value}`).join(', ')}`} />
+                        </View>
+                      ) : null}
+                      <KpiRow items={[
+                        { label: 'Sets', value: num(board.sets) },
+                        {
+                          label: 'Volume',
+                          value: board.volumeKg == null ? '—' : num(volumeIn(board.volumeKg, unit)),
+                          unit: board.volumeKg == null ? undefined : unit,
+                        },
+                        { label: 'Last', value: board.newestDay ? dayLabel(board.newestDay) : '—' },
+                      ]} />
+                      <Expandable title="About These Totals">
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>
+                        {board.dayCount == null
+                          ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
+                          : board.volumeKg == null
+                            ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total, so a dash rather than a nought.'
+                            : 'Across everything on record, over sets that carried a load. Bodyweight sets count on the left and contribute no tonnage.'}
+                        {board.entryCount != null && board.dayCount != null && board.entryCount > board.dayCount
+                          ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries. Some days hold more than one, and the days that do say so.`
+                          : ''}
+                      </Text>
+                      </Expandable>
+                      {pick.note ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{pick.note}</Text>
+                      ) : null}
+                    </Section>
 
                     {status === 'partial' ? (
                       <Section>
                         <PartialRead what="training days" shown={board.days.length}
-                          onPress={() => { if (picked) void load(picked, rangeDays); }} />
+                          onPress={reloadLog} />
                       </Section>
                     ) : null}
 
@@ -1024,11 +1595,18 @@ export default function ClientTraining() {
                     {/* ── which muscles the work landed on ────────────────
                         P1. Balance is the coach's job, and until now the app
                         showed it only to the client — who cannot rewrite the
-                        programme. Bars compare the groups with each other and
+                        program. Bars compare the groups with each other and
                         never with a target: there is no right number of sets
                         for a back and this screen does not pretend to know one. */}
                     <Section>
-                      <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `last ${muscleDays} days` : undefined} />
+                      <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `Last ${muscleDays} Days` : undefined} />
+                      {/* One piece of state behind two controls. The muscle
+                          panel below draws its own copy of these chips, and
+                          both read and write `muscleDays`, so the group board
+                          and the per-muscle board on this screen can never be
+                          describing two different fortnights — a disagreement a
+                          coach scrolling between them would have no way to
+                          see. */}
                       <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
                         {([7, 28] as const).map((dd) => (
                           <Pressable key={dd} onPress={() => setMuscleDays(dd)}
@@ -1048,7 +1626,7 @@ export default function ClientTraining() {
                       ) : !muscleWindowRead ? (
                         <Flag tone={t.warn}>
                           The read stops before the start of this window, so nothing is said about which muscles
-                          were worked. Narrow the range above and it comes back — an empty board here would be
+                          were worked. Narrow the range above and it comes back; an empty board here would be
                           about the query, not about {who}.
                         </Flag>
                       ) : !muscles.groups.length ? (
@@ -1061,19 +1639,16 @@ export default function ClientTraining() {
                         {muscles.groups.map((g) => {
                           const most = muscles.groups[0].sets;
                           return (
-                            <View key={g.group} style={{ marginTop: sp.md }}>
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
-                                <Text style={{ ...ty.caption, color: t.ink3 }}>
-                                  {g.sets} set{g.sets === 1 ? '' : 's'}
-                                  {g.volumeKg != null ? ` \u00b7 ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
-                                </Text>
-                              </View>
-                              <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                                <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
-                              </View>
+                            <View key={g.group}>
+                              {/* The kit's Meter, against the busiest group and
+                                  never against a target — see the note above. */}
+                              <Meter label={g.group} tone="purple" val={g.sets} target={most}
+                                note={`${g.sets} set${g.sets === 1 ? '' : 's'}${g.volumeKg != null ? ` \u00b7 ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}`} />
                               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                                {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+                                {/* Names in the reader's language, joined in the
+                                    sentence's — see the same note in
+                                    app/(client)/history.tsx. */}
+                                {g.exercises.slice(0, 3).map(movement).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
                               </Text>
                             </View>
                           );
@@ -1104,6 +1679,48 @@ export default function ClientTraining() {
 
                     <Rule />
 
+                    {/* ── the same work, per MUSCLE, and drawn ────────────
+                        The section above answers "have they trained legs"; this
+                        one answers "which part of the leg, how hard relative to
+                        everything else, and when was the last time anything
+                        touched it". It is the same log and the same catalogue
+                        read — nothing new is fetched — read through the finer
+                        of the two columns.
+
+                        Why it is on the COACH's screen and not only the
+                        member's: balance is the coach's job. The comment on
+                        `muscleDays` above makes that argument for the eleven
+                        groups and it is stronger here, because a hamstring that
+                        has only ever assisted does not show up as a gap in
+                        'Legs' at all — it shows up as a leg that was trained.
+
+                        `cat.signedOut` is folded into the status rather than
+                        checked separately: that case comes back as zero
+                        catalogue rows with NO error, and a whole read of an
+                        empty catalogue would publish an empty vocabulary, which
+                        is the board asserting that every muscle in this
+                        client's body is untrained. 'error' is what it is.
+
+                        No `fullScaleAt` is passed. There is one client and one
+                        window on this screen, so the picture scales to its own
+                        peak — which is what makes a beginner visible at all —
+                        and the panel prints the scale beside the key so the
+                        darkest band is never read as a quantity. A screen that
+                        ever draws two of these side by side has to fix it. */}
+                    <MuscleWorkPanel
+                      log={log}
+                      logStatus={status}
+                      catalogue={cat.rows}
+                      catalogueStatus={cat.signedOut ? 'error' : cat.status}
+                      nowMs={nowMs}
+                      windowDays={muscleDays}
+                      windows={[7, 28]}
+                      onWindowDays={(d) => setMuscleDays(d === 7 ? 7 : 28)}
+                      voice={voice}
+                    />
+
+                    <Rule />
+
                     {/* ── the year ────────────────────────────────────────
                         P2. The renewal conversation is won with an arc, not a
                         fortnight, and the module that draws twelve months of
@@ -1114,12 +1731,12 @@ export default function ClientTraining() {
                         kilograms in March, only that March has no logged
                         sessions in it. */}
                     <Section>
-                      <SectionHead title="The Long View" note={longWhole && trainedCells.length ? `${trainedCells.length} months trained` : undefined} />
+                      <SectionHead title="The Long View" note={longWhole && trainedCells.length ? `${trainedCells.length} Months Trained` : undefined} />
                       {!longWhole ? (
                         <Flag tone={t.warn}>
                           The read came back at its row limit, so no monthly roll-up is drawn. Over a truncated
                           log the oldest months come out short and the newest whole, which draws {who} tailing
-                          off backwards — the opposite of what their record says. Narrow the range above.
+                          off backwards, the opposite of what their record says. Narrow the range above.
                         </Flag>
                       ) : !lifetime || stage === 'empty' ? (
                         <Text style={{ ...ty.body, color: t.ink3 }}>
@@ -1169,10 +1786,20 @@ export default function ClientTraining() {
                           {' \u00b7 '}a flat line is a month with no logged sessions, never a month of nothing lifted
                         </Text>
 
-                        {best && best.volumeKg != null ? (
+                        {/* `best.days != null` in the gate, and no `?? 0`
+                            behind it. `MonthCell.days` is null on an UNTRAINED
+                            month (src/lib/longView.ts `blankCell`), and a
+                            fallback of 0 would have printed "their biggest month
+                            was March: 12 t across 0 days" — a sentence that is
+                            wrong about a person and reads as a broken screen.
+                            `bestMonth` only ever returns a cell with a tonnage,
+                            which is only ever a trained one, so this gate takes
+                            nothing away; it states the invariant instead of
+                            papering a zero over the case where it fails. */}
+                        {best && best.volumeKg != null && best.days != null ? (
                           <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
                             Their biggest month was {monthLabel(best.key)}: {num(tonnes(best.volumeKg))} t
-                            across {best.days ?? 0} day{best.days === 1 ? '' : 's'}
+                            across {best.days} day{best.days === 1 ? '' : 's'}
                             {best.topLift ? `, most of it ${best.topLift}` : ''}.
                           </Text>
                         ) : null}
@@ -1199,7 +1826,7 @@ export default function ClientTraining() {
 
                     {board.days.length ? (
                       <Section>
-                        <SectionHead title="Sessions" note={board.dayCount == null ? undefined : `${board.dayCount} days`} />
+                        <SectionHead title="Sessions" note={board.dayCount == null ? undefined : `${board.dayCount} Days`} />
                         {board.days.map(dayBlock)}
                       </Section>
                     ) : null}
@@ -1233,9 +1860,34 @@ export default function ClientTraining() {
                         it, and the panel is shared with the member's own
                         history screen so the two apps cannot disagree either. */}
                     <Rule />
-                    <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice} />
+                    {/* `rangeDays` and not just `status`. The range control
+                        above narrows the QUERY, so a windowed read comes back
+                        complete and `status` is 'ready' with nothing to flag —
+                        which is how this panel came to print "Best Est. 1RM",
+                        "Since the First Day on Record" and a count of
+                        movements "on record" over twelve weeks of a
+                        three-year client. The window is the second half of
+                        what the read was, and the panel words every
+                        record-shaped claim off it. */}
+                    <ExerciseHistoryPanel log={log} status={status} windowDays={rangeDays}
+                      unit={unit} voice={voice} onRefresh={reloadLog} />
                   </>
                 )}
+
+                {/* ── what they asked you to look at ───────────────────────
+                    Clips the member attached to a set, newest first. They come
+                    through `form_clips_coach_read`, which is `is_my_client` —
+                    so a coach who is no longer theirs sees nothing here and
+                    the signed URL below is refused by the same rule.
+                    supabase/parts/2617. */}
+                {/* `askable` as well as `picked`, which is what every other
+                    read on this screen already asks. `form_clips_coach_read`
+                    resolves `is_my_client()`, an EXISTS over `clients`, so for
+                    somebody the coach typed in by hand it answers zero rows and
+                    NO error — a read that was never entitled to an answer,
+                    issued on every focus, for a person with no account to hang
+                    a clip off. */}
+                {picked && askable ? <FormChecks memberId={picked} /> : null}
 
                 {/* ── what they were on before ────────────────────────────
                     Until supabase/parts/176 there was no copy of it anywhere:
@@ -1246,14 +1898,36 @@ export default function ClientTraining() {
                     else. The record starts from that migration and the line
                     below says so rather than letting "none" read as "nothing
                     was ever worth keeping". */}
+                {/* ── the third answer, which this section was collapsing ──
+                    `history` is `useProgramHistory(askable ? picked : null)` —
+                    correctly gated at :630, where the comment explains that a
+                    hand-added client is asked for nothing. But the SECTION was
+                    drawn for them anyway, and `useProgramHistory(null)` returns
+                    `{ rows: null, status: 'ready' }`: `historyBoard` reads the
+                    null and answers 'unreadable', so the line printed was
+                    "The earlier programs could not be read. That is not the
+                    same as Amy never having been on one."
+
+                    Two answers where there are three. It is the safe half of
+                    the pair — it does not accuse anybody of never having been
+                    on a program — but it tells a coach their read failed when
+                    no read was issued, directly underneath a notice saying this
+                    person has no account, and the only thing it suggests doing
+                    is pulling to refresh, for ever.
+
+                    The `!askable` branch above says which of the three this is,
+                    in full. So this section, the form checks above it and the
+                    unit note below it are all withheld from it rather than each
+                    adding a sentence about a read nobody made. */}
+                {askable ? (<>
                 <Rule />
                 <Section>
-                  <SectionHead title="Programme History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
+                  <SectionHead title="Program History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, who)}</Text>
                   {hist.entries.map((e, i) => (
                     <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                        <Text style={{ ...ty.body, fontWeight: e.current ? '600' : '400', color: e.current ? t.ink : t.ink2, flex: 1 }}>
+                        <Text style={{ ...ty.body, ...font(e.current ? '600' : '400'), color: e.current ? t.ink : t.ink2, flex: 1 }}>
                           {e.title}
                         </Text>
                         <Text style={{ ...ty.micro, color: e.current ? t.brand : t.ink3 }}>
@@ -1265,37 +1939,135 @@ export default function ClientTraining() {
                   ))}
                   {history.status === 'partial' ? (
                     <View style={{ marginTop: sp.md }}>
-                      <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length}
+                      <PartialRead what="earlier programs" shown={hist.entries.filter((e) => !e.current).length}
                         onPress={history.reload} />
                     </View>
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                    Read-only. Putting an old block back is an assign — it writes over what {who} is training
-                    this evening — so it goes through the builder, behind the same refusals every other assign does.
+                    Read-only. Putting an old block back is an assign (it writes over what {who} is training
+                    this evening), so it goes through the builder, behind the same refusals every other assign does.
                   </Text>
                 </Section>
 
                 {/* The unit note belongs on the page even when there is nothing
                     to print it against — a coach who reads pounds should not
                     have to see a figure first to learn whose unit this is. */}
+                {/* `unitFor` is handed `unitStatus`, which `load` sets to
+                    'error' for a hand-added client — so this printed "Amy's own
+                    unit could not be read ... That is a fact about the read" on
+                    a screen with no loads on it and no read behind it. Inside
+                    the same gate as the two sections above. */}
                 {board.state !== 'some' && pick.note ? (
                   <Section>
                     <Flag tone={t.ink3}>{pick.note}</Flag>
                   </Section>
                 ) : null}
+                </>) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
 
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Every day {who} has trained, newest first: what they logged themselves and what was
+          logged for them, with the exercises, sets, reps and loads as they were recorded.
+          Read-only: this is their record, and nothing on this screen changes it.
+        </Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           Grouped by the day it was done on, in your own timezone. Inside a day, each entry is the
-          exercises saved together in one go — a client who logs a movement at a time makes several,
+          exercises saved together in one go. A client who logs a movement at a time makes several,
           and a day that holds more than one says so above them rather than reading as several
           workouts. Loads are shown in {unit}.
         </Text>
 
       </ScrollView>
+      {amending && auth.user?.id ? (
+        <CoachAmendSheet entry={amending} coachId={auth.user.id} unit={unit} who={who}
+          onClose={() => setAmending(null)}
+          onSaved={(next) => { replaceEntry(amending.id!, next); setAmending(null); }} />
+      ) : null}
     </SafeAreaView>
+  );
+}
+
+/**
+ * The clips this client attached to their own sets.
+ *
+ * Read here rather than folded into the training read above, because it is a
+ * different question with a different answer when it fails: a training log
+ * that did not load and a client who has sent no clips are both "nothing on
+ * screen", and only one of them is worth a sentence. `null` from
+ * `fetchFormClipsFor` is the failed read and says so — a coach told "they have
+ * not sent you any" over a failed read stops looking.
+ */
+function FormChecks({ memberId }: { memberId: string }) {
+  const t = useTheme();
+  const [clips, setClips] = useState<FormClip[] | null | undefined>(undefined);
+  const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setClips(undefined);
+    void fetchFormClipsFor(memberId).then((rows) => { if (live) setClips(rows); });
+    return () => { live = false; };
+  }, [memberId]);
+
+  // Nothing at all while the first read is in flight, and nothing when the
+  // client has sent none: a heading over an empty space on every client who has
+  // never used the feature is noise on a screen that is already long.
+  if (clips === undefined) return null;
+  if (clips !== null && clips.length === 0) return null;
+
+  return (<>
+    <Rule />
+    <Section>
+      <SectionHead title="Form Checks" note={clips ? `${clips.length}` : undefined} />
+      {clips === null ? (
+        <Text style={{ ...ty.label, color: t.ink2 }}>
+          Their form checks could not be read just now. This is not a statement that they have sent none.
+          Pull down to ask again.
+        </Text>
+      ) : clips.map((c, i) => (
+        <View key={c.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+          <Text style={{ ...ty.body, color: t.ink }}>{clipNoteLine(c.note, fmtRelativeDay(c.createdAt))}</Text>
+          {playing?.id === c.id ? (
+            <FormClipPlayer url={playing.url} />
+          ) : (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+              <Ghost label="Watch" a11yLabel="Watch this form check"
+                onPress={async () => {
+                  setSaid(null);
+                  const url = await formClipUrl(c.path);
+                  // A link that could not be signed is the access rule saying
+                  // no, or the object being gone. Both are worth a sentence
+                  // rather than a button that does nothing when pressed.
+                  if (!url) { setSaid('That clip could not be opened. It may have been deleted by them, or you may no longer be their coach.'); return; }
+                  setPlaying({ id: c.id, url });
+                }} />
+            </View>
+          )}
+        </View>
+      ))}
+      {said ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{said}</Text> : null}
+    </Section>
+  </>);
+}
+
+/** One clip, playing. Its own component because `useVideoPlayer` is a hook and
+ *  cannot be called inside the list's map. */
+function FormClipPlayer({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (p) => { p.loop = true; });
+  return (
+    <VideoView
+      player={player}
+      style={{ width: '100%', aspectRatio: 9 / 16, borderRadius: radius.sm, marginTop: sp.sm }}
+      contentFit="contain"
+      nativeControls
+    />
   );
 }

@@ -2,7 +2,7 @@
 // coach.
 //
 // Four `useState`s on app/(client)/workouts.tsx held every change a member can
-// make to the programme they were given, and nothing wrote any of them
+// make to the program they were given, and nothing wrote any of them
 // anywhere. src/lib/planEdits.ts says at length what that cost. This is the
 // half that does I/O.
 //
@@ -25,6 +25,19 @@
 //    hook latches writing OFF when it happens, so a single bad parse cannot
 //    turn into a permanent loss on the next tap.
 //
+// ── 3. AND NONE OF IT IS THE NEXT ACCOUNT'S ────────────────────────────────
+//
+// The key was unqualified and the read had `[]` dependencies, and the Train tab
+// is a tab — `expo-router` keeps tab screens mounted — so both the stored blob
+// and the four values in this hook crossed a sign-out into the next member's
+// session. The device half showed them somebody else's swaps; the server half
+// wrote those swaps into THEIR row, because `push` upserts on a `clientId` that
+// had already become theirs. src/lib/planEdits.ts sets that out in full.
+//
+// So the key carries the account, the read is keyed ON the key, and what is in
+// memory is dropped when the account goes. The unqualified key is removed
+// unread.
+//
 // ── And what `shared` means ────────────────────────────────────────────────
 //
 // `true` the coach's console can see these · `false` they are on this phone
@@ -39,7 +52,8 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import {
-  PLAN_EDITS_KEY, readPlanEdits, writePlanEdits, EMPTY_PLAN_EDITS, isEmptyEdits, type PlanEdits,
+  PLAN_EDITS_KEY, planEditsKey, planEditsStepFor, readPlanEdits, writePlanEdits,
+  EMPTY_PLAN_EDITS, isEmptyEdits, type PlanEdits,
 } from '../lib/planEdits';
 import type { ProgramExercise } from '../lib/programs';
 
@@ -79,11 +93,68 @@ export function usePlanEdits(clientId: string | null | undefined): PlanEditsValu
   // this codebase has twice had to unpick.
   const latest = useRef<PlanEdits>(EMPTY_PLAN_EDITS);
 
+  /**
+   * Where this member's edits live, and who the four values above belong to.
+   *
+   * `clientId` IS the account: app/(client)/workouts.tsx is the only caller and
+   * passes `cd.id`, which src/ui/clientData.tsx defines as `sbUid ?? 'unknown'`
+   * — the signed-in uid, or the literal this file has always refused to push
+   * under. It is the same id the server row is keyed by, which is the point: a
+   * device copy under one account and a row under another is exactly the state
+   * this hook must not be able to reach.
+   */
+  const editsKey = planEditsKey(clientId);
+  /** The account the four values above belong to. A ref: it is written from
+   *  inside the effect that reads it and must not schedule a render. */
+  const editsFor = useRef<string | null>(null);
+  /** `loaded` again, readable inside the effect without being a dependency of
+   *  it. The two are set together and never apart. */
+  const armed = useRef(false);
+
+  const forget = useCallback(() => {
+    latest.current = EMPTY_PLAN_EDITS;
+    setSwapsState({});
+    setExEditsState({});
+    setRemovedExState([]);
+    setCustomExState([]);
+    // Nothing is known about the next member's sharing either, and `false`
+    // would be a claim. See the header.
+    setShared(null);
+  }, []);
+
   useEffect(() => {
+    const step = planEditsStepFor({
+      uid: clientId, onScreenKey: editsFor.current, onScreenSaved: armed.current,
+    });
+    // Both flags cleared BEFORE the read and before anything else — never left
+    // at whatever the LAST key's read set them to. A `loaded` that survived the
+    // key changing would let an account switch whose read then failed write
+    // this member's empty plan straight over the other member's stored
+    // corrections; a `cacheable` that survived it would carry one member's
+    // parse failure into the next member's session as a permanent refusal to
+    // save. src/ui/exerciseVideos.ts carries the same note.
+    armed.current = false;
+    cacheable.current = true;
+    setLoaded(false);
+    // No account and nothing of this account's on the device: hold. A null
+    // session is not a sign-out — src/ui/clientData.tsx says at length why —
+    // and corrections a member typed at the rack while a read was failing are
+    // the one copy of those corrections.
+    if (step.do === 'hold') return;
+    // The account is gone and the device has a copy under its own key. Take the
+    // four values off the screen: this hook is held by a TAB, which stays
+    // mounted, so without this the next member trains against the last one's
+    // swaps and the first tap sends them up under the next member's id.
+    if (step.do === 'forget') { editsFor.current = null; forget(); return; }
+    // A different member. Cleared on the way IN, before the read lands, so a
+    // read that is slow, that fails or that is refused cannot leave one
+    // member's corrections standing under another's name.
+    if (step.forget) forget();
+    editsFor.current = step.key;
     let live = true;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(PLAN_EDITS_KEY);
+        const raw = await AsyncStorage.getItem(step.key);
         if (!live) return;
         const r = readPlanEdits(raw);
         if (!r.read) cacheable.current = false;
@@ -96,10 +167,21 @@ export function usePlanEdits(clientId: string | null | undefined): PlanEditsValu
         // Learning nothing is not learning that there is nothing. The latch
         // stops the next tap writing an empty plan over whatever is on disk.
         cacheable.current = false;
-      } finally { if (live) setLoaded(true); }
+      } finally { if (live) { armed.current = true; setLoaded(true); } }
     })();
     return () => { live = false; };
-  }, []);
+    // `clientId` as well as the key it composes to: null and the 'unknown'
+    // literal are two different non-accounts that share the single key `null`,
+    // and the step is what must see the difference in what is on screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editsKey, clientId, forget]);
+
+  // The unqualified key this replaces, removed rather than migrated and never
+  // parsed on the way out. The blob names no member, so reading it into
+  // whoever is signed in is a guess — and its wrong answer is one person's
+  // swaps and corrected loads filed as another's, on the device and then, at
+  // the first tap, on the server. See the header of src/lib/planEdits.ts.
+  useEffect(() => { AsyncStorage.removeItem(PLAN_EDITS_KEY).catch(() => {}); }, []);
 
   /** Send the whole set up. Best effort, and its answer is reported rather than
    *  swallowed: `shared` is what the member reads. */
@@ -121,15 +203,17 @@ export function usePlanEdits(clientId: string | null | undefined): PlanEditsValu
   const persist = useCallback((next: PlanEdits) => {
     latest.current = next;
     if (!loaded) return;                       // rule 1
-    if (cacheable.current) {
-      AsyncStorage.setItem(PLAN_EDITS_KEY, writePlanEdits(next))
+    // No key is no account, and no account is no write — not to a shared key,
+    // which is rule 3.
+    if (editsKey && cacheable.current) {
+      AsyncStorage.setItem(editsKey, writePlanEdits(next))
         .catch(() => { /* the session is correct this run either way */ });
     }
     // An empty set is still sent: clearing every swap is a change the coach
     // needs to see as much as making one, and a member who put a movement back
     // must not leave a stale swap standing on the console.
     void push(next);
-  }, [loaded, push]);
+  }, [loaded, push, editsKey]);
 
   const apply = <K extends keyof PlanEdits>(key: K, value: PlanEdits[K]) => {
     persist({ ...latest.current, [key]: value });

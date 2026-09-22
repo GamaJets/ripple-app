@@ -12,6 +12,7 @@
 // California, and nobody at the keyboard can see it.
 import { dayKeyOf, dayKeyOfDate, sameLocalDay, instantForDay, readFoodEdit, foodChanged, readWorkoutEdit } from './entryEdit';
 import type { WorkoutEntry } from './mockData';
+import { coachMayAmend, coachAmendment, writeOutcome } from './coachAmend';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -103,6 +104,19 @@ if (fixed.ok) {
   ok(!('id' in fixed.value) && !('loggedBy' in fixed.value), 'identity and attribution are not editable here');
 }
 
+// The tempo each set was PERFORMED at is aligned to `sets` the same way the
+// effort is, and it fails the same way: deleting the middle set of three would
+// otherwise file set 3's four-second eccentric against set 2. An entry left
+// with no recorded tempo at all clears the column rather than keeping a list of
+// nulls, because a set nobody was asked about is not a set performed at zero.
+const tempoed: WorkoutEntry = { ...lift, tempos: [null, '2-0-X-0', '4-1-1-0'] };
+const tempoCut = readWorkoutEdit(tempoed, { name: 'Squat', sets: [{ reps: 8, kg: 60 }, { reps: 0, kg: 0 }, { reps: 6, kg: 70 }], mins: '', dist: '', watts: '', kcal: '' });
+ok(tempoCut.ok && JSON.stringify(tempoCut.value.tempos) === JSON.stringify([null, '4-1-1-0']),
+  'a removed set takes its own tempo with it and leaves every other set’s where it was');
+const cleared = readWorkoutEdit(tempoed, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' });
+ok(cleared.ok && 'tempos' in cleared.value && cleared.value.tempos === undefined,
+  'and an entry whose last recorded tempo was edited away clears the column rather than keeping nulls');
+
 // Blank calories means unknown, and unknown is null — not zero.
 const noKcal = readWorkoutEdit(lift, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' });
 ok(noKcal.ok && 'kcal' in noKcal.value && noKcal.value.kcal === undefined, 'blank calories must clear the figure, not zero it');
@@ -187,6 +201,70 @@ ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '0', dist: '6', watts
   'a cardio session with no minutes must be refused');
 ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: 'six', watts: '', kcal: '' }).ok,
   'an unreadable distance must be refused');
+
+/* ── five miles logged as five kilometres ─────────────────────────────────
+ *
+ * The app opened every cardio log on kilometres for everybody until recently,
+ * so this is the field on a cardio entry most likely to be wrong — and it was
+ * the one field the correction sheet could not touch. `{ ...entry.cardio }`
+ * carried the original unit through whatever the sheet showed, so a five-mile
+ * run stayed 5 km in the distance total, the calorie estimate and every trend,
+ * and the only remedy was to delete the session — which also discards the
+ * heart-rate zones nobody can retype.
+ */
+{
+  const toMiles = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: 'mi', watts: '', kcal: '' });
+  ok(toMiles.ok, 'a unit correction reads');
+  ok(toMiles.ok && toMiles.value.cardio?.unit === 'mi', 'and the unit actually changes');
+  ok(toMiles.ok && toMiles.value.cardio?.dist === 6, 'the number is not converted — the member is saying what it always was');
+  ok(toMiles.ok && toMiles.value.cardio?.hrAvg === 142,
+    'and the measured heart rate still survives a unit correction');
+
+  // An omitted unit keeps what the entry had. A caller with no unit control
+  // must not be able to rewrite the unit by leaving a field out.
+  const untouched = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', watts: '', kcal: '' });
+  ok(untouched.ok && untouched.value.cardio?.unit === 'km', 'an absent unit keeps the original');
+  const blank = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: '   ', watts: '', kcal: '' });
+  ok(blank.ok && blank.value.cardio?.unit === 'km', 'and so does a blank one');
+  const same = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: 'km', watts: '', kcal: '' });
+  ok(same.ok && same.value.cardio?.unit === 'km', 'and re-stating the same unit changes nothing');
+}
+
+/* ── a coach correcting a set they logged (src/lib/coachAmend.ts) ───────── */
+
+{
+  const mine: WorkoutEntry = { id: 'w1', t: '2026-09-15T10:00:00Z', exercise: 'Squat', sets: [[5, 100], [5, 100]], loggedBy: 'coach-1' };
+  ok(coachMayAmend(mine, 'coach-1'), 'a coach is offered a correction on a set they logged');
+  ok(!coachMayAmend({ ...mine, loggedBy: undefined }, 'coach-1'), 'never on a set the member logged');
+  ok(!coachMayAmend(mine, 'coach-2'), 'never on a set another coach logged');
+  ok(!coachMayAmend(mine, null), 'never while we do not know who the coach is');
+  ok(!coachMayAmend({ ...mine, id: undefined }, 'coach-1'), 'never on a row with no stored id');
+
+  const draft = { name: 'Squat', sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 100 }], mins: '', dist: '', watts: '', kcal: '' };
+  const same = coachAmendment(mine, draft);
+  ok(same.ok && same.value === null, 'an untouched sheet writes nothing and stamps nothing');
+
+  const fixed = coachAmendment(mine, { ...draft, sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 80 }] });
+  ok(fixed.ok && fixed.value != null && !('amended_at' in fixed.value) && !('amended_by' in fixed.value),
+     'a real correction sends no date and no author: the server stamps both (part 3230), so a handset cannot set either');
+  ok(fixed.ok && JSON.stringify(fixed.value?.sets) === '[[5,100],[5,80]]', 'and the corrected figures');
+  ok(fixed.ok && fixed.value != null && !('logged_by' in fixed.value) && !('performed_at' in fixed.value),
+     'and never who logged it or which day it was');
+
+  const emptied = coachAmendment(mine, { ...draft, sets: [{ reps: 0, kg: 0 }] });
+  ok(!emptied.ok, 'a correction that removes every set is refused, not written');
+
+  ok(writeOutcome('amend', { rows: 1 }) === null, 'one row back is done');
+  const lines = [
+    writeOutcome('amend', { rows: 0 }),
+    writeOutcome('withdraw', { rows: 0 }),
+    writeOutcome('amend', { rows: 0, error: { message: 'new row violates row-level security policy' } }),
+    writeOutcome('withdraw', 'threw'),
+  ];
+  ok(lines.every((l) => typeof l === 'string' && l.length > 0), 'zero rows, an error and no answer are all failures');
+  ok((lines[2] ?? '').includes('row-level security'), 'a refusal carries its reason');
+  ok(lines.every((l) => !(l ?? '').includes('\u2014')), 'no em-dash in anything a coach reads');
+}
 
 /* ── report ──────────────────────────────────────────────────────────────── */
 

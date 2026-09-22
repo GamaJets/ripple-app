@@ -13,7 +13,39 @@
 // base64 image and gets back the parsed text; nothing about the key reaches the
 // device. Parsing the text into weight / body-fat / muscle stays in the app,
 // where the InBody-specific rules already live.
+//
+// ── WHAT LEAVES, AND WHAT IS NOT ASKED OF THE VENDOR ─────────────────────
+//
+// This function is no longer only the InBody path. app/(client)/injury-doc.tsx
+// sends physiotherapy reports, scan results and doctors' notes through it, so
+// what goes over the wire below can be a person's clinical record.
+//
+// Exactly five form fields are posted to https://api.ocr.space/parse/image:
+// `apikey`, `OCREngine=2`, `scale=true`, `base64Image` — the WHOLE page, every
+// page of a PDF — and `filetype=PDF` when it is one. There is no sixth. In
+// particular NOTHING HERE ASKS OCR.SPACE NOT TO RETAIN THE UPLOAD, and nothing
+// anywhere else in this repository does either.
+//
+// Whether their API offers such a parameter at all is NOT ESTABLISHED by
+// anything in this codebase, and no claim is made in either direction — not
+// here, and not in the copy the member reads. src/lib/injuryDocConsent.ts tells
+// them the one thing that is verifiable: a copy leaves, and this app does not
+// ask for it back. If somebody establishes that a retention control exists, it
+// is one `form.set(...)` below plus a rewrite of `CONSENT_RETENTION`.
+//
+// The member is now ASKED before any of this happens, per document, and the
+// answer is recorded before the invoke (supabase/parts/1000-*.sql). That gate
+// is entirely on the client side and deliberately so: the subject of the data
+// and the operator of the client are the same person, so there is nobody for a
+// server-side check to protect. Nothing below has changed for it.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -30,17 +62,31 @@ Deno.serve(async (req) => {
   // Signed-in users only — this spends a metered quota.
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   let userId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
+    + 'Nothing has been scanned and your sheet has not been sent anywhere. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    userId = data?.user?.id || '';
-  } catch { /* ignore */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return json({ ok: false, error: CANNOT_ASK }, 503);
+    } else {
+      userId = data?.user?.id || '';
+    }
+  } catch { return json({ ok: false, error: CANNOT_ASK }, 503); }
   if (!userId) return json({ ok: false, error: 'Sign in to scan a body-composition sheet.' }, 401);
 
   const key = Deno.env.get('OCR_API_KEY') || '';
   if (!key || key === 'helloworld') {
     // Say so plainly rather than silently falling back to the demo key and
     // producing scans that fail at random.
-    return json({ ok: false, error: 'Scanning is not configured yet — no OCR key is set on the server.' });
+    return json({ ok: false, error: 'Scanning is not configured yet. No OCR key is set on the server.' });
   }
 
   let body: any = {};
@@ -55,7 +101,7 @@ Deno.serve(async (req) => {
   if (b64.length > MAX_B64) {
     return json({ ok: false, error: isPdf
       ? 'That document is too large to read. Try a shorter one, or photograph the page you need.'
-      : 'That photo is too large — try again a little further back.' });
+      : 'That photo is too large. Try again a little further back.' });
   }
 
   try {

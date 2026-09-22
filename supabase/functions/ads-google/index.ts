@@ -50,6 +50,13 @@
 // hundredths-of-major for every currency including the ones with no minor unit
 // and the ones with three. Nothing in this file divides anything.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { matchAds, urlsFromCreative, type AdInsight } from '../../../src/lib/adMatch.ts';
 import { majorFromMicros } from '../../../src/lib/adChannels.ts';
 
@@ -100,7 +107,7 @@ async function call<T>(url: string, init: RequestInit): Promise<Res<T>> {
       Array.isArray(e.details) ? e.details.map((d: any) => d?.errors?.map((x: any) => x?.message).join('; ')).filter(Boolean).join('; ') : '',
     ].filter(Boolean).join(' — ') || `HTTP ${res.status}`;
     if (res.status === 404 && /v\d+/.test(url)) {
-      return { ok: false, error: `${detail}. This build asks for Google Ads API ${VERSION}, which Google may have sunset — the owner sets GOOGLE_ADS_API_VERSION to the current one.` };
+      return { ok: false, error: `${detail}. This build asks for Google Ads API ${VERSION}, which Google may have sunset. The owner sets GOOGLE_ADS_API_VERSION to the current one.` };
     }
     return { ok: false, error: detail };
   }
@@ -226,7 +233,7 @@ Deno.serve(async (req) => {
   const clientSecret = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') || '';
   const devToken = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') || '';
   if (!clientId || !clientSecret || !devToken) {
-    return fail('Connecting a Google Ads account is not configured on the server yet — the owner sets GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN as Supabase secrets. The developer token is issued against a Google Ads manager account and has to be approved for Basic Access before it reads a live account.');
+    return fail('Connecting a Google Ads account is not configured on the server yet. The owner sets GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN as Supabase secrets. The developer token is issued against a Google Ads manager account and has to be approved for Basic Access before it reads a live account.');
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -235,10 +242,24 @@ Deno.serve(async (req) => {
   // request body is a request to connect somebody else's ad account to your own
   // coaching profile, and the token would then be spent reading their business.
   let trainerId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
+    + 'Nothing has been connected and your existing ad accounts are untouched. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    trainerId = data?.user?.id || '';
-  } catch { /* handled below */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return fail(CANNOT_ASK);
+    } else {
+      trainerId = data?.user?.id || '';
+    }
+  } catch { return fail(CANNOT_ASK); }
   if (!trainerId) return json({ ok: false, error: 'Sign in to Repple and try again.' }, 401);
 
   let body: any = {};
@@ -259,7 +280,7 @@ Deno.serve(async (req) => {
     });
     if (!tok.ok) {
       if (/invalid_grant/i.test(tok.error)) {
-        return fail(`Google would not accept that sign-in code (${tok.error}). A code is single-use and short-lived — tap Connect again to start a fresh sign-in.`);
+        return fail(`Google would not accept that sign-in code (${tok.error}). A code is single-use and short-lived. Tap Connect again to start a fresh sign-in.`);
       }
       if (/redirect_uri/i.test(tok.error)) {
         return fail(`Google rejected the redirect address (${tok.error}). It has to be listed as an Authorised redirect URI on the OAuth client in the Google Cloud console.`);
@@ -470,11 +491,20 @@ async function attach(service: any, trainerId: string, a: Acct): Promise<string 
   // Separate from choose_ad_account() because only Google has a manager, and
   // widening a function every other provider calls to carry a field only one of
   // them uses is how the field comes to be set wrongly by the other two.
-  const { error: mErr } = await service
+  //
+  // Counted, because the failure this guards against is the one the sentence
+  // below already describes and nothing was detecting. `choose_ad_account` has
+  // just written the row this update is keyed on, so zero rows means it did not
+  // land where this expects it — and the manager id is then missing on exactly
+  // the row the next spend read uses, which refuses without it. Same outcome as
+  // a refused write, so the same sentence: an error and a zero match are one
+  // thing to the coach, who has to choose the account again either way.
+  const { error: mErr, count } = await service
     .from('coach_ad_accounts')
-    .update({ manager_account_id: a.manager })
+    .update({ manager_account_id: a.manager }, { count: 'exact' })
     .eq('trainer_id', trainerId).eq('provider', PROVIDER);
   if (mErr) return `That ad account was saved but the manager account it sits under was not (${mErr.message}), so the next check will be refused. Choose it again.`;
+  if (!count) return 'That ad account was saved but the manager account it sits under was not. The saved account could not be found to write it onto, so the next check will be refused. Choose it again.';
   return null;
 }
 

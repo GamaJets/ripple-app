@@ -51,10 +51,11 @@
 // exists for. It is the same shape as the injury acknowledgement in
 // ./injuryGate.ts and is answered the same way: the coach is stopped by news.
 import type { Diet } from './types';
-import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput, type Slot } from './meals';
+import { allergenLabel, catalogSize, emptySlots, mealAt, planWeek, sameMealName, slotsFor, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
+import { numUpTo } from './format';
 
 /** Bumped only when a stored plan's shape changes in a way a reader must know
  *  about. `parsePlan` refuses anything it does not recognise rather than
@@ -138,31 +139,26 @@ export function capturePlanMeal(diet: Diet, slot: Slot, idx: number, avoid: read
 }
 
 /**
- * A week to start editing from: the day the client is already being shown,
- * then six variations of it.
+ * A week to start editing from: the week the client is already being shown.
  *
- * Stepping each index by the day number is exactly what the client's Meals tab
- * does for its own week preview, so a coach who opens this screen and saves
- * without touching anything has committed the week the client could already
- * see. A seed that invented a different week would make "send" a change the
- * coach did not make.
+ * It IS `planWeek`, rather than the same arithmetic written out again here, so
+ * a coach who opens this screen and saves without touching anything has
+ * committed the week the client could already see. It was a copy once, and a
+ * copy is how two weeks happen: `planWeek` now chooses each later day with the
+ * day's protein and the week's variety in mind, and a seed that still only
+ * stepped the index would make "send" a change the coach did not make.
  */
 export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan {
   const avoid = [...(input.avoid ?? [])];
-  const slots = slotsFor(input.mealsPerDay);
-  const day0 = buildPlan(input).plan;
-  const days: PlanDay[] = [];
-  for (let d = 0; d < PLAN_DAYS; d++) {
-    days.push({
-      meals: slots.map((slot, i) => capturePlanMeal(input.diet, slot, (day0[i]?.idx ?? 0) + d, avoid)),
-    });
-  }
+  const days: PlanDay[] = planWeek(input, undefined, PLAN_DAYS).map((day) => ({
+    meals: day.map((m) => capturePlanMeal(input.diet, m.slot, m.idx, avoid)),
+  }));
   return { v: PLAN_VERSION, diet: input.diet, avoid, mealsPerDay: input.mealsPerDay, days, writtenAt: writtenAtISO };
 }
 
 const SLOTS: readonly Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 const DIETS: readonly Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
-const ALLERGEN_IDS: readonly Allergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy'];
+const ALLERGEN_IDS: readonly Allergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy', 'pork'];
 
 const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -347,10 +343,14 @@ export function planStale(
   if (!mealsPerDayChanged && (dietChanged || !sameSet(plan.avoid, now))) {
     plan.days.forEach((day, dayIdx) => {
       day.meals.forEach((m, pos) => {
+        // A slot that can no longer be made safely resolves to its empty,
+        // named row, which differs from the meal the coach chose: diverged.
         const size = catalogSize(diet, m.slot, now);
-        if (!size) return;
-        const resolved = mealAt(diet, m.slot, m.idx % size, now);
-        if (resolved.n !== m.n) diverged.push({ dayIdx, pos, slot: m.slot, was: m.n, now: resolved.n });
+        const resolved = mealAt(diet, m.slot, size ? m.idx % size : m.idx, now);
+        // Through `sameMealName`: a plan written before breakfast styles were
+        // bracketed stores "Berry oats — warm", which is the meal that now
+        // reads "Berry oats (warm)". A new joiner is not a new meal.
+        if (!sameMealName(resolved.n, m.n)) diverged.push({ dayIdx, pos, slot: m.slot, was: m.n, now: resolved.n });
       });
     });
   }
@@ -384,7 +384,7 @@ export function planStaleLine(s: PlanStale, who: string): string | null {
       ? `One meal now resolves to something else on their phone: "${s.diverged[0].was}" is showing as "${s.diverged[0].now}".`
       : `${s.diverged.length} of these meals now resolve to something else on their phone.`);
   }
-  parts.push('Rebuild the week and send it again — nothing here is being shown to them as your plan while it says this.');
+  parts.push('Rebuild the week and send it again. Nothing here is being shown to them as your plan while it says this.');
   return parts.join(' ');
 }
 
@@ -392,6 +392,28 @@ function listOf(a: readonly string[]): string {
   const l = a.map((x) => x);
   if (l.length === 1) return l[0];
   return `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
+}
+
+/**
+ * The slots this client's plan cannot fill, said to the coach, or null when
+ * every slot has a meal.
+ *
+ * A slot that cannot be made without one of their allergens is sent EMPTY (see
+ * `mealAt`), and the client is told so on their phone. That is not a plan that
+ * is "fine": the coach is told which slot, which allergen, and what they can do
+ * about it, beside the control that sends it. Sending is not withheld, because
+ * every other slot is still worth sending and the empty one is safe; withholding
+ * it would leave the client with no plan at all over one meal nobody can build.
+ */
+export function planEmptySlotsLine(diet: Diet, mealsPerDay: 3 | 4 | 5, avoid: readonly Allergen[], who: string): string | null {
+  const empty = emptySlots(diet, slotsFor(mealsPerDay), [...avoid]);
+  if (!empty.length) return null;
+  const parts = empty.map(({ slot, allergens }) => {
+    const names = allergens.map(allergenLabel);
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+    return `${who}'s ${slot.toLowerCase()} reaches them empty: every ${slot.toLowerCase()} in their catalogue has ${list} in it, so none is generated.`;
+  });
+  return `${parts.join(' ')} Pin a recipe to ${empty.length === 1 ? 'that slot' : 'those slots'} on each day, or talk to them about what they eat instead. They are told the same on their phone.`;
 }
 
 /** Whether a coach may send this plan, and what to say when they may not. */
@@ -449,18 +471,76 @@ export function guardPlan(
 /**
  * What the client's app will do with the servings, in words.
  *
- * `buildPlan` scales every meal in a day by one shared multiplier so the day
- * lands on the client's target, so a coach who composes 1,400 kcal of food
- * against a 2,500 kcal target has not written a 1,400 kcal day — they have
- * written one where every plate is served at 1.75×. That is a consequence of
- * the choice worth reading before it is sent, and it is arithmetic rather than
- * advice: no judgement is offered about either figure.
+ * `buildPlan` scales the meals in a day so the day lands on the client's
+ * target, so a coach who composes 1,400 kcal of food against a 2,500 kcal
+ * target has not written a 1,400 kcal day — they have written one where every
+ * plate is served at 1.75×. That is a consequence of the choice worth reading
+ * before it is sent, and it is arithmetic rather than advice: no judgement is
+ * offered about either figure.
+ *
+ * The WHOLE DAY'S servings, not one plate's. This took a single number while
+ * `buildPlan` applied a single day-wide multiplier, and it no longer does —
+ * it now moves individual plates by a quarter serving to close the last of the
+ * gap, so the plates can differ. The caller was passing `plan[0].servings`,
+ * which after that change is breakfast's portion presented as the day's.
  */
-export function planServingNote(servings: number, baseKcal: number, targetKcal: number): string {
-  const mult = servings.toFixed(2).replace(/0$/, '').replace(/\.$/, '');
-  if (servings === 1) {
+export function planServingNote(servings: readonly number[], baseKcal: number, targetKcal: number): string {
+  const list = servings.length ? servings : [1];
+  const lo = Math.min(...list);
+  const hi = Math.max(...list);
+  // `toFixed(2)` here wrote an English full stop and then trimmed a trailing
+  // zero that a comma locale never produces, so a German coach read "1.75×"
+  // beside figures this app writes with a comma. numUpTo does both jobs in the
+  // reader's own language.
+  const mult = numUpTo(lo, 2);
+  if (lo !== hi) {
+    return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app sizes each plate on its own, between ${numUpTo(lo, 2)}× and ${numUpTo(hi, 2)}×, to land the day on that number. Pick differently if that is not the portion you mean.`;
+  }
+  const servings0 = lo;
+  if (servings0 === 1) {
     return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, which is what their target asks for. Their app serves them as written.`;
   }
-  const dir = servings > 1 ? 'up' : 'down';
-  return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app scales every plate ${dir} to ${mult}× to close the gap — pick differently if that is not the portion you mean.`;
+  const dir = servings0 > 1 ? 'up' : 'down';
+  return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app scales every plate ${dir} to ${mult}× to close the gap. Pick differently if that is not the portion you mean.`;
+}
+
+/**
+ * What the portions CANNOT do, in words — the protein gap, said out loud.
+ *
+ * `buildPlan` closes the day's CALORIES and nothing else. Scaling multiplies
+ * every macro by the same number, so a day's protein-per-calorie is fixed by
+ * which meals were chosen and no portion size moves it: measured across the
+ * catalogue a plan can sit 50% or more above its own protein target, or below
+ * it, with the coach holding no control that changes the figure.
+ *
+ * The screen drew that as a meter, beside the target it disagreed with, and
+ * said nothing. A meter reading 150 against a 100 printed two lines above it
+ * is not a disclosure — it looks like the plan, and a coach reads it as one.
+ * So this is the sentence, and it names the only lever there is: swap a meal.
+ *
+ * Null when the day is within `TOL` of its target, because a note on every
+ * plan is a note nobody reads, and a few grams is not a finding.
+ *
+ * Protein share is now a lever at meal SELECTION (`freshPicks` in ./meals.ts
+ * chooses a fresh plan's meals toward the target), but only among meals the
+ * diet, the allergens and the week's variety allow, and never over a meal a
+ * coach or member picked. Where a gap survives that, this still says so.
+ *
+ * A day with an empty slot is measured against the share of the target its
+ * SERVED meals carry (`served`, the same fraction `buildPlan` sizes them to).
+ * Against the whole day it would read as short of protein, and "swap a meal"
+ * would be the wrong advice: the missing protein is the missing meal.
+ */
+const PROTEIN_NOTE_TOL = 0.1;
+export function planProteinNote(planProtein: number, targetProtein: number, served = 1): string | null {
+  if (!Number.isFinite(planProtein) || !Number.isFinite(targetProtein) || targetProtein <= 0) return null;
+  const share = Number.isFinite(served) && served > 0 && served < 1 ? served : 1;
+  const aim = targetProtein * share;
+  const off = (planProtein - aim) / aim;
+  if (Math.abs(off) < PROTEIN_NOTE_TOL) return null;
+  const dir = off > 0 ? 'above' : 'below';
+  const against = share < 1
+    ? `the ${Math.round(aim).toLocaleString()} g the meals served should carry (the ${Math.round(targetProtein).toLocaleString()} g day target, less the empty slot's share)`
+    : `the ${Math.round(targetProtein).toLocaleString()} g target`;
+  return `The portions above are sized by calories, which is the only thing they can be sized by. This day's protein is what these particular meals contain: ${Math.round(planProtein).toLocaleString()} g, ${dir} ${against}. Swapping a meal moves it; changing the portions does not.`;
 }

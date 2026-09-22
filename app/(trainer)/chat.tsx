@@ -31,20 +31,25 @@
 // The bubble keeps sending, not-sent and unreadable apart for the reason the
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Cta, Ghost, Flag, SyncBadge } from '../../src/ui/kit';
+import { bubbleSync } from '../../src/ui/bubbleSync';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
-import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
+import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { fmtRelativeDay } from '../../src/lib/format';
+import { atBottom } from '../../src/lib/readReceipt';
+import { useReadReceipt } from '../../src/ui/readReceipts';
 import { useMyTemplates } from '../../src/ui/messageTemplates';
 import {
   applyTemplate, orderTemplates, templatesEmptyLine, hasUnfilledToken,
@@ -59,6 +64,9 @@ import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
+import { useRoster } from '../../src/ui/roster';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /** The clip itself, in its own component so the player hook receives a settled
  *  URL — a signature arrives asynchronously and a hook cannot wait for one. */
@@ -112,7 +120,7 @@ function Attachment({ m }: { m: ThreadMessage }) {
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
         {m.sending ? (
-          <View style={{ position: 'absolute', right: sp.sm, bottom: sp.sm }}>
+          <View style={{ position: 'absolute', end: sp.sm, bottom: sp.sm }}>
             <ActivityIndicator size="small" color={t.ink3} />
           </View>
         ) : null}
@@ -149,7 +157,20 @@ export default function CoachChat() {
   // Used where a sentence needs to address them. Falls back to the role word
   // rather than to a dash mid-sentence — "say hi to —" is not a sentence.
   const firstName = head.isName ? head.text.split(' ').filter(Boolean)[0] : null;
-  const { messages: msgs, send, status, unsent, cachedNote } = useThread(clientId, 'coach');
+  // `hasOlder`, `loadingOlder`, `olderError` and `loadOlder` were on the hook
+  // and taken by the client's copy of this screen alone. `useThread` reads
+  // newest-first at the row cap, so a long coaching relationship arrives with
+  // its own start missing — reported as `status: 'partial'` and said NOWHERE on
+  // the coach's side, which has only 'loading' and 'error' branches, so a
+  // truncated thread rendered as a complete one.
+  //
+  // The coach is the one who needs the history: a client scrolls back to find
+  // what they were told, and a coach scrolls back to find what they promised
+  // and to read it out to somebody disputing it.
+  const {
+    messages: msgs, send, status, unsent, cachedNote, reload: reloadThread, threadId,
+    hasOlder, loadingOlder, olderError, loadOlder,
+  } = useThread(clientId, 'coach');
   /* ── the way out ───────────────────────────────────────────────────────
    *
    * The database has supported blocking and reporting in BOTH directions since
@@ -166,8 +187,39 @@ export default function CoachChat() {
    */
   const safety = useThreadSafety(clientId, 'coach');
   const OTHER = 'this client';
+  /**
+   * Whether there is anybody at the other end of this thread.
+   *
+   * ── The hole this closes ────────────────────────────────────────────────
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row with no
+   * account behind it. `messages.client_id` references `clients(id)`, so such a
+   * person has no thread, cannot have one, and cannot receive anything written
+   * into one — but the read for them is not refused, it is answered with zero
+   * rows and no error, because `coach_clients.id` is `uuid DEFAULT
+   * gen_random_uuid()` and passes every shape test an id can be put to.
+   *
+   * This screen then drew the empty thread as a conversation nobody had started
+   * yet — "No messages yet — say hi to Priya" — over a live composer. A coach
+   * taking that invitation types a message to somebody who has never had the
+   * app, and finds out only when the insert is refused, by which time they have
+   * said it.
+   *
+   * `handAdded` comes off the roster, which is the only thing that knows which
+   * of its two tables each row came from, and `undefined` there is "the roster
+   * has not said yet" — which goes on asking rather than closing a real
+   * client's thread on a value nobody has supplied. See src/lib/clientRecord.ts.
+   * The read itself is left alone: `useThread` is shared with the member's own
+   * screen, the rows it returns for this id are genuinely none, and what was
+   * wrong was the sentence printed over them and the composer under it.
+   */
+  const rosterRow = useRoster().roster.find((c) => c.id === clientId) ?? null;
+  const hasAccount = clientIsQueryable(clientId, rosterRow?.handAdded);
   const blockNote = blockedComposerNote(safety.state, OTHER);
-  const canSend = canSendInto(safety.state);
+  // Two different reasons a message cannot go, and they are not folded into
+  // one: `safety` is a conversation that was closed, and `hasAccount` is a
+  // conversation that has never existed. Each says its own sentence below.
+  const canSend = canSendInto(safety.state) && hasAccount;
   const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null } | null>(null);
   const [reportNote, setReportNote] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
@@ -175,19 +227,43 @@ export default function CoachChat() {
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
+  /** Set just before older messages are asked for, so the content growing at the
+   *  TOP does not throw the coach back to the bottom of the thread. */
+  const heldPosition = useRef(false);
+  /**
+   * The end of the conversation is on screen.
+   *
+   * One of the four clauses of "what counts as read" (src/lib/readReceipt.ts),
+   * and on this screen it is the load-bearing one twice over: this chat is a
+   * `Tabs.Screen` with `href: null` and no `unmountOnBlur`, so it stays mounted
+   * — scrolled wherever the coach left it — behind everything they open next.
+   * True to begin with because `onContentSizeChange` scrolls a freshly loaded
+   * thread to its end, and corrected by the first real scroll event.
+   */
+  const [atEnd, setAtEnd] = useState(true);
+  /**
+   * What each of the coach's own bubbles may claim, and the write that tells
+   * the client their messages have been read.
+   *
+   * The failure sentences are unchanged — `deliveryLine` delegates them back to
+   * `unsentNote`, which is why this screen no longer imports it — and the two
+   * new states are "Sent Mon 1/9" for a row the server has, and "· Read" once
+   * the client's own watermark has passed it.
+   */
+  const receipt = useReadReceipt({ threadId, role: 'coach', messages: msgs, unsent, atEnd, them: firstName ?? 'they' });
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
     // A cancel carries neither, and must raise nothing at anybody.
-    if (error) { Alert.alert('That file cannot be sent', error); return; }
+    if (error) { Alert.alert('That File Cannot Be Sent', error); return; }
     if (attachment) setPending(attachment);
   };
 
   const onAttach = () => {
-    Alert.alert('Add to your message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
-      { text: 'Take a photo', onPress: () => { attach('photo'); } },
-      { text: 'Record a form check', onPress: () => { attach('video'); } },
-      { text: 'Choose from your library', onPress: () => { attach('library'); } },
+    Alert.alert('Add to Your Message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
+      { text: 'Take a Photo', onPress: () => { attach('photo'); } },
+      { text: 'Record a Form Check', onPress: () => { attach('video'); } },
+      { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -206,7 +282,7 @@ export default function CoachChat() {
         style: blocked ? 'default' : 'destructive',
         onPress: async () => {
           const r = blocked ? await safety.unblock() : await safety.block();
-          if (!r.ok) { Alert.alert(blocked ? 'Not unblocked' : 'Not blocked', r.error ?? 'That did not save.'); return; }
+          if (!r.ok) { Alert.alert(blocked ? 'Not Unblocked' : 'Not Blocked', r.error ?? 'That did not save.'); return; }
           Alert.alert(
             blocked ? 'Unblocked' : 'Blocked',
             blocked
@@ -225,7 +301,7 @@ export default function CoachChat() {
     setReportBusy(true);
     const res = await safety.report(category, reportNote, reportFor.messageId);
     setReportBusy(false);
-    if (!res.id) { Alert.alert('Not reported', res.error ?? 'That did not save.'); return; }
+    if (!res.id) { Alert.alert('Not Reported', res.error ?? 'That did not save.'); return; }
     setReportFor(null); setReportNote('');
     Alert.alert('Reported', reportFiledLine(category, safety.state));
   };
@@ -242,7 +318,7 @@ export default function CoachChat() {
     // signal is not a message that failed: the words are safe, they are marked
     // under the bubble as waiting, and they go on their own. Heading it "Not
     // sent" would tell somebody to type it again.
-    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
+    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to Send' : 'Not Sent', res.reason);
   };
   /* ── the six messages a coach types every week ─────────────────────────
    *
@@ -269,32 +345,85 @@ export default function CoachChat() {
     setTplOpen(false);
   };
 
-  const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+  // The stamp under every bubble, and the sister screen's already. This was a
+  // hardcoded English weekday array glued to `${d.getDate()}/${d.getMonth() + 1}`
+  // — a day name in a language the coach may not read, over a date that is
+  // 9 December here and 12 September in the United States. It is the same
+  // wording, on the same message, as the one the CLIENT sees under their copy
+  // of it (app/(client)/messages.tsx), so the two disagreeing about which day a
+  // message was sent on is a disagreement inside one conversation.
+  //
+  // `fmtRelativeDay` is that screen's answer and is now this one's: the reader's
+  // own language, the reader's own date order, and "Today"/"Tomorrow" which
+  // neither hand-rolled copy ever managed.
+  const fmt = (iso: string) => fmtRelativeDay(iso);
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This began "There is no realtime subscription on a thread", which is the
+   * same false sentence app/(client)/messages.tsx carried and is wrong about
+   * the same code: `useThread` opens `.channel('msg:' + cid)` and appends
+   * INSERTs on `messages` for this thread (src/ui/messaging.ts). Both screens
+   * mount that hook, so both have had live updates for as long as it has.
+   *
+   * The subscription is BEST-EFFORT, and that is what earns this control. It is
+   * opened inside a try/catch marked "realtime optional", so a project without
+   * the publication, a network that will not open a websocket, or a socket lost
+   * while the phone slept leaves the thread looking live and quietly frozen —
+   * and a coach waiting for an answer, looking straight at the conversation, is
+   * the one person nothing would then tell.
+   *
+   * The block state goes with it: it is written from the other side too, and a
+   * composer enabled against a stale answer is a message sent into a thread
+   * that will refuse it. The saved templates come along because they are the
+   * other thing this screen puts into the box.
+   *
+   * What is typed is untouched. `reload` re-reads the thread; it does not go
+   * near the composer. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(reloadThread()), Promise.resolve(safety.reload()),
+    Promise.resolve(templates.reload()),
+  ]), [reloadThread, safety, templates]));
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
 
       {/* ── header ───────────────────────────────────────────────────────── */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-        <Ghost icon="back" onPress={() => router.back()} />
+        <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         {/* The client's face, read for the CLIENT's id via
             `profiles_trainer_read` and from nowhere else. On the roster path the
             hook is handed no id and does no work, so there is nothing to draw
             and the monogram is taken from the name the roster passed — never
             from the coach's own profile, which is the readable one on this app
             and therefore the one TF-32 would have reached for. */}
-        <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {/* The mockups' monogram: the message blue's pale plate with its INK
+            for a real name (the inbox row this thread was opened from wears
+            the same pair), the grey of "nothing to report" for a withheld one. */}
+        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: head.isName ? t.data.blueSoft : t.surface3, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
           {peer.avatar
-            ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
-            : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+            ? <Image source={{ uri: peer.avatar }} style={{ width: 40, height: 40 }} accessibilityIgnoresInvertColors />
+            : <Text style={{ ...ty.label, ...font('700'), color: head.isName ? t.data.blueInk : t.ink3 }}>{peerMonogram(head)}</Text>}
         </View>
-        <View style={{ flex: 1 }}>
-          {/* Casing and full ink are for a real name only; a dash gets neither,
-              so the header never dresses a placeholder up as a person. */}
-          <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching chat'}</Text>
-        </View>
+        {/* The name is the way to the record, as the board's chevron beside it
+            says (page 9). Only when there is a client to open: a thread reached
+            without a key has nobody to go to, and a chevron that goes nowhere
+            is the tap that "appears to do nothing". `client.tsx` reads the same
+            two params the roster hands this screen. */}
+        <Pressable onPress={() => { if (clientId) router.push({ pathname: '/(trainer)/client', params: { clientId, name: head.isName ? head.text : '' } } as any); }}
+          disabled={!clientId} accessibilityRole={clientId ? 'button' : undefined}
+          accessibilityLabel={clientId ? `Open ${head.isName ? head.text + '’s' : 'their'} record` : undefined}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <View style={{ flex: 1 }}>
+            {/* Casing and full ink are for a real name only; a dash gets neither,
+                so the header never dresses a placeholder up as a person. */}
+            <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching Chat'}</Text>
+          </View>
+          {clientId ? <Icon name={FORWARD_ICON} size={16} color={t.ink3} /> : null}
+        </Pressable>
         {/* In the header rather than buried in a menu, for the same reason it is
             in the client's: a moderation path somebody has to go looking for is
             one they reach for after it has already gone wrong. The icon carries
@@ -302,11 +431,10 @@ export default function CoachChat() {
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
-          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="lock" size={16} color={t.ink2} />
+          style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+          <Icon name="lock" size={18} color={t.ink2} />
         </Pressable>
       </View>
-      <Rule />
 
       {/* The compose bar is lifted by measurement rather than by
           KeyboardAvoidingView, which under-lifted it by the height of the
@@ -320,17 +448,63 @@ export default function CoachChat() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
+          // Jumping to the end is right for a new message and exactly wrong for
+          // older ones: a coach who asked for the start of the conversation and
+          // was thrown back to the bottom of it has not been given the history.
+          onContentSizeChange={() => {
+            if (heldPosition.current) { heldPosition.current = false; return; }
+            scRef.current?.scrollToEnd({ animated: true });
+          }}
+          keyboardShouldPersistTaps="handled" refreshControl={pull}
+          // Feeds the "scrolled to the end" clause and nothing else; the
+          // decision, the debounce and the forward-only rule are all in
+          // src/lib/readReceipt.ts.
+          onScroll={(e) => setAtEnd(atBottom({
+            offsetY: e.nativeEvent.contentOffset.y,
+            viewport: e.nativeEvent.layoutMeasurement.height,
+            content: e.nativeEvent.contentSize.height,
+          }))}
+          scrollEventThrottle={64}>
+          {/* ── the beginning of the conversation, when it is not on screen ──
+              Said ABOVE the oldest bubble, which is where the missing part
+              actually is, and with the control beside the sentence rather than
+              a sentence on its own. The same shape app/(client)/messages.tsx
+              has had since the paging was built. */}
+          {hasOlder || status === 'partial' ? (
+            <View style={{ marginBottom: sp.lg, gap: sp.sm }}>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
+                {hasOlder
+                  ? 'This is not the whole conversation. Earlier messages are on the server and not on this screen.'
+                  : 'That is the whole conversation.'}
+              </Text>
+              {hasOlder ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+                  <Ghost label={loadingOlder ? 'Loading…' : 'Load Earlier Messages'}
+                    onPress={() => { if (loadingOlder) return; heldPosition.current = true; void loadOlder(); }} />
+                </View>
+              ) : null}
+              {olderError ? <Flag tone={t.warn}>{olderError}</Flag> : null}
+            </View>
+          ) : null}
           {/* A thread that failed to load has not been read, so it cannot be
-              reported as one nobody has written in. */}
+              reported as one nobody has written in.
+
+              And a thread that cannot exist is neither of those. "No account"
+              goes FIRST, above the error branch, because a hand-added client
+              produces an empty thread whichever way the read went — the reason
+              is the person having no account, not the connection, and a coach
+              told to try again would be trying for ever. */}
           {msgs.length === 0 && status !== 'loading' ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
-                {status === 'error'
-                  ? 'We could not load this conversation, so we cannot say whether there are messages in it.'
-                  : clientId
-                    ? `No messages yet — say hi${firstName ? ' to ' + firstName : ''}.`
-                    : 'This screen was opened without a client, so there is no thread to show.'}
+                {!clientId
+                  ? 'This screen was opened without a client, so there is no thread to show.'
+                  : !hasAccount
+                    ? `${firstName || 'This client'} was added to your book by hand and has no Repple account, so there is no thread here and nothing you write would reach them. This is not an unanswered conversation. Invite them from your client list and this opens properly from the day they join.`
+                    : status === 'error'
+                      ? 'We could not load this conversation, so we cannot say whether there are messages in it.'
+                      : `No messages yet. Say hi${firstName ? ' to ' + firstName : ''}.`}
               </Text>
             </View>
           ) : null}
@@ -339,8 +513,9 @@ export default function CoachChat() {
             // Local-only: the upload or the insert was refused, so the client
             // cannot see it. The stage says which, because "the video did not
             // upload" is the half a coach can do something about.
+            // Only the MARK is decided here now. The sentence beside it comes
+            // from `receipt.line`, which reads the same `unsent` entry.
             const stage = unsent[m.id];
-            const kind = m.local?.kind ?? (m.attachment.state === 'ok' ? m.attachment.attachment.kind : null);
             const hasMedia = m.attachment.state !== 'none' || !!m.local;
             return (
               <Pressable key={m.id}
@@ -358,16 +533,22 @@ export default function CoachChat() {
                 {/* A clip needs no caption, and an empty bubble under one is a
                     thing the sender did not say. */}
                 {m.body ? (
-                  <View style={{ backgroundColor: mine ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+                  // Theirs is a white surface lifted off the grey ground, the way
+                  // every card in the app now is; the coach's own stays the accent.
+                  <View style={{ backgroundColor: mine ? t.brand : t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.sm + 2, ...(mine ? null : elevation.card) }}>
                     <Text style={{ ...ty.body, color: mine ? t.brandInk : t.ink }}>{m.body}</Text>
                   </View>
                 ) : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, alignSelf: mine ? 'flex-end' : 'flex-start' }}>
-                  {/* Status colours never colour text — the mark carries it. */}
-                  {stage ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>
-                    {stage ? unsentNote(firstName ?? 'they', stage, kind) : m.sending ? 'Sending…' : fmt(m.createdAt)}
-                  </Text>
+                  {/* Rule 6: an unconfirmed bubble (sending, waiting to send,
+                      refused) wears a SyncBadge carrying the receipt's own
+                      sentence; one the server has keeps the plain time line.
+                      Also stops a QUEUED bubble wearing the refused red dot. */}
+                  {(() => {
+                    const sync = bubbleSync(m, mine, stage);
+                    const words = receipt.line(m, fmt(m.createdAt));
+                    return sync ? <SyncBadge state={sync} label={words} /> : <Text style={{ ...ty.caption, color: t.ink3 }}>{words}</Text>;
+                  })()}
                 </View>
               </Pressable>
             );
@@ -375,17 +556,19 @@ export default function CoachChat() {
         </ScrollView>
 
         {/* ── composer ───────────────────────────────────────────────────── */}
-        <Rule />
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
         {pending ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingTop: sp.md }}>
+          // Drawn as the board's attachment card (page 9's "Week 4 Plan.pdf"):
+          // a bordered card with the file at its start and its name beside it.
+          // The same row it always was — nothing is uploaded until Send.
+          <View style={{ marginHorizontal: G, marginTop: sp.md, flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.md, backgroundColor: t.surface, borderRadius: radius.md, ...elevation.card }}>
             {pending.kind === 'image'
               ? <Image source={{ uri: pending.uri }} style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" accessibilityIgnoresInvertColors />
               : <View style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="video" size={18} color={t.ink3} />
                 </View>}
-            <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
               {pending.kind === 'image' ? 'Photo ready to send' : 'Video ready to send'}
             </Text>
             <Pressable onPress={() => setPending(null)} accessibilityRole="button"
@@ -402,30 +585,63 @@ export default function CoachChat() {
             <Text style={{ ...ty.caption, color: t.ink2 }}>{UNFILLED_TOKEN_NOTE}</Text>
           </View>
         ) : null}
+        {/* The board's composer (page 9): one pill holding the box with the
+            attach glyph at its trailing end, and a round green send button
+            beside it. The two quiet controls that used to sit BEFORE the box
+            — the camera and the saved-messages picker — now sit inside the
+            pill at its end, which is where the board draws its attach glyph;
+            they do the same two things they always did. */}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
-          <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="camera" size={18} color={t.ink2} />
-          </Pressable>
-          <Pressable onPress={() => setTplOpen(true)} accessibilityRole="button" accessibilityLabel="Use a saved message" hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="pencil" size={18} color={t.ink2} />
-          </Pressable>
-          <TextInput value={text} onChangeText={setText} editable={canSend}
-            placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : 'This conversation is closed'}
-            placeholderTextColor={t.ink3}
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingStart: sp.lg, paddingEnd: sp.xs, backgroundColor: t.surface, borderRadius: radius.pill, opacity: canSend ? 1 : 0.6, ...elevation.card }}>
+            <TextInput value={text} onChangeText={setText} editable={canSend}
+              // The placeholder is the only thing naming this box, and a placeholder
+              // is drawn only while it is EMPTY — so from the first keystroke it was
+              // an unnamed field, and a closed conversation said nothing at all.
+              // Two ways to be un-sendable, and they are different sentences. A
+              // hand-added client's thread was never opened and never closed —
+              // "This conversation is closed" would be a fourth wrong thing to
+              // tell a coach about somebody who has never had the app.
+              accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : !hasAccount ? 'There is no account to message yet' : 'This conversation is closed'}
+              placeholder={canSend ? 'Type a message…' : !hasAccount ? 'No account to message yet' : 'This conversation is closed'}
+              placeholderTextColor={t.ink3}
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.sm }} />
+            <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={6}
+              style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="camera" size={18} color={t.ink2} />
+            </Pressable>
+            <Pressable onPress={() => setTplOpen(true)} accessibilityRole="button" accessibilityLabel="Use a saved message" hitSlop={6}
+              style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="pencil" size={18} color={t.ink2} />
+            </Pressable>
+          </View>
           {/* Disabled while a send is in flight: tapping twice would put the
               same clip in the bucket twice and the thread twice with it. And
               disabled while blocked — the database refuses the write either
               way, so leaving it live would only turn a closed conversation into
-              an error message. */}
-          <Cta label={busy ? 'Sending…' : 'Send'} onPress={onSend} disabled={busy || !canSend} />
+              an error message. Round and green as the board draws it; the word
+              is spoken rather than printed, and the spinner is the in-flight
+              state the label used to carry as "Sending…". */}
+          <Pressable onPress={onSend} disabled={busy || !canSend}
+            accessibilityRole="button" accessibilityLabel={busy ? 'Sending' : 'Send'}
+            accessibilityState={{ disabled: busy || !canSend, busy }}
+            // The BRIGHT accent under its deep ink, the pair the hero's button
+            // wears (`CtaBright`): the one thing on this screen to press. A send
+            // that cannot go is the grey of "nothing to do", with no fill to
+            // promise otherwise.
+            style={{ width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: canSend ? t.brandBright : t.surface3, ...(canSend ? elevation.float : null) }}>
+            {busy
+              ? <ActivityIndicator size="small" color={t.brandDeep} />
+              : <Icon name={FORWARD_ICON} size={22} color={canSend ? t.brandDeep : t.ink3} />}
+          </Pressable>
         </View>
         {/* The state, in words, under the box. `blockedComposerNote` returns
             null for an unread state rather than guessing: a coach who has not
             blocked anybody must not be told they have. */}
-        {blockNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>{blockNote}</Flag> : null}
+        {!hasAccount && clientId ? (
+          <Flag tone={t.ink3} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>
+            {`${firstName || 'This client'} has no Repple account yet, so there is nowhere for a message to go. Invite them from your client list and the composer starts working from the day they join.`}
+          </Flag>
+        ) : blockNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>{blockNote}</Flag> : null}
       </View>
 
       {/* ── the saved messages ───────────────────────────────────────────
@@ -434,8 +650,9 @@ export default function CoachChat() {
           message, and an editor inside a chat is where somebody edits a
           template by accident while meaning to edit the message. */}
       <Modal visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
             Tapping one puts it in your box, with {firstName ? firstName + '’s' : 'the'} name filled in. Nothing is sent until you press Send.
@@ -447,7 +664,7 @@ export default function CoachChat() {
               <Pressable key={tpl.id ?? tpl.title} onPress={() => useTemplate(tpl.body)}
                 accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
                   {applyTemplate(tpl.body, firstName ?? null, coachName ?? null)}
                 </Text>
@@ -465,11 +682,12 @@ export default function CoachChat() {
           is optional: requiring an explanation puts a writing task in front of
           the person least able to do one at that moment. */}
       <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>
-              {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
+              {reportFor?.messageId ? 'Report This Message' : 'Report This Conversation'}
             </Text>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>{REPORT_EXPLAINER}</Text>
 
@@ -480,14 +698,14 @@ export default function CoachChat() {
                   accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
                   accessibilityState={{ disabled: reportBusy }}
                   style={{ paddingVertical: sp.md, opacity: reportBusy ? 0.5 : 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{o.label}</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
                 </Pressable>
               </View>
             ))}
 
             <Rule />
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything you want to add</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything You Want to Add</Text>
             <TextInput value={reportNote} onChangeText={setReportNote} multiline editable={!reportBusy}
               placeholder="Optional. Nobody but us reads this." placeholderTextColor={t.ink3}
               style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />
@@ -495,7 +713,7 @@ export default function CoachChat() {
             <Pressable onPress={() => setReportFor(null)} accessibilityRole="button"
               accessibilityLabel="Close without reporting anything"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

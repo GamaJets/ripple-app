@@ -3,12 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Your coach invited you — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/join">
 <meta name="description" content="Someone invited you to train with them on Repple. Get the app and enter their code.">
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:title" content="Train with your coach on Repple">
+<meta property="og:description" content="Your coach invited you. Install Repple, sign in, and their programs land in your Train tab.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -18,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -36,6 +77,10 @@ addEventListener('DOMContentLoaded', function () {
 </script>
 </head>
 <body>
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <!--
   THE LANDING PAGE FOR A COACH'S INVITE LINK.
@@ -72,21 +117,31 @@ addEventListener('DOMContentLoaded', function () {
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark" id="b-mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+      <span id="b-mark">
+        <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+          <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+            <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(492 0)" d="M12 0V88H100"/>
+            <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+          </g>
+          <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+          <g class="signal" fill="#22c55e" transform="translate(124 0)">
+            <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+          </g>
         </svg>
       </span>
-      <span id="b-wordmark">Repple</span>
+      <span id="b-wordmark"></span><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -97,7 +152,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
   <div class="page">
 
     <p class="eyebrow">You have been invited</p>
@@ -109,7 +164,10 @@ addEventListener('DOMContentLoaded', function () {
       <p class="eyebrow">Their code</p>
       <p class="mono" id="code" style="font-size:30px;letter-spacing:.14em;margin:6px 0 10px"></p>
       <button class="btn" type="button" id="copy">Copy code</button>
-      <p class="compare-note" id="copied" hidden>Copied.</p>
+      <!-- role="status": pressing Copy changed nothing a screen reader could
+           perceive — the button's own label does not change and this line was
+           simply unhidden. -->
+      <p class="compare-note" id="copied" role="status" hidden>Copied.</p>
       <!-- The handoff. With Repple installed this opens it on the join route
            with the code already carried, so nobody has to memorise six
            characters across an App Store visit — which is where most of the
@@ -174,8 +232,18 @@ addEventListener('DOMContentLoaded', function () {
           <textarea id="asknote" name="note" maxlength="500" rows="3"></textarea>
         </p>
         <p style="margin:14px 0 0"><button class="btn" type="submit" id="asksend">Send it to them</button></p>
-        <p class="compare-note bad" id="askerr" hidden></p>
-        <p class="compare-note" id="askdone" hidden></p>
+        <!-- Five different refusals were written into this paragraph and none of
+             them was ever announced: no live region, no aria-describedby from
+             either field, no aria-invalid, and no focus moved. Somebody who
+             cannot see the form pressed Send, heard nothing at all, and had no
+             way to learn which of the three fields was wrong — on the only form
+             on this site, whose entire purpose is to reach a coach who would
+             otherwise never hear from them.
+             `role="alert"` because a refusal must interrupt; the success note
+             below is `role="status"`, which waits its turn, because nothing is
+             lost by hearing it a moment later. -->
+        <p class="compare-note bad" id="askerr" role="alert" hidden></p>
+        <p class="compare-note" id="askdone" role="status" hidden></p>
         <p class="compare-note" style="margin-top:10px" id="b-noemail">Repple does not email you. Your coach reads this
            and replies themselves, in their own time. If the code above is not exactly the one they sent
            you, there is no coach to pass this to and nobody will see it.</p>
@@ -183,10 +251,9 @@ addEventListener('DOMContentLoaded', function () {
     </div>
 
     <div class="callout">
-      <p><strong>Being released now.</strong> <span id="b-release">Repple</span> is in its first release and the store listings
-         are still going live. The buttons below are the real App Store and Google Play addresses
-         and will open the listing the moment it is published &mdash; if one does not open yet,
-         that app has not finished going out.</p>
+      <p><strong>Not on the stores yet.</strong> <span id="b-release">Repple</span> has no public App Store or
+         Google Play listing. The buttons below are the real addresses and each one opens the moment
+         that listing publishes &mdash; until then it does not open at all.</p>
       <p>You do not have to wait to be useful to your coach: email
          <a id="b-support" href="mailto:support@repplefitness.com">support@repplefitness.com</a> with the code
          above and whether you are on iPhone or Android, and we will get you onto the test build.</p>
@@ -194,8 +261,8 @@ addEventListener('DOMContentLoaded', function () {
 
     <h2 class="hd" id="storehd">Get Repple</h2>
     <div class="btn-row" id="stores">
-      <a class="store" id="ios" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40"></a>
-      <a class="store" id="android" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250"></a>
+      <a class="store" id="ios" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40"><span class="vh"> &mdash; Repple</span></a>
+      <a class="store" id="android" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250"><span class="vh"> &mdash; Repple</span></a>
     </div>
     <p class="compare-note" id="other"></p>
 
@@ -380,11 +447,14 @@ addEventListener('DOMContentLoaded', function () {
   var canon = document.querySelector('link[rel=canonical]');
   if (canon && b.hosts && b.hosts.length) canon.setAttribute('href', 'https://' + b.hosts[b.hosts.length - 1] + '/join');
 
-  // The ripple in the header is Repple's logo, drawn inline. There is no
+  // The R≡PPLE word in the header is Repple's logo, drawn inline inside
+  // #b-mark (a span, because `hidden` is an HTMLElement property and does
+  // nothing on an <svg>); #b-wordmark beside it is empty until a tenant's name
+  // is written into it, so the default page says Repple once. There is no
   // brand's logo to put in its place — this is a static site with no asset
   // pipeline — so it is REMOVED rather than left. Another chain's page carrying
   // its supplier's mark is the same failure as a second brand's app reaching
-  // the store wearing Repple's icon, and the wordmark alone reads as finished.
+  // the store wearing Repple's icon, and the tenant's name alone reads as finished.
   var mark = document.getElementById('b-mark');
   if (mark) mark.hidden = true;
   set('b-wordmark', b.label);
@@ -617,17 +687,47 @@ form.addEventListener('submit', async (e) => {
   const contact = document.getElementById('askcontact').value.trim();
   const note = document.getElementById('asknote').value.trim();
 
-  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  /* Every refusal here is about ONE field, so the field is named in the call
+     and gets three things: aria-invalid, so its state is announced wherever the
+     reader meets it; aria-describedby pointing at the message, so the reason
+     travels with the field rather than living in a paragraph further down; and
+     focus, so the reader is standing on the box they have to change. Without
+     the focus move, "Put in a name" is announced into the air and the reader
+     has to go and find which of three boxes it meant. */
+  const fields = [document.getElementById('askname'), document.getElementById('askcontact')];
+  const clearInvalid = () => fields.forEach((el) => {
+    el.removeAttribute('aria-invalid');
+    el.removeAttribute('aria-describedby');
+  });
+  const fail = (msg, field) => {
+    clearInvalid();
+    err.textContent = msg;
+    err.hidden = false;
+    if (field) {
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-describedby', 'askerr');
+      field.focus();
+    }
+  };
+  clearInvalid();
 
-  if (!name) return fail('Put in a name, so the coach knows who is asking.');
-  if (name.length > MAX_NAME) return fail('Keep the name to ' + MAX_NAME + ' characters or fewer.');
-  if (!contact) return fail('Put in an email address or a phone number, or the coach has no way to answer.');
-  if (contact.length > MAX_CONTACT) return fail('Keep that to ' + MAX_CONTACT + ' characters or fewer.');
+  const nameEl = fields[0], contactEl = fields[1];
+  if (!name) return fail('Put in a name, so the coach knows who is asking.', nameEl);
+  if (name.length > MAX_NAME) return fail('Keep the name to ' + MAX_NAME + ' characters or fewer.', nameEl);
+  if (!contact) return fail('Put in an email address or a phone number, or the coach has no way to answer.', contactEl);
+  if (contact.length > MAX_CONTACT) return fail('Keep that to ' + MAX_CONTACT + ' characters or fewer.', contactEl);
   if (!looksLikeEmail(contact) && !looksLikePhone(contact)) {
-    return fail('That does not look like an email address or a phone number. The coach will reply to whatever you put here, so it has to be something they can reach you on.');
+    return fail('That does not look like an email address or a phone number. The coach will reply to whatever you put here, so it has to be something they can reach you on.', contactEl);
   }
 
-  send.disabled = true;
+  /* aria-disabled and a re-entry guard rather than `disabled`: disabling the
+     button the reader has just pressed takes focus off it, to <body>, for the
+     length of the round trip, and then gives it back to an element they are no
+     longer on. The changed label says it is working; `busy` is what actually
+     prevents a second send. */
+  if (send.dataset.busy === '1') return;
+  send.dataset.busy = '1';
+  send.setAttribute('aria-disabled', 'true');
   send.textContent = 'Sending…';
   const { error } = await sb.rpc('leave_my_details', {
     p_code: code,
@@ -635,7 +735,8 @@ form.addEventListener('submit', async (e) => {
     p_contact: contact,
     p_note: note.slice(0, MAX_NOTE),
   });
-  send.disabled = false;
+  delete send.dataset.busy;
+  send.removeAttribute('aria-disabled');
   send.textContent = 'Send it to them';
 
   /* The only failure this can report is a failure to REACH the server — the
@@ -643,6 +744,8 @@ form.addEventListener('submit', async (e) => {
      happen, which is the one thing an error here actually establishes. */
   if (error) {
     const support = (window.SITE_BRAND && window.SITE_BRAND.supportEmail) || 'support@repplefitness.com';
+    /* No field is at fault here, so none is marked and focus stays on the
+       button they pressed — which is the control they will press again. */
     return fail('That did not send — your details have not gone anywhere. Check your connection and try again, or email ' + support + ' with the code above.');
   }
 

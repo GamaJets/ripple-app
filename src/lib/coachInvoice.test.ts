@@ -21,6 +21,7 @@ import {
   draftMinorUnits,
   invoiceBook,
   invoiceShareBlurb,
+  voidBlocker,
   escapeHtml,
   money,
   kindLabel,
@@ -29,12 +30,14 @@ import {
   readTaxRate,
   statesTax,
   INVOICE_NOT_A_RECEIPT,
+  INVOICE_SETTLEMENT_IS_YOUR_WORD,
   INVOICE_PROVENANCE,
   INVOICE_VOID_NOTICE,
   type CoachInvoice,
   type CoachInvoiceInput,
   type InvoiceDraft,
 } from './coachInvoice';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -244,7 +247,14 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   eq(draftMinorUnits('12.500', 'kwd'), 12500, 'and the code is read case-insensitively');
   eq(draftMinorUnits('12.5', 'KWD'), 12500, 'a short fraction is padded to the currency’s own places, not read as hundredths');
   eq(draftMinorUnits('12', 'BHD'), 12000, 'and a whole dinar is a thousand fils');
-  eq(draftMinorUnits('12.345', 'KWD'), null, 'Stripe charges thousandths in tens, so a fils in the last place is refused rather than rounded');
+  // Stripe's whole-ten rule for the thousandth-unit currencies is deliberately
+  // NOT applied here: a coach invoice is a figure they state and settle against
+  // their own ledger, and Stripe never sees it. `draftAmount` passes
+  // `chargeable: false` — see coachMoney.ts's header for the count of which
+  // boxes are charges and which are a record of money that already moved.
+  // Refusing this used to leave a Kuwaiti coach unable to bill the amount they
+  // had actually agreed.
+  eq(draftMinorUnits('12.345', 'KWD'), 12345, 'a fils in the last place is a real amount on an invoice Stripe never sees');
   eq(draftMinorUnits('12.5000', 'KWD'), null, 'four places is not an amount in a three-place currency');
   eq(draftMinorUnits('40.00', 'OMR'), 40000, 'and the same holds for every one of the five');
   eq(draftMinorUnits('0.000', 'KWD'), null, 'a nought is still not an amount to invoice, whatever the currency');
@@ -256,12 +266,17 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
    typed. The blocker quotes the reader rather than a sentence written here. */
 
 {
-  const kw: InvoiceDraft = { billTo: 'Nasser', description: 'Ten pack', amountText: '12.345', currency: 'KWD', kind: 'requested', issuedOn: '2026-08-31' };
+  // Four places, not three — a figure that is not an amount in KWD at all.
+  // The whole-ten rule is off on this box (see above), so the refusal being
+  // tested here is the one about the SHAPE of the number, which is the one a
+  // coach in Kuwait was being told about in the wrong currency's language.
+  const kw: InvoiceDraft = { billTo: 'Nasser', description: 'Ten pack', amountText: '12.5000', currency: 'KWD', kind: 'requested', issuedOn: '2026-08-31' };
   const b = invoiceBlockers(kw);
   eq(b.length, 1, 'one blocker, about the amount');
   ok(/KWD/.test(b[0]), 'and it names the currency it is talking about');
   ok(!/two decimal/i.test(b[0]), 'and never says "two decimal places" about a three-place currency');
   eq(invoiceBlockers({ ...kw, amountText: '12.500' }).length, 0, 'a real dinar amount is not blocked');
+  eq(invoiceBlockers({ ...kw, amountText: '12.345' }).length, 0, 'and neither is one whose last fils is not a nought — this invoice is not a Stripe charge');
 
   const jp = invoiceBlockers({ ...kw, currency: 'JPY', amountText: '500.50' });
   eq(jp.length, 1, 'a decimal in yen is one blocker');
@@ -320,6 +335,44 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   ok(d.text.includes('Its number has not been reused'), 'and states that the number is not reused');
   ok(invoiceShareBlurb(d, { ...INV, voidedAt: '2026-08-31T09:00:00Z' }).includes('VOIDED'),
     'the share sheet warns before a voided document leaves the phone');
+}
+
+/* ── 6b. and there are two invoices a void may not touch ──────────────────
+   `voidBlocker` is the screen's copy of the rule part 2100 puts in
+   `void_coach_invoice()`. Both refusals exist because the database will refuse
+   anyway: part 660's `coach_invoices_not_both_chk` will not let a row say both
+   that it was cancelled and that it was paid, and the function had no guard for
+   it — so the tap reached the UPDATE, tripped the CHECK, and handed the coach
+   'new row for relation "coach_invoices" violates check constraint
+   "coach_invoices_not_both_chk"' inside an Alert.
+
+   The state is the one a coach reaches by making a mistake: a settlement is
+   written once, there is no un-settle, and the immutable guard's own message
+   sends them to "void it and issue another". So the refusal has to say what is
+   left to do, not only that the answer is no. */
+
+{
+  eq(voidBlocker(INV), null, 'an ordinary open invoice can be voided');
+  eq(voidBlocker({ ...INV, kind: 'received' }), null,
+    'and so can one stating the money was received — the document is still a document, and voiding is how a wrong one is withdrawn');
+
+  const settled = voidBlocker({ ...INV, settledOn: '2026-09-02', settledAt: '2026-09-02T10:00:00Z' });
+  ok(settled !== null, 'an invoice recorded as settled cannot also be voided');
+  ok(!/constraint|relation|coach_invoices/.test(settled ?? ''),
+    'and the refusal is a sentence about the invoice, never a database one');
+  ok((settled ?? '').includes(invoiceDayLabel('2026-09-02')),
+    'it names the day the coach said the money arrived, so they can see which claim is in the way');
+  ok(/new document/i.test(settled ?? ''), 'and names what is left to do, because the number still stands');
+
+  const already = voidBlocker({ ...INV, voidedAt: '2026-08-31T09:00:00Z', voidReason: 'issued twice' });
+  ok(already !== null, 'and a voided one is not voided twice');
+  ok(already !== settled, 'the two refusals are different sentences about different states');
+
+  // Voided wins when a row somehow carries both. The screen reads the first
+  // refusal it is given, and "already voided" is the one that is actionable —
+  // there is nothing to correct on a number already withdrawn.
+  ok(voidBlocker({ ...INV, voidedAt: '2026-08-31T09:00:00Z', settledOn: '2026-09-02' }) === already,
+    'a row carrying both states reads as voided, which is the sentence with nothing left to do');
 }
 
 /* ── 7. read honesty: a document built from a failed read says so ─────────
@@ -391,9 +444,20 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
    assertion that would fail in one of them. */
 
 {
-  eq(invoiceDayLabel('2026-01-01'), '1 Jan 2026', 'the first of January stays the first of January');
-  eq(invoiceDayLabel('2026-12-31'), '31 Dec 2026', 'and the last of December');
-  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), '31 Aug 2026', 'a timestamp is cut to its calendar day, not shifted by one');
+  // Derived rather than pinned. `fmtPointDay` renders in the reader's own
+  // language now, so '1 Jan 2026' was asserting an English formatter's output
+  // and not this function's contract — and a coach on a Norwegian phone was
+  // shown an English month on every invoice so that this literal could stay
+  // short. What these three actually claim survives the change: the day is
+  // read out of the STRING'S OWN PARTS and never shifted by a timezone.
+  eq(invoiceDayLabel('2026-01-01'), fmtPointDay(2026, 0, 1), 'the first of January stays the first of January');
+  eq(invoiceDayLabel('2026-12-31'), fmtPointDay(2026, 11, 31), 'and the last of December');
+  // The load-bearing one, and it needs no formatter at all: 22:30 UTC on the
+  // 31st is the 1st in Auckland and the 31st in London. Comparing the timestamp
+  // against the bare date proves the day was cut, not parsed, in every zone.
+  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), invoiceDayLabel('2026-08-31'),
+    'a timestamp is cut to its calendar day, not shifted by one');
+  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), fmtPointDay(2026, 7, 31), 'and that day is the one the string names');
   eq(invoiceDayLabel(''), '—', 'an empty date is a dash');
   eq(invoiceDayLabel('31/08/2026'), '—', 'and an unparseable one is a dash rather than a guess');
   eq(invoiceDayLabel('2026-13-01'), '—', 'a month that does not exist is a dash');
@@ -453,6 +517,65 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   const noBrand = coachInvoiceDoc(base({ issuer: { status: 'ready', name: 'Sam Whitfield', brand: null } }));
   ok(!noBrand.html.includes('Repple'), 'a missing brand prints no brand rather than substituting the platform');
   ok(!noBrand.html.includes('undefined') && !noBrand.html.includes('null'), 'and never prints the word undefined or null');
+}
+
+/* ── 14. THE FIFTH CLAIM, WHICH IS AN ADDITION AND NOT AN EDIT ────────────
+   Part 660 lets a coach record that a 'requested' invoice was paid. The header
+   of coachInvoice.ts lists exactly five things this document claims and is
+   careful to claim no sixth; the whole risk of the fifth is that it looks like
+   a change to the fourth.
+
+   It is not. `kind` is untouched, on the row and on the page, and the
+   settlement is printed beside it as a separate statement with its own date and
+   its own hedge. Every assertion here is aimed at somebody "simplifying" this
+   later by flipping `kind` to 'received' instead. */
+
+{
+  const paid = withInv({ kind: 'requested', settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z', settleNote: 'Bank transfer' });
+  const d = coachInvoiceDoc(paid);
+
+  ok(d.text.includes('The issuer states this amount is being requested.'),
+    'the claim the document was issued with survives a settlement, word for word');
+  // The date half is derived for the same reason as the block above: the
+  // document renders it in the reader's own language. The sentence around it
+  // is still pinned word for word, because THAT is the claim the document
+  // makes and it must not drift — only the rendering of the day may.
+  ok(d.text.includes(`the issuer states this was paid on ${fmtPointDay(2026, 7, 20)}`),
+    'and the settlement is printed beside it, dated');
+  ok(d.text.includes('How the issuer says it arrived: Bank transfer'),
+    'with the coach’s own words about how, where they gave any');
+  ok(d.text.includes(INVOICE_SETTLEMENT_IS_YOUR_WORD),
+    'and the hedge that says nothing checked it, exactly as `kind` carries one');
+  ok(d.html.includes('Settled:'), 'and it is on the HTML document as well as in the text');
+
+  // Not on a document that does not carry one. A paragraph about a claim the
+  // document does not make is how the tax sentence came to need two versions.
+  const unsettled = coachInvoiceDoc(withInv({ kind: 'requested' }));
+  ok(!unsettled.text.includes(INVOICE_SETTLEMENT_IS_YOUR_WORD),
+    'and appears on no document that has not been settled');
+  ok(!unsettled.text.includes('Settled:'), 'which prints no settlement line either');
+
+  // A note with no settlement behind it prints nothing — the column has a CHECK
+  // saying the same thing, and this is the reader agreeing with it.
+  const orphan = coachInvoiceDoc(withInv({ kind: 'requested', settleNote: 'Bank transfer' }));
+  ok(!orphan.text.includes('Bank transfer'), 'a settle note with no settlement behind it prints nothing');
+
+  // The escaping still holds. `settle_note` is a fifth value a person typed, so
+  // it goes through the same five replacements as the other four — a note
+  // reading "cash <in hand>" must not take the rest of the invoice with it.
+  const nasty = coachInvoiceDoc(withInv({
+    kind: 'requested', settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z',
+    settleNote: 'cash <in hand> & counted',
+  }));
+  ok(nasty.html.includes('cash &lt;in hand&gt; &amp; counted'), 'a typed settle note is escaped like every other typed value');
+  ok(!nasty.html.includes('<in hand>'), 'and reaches the page as text rather than as markup');
+
+  // And a chase date reaches no document at all. It is the coach's own working
+  // note, the client never agreed to it, and printing it would turn it into the
+  // term `CHASE_FROM_IS_NOT_A_DUE_DATE` says it is not.
+  const planned = coachInvoiceDoc(withInv({ kind: 'requested', dueOn: null, chaseFrom: '2026-09-15' }));
+  ok(!planned.text.includes('15 Sep 2026'), 'a chase date is on no document');
+  ok(!planned.html.includes('15 Sep 2026'), 'in either form');
 }
 
 declare const process: { exit(code: number): void };

@@ -54,21 +54,28 @@
 // thread about their own sleep and a coach-side thread about their own revenue.
 // Keying on the account alone would let one screen restore the other's
 // conversation. See src/lib/coachChat.ts.
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+// The month window's instant, recomputed at midnight, on foreground and on
+// focus — never frozen at mount. See src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Notice, Flag, Ghost } from '../../src/ui/kit';
+import { Notice, Flag, Ghost, PageHead, IconPlate } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { useRoster } from '../../src/ui/roster';
 import { useSessions } from '../../src/ui/sessions';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { atRiskClient } from '../../src/lib/trainerMock';
-import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { useClientDrift } from '../../src/ui/clientDrift';
+import { useTenant } from '../../src/ui/tenant';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import { type MyCurrency } from '../../src/lib/currencySource';
+import { currencyForModel } from '../../src/lib/currencyForModel';
+import { deliveredValue, monthToDate, sessionMonth } from '../../src/lib/coachRevenue';
 import { askAboutMyBusiness, coachAvailable, type ChatMsg } from '../../src/lib/coach';
 import { useCoachChat } from '../../src/ui/coachChat';
 import { COACH_THREAD_KEPT_NOTE } from '../../src/lib/coachChat';
@@ -76,6 +83,7 @@ import {
   COACH_ASK_WHAT_GOES, COACH_ASK_WHAT_NEVER_GOES, COACH_ASK_NOT_ADVICE,
 } from '../../src/lib/coachShare';
 import { useEffect } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const SUGGESTIONS = [
   'How is my month going?',
@@ -87,8 +95,27 @@ const SUGGESTIONS = [
 const SYSTEM =
   'You are a business assistant for a self-employed fitness coach. Answer only from the figures in the context. '
   + 'Never invent a figure, never name a client (you have not been given any names), and never state an amount of money '
-  + 'unless the currency field gives you an ISO code — write the code before the amount and never a currency symbol. '
-  + 'Where a figure is null or says "unknown", say you were not given it rather than guessing. Be short and specific.';
+  + 'unless the currency field gives you an ISO code. Write the code before the amount and never a currency symbol. '
+  + 'Where a figure is null or says "unknown", say you were not given it rather than guessing. '
+  // The same two rules the Monday digest carries, in the same words, because
+  // they are about the same two fields and a second wording is a second
+  // definition. sessionsDeliveredThisMonth is counted from recorded outcomes
+  // now, not from the clock, and the unmarked ones are their own state.
+  + 'sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed. Never describe it as '
+  + 'sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither '
+  + 'delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be '
+  + 'marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own '
+  + 'arithmetic, not a payout. '
+  // The denominators, said once. `clients` is the whole book; every other count
+  // is taken over a subset of it, and a model handed "clients: 4, onTrack: 1"
+  // with nothing else to go on subtracts and writes about three clients it has
+  // been told nothing about. The subtraction is not a fourth band — it is the
+  // clients whose training record this app is not entitled to read at all,
+  // because they were typed into Add Client and have no Repple account.
+  + 'clients is the whole book. avgAdherence, onTrack, watch, atRiskLow and atRiskClients are each counted over '
+  + 'only part of it and say so when they are; never subtract one of them from clients, never treat the '
+  + 'difference as a group of clients who are fine, and never describe a client nobody could assess as being '
+  + 'on track or not at risk. Be short and specific.';
 
 export default function TrainerAssistant() {
   const t = useTheme();
@@ -96,9 +123,9 @@ export default function TrainerAssistant() {
   const { ref: barRef, lift } = useKeyboardLift();
   const scroller = useRef<ScrollView>(null);
 
-  const { roster, status: rosterStatus } = useRoster();
-  const { sessions, status: sessionsStatus } = useSessions();
-  const { sessionFee } = useMyTrainerProfile();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { sessions, status: sessionsStatus, refresh: refreshSessions } = useSessions();
+  const { sessionFee, reload: reloadProfile } = useMyTrainerProfile();
 
   // The same gate analytics.tsx uses, and the same reason: every figure here is
   // a sum or a count over one of these two sets, and a sum over part of a set
@@ -106,23 +133,171 @@ export default function TrainerAssistant() {
   const figureStatus = worstStatus(rosterStatus, sessionsStatus);
   const figuresWhole = isWhole(figureStatus);
 
-  const [gymCur, setGymCur] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    myTenantCurrency().then((r) => { if (alive) setGymCur(r.currency); });
-    return () => { alive = false; };
-  }, []);
+  // Who has actually stopped, on the one definition of it — the same read the
+  // Clients screen and Analytics make, through src/ui/clientDrift.ts. The gym
+  // is passed because the door log is tenant-scoped and is not read without it.
+  const { tenant } = useTenant();
+  // Bumped by the gesture below. The drift read re-runs on its own when the
+  // roster's ids change, and a pull-to-refresh usually changes none of them —
+  // so without this the coach could refresh everything on the screen except the
+  // one read the prose is actually about.
+  const [driftNonce, setDriftNonce] = useState(0);
+  /**
+   * Who is asked about, and why it is not the whole roster.
+   *
+   * `readClientActivity` reports `notAsked` for ids that are not uuids, which
+   * is NOT the same set as "clients with no Repple account". `coach_clients.id`
+   * is `uuid DEFAULT gen_random_uuid()`, so a client the coach typed in has a
+   * queryable uuid from the first round trip — the reads behind the verdict all
+   * go through `is_my_client()`, find nothing, and `assessDrift` bands every
+   * one of them `idle`. Six cash clients therefore added six to the figure
+   * below on a read where nothing had gone wrong, and this file's whole subject
+   * is that that figure becomes a paragraph.
+   *
+   * Excluded rather than counted as "nothing recorded", which is what
+   * `unassessed` in src/lib/segments.ts already does for the broadcast
+   * segments, for the same two reasons: nothing of theirs can be read, and
+   * there is no thread to write into either.
+   */
+  const driftSubjects = useMemo(() => roster.filter((c) => c.handAdded !== true), [roster]);
+  const drift = useClientDrift(driftSubjects, tenant?.id ?? null, driftNonce);
+  /**
+   * Whether the record may support a claim about who has STOPPED.
+   *
+   * `useClientDrift` exports `coverage` and `actionable` and its header says
+   * "`actionable` is that gate". This screen checked `drift.drift &&
+   * !drift.error` and stopped there, so it admitted a truncated read —
+   * `readClientActivity` reads capped per 150-id chunk with no `.order()`, and
+   * 56 days of check-ins, workouts, sessions and door swipes across two dozen
+   * clients runs past the ceiling routinely. The clients whose rows fell off
+   * the end come back with no events and band `at_risk` or `idle`.
+   *
+   * On the Analytics screen that is a wrong cell. HERE the number goes into the
+   * MODEL PROMPT, and the model writes the coach a paragraph about clients who
+   * have not stopped — advice about named work to do on people who are
+   * training. Null instead, which the system prompt above already tells the
+   * model to report as a figure it was not given.
+   */
+  const driftCovered = !!drift.coverage && !drift.coverage.truncated && !drift.coverage.notAsked.size;
 
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const deliveredMo = sessions.filter((sx) => sx.status === 'booked'
-    && Date.parse(sx.startsAt) >= monthStart.getTime()
-    && Date.parse(sx.startsAt) <= Date.now());
-  const sessionsMo = figuresWhole ? deliveredMo.length : null;
+  /**
+   * What this coach is priced in, through the one resolver.
+   *
+   * Was `myTenantCurrency()`, which answers about a GYM. That was the whole
+   * answer until part 940 gave a coach with no gym a currency of their own on
+   * `trainers.currency`; since then this screen has been telling the model that
+   * an independent coach's gym had not set one — about a gym that does not
+   * exist — and the model, correctly following its instruction to state no
+   * amount, wrote about that coach's business with every figure of money
+   * removed from it. `fetchMyCurrency` applies the precedence rule in
+   * src/lib/currencySource.ts: the gym first, always, and the coach's own
+   * column only when there is provably no gym.
+   *
+   * The whole answer is held, not just the code, because the model is told
+   * WHICH of six things is true when there is no code — see
+   * src/lib/currencyForModel.ts. `null` is the read still in flight, which is
+   * its own answer and not one of the six.
+   */
+  const [cur, setCur] = useState<MyCurrency | null>(null);
+  const loadCurrency = useCallback(async () => { setCur(await fetchMyCurrency()); }, []);
+  useEffect(() => { void loadCurrency(); }, [loadCurrency]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen refuses to ask anything at all until the roster and the
+   * sessions have both come back whole, and it says so in the notice below. A
+   * coach whose roster read was refused therefore had an assistant that would
+   * not answer for the rest of the session and no way to make it try again —
+   * the one shape this gesture exists for. The session rate comes from the
+   * profile and the currency from the tenant; both are read once and both are
+   * asked for again here, because a refreshed roster paired with a stale rate
+   * is a revenue figure with halves from different minutes.
+   *
+   * The stored conversation is not re-read: it lives on this handset, this
+   * screen is the only thing that writes it, and there is no other copy of it
+   * for a refresh to go and find. */
+  const pull = usePullToRefresh(useCallback(
+    () => { setDriftNonce((n) => n + 1); return Promise.all([refreshRoster(), refreshSessions(), reloadProfile(), loadCurrency()]); },
+    [refreshRoster, refreshSessions, reloadProfile, loadCurrency],
+  ));
+
+  /**
+   * The month, counted from what the record says became of each session.
+   *
+   * This screen was the last place in the app still inferring delivery from the
+   * clock: `status === 'booked'` with a start time in the past, which counts a
+   * no-show, a late cancellation and an hour nobody has marked as work that
+   * happened. That is verbatim the inference src/lib/coachRevenue.ts was
+   * written to end, and 33-session-outcomes.sql before it — and here it fed
+   * PROSE and was then multiplied by the coach's own rate. A wrong figure in a
+   * cell can be caught by a dash; a wrong figure in a paragraph a coach reads
+   * on a Monday morning cannot be caught by anything.
+   *
+   * `now` is fixed for the render: the window's upper bound is "now", and a
+   * bound that moved on every re-render would recompute the month against a
+   * different instant each time.
+   */
+  /* `useNow`, not `useMemo(() => new Date(), [])`. The comment that stood here
+     said `now` was fixed "for the render"; an empty dependency array fixes it
+     for the life of the MOUNT, and this screen is a tab that stays mounted for
+     as long as the app runs. Both bounds of the month window come from it, so a
+     coach who opened this on the 31st and came back on the 1st read last
+     month's figures under a heading saying this month — and a pull-to-refresh
+     re-read the server against the same wrong dates, which made the stale
+     figure look freshly confirmed. See src/ui/today.ts. */
+  const now = useNow();
+  const { from: monthFrom, to: monthTo } = useMemo(() => monthToDate(now), [now]);
+  const month = useMemo(
+    () => sessionMonth(sessions, sessionsStatus, monthFrom, monthTo),
+    [sessions, sessionsStatus, monthFrom, monthTo],
+  );
+  // Null unless the read was whole — `sessionMonth` enforces that itself, so no
+  // caller can forget. `figuresWhole` still gates the roster-derived figures
+  // below, which have no such guard of their own.
+  const sessionsMo = month.delivered;
+  /** Sessions that happened and carry no outcome. Its own field, never added to
+   *  the one above and never dropped: a model handed only "delivered: 4" from a
+   *  month with nine unmarked sessions writes a sentence about a quiet month. */
+  const unmarkedMo = month.unmarked;
   const clients = figuresWhole ? roster.length : null;
+  /**
+   * How much of the book each roster-derived figure below actually covers.
+   *
+   * Every count under this line is taken over a SUBSET of the roster, and until
+   * now not one of them said so. `driftSubjects` drops the hand-added clients
+   * because nothing of theirs can be read; the three adherence bands and the
+   * average are narrower still, because they need a check-in on record and a
+   * linked client who has never done one has `adherence: null` (src/ui/roster.tsx
+   * :377). In the live database 2 of 4 clients are hand-added, so these are not
+   * edge cases — they are the ordinary shape of a coach's book.
+   *
+   * The figures were handed to the model beside `clients: 4` with nothing to
+   * say they were counted over 2, or over 1, or over none. A model given
+   * "clients: 4, onTrack: 0, watch: 0, atRiskLow: 0, atRiskClients: 0" writes
+   * that nobody is drifting and everything is fine, which is a confident
+   * all-clear assembled entirely out of rows we were never entitled to read.
+   * That is the same defect as "0 meals in the last 7 days" about a client with
+   * no account, one level up: an absence summarised as a fact.
+   */
+  const noRecord = figuresWhole ? roster.length - driftSubjects.length : null;
   const adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
   const avgAdh = figuresWhole && adhKnown.length
     ? Math.round(adhKnown.reduce((a, x) => a + x, 0) / adhKnown.length) : null;
-  const revenue = sessionFee == null || sessionsMo == null ? null : sessionsMo * sessionFee;
+  /**
+   * The reason there is no adherence figure, or null when there is one.
+   *
+   * Worded once and used by all four adherence fields, so the average and the
+   * three bands cannot drift into describing the same gap differently. Begins
+   * with the word `unknown` because the system prompt above is written to scan
+   * for exactly that.
+   */
+  const adhGap = !figuresWhole || adhKnown.length ? null
+    : roster.length === 0
+      ? 'unknown: there is nobody on this roster to have an adherence figure'
+      : 'unknown: not one of the ' + roster.length + ' clients on this roster has a check-in on record'
+        + (noRecord ? ' (' + noRecord + ' of them were added by hand and have no Repple account to record one with)' : '')
+        + ', so state no adherence figure and do not say anyone is on track or at risk';
+  const revenue = deliveredValue(month, sessionFee);
 
   // Kept between visits, on this phone, under this account and under this side
   // of the app. `ready` is unconditionally true and `health` unconditionally
@@ -149,16 +324,141 @@ export default function TrainerAssistant() {
     // system prompt tells it to say so rather than fill the gap.
     const ctx = {
       sessionsDeliveredThisMonth: sessionsMo,
-      revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
-      currency: gymCur ?? 'unknown — the gym has not set one, so state no amount',
+      sessionsStillUnmarked: unmarkedMo,
+      revenueAtOwnRate: revenue ?? 'unknown: no session rate set',
+      // Was `gymCur ?? 'unknown — the gym has not set one, so state no amount'`
+      // — one sentence for six different states. Four of them it describes
+      // wrongly, and the commonest since part 940 is a coach with NO GYM, who
+      // was being described to the model as waiting on an owner who does not
+      // exist. `currencyForModel` says which of the six it is, in the third
+      // person, and every one of them still ends in "state no amount".
+      currency: currencyForModel(cur),
       clients,
-      avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
-      atRiskClients: figuresWhole ? roster.filter(atRiskClient).length : null,
-      onTrack: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null,
-      watch: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null,
-      atRiskLow: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null,
-      unreadThreads: figuresWhole && !roster.some((c) => c.unread == null)
-        ? roster.filter((c) => (c.unread ?? 0) > 0).length : null,
+      // Was `avgAdh + '%' : 'no check-ins yet'`. Both halves were wrong.
+      //
+      // The fallback is the sharper one: `avgAdh` is null when NOT ONE client
+      // has an adherence on record, and the commonest way for that to happen is
+      // a book of hand-added clients, who have no Repple account and no
+      // check-in screen to have been silent on. "No check-ins yet" is an
+      // assertion about people who have not failed to do anything — the same
+      // sentence as "0 meals in the last 7 days" about somebody with no app,
+      // and it reads to the model as a fact it may then advise on.
+      //
+      // And the figure itself was an average over whoever happened to have one,
+      // handed over beside `clients: 4` with no denominator, so a model reads
+      // it as the book's adherence. It carries its own coverage now.
+      avgAdherence: avgAdh != null
+        ? adhKnown.length === roster.length
+          ? avgAdh + '%'
+          : avgAdh + '%, averaged over the ' + adhKnown.length + ' of ' + roster.length
+            + ' clients who have a check-in on record, so it is not the whole book'
+        : adhGap,
+      // Was `roster.filter(atRiskClient).length`. `atRiskClient` is
+      // src/lib/trainerMock.ts — `adherence < 80 || staleDays(lastActive) >= 2`
+      // — where `staleDays` recovers a number by regexing a DISPLAY STRING
+      // ("3d ago", written by `ago()` in src/ui/roster.tsx for a human to
+      // read). Its own comment says src/lib/clientDrift.ts models this properly
+      // and is what the Clients screen ranks on. So this screen was writing
+      // prose about the coach's book off a definition the coach's own client
+      // list does not use, and the two numbers disagreed.
+      //
+      // Null, not a count, whenever the training record is not established.
+      // The system prompt already tells the model to say it was not given a
+      // figure rather than guess; a zero here would have it write that nobody
+      // is drifting.
+      //
+      // The count, or the REASON there is not one, in the same field — the
+      // shape `revenueAtOwnRate` two lines above already uses, and the only
+      // shape available: `COACH_BUSINESS_KEYS` in src/lib/coachShare.ts is an
+      // allowlist, a companion field explaining the gap would be dropped on the
+      // way out, and that file's own header is about a prompt written around
+      // three fields that never arrived. `drift.note` is the provider's
+      // sentence, prefixed so it meets the system prompt's "null or says
+      // unknown" rule word for word.
+      //
+      // The gate had one hole left, and it is the emptiest possible read. When
+      // EVERY client was added by hand, `driftSubjects` is empty,
+      // `useClientDrift` short-circuits on `!ids.length` and sets `drift` to
+      // `{}` with a clean coverage (src/ui/clientDrift.ts:126) — so `drift.drift`
+      // is truthy, `driftCovered` is true, the filter runs over nothing and this
+      // field left as `0`. Nobody was assessed and the model was told nobody is
+      // at risk. `drift.note` is null in that state too, so the coach saw no
+      // flag either: filtering the hand-added clients out before the hook sees
+      // them also suppressed the hook's own sentence explaining the gap.
+      //
+      // Said here instead, because this screen is the one that did the
+      // filtering and is therefore the only one that knows what it removed.
+      atRiskClients: !figuresWhole ? null
+        : driftSubjects.length === 0
+          ? (roster.length
+            ? 'unknown: all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+              + 'account, so there is no training record to judge any of them by and nobody has been assessed'
+            : null)
+          : drift.drift && !drift.error && driftCovered
+            ? (() => {
+              const n = driftSubjects.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length;
+              // The denominator travels with the number whenever it is not the
+              // whole book, for the same reason `avgAdherence` now carries one.
+              return noRecord
+                ? n + ' of the ' + driftSubjects.length + ' clients with a Repple account; the other ' + noRecord
+                  + ' were added by hand and have no training record, so they are in no count here'
+                : n;
+            })()
+            : drift.note
+              ? 'unknown: ' + drift.note
+              : null,
+      // The three bands are counted over the clients who have an adherence on
+      // record, which is narrower than the roster and narrower than
+      // `driftSubjects`. `avgAdherence` above carries that denominator; what
+      // these must not do is report `0` when the set is empty, which is three
+      // more all-clears out of an absence.
+      onTrack: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : adhGap) : null,
+      watch: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : adhGap) : null,
+      atRiskLow: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : adhGap) : null,
+      // Was `figuresWhole && !roster.some((c) => c.unread == null)`, a
+      // whole-roster guard on a per-client figure, so this field was null for
+      // the life of any account with one hand-added client — and the live
+      // database has 2 of 4. `app/(trainer)/dashboard.tsx:1327-1344` states the
+      // argument in full and this is the same repair.
+      //
+      // `coach_unread_counts()` (supabase/parts/88-message-read-state.sql:33)
+      // selects `from clients c where c.trainer_id = auth.uid()` and returns
+      // `count(*)::int` — one row per LINKED client, zeros included, never
+      // null. A hand-added row lives in `coach_clients`, is in no thread, and
+      // has never been counted: its null is the absence of a thread and not an
+      // unknown count, and no retry changes it. So the unknown is real for the
+      // linked rows and only for them.
+      //
+      // `driftSubjects` is `roster.filter((c) => c.handAdded !== true)` — the
+      // same set, reused rather than re-derived so that `noRecord` stays its
+      // exact complement.
+      //
+      // And when it is narrower than the roster the count carries its
+      // denominator INSIDE the value, for the reason `avgAdherence` and
+      // `atRiskClients` above already do it that way: `COACH_BUSINESS_KEYS` in
+      // src/lib/coachShare.ts is an allowlist and a companion field explaining
+      // the coverage would be dropped on the way out.
+      //
+      // The empty case is the one that has to be a sentence rather than a
+      // number: with every client hand-added, `driftSubjects` is empty, the
+      // filter runs over nothing and a bare `0` tells the model nobody is
+      // waiting on this coach — an all-clear out of an absence, the same hole
+      // `atRiskClients` had.
+      unreadThreads: !figuresWhole ? null
+        : driftSubjects.length === 0
+          ? (roster.length
+            ? 'unknown: all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+              + 'account, so none of them is in a message thread and nobody has been counted'
+            : null)
+          : driftSubjects.some((c) => c.unread == null)
+            ? null
+            : (() => {
+              const n = driftSubjects.filter((c) => (c.unread ?? 0) > 0).length;
+              return noRecord
+                ? n + ' of the ' + driftSubjects.length + ' clients with a Repple account; the other ' + noRecord
+                  + ' were added by hand and are in no message thread, so they are in no count here'
+                : n;
+            })(),
     };
     const answer = await askAboutMyBusiness([{ role: 'user', content: SYSTEM }, ...next], ctx);
     setBusy(false);
@@ -170,7 +470,7 @@ export default function TrainerAssistant() {
       content: answer.ok ? answer.reply
         : answer.reason === 'unavailable'
           ? 'The assistant is not switched on for this build, so nothing was sent and there is no answer. Every figure it would have used is on your Analytics screen.'
-          : 'That did not reach the assistant, so nothing came back. Nothing about your business was left half-sent — try again in a moment.',
+          : 'That did not reach the assistant, so nothing came back. Nothing about your business was left half-sent. Try again in a moment.',
     }]);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 40);
   };
@@ -181,30 +481,28 @@ export default function TrainerAssistant() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ flex: 1, paddingBottom: lift }}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-            <Icon name="back" size={20} color={t.ink2} />
-          </Pressable>
-          <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="sparkle" size={17} color={t.brandInk} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Assistant</Text>
-            {/* A claim about what the model has, so it answers to the reads. */}
-            <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {figuresWhole ? 'Working from your own figures' : 'Waiting on your figures'}
-            </Text>
-          </View>
+        {/* The board's page head: the round back control, the title on the
+            centre line, and the sparkle plate in the trailing slot where the
+            board puts a page's one mark. The line under the title is a claim
+            about what the model has, so it answers to the reads. */}
+        <View style={{ paddingHorizontal: G, paddingBottom: sp.md }}>
+          <PageHead title="Assistant"
+            subtitle={figuresWhole ? 'Working from your own figures' : 'Waiting on your figures'}
+            trailing={
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.data.purpleSoft, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="sparkle" size={19} color={t.data.purpleInk} />
+              </View>
+            } />
         </View>
-        <Rule />
 
-        <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled" refreshControl={pull}>
 
           {/* Withheld rather than warned about. A paragraph written from nulls
               is a confident answer about a business that does not exist, and
               there is nothing on it for a coach to doubt. */}
           {!figuresWhole ? (
-            <Notice tone={t.warn} kicker="Your figures" title="Not enough has been read to answer from"
+            <Notice tone={t.warn} kicker="Your Figures" title="Not Enough Has Been Read to Answer From"
               note={figureStatus === 'loading'
                 ? 'Still reading your roster and your sessions. Nothing is asked until both have come back, because an answer written from half of them would read exactly like an answer written from all of them.'
                 : figureStatus === 'partial'
@@ -212,15 +510,41 @@ export default function TrainerAssistant() {
                   : 'Your roster or your sessions did not come back at all. That is unknown rather than zero, and an assistant told zero would write you a paragraph about a business with nobody in it.'} />
           ) : null}
 
+          {/* One of this screen's own suggestions is "What should I do about
+              the clients who are drifting?", and the answer to it is the one
+              figure that can be missing while every other figure is whole. Said
+              here, in the provider's own words, so a coach reading the reply
+              knows before they read it which question it could not answer —
+              rather than finding out inside a paragraph, or not at all. */}
+          {figuresWhole && drift.note ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{drift.note}</Flag>
+          ) : null}
+
+          {/* And the exclusion this screen makes itself.
+              `useClientDrift` writes the sentence above about ids IT could not
+              ask about; the hand-added clients never reach it, because
+              `driftSubjects` removes them first. So the one gap that is always
+              present went unmentioned on screen — the coach read an answer
+              about half their book with nothing saying it was half. */}
+          {figuresWhole && !drift.note && noRecord ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              {noRecord === 1
+                ? 'One of your clients was added by hand and has no Repple account. There is no training record to read for them, so they are in none of the figures the assistant is answering from.'
+                : `${noRecord} of your clients were added by hand and have no Repple account. There is no training record to read for them, so they are in none of the figures the assistant is answering from.`}
+            </Flag>
+          ) : null}
+
           {!coachAvailable() ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              The assistant is not switched on for this build. Nothing is sent anywhere and no question is answered — your figures are all on the Analytics screen.
+              The assistant is not switched on for this build. Nothing is sent anywhere and no question is answered. Your figures are all on the Analytics screen.
             </Flag>
           ) : null}
 
           {msgs.map((m, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: sp.md }}>
-              <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+              {/* The answer is a white surface lifted off the grey ground, as
+                  every card now is; the coach's own question stays the accent. */}
+              <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.sm + 2, ...(m.role === 'user' ? null : elevation.card) }}>
                 <Text style={{ ...ty.body, color: m.role === 'user' ? t.brandInk : t.ink }}>{m.content}</Text>
               </View>
             </View>
@@ -246,7 +570,7 @@ export default function TrainerAssistant() {
 
           {thread.status === 'partial' ? (
             <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept — try again after the next restart.
+              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept. Try again after the next restart.
             </Flag>
           ) : null}
 
@@ -254,8 +578,9 @@ export default function TrainerAssistant() {
             <View style={{ marginTop: sp.md, gap: sp.sm }}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => { void send(s); }} accessibilityRole="button" accessibilityLabel={s}
-                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{s}</Text>
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 56, ...elevation.card }}>
+                  <IconPlate icon="sparkle" tone="purple" size={36} />
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink, flex: 1 }}>{s}</Text>
                 </Pressable>
               ))}
             </View>
@@ -267,7 +592,7 @@ export default function TrainerAssistant() {
               nobody has been shown. */}
           <View style={{ marginTop: sp.xl, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              No client is named to the assistant, so it cannot tell you who to message — it can tell you how many and what to do, and the names are on your own roster.
+              No client is named to the assistant, so it cannot tell you who to message. It can tell you how many and what to do, and the names are on your own roster.
             </Text>
             {/* Where the conversation itself is. Said here for the same
                 reason the member's screen says it: a record nobody has been
@@ -275,7 +600,7 @@ export default function TrainerAssistant() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               {thread.kept
                 ? COACH_THREAD_KEPT_NOTE
-                : 'This conversation is not being kept — it goes when you leave the screen, and it is not stored on our servers either.'}
+                : 'This conversation is not being kept. It goes when you leave the screen, and it is not stored on our servers either.'}
             </Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center', flexWrap: 'wrap' }}>
               <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
@@ -295,14 +620,25 @@ export default function TrainerAssistant() {
             coach can type into is a promise that send will do something. */}
         {figuresWhole ? (
           <View>
-            <Rule />
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask about your book…" placeholderTextColor={t.ink3} multiline
-                style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
+                accessibilityLabel="Ask about your book"
+                style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface, borderRadius: radius.xl, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120, ...elevation.card }} />
+              {/* The refusal is drawn — the circle goes to `surface3` with an
+                  empty box — and drawing is the only place it was said. A
+                  screen reader was handed "Send question, button" whether the
+                  box was empty or a question was already in flight, so the tap
+                  did nothing and nothing explained why. `accessibilityState`
+                  is where that belongs; `busy` rides on it too, because "still
+                  thinking" and "nothing typed" are different reasons to wait. */}
               <Pressable onPress={() => { void send(input); }} disabled={!input.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Send question"
-                style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
+                accessibilityRole="button" accessibilityLabel="Send Question"
+                accessibilityState={{ disabled: !input.trim() || busy, busy }}
+                // The bright accent under its deep ink, the pair the hero's
+                // button wears. With nothing to send it is grey, and the arrow
+                // takes the quiet ink so it is not white on pale grey.
+                style={{ width: 48, height: 48, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brandBright : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.head, color: input.trim() && !busy ? t.brandDeep : t.ink3 }}>↑</Text>
               </Pressable>
             </View>
           </View>

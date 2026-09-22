@@ -102,7 +102,11 @@
 // COACH_FEATURES in src/lib/features.ts. This note used to say the line was
 // still owed by another change; it has since landed, and `check:tabs` and
 // `check:reachable` both hold it.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The instant the published window is cut on, recomputed at local midnight, on
+// foreground and on focus. See the card memo below.
+import { useNow } from '../../src/ui/today';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // React Native's own <Image>, which is in every binary ever built. The
 // thumbnails here are still photographs and nothing needs an animated format,
 // so this screen does not have to branch on HAS_NATIVE_IMAGE.
@@ -112,8 +116,8 @@ import { useRouter } from 'expo-router';
 import Svg, { Rect, Text as SvgText, Line, Image as SvgImage, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead, HERO_FIT } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -122,10 +126,12 @@ import { deliveredBetween, fetchMySessions, windowStart } from '../../src/lib/tr
 import type { PtSession } from '../../src/lib/gymSessions';
 import {
   CARD_SIZES, cardSize, charsPerLine, wrapLines, weekCard, resultCard,
+  BRAND_UNREAD_NOTE, LOGO_SET_NOT_FETCHED,
   type CardShape, type ShareCard, type CardBuild, type Stat,
 } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
 import { useRoster } from '../../src/ui/roster';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { fetchPhotosSharedWithMe, type SharedPhoto } from '../../src/lib/photoShare';
 import { photoDataUri, usePublishGrantsFrom } from '../../src/ui/photoPublish';
@@ -147,8 +153,8 @@ import {
  *  thing and a coach should be able to widen the window rather than be told
  *  there is nothing to post about. */
 const SPANS: { days: number; label: string }[] = [
-  { days: 7, label: 'Last 7 days' },
-  { days: 30, label: 'Last 30 days' },
+  { days: 7, label: 'Last 7 Days' },
+  { days: 30, label: 'Last 30 Days' },
 ];
 
 type Mode = 'week' | 'result';
@@ -159,7 +165,11 @@ export default function ShareKit() {
   const { width } = useWindowDimensions();
   const { user: authUser, loading: authLoading } = useAuth();
   const coachId = authUser?.id ?? null;
-  const { tenant } = useTenant();
+  // `status` as well as the tenant. src/ui/tenant.tsx carries it precisely
+  // because "this coach has no gym" and "the gym could not be read" are two
+  // different answers, and on this screen the difference is which NAME gets
+  // published — see `BRAND_UNREAD_NOTE`.
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
 
   const [mode, setMode] = useState<Mode>('week');
   const [shape, setShape] = useState<CardShape>('post');
@@ -194,10 +204,23 @@ export default function ShareKit() {
   // was written on.
   const ig = useMyInstagram();
   const [igBusy, setIgBusy] = useState(false);
-  /** The Pages a fresh connection turned up, when there was more than one with
-   *  an Instagram account on it. Null when there is nothing to choose. A coach
-   *  who also runs a client's gym Page must not have a card posted to the wrong
-   *  business's feed, and there is no undoing a post. */
+  /**
+   * The Pages a fresh connection turned up, when there was more than one with
+   * an Instagram account on it. Null when there is nothing to choose. A coach
+   * who also runs a client's gym Page must not have a card posted to the wrong
+   * business's feed, and there is no undoing a post.
+   *
+   * THIS ALONE DECIDES WHETHER THE PICKER IS DRAWN, and it did not used to.
+   * The list was gated on `pages?.length` AND `ig.state === 'connected'`, and
+   * those two are mutually exclusive: 'connected' is `account.ready`, which is
+   * `ig_user_id is not null` in `my_instagram_account()`, and the edge function
+   * leaves `ig_user_id` null in exactly the case that produces a list —
+   * `chosen` is settled server-side only when precisely one Page has an
+   * Instagram account on it. So the picker was gated on the one state in which
+   * there is nothing to pick, `chooseInstagramPage` was called from nowhere,
+   * and a coach whose Meta login reached two accounts read "Choose the account"
+   * over a screen offering them nothing to choose from.
+   */
   const [pages, setPages] = useState<PageChoice[] | null>(null);
 
   // The client-result inputs. Nothing here is remembered between shares: a
@@ -220,13 +243,33 @@ export default function ShareKit() {
   // null NOTHING is read: there is no list of everybody's photos anywhere in
   // this screen, because a picker that showed one would be the wrong shape even
   // with every permission in place.
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  // Bumped by the pull below and read by the sessions effect, so the refresh
+  // goes through the one read rather than a duplicate of it.
+  const [sessionsNonce, setSessionsNonce] = useState(0);
   const [subject, setSubject] = useState<string | null>(null);
   /** What that client has SENT this coach. Null is unknown, never "none". */
   const [sent, setSent] = useState<SharedPhoto[] | null>(null);
   const [sentStatus, setSentStatus] = useState<LoadStatus>('loading');
-  /** What they have separately agreed may be PUBLISHED. */
-  const grants = usePublishGrantsFrom(subject);
+  /**
+   * Whether the server may be asked about the chosen client at all.
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row with no
+   * account behind it, so there is nothing of theirs on the server and nothing
+   * they could ever have agreed to. The reads ran for them anyway and answered
+   * with zero rows and no error, which this screen drew as a client who had
+   * refused. `handAdded` is the roster's own record of which of its two tables
+   * each row came from; `undefined` is "the roster has not said" and goes on
+   * asking. See src/lib/clientRecord.ts.
+   */
+  const subjectAskable = clientIsQueryable(
+    subject,
+    roster.find((c) => c.id === subject)?.handAdded,
+  );
+  /** What they have separately agreed may be PUBLISHED. Null, not `subject`,
+   *  when there is nobody to ask about: a read that cannot be answered must not
+   *  be made, and its emptiness must not reach the render as an answer. */
+  const grants = usePublishGrantsFrom(subjectAskable ? subject : null);
   const [pickedId, setPickedId] = useState<string | null>(null);
   /** The chosen photo as bytes. Fetched rather than linked, because the export
    *  rasterises the SVG and a remote href is a race it loses silently. */
@@ -235,26 +278,37 @@ export default function ShareKit() {
 
   // Changing the subject drops everything about the previous one. A photo id
   // left over from another client is the one bug this whole feature cannot have.
+  // Lifted out of the effect so the pull below can run it again. It still
+  // clears first: this is also what runs when the SUBJECT changes, and a
+  // photo left over from another client is the one bug this feature cannot
+  // have.
+  const loadSentPhotos = useCallback(async () => {
+    if (!subject) { setSent(null); setSentStatus('loading'); return; }
+    // Nothing is asked about a client the coach typed in by hand. Null and
+    // 'loading', exactly as for no subject at all — deliberately NOT 'ready',
+    // because 'ready' with an empty list is this codebase's way of saying "the
+    // read came back and they have sent none", and nothing came back because
+    // nothing was asked. The render says which answer this is; see
+    // `subjectAskable` above.
+    if (!subjectAskable) { setSent(null); setSentStatus('loading'); return; }
+    setSent(null);
+    setSentStatus('loading');
+    try {
+      const rows = await fetchPhotosSharedWithMe(subject);
+      setSent(rows); setSentStatus('ready');
+    } catch (e) {
+      reportError('shareKit.sharedPhotos', e);
+      // Null, not []. An empty list here would say this client has sent
+      // nothing, which is a claim about them.
+      setSent(null); setSentStatus('error');
+    }
+  }, [subject, subjectAskable]);
+
   useEffect(() => {
     setPickedId(null);
     setPickedUri(null);
-    if (!subject) { setSent(null); setSentStatus('loading'); return; }
-    let live = true;
-    setSent(null);
-    setSentStatus('loading');
-    (async () => {
-      try {
-        const rows = await fetchPhotosSharedWithMe(subject);
-        if (live) { setSent(rows); setSentStatus('ready'); }
-      } catch (e) {
-        reportError('shareKit.sharedPhotos', e);
-        // Null, not []. An empty list here would say this client has sent
-        // nothing, which is a claim about them.
-        if (live) { setSent(null); setSentStatus('error'); }
-      }
-    })();
-    return () => { live = false; };
-  }, [subject]);
+    void loadSentPhotos();
+  }, [loadSentPhotos]);
 
   /** The photos this coach may actually use: what they can see, narrowed by
    *  what the client agreed to. Null while either read is unknown, and the
@@ -317,12 +371,50 @@ export default function ShareKit() {
       }
     })();
     return () => { live = false; };
-  }, [coachId, authLoading]);
+  }, [coachId, authLoading, sessionsNonce]);
 
-  const brand = (tenant?.name || authUser?.name || '').trim();
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This screen composes something that gets POSTED, publicly, under the
+   * coach's name, and every read behind it can be refused. The two that
+   * matter most are the photos a client has SENT and the separate grants
+   * saying which of them may be published: a client withdrawing permission
+   * happens on the client's phone, and this is the only way the coach's copy
+   * of that answer is asked for again before they post.
+   *
+   * The sessions read goes through the nonce the effect already watches
+   * rather than a second copy of it — the null-not-empty rule in there is the
+   * thing that stops a card saying the coach did nothing this week. */
+  const pull = usePullToRefresh(useCallback(() => {
+    setSessionsNonce((n) => n + 1);
+    return Promise.all([
+      loadSentPhotos(), Promise.resolve(grants.reload()), refreshRoster(),
+      Promise.resolve(logo.reload()), Promise.resolve(ig.reload()), Promise.resolve(refreshTenant()),
+    ]);
+  }, [loadSentPhotos, grants, refreshRoster, logo, ig, refreshTenant]));
+
+  /**
+   * Whether the brand on this card is known at all.
+   *
+   * A WHOLE read with no tenant is a real answer — an independent coach has no
+   * gym and their own name is the brand. Anything else is not knowing, and the
+   * fallback below silently turns not knowing into the coach's own account
+   * name across a public post.
+   */
+  const brandKnown = tenantStatus === 'ready';
+  const brand = brandKnown ? (tenant?.name || authUser?.name || '').trim() : '';
   const span = SPANS.find((s) => s.days === days) ?? SPANS[0];
+  /** Both ends of the window the week card counts over. State, not a render-body
+   *  read: this screen is registered `href: null` and does not redraw while
+   *  nobody is touching it. */
+  const nowMs = useNow().getTime();
 
   const build: CardBuild = useMemo(() => {
+    // Before anything else, and it applies to both card kinds: a card is not
+    // composed at all while the name it would carry is unknown. 'unread' is the
+    // existing refusal for a card that cannot be made from a read, and it is
+    // what disables Share and Post to Instagram below.
+    if (!brandKnown) return { ok: false, reason: 'unread', why: BRAND_UNREAD_NOTE };
     if (mode === 'result') {
       return resultCard(
         {
@@ -343,8 +435,20 @@ export default function ShareKit() {
 
     if (rows === null) return weekCard({ brand, spanLabel: span.label, sessions: null, minutes: null, clients: null, logo: logo.dataUri });
 
-    const sinceMs = Date.now() - days * 86_400_000;
-    const untilMs = Date.now();
+    // `nowMs` from `useNow`, and ONE read of it rather than two. Both bounds of
+    // the window this card publishes come from here, and the memo's dependency
+    // list moves when a read answers, when the coach picks a span and never
+    // when time passes — so a screen left open composed "last 7 days" against
+    // the seven days before whenever it mounted, and a card posted on Friday
+    // could be counting Monday to Sunday of the week before. `check:frozen-day`
+    // looks for an EMPTY dependency array and cannot see this shape;
+    // `check:frozen-hook` names it, and this is its entry.
+    //
+    // Two `Date.now()` calls also gave the two bounds two different instants —
+    // harmless at this width and wrong in principle, on the pair that decides
+    // which sessions a coach publishes a number about.
+    const sinceMs = nowMs - days * 86_400_000;
+    const untilMs = nowMs;
     const sessions = deliveredBetween(rows, sinceMs, untilMs);
     // The same predicate, written a second time to get the ROWS rather than the
     // count — and then checked against the count, because two definitions of
@@ -361,7 +465,7 @@ export default function ShareKit() {
     const clients = agrees ? new Set(delivered.map((s) => s.clientId).filter(Boolean)).size : null;
 
     return weekCard({ brand, spanLabel: span.label, sessions, minutes, clients, logo: logo.dataUri });
-  }, [mode, rows, days, span.label, brand, clientName, spanText, figures, note, okFigures, okName,
+  }, [mode, rows, days, nowMs, span.label, brand, brandKnown, clientName, spanText, figures, note, okFigures, okName,
       logo.dataUri, pickedId, pickedUri, photoConsent]);
 
   const size = cardSize(shape);
@@ -389,7 +493,7 @@ export default function ShareKit() {
   });
 
   const share = async () => {
-    if (!build.ok) { Alert.alert('Nothing to share yet', build.why); return; }
+    if (!build.ok) { Alert.alert('Nothing to Share Yet', build.why); return; }
     setBusy(true);
     const png = await capture();
     const r = await sharePngAsset(png ?? '', build.card.filename, build.card.caption);
@@ -397,10 +501,10 @@ export default function ShareKit() {
 
     if (r.sent === 'image') {
       Alert.alert(
-        'Card sent to your share sheet',
+        'Card Sent to Your Share Sheet',
         r.captionCopied
-          ? 'Your caption is on the clipboard — paste it into the post. A share sheet cannot carry an image and its words to the same place, so they travel separately.'
-          : 'Copy your caption from the box on this screen before you post — this version of the app could not put it on the clipboard for you.',
+          ? 'Your caption is on the clipboard. Paste it into the post. A share sheet cannot carry an image and its words to the same place, so they travel separately.'
+          : 'Copy your caption from the box on this screen before you post. This version of the app could not put it on the clipboard for you.',
       );
       return;
     }
@@ -408,10 +512,10 @@ export default function ShareKit() {
     // have different answers and neither of them is "try again".
     const moduleReason = imageShareBlocker();
     Alert.alert(
-      'Sent as text instead',
+      'Sent as Text Instead',
       moduleReason
         ? `${moduleReason}\n\nYour caption has gone to the share sheet.`
-        : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted — you still choose where it goes.',
+        : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted; you still choose where it goes.',
     );
   };
 
@@ -463,37 +567,102 @@ export default function ShareKit() {
   photoOnCardRef.current = !!(build.ok && build.card.photo) || (mode === 'result' && !!pickedId);
 
   const connect = async () => {
+    // Read BEFORE the sign-in, because the reload below is what replaces it.
+    //
+    // The handle of the account this coach was already posting to is the ONLY
+    // thing the app holds that can identify that account in the list Meta comes
+    // back with. `instagram_accounts` is unreadable from a device by design
+    // (part 401) and `my_instagram_account()` returns names and flags — there
+    // is no Page id on this side, and there is no need to invent one: the
+    // handle is the same string on both, `ig_username` on the row and
+    // `igUsername` on a `PageChoice`, both taken from Meta's
+    // `instagram_business_account.username`.
+    const wasPostingTo = ig.account?.ready ? ig.account.username : null;
     setIgBusy(true);
     const r = await connectInstagram();
-    setIgBusy(false);
-    if (!r.ok) { Alert.alert('Not connected', r.reason); return; }
-    ig.reload();
+    if (!r.ok) { setIgBusy(false); Alert.alert('Not Connected', r.reason); return; }
+
     if (r.chosen) {
+      setIgBusy(false);
       setPages(null);
+      ig.reload();
       Alert.alert(
-        'Instagram connected',
+        'Instagram Connected',
         `Cards will post to ${r.chosen.igUsername ? `@${r.chosen.igUsername}` : r.chosen.name}.${r.warning ? `\n\n${r.warning}` : ''}`,
       );
       return;
     }
+
     // Nothing was chosen for them. Either there are several Pages with an
     // Instagram account on them, or there are none — and those are different
     // sentences, because only one of them is a decision the coach can make.
     const withIg = r.pages.filter((p) => p.hasInstagram);
-    setPages(withIg.length ? withIg : null);
-    Alert.alert(
-      withIg.length ? 'Choose the account' : 'Nothing to post to',
-      withIg.length
-        ? 'Your Meta login reaches more than one Instagram account. Pick the one you post from.'
-        : 'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.',
-    );
+    if (!withIg.length) {
+      setIgBusy(false);
+      setPages(null);
+      ig.reload();
+      // The one case this screen cannot repair by itself, and it is said as
+      // plainly as it can be. The deployed function has already written
+      // `ig_user_id: null` over whatever was there, and there is nothing in
+      // this list to put back — see the note on the restore below.
+      Alert.alert(
+        'Nothing to Post To',
+        'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.'
+        + (wasPostingTo ? `\n\nThat sign-in has also cleared the account Repple was posting to. Connect again with the Meta login that reaches @${wasPostingTo}.` : ''),
+      );
+      return;
+    }
+
+    // ── putting back what the reconnect just took away ───────────────────
+    //
+    // The deployed edge function writes `ig_user_id: chosen?.igUserId ?? null`
+    // on EVERY connect, and `chosen` is null whenever the login reaches
+    // anything other than exactly one Instagram account. So a coach who was
+    // posting perfectly well, and who tapped Connect because the banner on this
+    // screen told them their connection expires within the week, has just had
+    // their account unset by the act of renewing it.
+    //
+    // The account they were posting to is named in the list that came back, and
+    // they were posting to exactly one of them a moment ago. Putting that one
+    // back is not a choice being made for them: it is the state they were
+    // already in, restored, and it is the only reading of "connect again and
+    // posting keeps working" that is true. Anything else — a handle that was
+    // renamed at Meta, a genuinely first connection — still shows the list.
+    //
+    // This is a REPAIR, not a prevention. The null is written before the app
+    // hears anything back, so only the function can stop it being written at
+    // all; see the note in supabase/functions/instagram-publish/index.ts.
+    const same = wasPostingTo ? withIg.filter((p) => p.igUsername === wasPostingTo) : [];
+    if (same.length === 1) {
+      const back = await chooseInstagramPage(same[0].id);
+      setIgBusy(false);
+      ig.reload();
+      if (back.ok) {
+        setPages(null);
+        Alert.alert(
+          'Instagram Reconnected',
+          `Cards still post to @${wasPostingTo}. To post from one of the other accounts this login reaches, disconnect below and connect again.`,
+        );
+        return;
+      }
+      // The restore was refused. The list is the way back, and it is now on
+      // the screen rather than nowhere.
+      setPages(withIg);
+      Alert.alert('Pick Your Account Again', `${back.reason}\n\nPick the account you post from.`);
+      return;
+    }
+
+    setIgBusy(false);
+    setPages(withIg);
+    ig.reload();
+    Alert.alert('Choose the Account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from. Nothing posts anywhere until you do.');
   };
 
   const choose = async (p: PageChoice) => {
     setIgBusy(true);
     const r = await chooseInstagramPage(p.id);
     setIgBusy(false);
-    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    if (!r.ok) { Alert.alert('Not Saved', r.reason); return; }
     setPages(null);
     ig.reload();
   };
@@ -502,7 +671,7 @@ export default function ShareKit() {
     setIgBusy(true);
     const r = await disconnectInstagram();
     setIgBusy(false);
-    if (!r.ok) { Alert.alert('Still connected', r.reason); return; }
+    if (!r.ok) { Alert.alert('Still Connected', r.reason); return; }
     setPages(null);
     ig.reload();
   };
@@ -511,7 +680,7 @@ export default function ShareKit() {
     // The gate again at the moment of pressing, not only at the moment of
     // drawing. Nothing between the two can have changed the card without this
     // recomputing, and asking twice costs nothing.
-    if (!igGate.ok) { Alert.alert('Not posted', igGate.why); return; }
+    if (!igGate.ok) { Alert.alert('Not Posted', igGate.why); return; }
     setIgBusy(true);
     const png = await capture();
     // The bytes now exist and this is the last moment before they could leave.
@@ -519,7 +688,7 @@ export default function ShareKit() {
     // those bytes have it in them and nothing else in this function would know.
     if (photoOnCardRef.current) {
       setIgBusy(false);
-      Alert.alert('Not posted', PHOTO_KEEPS_THE_SHARE_SHEET);
+      Alert.alert('Not Posted', PHOTO_KEEPS_THE_SHARE_SHEET);
       return;
     }
     const r = await publishCardToInstagram(igGate.card, png ?? '', build.ok ? build.card.kind : 'week');
@@ -537,7 +706,7 @@ export default function ShareKit() {
     // sending them to check their account is sending them nowhere.
     const permission = /permission/i.test(r.reason);
     Alert.alert(
-      r.containerCreated ? 'Not published' : 'Nothing was posted',
+      r.containerCreated ? 'Not Published' : 'Nothing Was Posted',
       permission ? reviewRefusalNote(r.reason) : r.reason,
     );
   };
@@ -561,18 +730,45 @@ export default function ShareKit() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share Kit</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          A card from your real numbers. You post it — Repple never posts for you.
-        </Text>
+        <PageHead title="Share Kit" subtitle="Your real numbers. You post it" />
+
+        {/* ── the card, FIRST ─────────────────────────────────────────────────
+            The page opens on the thing it makes. It stood under four sections
+            of settings, so a coach chose a mode, a period and a shape before
+            seeing what any of them did; now every control below changes a
+            picture that is already on screen. Nothing about how it is built
+            moved: the same `build`, the same refusals in the same words. */}
+        <Section>
+          <SectionHead title="Your Card" note={build.ok ? `${size.w} × ${size.h}` : undefined} />
+          {build.ok ? (
+            <View style={{ alignItems: 'center' }}>
+              <View style={{ width: previewW, height: previewH, overflow: 'hidden', borderRadius: radius.lg, ...elevation.card }}>
+                {/* Drawn at export size and scaled about its centre, so the
+                    bitmap `toDataURL` takes is the full 1080-wide one whether or
+                    not the native side honours the size options. */}
+                <View style={{ position: 'absolute', start: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
+                  <CardArt ref={svgRef} card={build.card} w={size.w} h={size.h} accent={t.brand} />
+                </View>
+              </View>
+            </View>
+          ) : (
+            // A pending read is not a failed one. `build.reason` is 'unread'
+            // for both, because to the CARD they are the same refusal — but to
+            // the coach they are not, and this is the line they read.
+            build.reason === 'unread' && sessionsPending ? (
+              <Notice kicker="Reading Your Sessions" title="No Card Yet"
+                note="Still reading what you have delivered. Nothing has failed. The figures for a card appear here once the read lands." />
+            ) : (
+            <Notice tone={build.reason === 'unread' ? undefined : t.brand}
+              kicker={build.reason === 'unread' ? 'Could Not Read Your Sessions' : build.reason === 'consent' ? 'Their Call, Not Yours' : 'Nothing to Put on It Yet'}
+              title="No Card"
+              note={build.why} />
+            )
+          )}
+        </Section>
+
 
         {/* ── what the card is about ─────────────────────────────────────── */}
         <Section>
@@ -594,17 +790,16 @@ export default function ShareKit() {
           </Section>
         ) : (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="The result" note="You type it" />
-              <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card — the period, in your words.</Text>
+              <SectionHead title="The Result" note="You Type It" />
+              <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} accessibilityLabel="The period, in your words" />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card: the period, in your words.</Text>
 
               <View style={{ marginTop: sp.lg, gap: sp.sm }}>
                 {figures.map((f, i) => (
                   <View key={i} style={{ flexDirection: 'row', gap: sp.sm }}>
-                    <TextInput value={f.label} onChangeText={(v) => setFigure(i, { label: v })} placeholder={i === 0 ? 'Weight' : 'Label'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} />
-                    <TextInput value={f.value} onChangeText={(v) => setFigure(i, { value: v })} placeholder={i === 0 ? '−8.4 kg' : 'Figure'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} />
+                    <TextInput value={f.label} onChangeText={(v) => setFigure(i, { label: v })} placeholder={i === 0 ? 'Weight' : 'Label'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} accessibilityLabel={`What figure ${i + 1} is called`} />
+                    <TextInput value={f.value} onChangeText={(v) => setFigure(i, { value: v })} placeholder={i === 0 ? '−8.4 kg' : 'Figure'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} accessibilityLabel={`Figure ${i + 1}`} />
                   </View>
                 ))}
               </View>
@@ -612,33 +807,32 @@ export default function ShareKit() {
                   expects the app to fill these in should understand that the
                   refusal is deliberate rather than missing. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Type the figures your client agreed you could post. Repple will not pull them from their record — those are theirs, not yours to publish.
+                Type the figures your client agreed you could post. Repple will not pull them from their record. Those are theirs, not yours to publish.
               </Text>
 
-              <TextInput value={note} onChangeText={setNote} placeholder="Add a line of your own (optional)" placeholderTextColor={t.ink3} multiline
+              <TextInput value={note} onChangeText={setNote} placeholder="Add a line of your own (optional)" placeholderTextColor={t.ink3} multiline accessibilityLabel="A line of your own, optional"
                 style={{ ...field, marginTop: sp.lg, minHeight: 72, textAlignVertical: 'top' }} />
             </Section>
 
-            <Rule />
 
             <Section>
-              <SectionHead title="Their permission" />
+              <SectionHead title="Their Permission" />
               <Check
                 on={okFigures}
                 onPress={() => setOkFigures((v) => !v)}
-                title="They agreed these figures can be posted publicly"
-                note="Without this there is no card to share — not a warning you can tap past."
+                title="They Agreed These Figures Can Be Posted Publicly"
+                note="Without this there is no card to share. This is not a warning you can tap past."
               />
               <Check
                 on={okName}
                 onPress={() => setOkName((v) => !v)}
-                title="They agreed to be named"
+                title="They Agreed to Be Named"
                 note="Off by default, and asked separately. Their name is removed from your caption too."
               />
               {okName ? (
-                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} />
+                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name" />
               ) : (
-                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name — used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} />
+                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name, used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name, typed here so it can be kept off the card" />
               )}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {okName
@@ -650,19 +844,26 @@ export default function ShareKit() {
               </Text>
             </Section>
 
-            <Rule />
 
             {/* ── the photograph, on the client's own say-so ───────────────
                 Built the opposite way round to the figures above: the coach
                 types those because the app cannot verify them, and picks this
                 from a list the database built because it can. */}
             <Section>
-              <SectionHead title="A Photo" note="Their call" />
+              <SectionHead title="A Photo" note="Their Call" />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{SEEING_IS_NOT_PUBLISHING}</Text>
 
               {rosterStatus === 'error' ? (
-                <Notice kicker="Could not read your clients" title="No photos offered"
+                <Notice kicker="Could Not Read Your Clients" title="No Photos Offered"
                   note="Your book could not be read, so there is nobody to look up permissions for. This is not a coach with no clients." />
+              ) : rosterStatus === 'loading' ? (
+                // Two states used to fall past this branch into the chip row
+                // and render as one: a short book and a book still arriving,
+                // both drawn as the whole book. What this screen composes gets
+                // POSTED PUBLICLY under the coach's name, and the coach looking
+                // for the one client whose result they want to put out, and not
+                // finding them, concludes the permission was withdrawn.
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Reading your clients…</Text>
               ) : (
                 <>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
@@ -671,23 +872,58 @@ export default function ShareKit() {
                       return (
                         <Pressable key={c.id} onPress={() => setSubject(on ? null : c.id)}
                           accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={c.name}
-                          style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{c.name}</Text>
+                          style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                          <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink }}>{c.name}</Text>
                         </Pressable>
                       );
                     })}
                   </ScrollView>
 
+                  {rosterStatus === 'partial' ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <Flag tone={t.warn}>
+                        Your book came back short, so these are not all of your clients. A client you
+                        cannot find here has not withdrawn anything. Pull to refresh and look again.
+                      </Flag>
+                    </View>
+                  ) : null}
+
                   {!subject ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PICK_A_CLIENT_FIRST}</Text>
+                  ) : !subjectAskable ? (
+                    /* ── the third answer ───────────────────────────────────
+                       Not "they have agreed to none" and not "we could not read
+                       what they agreed to". A client the coach typed into Add
+                       Client has a `coach_clients` row and no account, so there
+                       is no Progress screen for them to agree on and no photo
+                       for them to have sent. Both reads came back empty with no
+                       error — `coach_clients.id` is `uuid DEFAULT
+                       gen_random_uuid()`, so the id passes every shape test —
+                       and `publishConsentNote('absent')` then printed "Your
+                       client has not agreed to this photo being used in
+                       anything you publish", which is a statement about
+                       somebody's consent invented out of the absence of an
+                       account, on the screen that decides what goes out in
+                       public under the coach's name. It went on to send them to
+                       a Progress screen they do not have.
+
+                       The same distinction `wellnessPanel`'s `not-asked` kind
+                       keeps apart from `unreadable` in
+                       src/lib/coachWellness.ts. */
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      You added this client to your book by hand, so they have no Repple account, no
+                      Progress screen and no photos here. This is not a client who has refused and it
+                      is not a read that failed. There is nothing yet to agree to. The card is made
+                      without a photo.
+                    </Text>
                   ) : sentStatus === 'error' ? (
-                    <Notice kicker="Could not read their photos" title="No photos offered"
+                    <Notice kicker="Could Not Read Their Photos" title="No Photos Offered"
                       note="What this client has sent you could not be read, so nothing is offered. Nothing has been posted and this is not a client who sent none." />
                   ) : grants.status === 'error' ? (
                     // The distinction this whole item turns on. Their photos
                     // read fine; what they AGREED to did not, and a card is not
                     // made out of an unanswered question.
-                    <Notice kicker="Could not read their permissions" title="No photo on this card"
+                    <Notice kicker="Could Not Read Their Permissions" title="No Photo on This Card"
                       note={publishConsentNote('unknown') ?? ''} />
                   ) : usable === null ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading what they have agreed to…</Text>
@@ -736,7 +972,6 @@ export default function ShareKit() {
           </>
         )}
 
-        <Rule />
 
         {/* ── shape ──────────────────────────────────────────────────────── */}
         <Section>
@@ -748,43 +983,21 @@ export default function ShareKit() {
           />
         </Section>
 
-        <Rule />
 
-        {/* ── the card ───────────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Your card" note={build.ok ? `${size.w} × ${size.h}` : undefined} />
-          {build.ok ? (
-            <View style={{ alignItems: 'center' }}>
-              <View style={{ width: previewW, height: previewH, overflow: 'hidden', borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring }}>
-                {/* Drawn at export size and scaled about its centre, so the
-                    bitmap `toDataURL` takes is the full 1080-wide one whether or
-                    not the native side honours the size options. */}
-                <View style={{ position: 'absolute', left: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
-                  <CardArt ref={svgRef} card={build.card} w={size.w} h={size.h} accent={t.brand} />
-                </View>
-              </View>
-            </View>
-          ) : (
-            // A pending read is not a failed one. `build.reason` is 'unread'
-            // for both, because to the CARD they are the same refusal — but to
-            // the coach they are not, and this is the line they read.
-            build.reason === 'unread' && sessionsPending ? (
-              <Notice kicker="Reading your sessions" title="No card yet"
-                note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
-            ) : (
-            <Notice tone={build.reason === 'unread' ? undefined : t.brand}
-              kicker={build.reason === 'unread' ? 'Could not read your sessions' : build.reason === 'consent' ? 'Their call, not yours' : 'Nothing to put on it yet'}
-              title="No card"
-              note={build.why} />
-            )
-          )}
-        </Section>
+        {/* The logo is set and its picture did not arrive. Said HERE, on the
+            screen that publishes, because this is the only surface where an
+            unbranded card is permanent — app/(trainer)/brand.tsx has drawn the
+            same distinction all along. */}
+        {logo.path && logo.pictureStatus === 'error' ? (
+          <Section>
+            <Flag tone={t.warn}>{LOGO_SET_NOT_FETCHED}</Flag>
+          </Section>
+        ) : null}
 
         {build.ok ? (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="Caption" note="Copied when you share" />
+              <SectionHead title="Caption" note="Copied When You Share" />
               <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
                 <Text selectable style={{ ...ty.body, color: t.ink }}>{build.card.caption}</Text>
               </View>
@@ -793,17 +1006,23 @@ export default function ShareKit() {
         ) : null}
 
         <Section>
+          {/* A card that could not be built refuses this control, and the
+              refusal was said ONLY in the palette: the fill drops to
+              `surface2` and the ink to `ink3`. A coach using VoiceOver heard
+              "Share this card, button", tapped it, and got silence — with no
+              way to learn that the figures behind the card had not been read.
+              The state is now announced as well as coloured. */}
           <Pressable onPress={share} disabled={busy || !build.ok} accessibilityRole="button" accessibilityLabel="Share this card"
-            style={{ backgroundColor: build.ok ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
-            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={build.ok ? t.brandInk : t.ink3} />}
-            <Text style={{ ...ty.label, fontWeight: '600', color: build.ok ? t.brandInk : t.ink3 }}>{busy ? 'Preparing…' : 'Share this card'}</Text>
+            accessibilityState={{ disabled: busy || !build.ok, busy }}
+            style={{ backgroundColor: build.ok ? t.brand : t.surface3, borderRadius: radius.md, minHeight: 56, paddingVertical: sp.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={20} color={build.ok ? t.brandInk : t.ink3} />}
+            <Text style={{ ...ty.button, color: build.ok ? t.brandInk : t.ink3 }}>{busy ? 'Preparing…' : 'Share This Card'}</Text>
           </Pressable>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Opens your phone's share sheet — Instagram, TikTok, WhatsApp, or anywhere else you post. You choose the destination and you confirm the post.
+            Opens your phone's share sheet. You choose where, and you confirm the post.
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── the one network posted to directly ──────────────────────────
             Everything above stays exactly as it was. This is one network
@@ -813,16 +1032,24 @@ export default function ShareKit() {
         <Section>
           <SectionHead title="Post to Instagram" note={ig.account?.username ? `@${ig.account.username}` : undefined} />
 
-          {ig.state === 'connected' && pages?.length ? (
+          {/* The list, and it is FIRST and unconditional on the connection
+              state. A list exists only when a sign-in came back without an
+              account settled on, which is precisely the state the connection
+              reads as not-connected in — so anding this with
+              `ig.state === 'connected'` was asking for the one state in which
+              there is nothing to choose, and drew the not-connected branch
+              underneath an alert saying "Choose the account". */}
+          {pages?.length ? (
             <>
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Your Meta login reaches more than one Instagram account. Pick the one you post from.
+                Your Meta login reaches more than one Instagram account. Pick the one you post from. Nothing posts anywhere until you do.
               </Text>
               {pages.map((p) => (
                 <Pressable key={p.id} onPress={() => { void choose(p); }} disabled={igBusy}
                   accessibilityRole="button" accessibilityLabel={`Post to ${p.igUsername ? `@${p.igUsername}` : p.name}`}
-                  style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
+                  accessibilityState={{ disabled: igBusy, busy: igBusy }}
+                  style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.name}</Text>
                 </Pressable>
               ))}
@@ -1031,15 +1258,22 @@ function Segmented({ options, value, onChange }: {
   onChange: (key: string) => void;
 }) {
   const t = useTheme();
+  // The board's segment bar: one `surface2` pill, equal segments, the chosen
+  // one filled in ink with the ground's colour for its text. These were
+  // bordered boxes in the accent, which made every choice on the screen look
+  // like the one primary action.
   return (
-    <View style={{ flexDirection: 'row', gap: sp.sm }}>
+    <View accessibilityRole="radiogroup"
+      style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}>
       {options.map((o) => {
         const on = o.key === value;
         return (
-          <Pressable key={o.key} onPress={() => onChange(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={o.label}
-            style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{o.label}</Text>
-            {o.note ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
+          <Pressable key={o.key} onPress={() => onChange(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }}
+            accessibilityLabel={o.note ? `${o.label}. ${o.note}` : o.label}
+            style={{ flex: 1, minHeight: 40, paddingVertical: sp.sm, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+              style={{ ...ty.label, ...font(on ? '600' : '500'), ...HERO_FIT, color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+            {o.note ? <Text style={{ ...ty.caption, color: on ? t.bg : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
           </Pressable>
         );
       })}
@@ -1052,13 +1286,16 @@ function Segmented({ options, value, onChange }: {
 function Check({ on, onPress, title, note }: { on: boolean; onPress: () => void; title: string; note: string }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={title}
+    // The note is the CONSEQUENCE of the tick, not a second name for it, so it
+    // goes on the hint channel: VoiceOver reads it after the label rather than
+    // instead of the children, which is what an accessibilityLabel would do.
+    <Pressable onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={title} accessibilityHint={note}
       style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
       <View style={{ width: 22, height: 22, borderRadius: 7, marginTop: 2, borderWidth: hairline, borderColor: on ? t.brand : t.ink3, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
         {on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{title}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
       </View>
     </Pressable>

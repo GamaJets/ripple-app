@@ -8,9 +8,10 @@
 // out of here as a figure with a name on it, not dropped from a total.
 import {
   CURRENCY_CONFLICT_NOTE, NO_CURRENCY_NOTE, UNMATCHED_NOTE,
-  centsFromAmount, codeFromUrl, matchAds, unmatchedReasonNote, urlsFromCreative,
+  adCurrencyDecimals, centsFromAmount, codeFromUrl, matchAds, unmatchedReasonNote, urlsFromCreative,
   type AdInsight, type KnownCode, type MatchResult, type UnmatchReason,
 } from './adMatch';
+import { currencyDecimals } from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -92,16 +93,85 @@ eq(codeFromUrl('https://www.repplefitness.com/join?c=hello-world'), 'HELLO-WORLD
 
 /* ── the amount ────────────────────────────────────────────────────────── */
 
-eq(centsFromAmount('120.00'), 12000, 'a provider decimal becomes minor units');
-eq(centsFromAmount('0'), 0, 'a real zero is a real figure');
-eq(centsFromAmount('1234'), 123400, 'a whole-number amount is major units too — money() divides by 100 for every currency');
-eq(centsFromAmount('1,250.50'), 125050, 'a grouped figure is still an amount');
-eq(centsFromAmount(''), null, 'an empty spend is unknown');
-eq(centsFromAmount(null), null, 'and so is a missing one');
-eq(centsFromAmount('unknown'), null, 'and so is a word');
-eq(centsFromAmount('-5'), null, 'a negative spend is not an amount an ad account reports');
-eq(centsFromAmount('999999999.99'), 99999999999, 'the largest figure part 98 will hold is still an amount');
-eq(centsFromAmount('1000000000'), null, 'and one past it is refused rather than stored wrong — the same ceiling a typed figure gets');
+eq(centsFromAmount('120.00', 'GBP'), 12000, 'a provider decimal becomes minor units');
+eq(centsFromAmount('0', 'GBP'), 0, 'a real zero is a real figure');
+eq(centsFromAmount('1234', 'GBP'), 123400, 'a whole-number amount is major units too, in a currency that has hundredths');
+eq(centsFromAmount('1,250.50', 'GBP'), 125050, 'a grouped figure is still an amount');
+eq(centsFromAmount('', 'GBP'), null, 'an empty spend is unknown');
+eq(centsFromAmount(null, 'GBP'), null, 'and so is a missing one');
+eq(centsFromAmount('unknown', 'GBP'), null, 'and so is a word');
+eq(centsFromAmount('-5', 'GBP'), null, 'a negative spend is not an amount an ad account reports');
+eq(centsFromAmount('999999999.99', 'GBP'), 99999999999, 'the largest figure part 98 will hold is still an amount');
+eq(centsFromAmount('1000000000', 'GBP'), null, 'and one past it is refused rather than stored wrong — the same ceiling a typed figure gets');
+
+// ── the hundred that was wrong for twenty-one currencies ──────────────────
+//
+// This was `Math.round(n * 100)` for every currency on earth, under a comment
+// claiming money() divided by a hundred to match. money() delegates to
+// minorMoney, which asks the currency, so a Tokyo coach's ¥1,234 ad was stored
+// as 123400 and shown back to them as JPY 123,400 — and their cost per client
+// with it.
+eq(centsFromAmount('1234', 'JPY'), 1234, 'a yen has no minor unit, so ¥1,234 is 1234 minor units and not 123,400');
+eq(centsFromAmount('50000', 'jpy'), 50000, 'the currency is read case-insensitively, as everywhere else');
+eq(centsFromAmount('1234.5', 'JPY'), 1235, 'a fraction a yen does not have is rounded rather than dropping the ad');
+eq(centsFromAmount('12.340', 'KWD'), 12340, 'a dinar has a thousand fils, so 12.340 is 12340 of them and not 1234');
+eq(centsFromAmount('12.345', 'KWD'), 12345,
+  'a third place a Kuwaiti ad account really billed is kept — Stripe’s whole-ten rule is about charges, not about what an ad cost');
+eq(centsFromAmount('12.3456', 'KWD'), 12346, 'and a fourth place is rounded, not refused');
+eq(centsFromAmount('12.345', 'GBP'), 1235, 'rounding is half-up, on the digits');
+eq(centsFromAmount('12.344', 'GBP'), 1234, 'and down below the half');
+eq(centsFromAmount('120.00', null), null, 'no currency, no figure — there is no default one to scale by');
+eq(centsFromAmount('120.00', ''), null, 'and an empty currency is the same silence as a missing one');
+
+// The copy of Stripe's two lists in adMatch.ts must not drift from the one in
+// coachMoney.ts. It cannot import it — adMatch is loaded by three edge
+// functions and Deno cannot resolve an extensionless relative specifier — so
+// the assertion is what holds them together.
+//
+// ── and the list below used to hold nothing but codes ─────────────────────
+//
+// Which is why it went on passing over a real divergence. coachMoney's
+// `currencyDecimals` was given a `/^[a-z]{3}$/` shape test; adMatch's copy kept
+// `if (!cur) return null`, so the two genuinely disagreed on every non-code —
+// 'pounds' was null in one and 2 in the other — and this loop could not see it,
+// because a loop walking twenty-seven currency CODES exercises the one branch
+// where a truthiness guard and a shape test cannot differ. A parity assertion is
+// only worth the inputs it holds. The non-codes are now first.
+const NON_CODES = [
+  'pounds',      // a word in a currency column; `moneyIn` lists five columns with no format check
+  'GB',          // a country, two letters
+  '£',           // a symbol
+  'Japanese yen',// a name, with a space
+  'usdt',        // four letters
+  'us1',         // right length, wrong alphabet
+  'ＵＳＤ',        // full-width — three characters, and not [a-z] after toLowerCase()
+  '',            // nobody said
+  '   ',         // and whitespace is the same silence, after trim()
+];
+for (const c of NON_CODES) {
+  eq(adCurrencyDecimals(c), currencyDecimals(c),
+    `adMatch and coachMoney agree that ${JSON.stringify(c)} is not a currency`);
+  eq(adCurrencyDecimals(c), null, `and ${JSON.stringify(c)} has no number of decimal places at all`);
+}
+for (const c of ['jpy', 'krw', 'vnd', 'bif', 'clp', 'djf', 'gnf', 'kmf', 'mga', 'pyg', 'rwf', 'ugx', 'vuv', 'xaf', 'xof', 'xpf',
+                 'bhd', 'jod', 'kwd', 'omr', 'tnd', 'gbp', 'usd', 'aed', 'eur', '', 'zzz']) {
+  eq(adCurrencyDecimals(c), currencyDecimals(c), `adMatch and coachMoney agree on how many places ${c || '(nothing)'} has`);
+}
+// The other half of the shape test, and the reason it is a shape test rather
+// than an allowlist: a stated-but-unrecognised code is still two places, in
+// both copies. 'aed' is a real currency this build does not name, and answering
+// null for it would drop a dirham gym's real money — the worse failure of the
+// two. wholeUnits.test.ts:82 is where that standing rule is written down.
+eq(adCurrencyDecimals('zzz'), 2, 'an unrecognised but well-formed code is two places, not null');
+eq(adCurrencyDecimals('aed'), 2, 'and so is a real currency this build has not been told about by name');
+
+// And the same rule where it turns into an amount. This is the assertion that
+// would have failed on the drifted guard: a word scaled a spend by an assumed
+// hundred and filed it beside revenue that was scaled by the real currency.
+eq(centsFromAmount('12.345', 'pounds'), null, 'a word is not a currency, so an ad spend in it has no minor units — this was 1235');
+eq(centsFromAmount('120.00', '£'), null, 'nor is a symbol — this was 12000');
+eq(centsFromAmount('120.00', 'GB'), null, 'nor is a country code');
+eq(centsFromAmount('120.00', '   '), null, 'and whitespace is the same silence as nothing at all');
 
 /* ── pulling destinations off whatever shape the creative arrived in ───── */
 

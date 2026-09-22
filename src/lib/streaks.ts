@@ -5,6 +5,10 @@
 // can light up confetti on a new milestone.
 import type { WorkoutEntry } from './mockData';
 import { isBodyweightSet, setLoadKg, entryTonnage, type BodyweightHistory } from './bodyweightSets';
+// The product's week anchor. Sunday, everywhere, for the reason that file's
+// header gives: a week measured from a different place on two handsets puts the
+// same seven sessions in different buckets.
+import { startOfWeek } from './weekStart';
 // A held set's first number is seconds, not reps. Epley over it returns a
 // strength figure computed from a stopwatch, so this board leaves holds alone
 // and src/lib/timedSets.ts keeps the record they do belong on.
@@ -97,6 +101,41 @@ export function currentStreakFrozen(log: WorkoutEntry[], freezes: number = 0, no
     budget--; used++; frozen.push(keyOf(cursor)); stepBack(cursor);
   }
   return { streak, freezesUsed: used, frozen };
+}
+
+/**
+ * THE streak figure. The one a member is shown, wherever they are shown one.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * There were two. `currentStreakFrozen(log, freezeBudget(log))` was the ring on
+ * Home and the hero on Consistency; the raw `currentStreak` was the banner four
+ * inches above that ring, the Milestone Card exported as an image and posted to
+ * Instagram, the Activity feed, and the Weekly Report — including the figure
+ * handed to the model that writes the report's summary.
+ *
+ * So a member whose freeze had bridged a missed day read "23" in the ring and,
+ * on the same screen, "A freeze is holding your 12-day streak", and the card
+ * they posted said 12. The freeze feature exists to tell somebody that a missed
+ * day did not cost them the run, and it was being contradicted by the screen
+ * that granted it.
+ *
+ * The frozen figure wins because it is the one the product PROMISES: the budget
+ * is earned from the log (`freezeBudget`), the app spends it silently, and a
+ * member who is told their streak survived must not then be shown the number it
+ * would have been if it had not.
+ *
+ * The budget is derived here rather than passed in, for the same reason it is
+ * derived in `freezeBudget` rather than persisted: two callers computing their
+ * own budget is exactly how two answers happen.
+ *
+ * `currentStreak` stays exported and is still the right function for one
+ * question — "would this chain have held with no help" — which is what
+ * `streakRisk` asks. Nothing else should call it. A screen showing a member
+ * their streak calls this.
+ */
+export function shownStreak(log: WorkoutEntry[], now: number = Date.now()): number {
+  return currentStreakFrozen(log, freezeBudget(log), now).streak;
 }
 
 export interface StreakRisk { atRisk: boolean; streak: number; trainedToday: boolean }
@@ -208,7 +247,52 @@ export function isNewPR(log: WorkoutEntry[], entry: WorkoutEntry, history: Bodyw
 }
 
 export interface WeekStats {
+  /**
+   * Log ENTRIES in the window — one per exercise, not one per session.
+   *
+   * The name is the historical one and it has always meant this: `workouts`
+   * table rows, and this app writes one of those per movement (see
+   * `WorkoutEntry` in src/lib/mockData.ts, and `logWorkouts` in
+   * app/(client)/workouts.tsx, which maps a session's exercises to one entry
+   * each). app/(trainer)/my-training.tsx has labelled it "Exercises" all
+   * along, which is what it is.
+   *
+   * It is NOT a count of sessions and it is NOT a count of training days.
+   * Three client screens printed it as one or the other: Home's goal ring read
+   * "7 of 4 this week · goal was 4" after a single Monday of seven movements,
+   * and the Weekly Report — the document a member sends to their coach, and
+   * the fact list handed to the model that writes its summary — said "Trained
+   * 7 time(s) across 1 active day(s)". Use `sessions` or `days` for those.
+   */
   workouts: number;
+  /**
+   * There is deliberately NO `sessions` count here, and the reason is a fact
+   * about the live data rather than a preference.
+   *
+   * A first version of this interface added one, defined as distinct
+   * `performed_at` — the definition `lifetimeTotals` in src/lib/longView.ts and
+   * `sessionsOf` in src/lib/clientTraining.ts both use, and which longView
+   * states outright: "One session writes every exercise with the same
+   * performed_at". That is true of ONE write path. app/(client)/workouts.tsx
+   * stamps every exercise of a save with one `nowISO`, so logging a whole
+   * session in one go does write a single timestamp.
+   *
+   * Members do not log in one go. Checked against production: one member's
+   * 17 August is seven rows with SEVEN distinct timestamps, 16:14 to 17:12 —
+   * MixedCardio, Treadmill, Hip Thrust, Squat, Hip abduction, Calf raise, Dead
+   * lift. That is one visit to one gym, saved as they went. Distinct
+   * timestamps counts it as seven. The next day is seven more, and the day
+   * after six.
+   *
+   * So a session count derived from this data would be a count of SAVES, and
+   * it would differ from `workouts` only for the member who logs everything at
+   * the end — which is to say it would be wrong in the same direction, by
+   * nearly the same amount, while sounding precise. There is no session id to
+   * fall back on: `workouts.session_id` exists and is NULL on every row.
+   *
+   * `days` below is what this app can actually prove, and it is what every
+   * member-facing count now shows.
+   */
   volumeKg: number;
   kcal: number;
   days: number;
@@ -220,14 +304,17 @@ export interface WeekStats {
 }
 
 /**
- * Totals for the trailing 7 days. Volume = Σ reps × load across all sets.
+ * Totals over everything logged at or after `sinceMs`. Volume = Σ reps × load.
+ *
+ * The engine under both windows below, because the two of them differ ONLY in
+ * where the window opens and a second copy of this loop is how they would come
+ * to disagree about the same fortnight.
  *
  * `history` is the member's weight over time; without it a bodyweight set has
  * no load and lands in `unpricedSets` rather than being counted as zero.
  */
-export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
-  const since = now - 7 * DAY;
-  const recent = log.filter((e) => Date.parse(e.t) >= since);
+export function statsSince(log: WorkoutEntry[], sinceMs: number, history: BodyweightHistory = []): WeekStats {
+  const recent = log.filter((e) => Date.parse(e.t) >= sinceMs);
   let volume = 0, kcal = 0, unpriced = 0;
   for (const e of recent) {
     kcal += e.kcal ?? 0;
@@ -244,11 +331,52 @@ export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history
   };
 }
 
+/**
+ * Totals for the trailing 7 days — a ROLLING 168 hours, ending now.
+ *
+ * Right for a question about load and recovery, which is what it was written
+ * for: `deloadCheck` and the rest-day suggestion in app/(client)/restday.tsx
+ * ask "how much have you done lately", and lately does not reset on a Sunday.
+ *
+ * WRONG for anything captioned "this week", and it was being used for exactly
+ * that on three screens. See `thisWeekStats` below.
+ */
+export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
+  return statsSince(log, now - 7 * DAY, history);
+}
+
+/**
+ * Totals for the CALENDAR week the member is in — from local midnight on the
+ * day the week opened, which `src/lib/weekStart.ts` fixes at Sunday for the
+ * whole product.
+ *
+ * ── What this is the fix for ──────────────────────────────────────────────
+ *
+ * `weekStats` is a rolling 168 hours and says so. Three screens printed it
+ * under the words "this week" anyway, while `week.tsx`, `trends.tsx` and
+ * `consistency.tsx` measured the same phrase with `startOfWeek`. So the same
+ * member, on the same Monday morning, read three different answers to one
+ * question — and the sharpest of them was the goal ring on Home, which could
+ * say "4 of 4 this week · goal met" on a Monday to somebody who had not
+ * trained since the week opened, because it was still counting the previous
+ * Wednesday and Thursday.
+ *
+ * `weekStart.ts` opens with the reason the anchor is product-wide and not
+ * per-device: otherwise "the same seven sessions land in different buckets on
+ * two handsets". A rolling window is that failure without the second handset.
+ *
+ * Calendar arithmetic, via `startOfWeek`, so a week containing a clocks change
+ * is still seven days and not 167 hours.
+ */
+export function thisWeekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
+  return statsSince(log, startOfWeek(now).getTime(), history);
+}
+
 /** A short, friendly milestone label for a streak count (for the confetti banner). */
 export function streakMilestone(streak: number): string | null {
-  if (streak >= 30) return `${streak}-day streak — unstoppable! 🔥`;
-  if (streak >= 14) return `${streak}-day streak — two weeks strong! 🔥`;
-  if (streak >= 7) return `${streak}-day streak — a full week! 🔥`;
-  if (streak >= 3) return `${streak}-day streak — keep it rolling! 🔥`;
+  if (streak >= 30) return `${streak}-day streak. Unstoppable! 🔥`;
+  if (streak >= 14) return `${streak}-day streak. Two weeks strong! 🔥`;
+  if (streak >= 7) return `${streak}-day streak. A full week! 🔥`;
+  if (streak >= 3) return `${streak}-day streak. Keep it rolling! 🔥`;
   return null;
 }

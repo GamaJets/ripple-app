@@ -50,6 +50,7 @@ import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { useRoster } from './roster';
 import { useTenant } from './tenant';
+import { useNow } from './today';
 import {
   readClientActivity, isQueryableId, DEFAULT_WINDOWS,
   type ActivityEvent, type Drift,
@@ -60,6 +61,14 @@ import {
 } from '../lib/nudge';
 import { assessCadence, worthRaising, byLateness, type Cadence } from '../lib/cadence';
 import { fetchCoachPrefs } from '../lib/coachPrefsStore';
+// Who the coach is, with the failure kept rather than collapsed. `sessionUid`
+// keeps the getSession() call this hook has always made — it answers from
+// device storage, so it answers offline, which is why this is not getUser() —
+// and classifies its `error` once, in src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
+import { authGateMessage } from '../lib/authedUid';
+import type { AuthReadFate } from '../lib/authReadFate';
+import { useAuth } from './auth';
 
 /**
  * How far back the record of what the coach did is read.
@@ -179,6 +188,8 @@ function rowToRecord(r: any): NudgeRecord {
 
 export function useNudges(): NudgeBook {
   const authRev = useAuthRevision();
+  // Handed to the store rather than re-resolved inside it — see coachPrefsStore.
+  const authUid = useAuth().user?.id ?? null;
   const { roster, status: rosterStatus } = useRoster();
   const { tenant } = useTenant();
   const tenantId = tenant?.id ?? null;
@@ -186,6 +197,18 @@ export function useNudges(): NudgeBook {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const [coachId, setCoachId] = useState<string | null>(null);
+  /**
+   * Why there is no `coachId`, when there is not one.
+   *
+   * Null while there IS one. The three writes below all refused with the
+   * sentence "Not signed in, so this could not be recorded" for any falsy
+   * coachId, which during an outage told a coach who is signed in that they are
+   * not — over an action that never reached the insert. `authGateMessage` says
+   * which of the two it was, and its unreadable arm ends in "nothing has been
+   * changed", which is literally true here: every path returns before the
+   * write.
+   */
+  const [authFate, setAuthFate] = useState<AuthReadFate | null>(null);
   // The coach's own floor on how often the same person may be raised.
   // `undefined` until the read lands and null when they have not set one; the
   // two are the same behaviour and are kept apart anyway, because a read that
@@ -195,14 +218,14 @@ export function useNudges(): NudgeBook {
   useEffect(() => {
     let live = true;
     (async () => {
-      const { prefs, status: st } = await fetchCoachPrefs();
+      const { prefs, status: st } = await fetchCoachPrefs(authUid);
       // A refused read is the app's own pacing, not a zero. `cooldownFloor`
       // refuses anything outside 1..365 anyway, so this is belt and braces on
       // the one value that could silence a coach's whole list.
       if (live) setCooldownPref(st === 'ready' ? prefs.nudgeCooldownDays : null);
     })();
     return () => { live = false; };
-  }, [authRev]);
+  }, [authRev, authUid]);
 
   // null until the stored week comes back. See `watchDigestDue` on NudgeBook.
   const [digestSeen, setDigestSeen] = useState<string | null | undefined>(undefined);
@@ -232,13 +255,50 @@ export function useNudges(): NudgeBook {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setLoaded(EMPTY); setStatus('ready'); return; }
     try {
-      // getSession and not getUser: getUser REJECTS when nobody is signed in,
-      // which would latch this into 'error' before anybody has logged in. No
-      // session is a true answer, and its true board is an empty one.
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id ?? null;
+      // ── 0 · who is asking, and which answer that is ────────────────────
+      //
+      // getSession and not getUser, and `sessionUid` is what keeps it that way:
+      // getSession answers from device storage, so it answers in a basement
+      // gym, and src/lib/sessionUidRead.ts records what swapping it for
+      // getUser() cost a member wearing a glucose monitor.
+      //
+      // What this line used to be was `sess?.session?.user?.id ?? null` with the
+      // `error` thrown away, and it is the reason this comment is now four
+      // paragraphs long. getSession() does not reject when the auth server is
+      // unreachable: if the stored access token has expired and the refresh
+      // cannot get out, it RESOLVES with `{ data: { session: null }, error }` —
+      // byte-for-byte what it resolves with for a coach who has never signed
+      // in. So `uid` was null for an outage, this function took the branch
+      // below, and the FIFTH read of this hook — the one that decides whether
+      // anybody is drifting — answered 'ready' over an empty board.
+      //
+      // 'ready' with an empty board is not a neutral state on this screen. It
+      // is `boardNote(board)` saying "Nobody to chase", the Monday watch digest
+      // opening on nothing, and a coach being told in so many words that every
+      // client on their book is holding their pattern. The roster was never
+      // read. That sentence is assembled entirely out of an absence, and it is
+      // the one thing this hook must never say.
+      //
+      // Told apart by `fate`, never by `!who.uid`: UidRead's signed-in member
+      // is `string`, which includes '', so `!who.uid` does not narrow the union
+      // and the compiler is right to refuse `who.uid` as a string after it.
+      const who = await sessionUid('nudges.read');
+      setAuthFate(who.fate);
+      if (who.fate === 'unreadable') {
+        // Nothing was established about who this coach is, so nothing may be
+        // said about who has gone quiet. 'error' is this hook's own word for
+        // that and `note` already has the sentence: "This is not a quiet week —
+        // it is a failed read."
+        setCoachId(null);
+        setLoaded(EMPTY);
+        setStatus('error');
+        return;
+      }
+      const uid = who.uid;
       setCoachId(uid);
-      if (!uid) { setLoaded(EMPTY); setStatus('ready'); return; }
+      // Genuinely nobody signed in. No session is a true answer, and its true
+      // board is an empty one — there is no roster to have gone quiet.
+      if (uid === null) { setLoaded(EMPTY); setStatus('ready'); return; }
 
       // ── 1 · who on the book actually has a Repple account ───────────────
       //
@@ -328,6 +388,11 @@ export function useNudges(): NudgeBook {
   // candidates the board was built from, so a client cannot be assessable by one
   // and not the other — and only for candidates whose activity actually came
   // back, which is `activity.read` and not "their event list is empty".
+  /** The instant lateness is measured from. `useNow()` rather than a
+   *  `Date.now()` in the memo body, and it is IN the dependency list below —
+   *  see src/ui/today.ts. */
+  const nowMs = useNow().getTime();
+
   const dueBack = useMemo(() => {
     if (combined !== 'ready' || !board) return null;
     const already = new Set<string>([
@@ -338,16 +403,16 @@ export function useNudges(): NudgeBook {
     for (const c of loaded.candidates) {
       if (!c.activity.read) continue;
       if (already.has(c.clientId)) continue;
-      const cadence = assessCadence(c.activity.events, Date.now(), DEFAULT_WINDOWS.historyDays);
+      const cadence = assessCadence(c.activity.events, nowMs, DEFAULT_WINDOWS.historyDays);
       if (!worthRaising(cadence)) continue;
       rows.push({ clientId: c.clientId, name: c.name, cadence });
     }
     return byLateness(rows);
-  }, [combined, board, loaded.candidates]);
+  }, [combined, board, loaded.candidates, nowMs]);
 
   const note = useMemo(() => {
     if (combined === 'error') {
-      return 'Could not work out who has gone quiet, so nothing is suggested. This is not a quiet week — it is a failed read.';
+      return 'Could not work out who has gone quiet, so nothing is suggested. This is not a quiet week. It is a failed read.';
     }
     if (combined === 'partial') {
       return 'Only part of the record came back, so no client is suggested: a gap in it looks exactly like silence.';
@@ -372,13 +437,31 @@ export function useNudges(): NudgeBook {
     observed: string,
   ): Promise<NudgeWrite> => {
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so this could not be recorded — and an unrecorded nudge is one you will be asked about again tomorrow.' };
+      // The sentence depends on WHY there is no coachId. An outage is not a
+      // sign-out, and telling a working coach to sign in again is advice that
+      // cannot help them. Both arms say the same true thing about the record:
+      // nothing was written, so this client can be raised again tomorrow.
+      const why = authFate
+        ? authGateMessage(authFate)
+        : 'Not signed in, so this could not be recorded.';
+      return { ok: false, reason: `${why} An unrecorded nudge is one you will be asked about again tomorrow.` };
     }
     const { data, error } = await supabase.from('client_nudges').insert({
       coach_id: coachId,
       client_id: clientId,
       action,
-      muted_days: mutedDaysFor(action, drift),
+      // The coach's OWN cooldown, which the board is already built with and
+      // the write was not. `mutedDaysFor(action, drift)` with no bounds falls
+      // back to MIN_COOLDOWN_DAYS/MAX_COOLDOWN_DAYS (src/lib/interventions.ts),
+      // so the number STORED had nothing to do with the setting — while the
+      // number the screen promised did: app/(trainer)/nudges.tsx prints
+      // `mutedDaysIfSent` and `mutedDaysIfDismissed`, both computed from
+      // `board`, which is built at `bounds: { minCooldownDays: cooldownPref }`
+      // sixty lines above. So a coach who set "no more often than every 45
+      // days" read "they will not be suggested again for 45 days" and got 28,
+      // and a coach who set 3 got 7. `mutedBy` reads `muted_days` back
+      // verbatim by design, so nothing downstream repairs it.
+      muted_days: mutedDaysFor(action, drift, { minCooldownDays: cooldownPref }),
       observed: observed.slice(0, 500),
       quiet_days: drift.quietDays,
     }).select('id').single();
@@ -387,13 +470,13 @@ export function useNudges(): NudgeBook {
       return {
         ok: false,
         reason: action === 'sent'
-          ? 'Your message was sent, but we could not record it — so this client may be suggested again.'
+          ? 'Your message was sent, but we could not record it, so this client may be suggested again.'
           : 'That could not be recorded, so this client may be suggested again.',
       };
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load, cooldownPref]);
 
   const recordSent = useCallback(
     (clientId: string, drift: Drift, observed: string) => write(clientId, 'sent', drift, observed),
@@ -403,7 +486,14 @@ export function useNudges(): NudgeBook {
     [write]);
 
   const undismiss = useCallback(async (clientId: string): Promise<NudgeWrite> => {
-    if (!USE_SUPABASE || !coachId) return { ok: false, reason: 'Not signed in.' };
+    if (!USE_SUPABASE || !coachId) {
+      // Same discrimination as `write` above: "Not signed in." was said to a
+      // coach in a lift as readily as to one who had signed out.
+      return {
+        ok: false,
+        reason: authFate ? authGateMessage(authFate) : 'Not signed in.',
+      };
+    }
     // A zero-row delete is not an error in PostgREST — it resolves with an
     // empty array and no message, which is exactly what a refused policy looks
     // like. So the COUNT is checked, not the absence of an error: the delete
@@ -421,7 +511,7 @@ export function useNudges(): NudgeBook {
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   return {
     status: combined,

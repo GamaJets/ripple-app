@@ -34,8 +34,11 @@
 //    loud rather than dropped: an invitation is addressed to an address, and
 //    a name is not one.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
   previewMembers, previewPayments, previewPlans, describePreview,
   type ImportPreview, type MemberRow, type PaymentRow, type PlanRow,
@@ -45,7 +48,8 @@ import {
   fetchMemberships, fetchPlans, money,
   type Membership, type MembershipPlan,
 } from '@lib/gymRecord';
-import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import {
   keyPaymentRows, startImportRun, finishImportRun, importPayments,
   fetchImportRuns, undoImportRun, importedRowCount,
@@ -67,7 +71,23 @@ export default function ImportPage() {
   // meant a visitor who was still loading and a visitor with no account were
   // shown the same blank page, and neither was ever told to sign in.
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [tenantId, setTenantId] = useState<string | null>(null);
   // `tenants.currency`, and the reason this read exists at all.
   //
@@ -80,6 +100,34 @@ export default function ImportPage() {
   // Null here means the gym has not set one, and the import is refused rather
   // than guessed.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /**
+   * Why `ccy` is null, when it is — and the reason this had to be carried.
+   *
+   * The read below collapsed two facts into one null: `setCcy(error ? null :
+   * …)`. The gym that has not set a currency and the gym record that would not
+   * READ both arrived as `ccy === null`, and both refusals on this page then
+   * told the owner, in so many words, that "this gym has not set its currency
+   * … an owner sets it on the gym settings screen". For the second gym that is
+   * a claim about a setting, made out of a query that failed. An owner whose
+   * currency is set goes to Settings, finds GBP already sitting there, and is
+   * left with an import that will not run and nothing on screen that explains
+   * why — the page has sent them to fix something that is not broken.
+   *
+   * The refusal itself is right in both cases and does not change: an import
+   * that would stamp a currency nobody chose over a whole historical ledger is
+   * refused either way. What changes is which sentence is under the button, and
+   * therefore where the person goes next — Settings, or reload.
+   *
+   * This is the same bit `gymNameUnread` above already carries for the name.
+   * The name had it because the rail prints "No gym linked" for a null it is
+   * given no other word for; the currency did not, and it is the half of the
+   * row that stops money being written.
+   */
+  const [gymErr, setGymErr] = useState<string | null>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. The import log
+   *  below stamps a time on every run, and which day a run landed on is a fact
+   *  about the gym's day rather than about the desk this is read from. */
+  const [zone, setZone] = useState<string | null>(null);
 
   const [kind, setKind] = useState<Kind>('payments');
   const [text, setText] = useState('');
@@ -101,6 +149,13 @@ export default function ImportPage() {
   // had been told two hundred were about to go out.
   const [invites, setInvites] = useState<MemberInvite[] | null>(null);
   const [invitesError, setInvitesError] = useState<string | null>(null);
+  /** ms of the last invitations read that came back, or null if none has. See
+   *  where it is stamped in `loadGym`, and where it is spent in `inviteDrafts`. */
+  const [invitesAt, setInvitesAt] = useState<number | null>(null);
+  /** The instant an invitation's expiry is judged against: the read that
+   *  produced the list. `?? Date.now()` covers the render before the first read
+   *  has landed, where `invites` is null and the panel draws nothing anyway. */
+  const nowMs = invitesAt ?? Date.now();
 
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ text: string; outcome: Outcome } | null>(null);
@@ -144,6 +199,16 @@ export default function ImportPage() {
     try {
       setInvites(await fetchInvites(supabase, tenant));
       setInvitesError(null);
+      // When these invitations were read. The duplicate screen below asks
+      // whether each one is still open, which is a question about a clock: an
+      // invitation expires with nobody touching it. This page has no `useFetched`
+      // and no poll, so without a stamp that moves with the read the screen was
+      // judging expiry against the moment the tab was opened — and this console
+      // has no router, so an import tab left open on a desk is one document that
+      // lives for days. Stamped only on a read that came back: a failed read
+      // leaves the previous stamp where it is, because the rows on screen are
+      // still the ones it produced.
+      setInvitesAt(Date.now());
     } catch (e: any) {
       setInvites(null);
       setInvitesError(e?.message ?? 'Could not read the invitations already sent.');
@@ -163,16 +228,26 @@ export default function ImportPage() {
   useEffect(() => {
     (async () => {
       const who = await loadMe();
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who) return;
       setTenantId(who.tenantId);
       if (who.tenantId) {
-        // supabase-js resolves on a database error rather than rejecting, so
-        // the error has to be read off the result, not caught.
-        const { data, error } = await supabase
-          .from('tenants').select('name, currency').eq('id', who.tenantId).single();
-        setGymName(error ? null : ((data as any)?.name ?? null));
-        setCcy(error ? null : ((((data as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+        // `readTenant`, not the hand-written `select('name, currency,
+        // timezone')` that was here. It is the same query — it reads `error`
+        // off the resolved result, folds the currency and parses the zone
+        // exactly as this did — and it is the one place those three facts are
+        // read, so the failure comes back NAMED rather than as three nulls that
+        // three different sentences then have to guess at. See lib/currency.ts.
+        const t = await readTenant(supabase, who.tenantId);
+        setGymName(t.name);
+        setGymNameUnread(!!t.error);
+        setCcy(t.currency);
+        setGymErr(t.error);
+        setZone(t.zone);
         await loadGym(who.tenantId);
       }
     })();
@@ -184,10 +259,11 @@ export default function ImportPage() {
   const preview = useMemo<ImportPreview<MemberRow | PaymentRow | PlanRow> | null>(() => {
     if (!text.trim()) return null;
     const o = order || undefined;
-    // Plans carry no dates, so previewPlans takes no order to apply.
-    if (kind === 'plans') return previewPlans(text);
-    return kind === 'payments' ? previewPayments(text, o) : previewMembers(text, o);
-  }, [text, kind, order]);
+    // Plans carry no dates, so previewPlans takes no order to apply. The gym's
+    // currency is the fallback for any row whose sheet does not state one.
+    if (kind === 'plans') return previewPlans(text, ccy);
+    return kind === 'payments' ? previewPayments(text, o, ccy) : previewMembers(text, o);
+  }, [text, kind, order, ccy]);
 
   /**
    * The plan rows that will be written, each still carrying its line number.
@@ -255,6 +331,21 @@ export default function ImportPage() {
    */
   const inviteDrafts = useMemo(() => {
     if (!preview || kind !== 'members' || preview.missingRequired.length) return null;
+    // The duplicate screen could not be run, so there is no screened list.
+    //
+    // This was `const openTo = invites === null ? [] : …` directly under a
+    // comment forbidding exactly that: "Passing [] from a failed read would say
+    // 'none of these is a duplicate', which is a claim, not a silence." The
+    // line did what the comment forbade, and the consequences were not a
+    // silence either — `screenInvites` returned every row as sendable, the tile
+    // printed the count, the "cannot be invited" panel listed nothing, and the
+    // confirmation read "200 invitations will be recorded", which is the
+    // sentence somebody acts on. The warning banner above was true and it was
+    // beside a set of numbers that contradicted it.
+    //
+    // Null here withholds the whole panel: no count, no list, no button. The
+    // banner says why, and the errand is "reload", which is a thing that works.
+    if (invites === null) return null;
     const rows = (preview.rows as RowResult<MemberRow>[]).filter((r) => r.errors.length === 0);
     const noAddress = rows.filter((r) => !r.value?.email);
     const drafts = rows
@@ -271,12 +362,16 @@ export default function ImportPage() {
         planName: r.value!.plan,
         validDays: DEFAULT_VALID_DAYS as number | null,
       }));
-    // Only screened against the open invitations when that read actually came
-    // back. Passing [] from a failed read would say "none of these is a
-    // duplicate", which is a claim, not a silence.
-    const openTo = invites === null
-      ? []
-      : invites.filter((i) => inviteState(i) === 'pending').map((i) => i.email);
+    // Screened against the open invitations, which by here have been read —
+    // the guard at the top of this memo is what makes that true.
+    // Judged at the instant the invitations were READ, not at whatever moment
+    // this memo first happened to run. `inviteState` defaults its second
+    // argument to the clock, and nothing in this dependency list moves when time
+    // does — so an invitation that expired while the file sat on screen still
+    // counted as open, and the row it belongs to was rejected as a duplicate of
+    // an invitation that no longer exists. That is the silent direction: the
+    // person is simply left out of the batch.
+    const openTo = invites.filter((i) => inviteState(i, nowMs) === 'pending').map((i) => i.email);
     const { send, rejected } = screenInvites(drafts, openTo);
     return {
       send,
@@ -288,7 +383,7 @@ export default function ImportPage() {
       planned: priceBook === null ? null : send.filter((d) => d.planId !== null).length,
       named: send.filter((d) => (d.planName ?? '').trim() !== '').length,
     };
-  }, [preview, kind, invites, priceBook]);
+  }, [preview, kind, invites, priceBook, nowMs]);
 
   /**
    * Plan names in the file that the gym already sells.
@@ -365,8 +460,11 @@ export default function ImportPage() {
     } catch (e: any) {
       setBusy(false);
       setDone({
-        text: `Nothing was written: the import could not be opened (${e?.message ?? 'the write was refused'}). `
-          + 'No payment was recorded, so the file is still to run.',
+        text: writeFailedText(e, {
+          what: 'Opening that import',
+          unchanged: 'no payment was recorded and the file is still to run',
+          howToCheck: 'Reload this page and look for a run of this file in the receipts below before running it again — an import run twice files every payment twice.',
+        }),
         outcome: 'none',
       });
       return;
@@ -423,7 +521,11 @@ export default function ImportPage() {
       setUndoMsg(`${removed} payment${removed === 1 ? '' : 's'} removed. Every total is back to what it was before that import.`);
       await loadGym(tenantId);
     } catch (e: any) {
-      setUndoMsg(`Nothing was removed: ${e?.message ?? 'the delete was refused'}. The ledger is unchanged.`);
+      setUndoMsg(writeFailedText(e, {
+        what: 'That undo',
+        unchanged: 'nothing was removed and the ledger is unchanged',
+        howToCheck: 'Reload this page and read the run’s state below — the payments it wrote are either gone or they are not.',
+      }));
     } finally {
       setUndoing(null);
     }
@@ -454,7 +556,15 @@ export default function ImportPage() {
     let ok = 0; const bad: { line: number; why: string }[] = [];
     for (const { line, plan } of planRows) {
       try {
-        const { error } = await supabase.from('membership_plans').insert({
+        // `.select('id')`, and the count comes off what came BACK.
+        //
+        // This was a bare insert with `ok++` under `if (error) throw error` —
+        // counting what was sent, which is the one rule src/lib/gymImports.ts
+        // states in as many words for the payments import ("count what the
+        // server confirmed, never what you sent") and which this path did not
+        // follow. The line under the button is what an owner uses to decide the
+        // price book is now right; it must be a count of rows that exist.
+        const { data: wrote, error } = await supabase.from('membership_plans').insert({
           tenant_id: tenantId,
           name: plan.name,
           price_cents: plan.priceCents,
@@ -464,8 +574,16 @@ export default function ImportPage() {
           currency: plan.currency ?? ccy,
           interval: plan.interval,
           active: plan.active,
-        });
+        }).select('id').single();
         if (error) throw error;
+        // No error and no id back is not a success and it is not a plain
+        // failure either. It is the one case an owner must not resolve by
+        // running the file again — plans carry no import key, so a second run
+        // writes a second price book — so the sentence says to look before
+        // retrying rather than counting it in either direction silently.
+        if (!wrote?.id) {
+          throw new Error('the database accepted this row without confirming it. Check your price book for it before running this file again — a plan carries no import key, so a second run would add it twice.');
+        }
         ok++;
       } catch (e: any) {
         bad.push({ line, why: e?.message ?? 'write failed' });
@@ -517,9 +635,13 @@ export default function ImportPage() {
     } catch (e: any) {
       setFailed([]);
       setDone({
-        text: `Nothing was recorded: ${e?.message ?? 'the write was refused'}. The whole list is `
-          + 'written in one statement, so not one invitation went out — the file is still to run, '
-          + 'and running it again will not send anything twice.',
+        // The one-statement argument survives a refusal and does not survive a
+        // silence: a statement nobody answered about may have committed whole.
+        text: writeFailedText(e, {
+          what: 'That list of invitations',
+          unchanged: 'the whole list is written in one statement, so not one invitation went out and the file is still to run',
+          howToCheck: 'Reload this page and read the invitation list before running the file again.',
+        }),
         outcome: 'none',
       });
     } finally { setBusy(false); }
@@ -532,12 +654,15 @@ export default function ImportPage() {
     ? (preview.ready as PaymentRow[]).filter((r) => matchMember(r) !== null).length
     : null;
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/import">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -554,7 +679,7 @@ export default function ImportPage() {
   // refused run still leaves the half that landed. Said here, before the form.
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/import">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Importing writes the gym&rsquo;s price book and its payment record, so it
@@ -565,7 +690,7 @@ export default function ImportPage() {
   }
 
   return (
-    <Shell me={me} gymName={gymName} current="/import">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
       <h1 style={{ margin: '0 0 4px', fontSize: 20 }}>Import</h1>
       <p style={{ margin: '0 0 20px', color: 'var(--ink3)', fontSize: 13, maxWidth: '78ch' }}>
         Paste a spreadsheet exported from whatever you used before. Nothing is written until you
@@ -574,12 +699,15 @@ export default function ImportPage() {
         skipped rather than recorded twice, and any run can be taken back below.
       </p>
 
-      <Runs runs={runs} error={runsErr} onUndo={undoRun} undoing={undoing} message={undoMsg} />
+      <Runs runs={runs} error={runsErr} zone={zone} onUndo={undoRun} undoing={undoing} message={undoMsg} />
 
       <Section title="The file" sub="Copy the whole sheet, header row included, and paste it here.">
         <div style={{ ...formRow, borderBottom: 'none' }}>
           {(['payments', 'members', 'plans'] as Kind[]).map((k) => (
-            <button key={k} onClick={() => { setKind(k); setDone(null); setFailed([]); }}
+            /* `aria-pressed` — which of the three kinds the pasted sheet will
+               be read as was a button style and nothing announced. */
+            <button key={k} type="button" aria-pressed={k === kind}
+              onClick={() => { setKind(k); setDone(null); setFailed([]); }}
               style={k === kind
                 ? { ...primaryBtn, textTransform: 'capitalize' }
                 : { ...field, cursor: 'pointer', textTransform: 'capitalize' }}>
@@ -588,7 +716,15 @@ export default function ImportPage() {
           ))}
           {/* A price book has no dates in it, so there is no convention to pick. */}
           {kind === 'plans' ? null : (
-            <select value={order} onChange={(e) => setOrder(e.target.value as DateOrder | '')} style={field}>
+            <select
+              value={order} onChange={(e) => setOrder(e.target.value as DateOrder | '')}
+              // Its only hint of purpose was the text of the default option,
+              // which a screen reader reads as the VALUE rather than as the
+              // label — so the control that decides whether 03/04 is March or
+              // April announced nothing about what it is for.
+              aria-label="How dates in the pasted text are ordered"
+              style={field}
+            >
               <option value="">Work out the date order</option>
               <option value="dmy">Dates are day/month/year</option>
               <option value="mdy">Dates are month/day/year</option>
@@ -597,7 +733,17 @@ export default function ImportPage() {
           )}
         </div>
         <div style={{ padding: '0 14px 14px' }}>
+          {/* A real <label>, associated by id. The box a gym pastes its entire
+              roster into carried a placeholder and nothing else — and a
+              placeholder is not a label: it is announced as a value, and it
+              disappears the moment anybody types. This is the control that
+              decides how a whole gym's roster is parsed, on the screen where
+              getting it wrong writes rows. */}
+          <label htmlFor="paste" className="micro" style={{ display: 'block', marginBottom: 5 }}>
+            Paste {kind === 'plans' ? 'the price book' : kind === 'members' ? 'the roster' : `the ${kind}`}, one per line
+          </label>
           <textarea
+            id="paste"
             value={text}
             onChange={(e) => { setText(e.target.value); setDone(null); setFailed([]); }}
             placeholder={PLACEHOLDERS[kind]}
@@ -639,9 +785,10 @@ export default function ImportPage() {
       {kind === 'members' && invitesError ? (
         <Note tone="warn">
           <strong style={{ color: 'var(--ink)' }}>The invitations already sent could not be read</strong>,
-          so this cannot say which of these people you have already invited: {invitesError}. Running
-          the file anyway is refused by the database one row at a time rather than reported here, so
-          reload before sending a list you may have sent before.
+          so this cannot say which of these people you have already invited: {invitesError}. The
+          count and the send list below are withheld rather than computed over a check that did not
+          run &mdash; &ldquo;200 invitations will be recorded&rdquo; over an unrun duplicate check is
+          a claim, not a silence. Reload the page and the panel comes back.
         </Note>
       ) : null}
 
@@ -706,7 +853,7 @@ export default function ImportPage() {
             </div>
 
             {collisions && collisions.names.length ? (
-              <p style={{ margin: '12px 14px', fontSize: 12.5, color: '#f0c04e' }}>
+              <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--warn)' }}>
                 {collisions.names.length === 1 ? 'One plan' : `${collisions.names.length} plans`} in this file
                 already {collisions.names.length === 1 ? 'exists' : 'exist'} in your price book:{' '}
                 <span style={{ fontFamily: 'var(--mono)' }}>{collisions.names.join(', ')}</span>. Importing
@@ -716,13 +863,13 @@ export default function ImportPage() {
             ) : null}
 
             {preview.missingRequired.length ? (
-              <p style={{ margin: '12px 14px', fontSize: 13, color: '#ef8080' }}>
+              <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--crit)' }}>
                 No {preview.missingRequired.join(' or ')} column found, so nothing can be read from this file.
               </p>
             ) : null}
 
             {preview.dateOrder === 'ambiguous' ? (
-              <p style={{ margin: '12px 14px', fontSize: 13, color: '#f0c04e' }}>
+              <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--warn)' }}>
                 Every date in this file works read either way round — 03/04 could be 3 April or
                 4 March. Say which above; guessing would silently move somebody&rsquo;s renewal by
                 nine months.
@@ -766,12 +913,21 @@ export default function ImportPage() {
                 <button onClick={runImport} disabled={busy || !tenantId || !ccy} style={primaryBtn}>
                   {busy ? 'Importing…' : ccy ? `Record ${paymentRows.length} payments in ${ccy}` : `Record ${paymentRows.length} payments`}
                 </button>
-                {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                {!tenantId ? <span style={{ fontSize: 13, color: 'var(--crit)' }}>{NO_TENANT}</span> : null}
+                {/* Two reasons `ccy` is null, and they send the reader to two
+                    different places. The refusal is the same either way — a
+                    ledger stamped with a currency nobody chose cannot be
+                    corrected from the rows afterwards — but "go and set it" is
+                    a lie to the owner who already has. */}
                 {tenantId && !ccy ? (
-                  <span style={{ fontSize: 13, color: '#ef8080' }}>
-                    These payments cannot be recorded: {NO_CURRENCY_NOTE}, and this file does not
-                    carry one. Every row would be stored in a currency nobody chose, permanently.
-                    An owner sets it on the gym settings screen.
+                  <span style={{ fontSize: 13, color: 'var(--crit)' }}>
+                    {gymErr
+                      ? <>These payments cannot be recorded: the gym record would not read, so the
+                          currency they would be stored in is <strong>unknown</strong> rather than
+                          unset — {gymErr} Reload the page; this is not a setting to go and change.</>
+                      : <>These payments cannot be recorded: {NO_CURRENCY_NOTE}, and this file does not
+                          carry one. Every row would be stored in a currency nobody chose, permanently.
+                          An owner sets it on the gym settings screen.</>}
                   </span>
                 ) : null}
                 <Result done={done} />
@@ -828,7 +984,7 @@ export default function ImportPage() {
                 <button onClick={runInviteImport} disabled={busy || !tenantId} style={primaryBtn}>
                   {busy ? 'Inviting…' : `Invite ${inviteDrafts.send.length} ${inviteDrafts.send.length === 1 ? 'person' : 'people'}`}
                 </button>
-                {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                {!tenantId ? <span style={{ fontSize: 13, color: 'var(--crit)' }}>{NO_TENANT}</span> : null}
                 <Result done={done} />
               </div>
               <Failures failed={failed} />
@@ -916,12 +1072,17 @@ export default function ImportPage() {
                     ? 'Importing…'
                     : `Add ${planRows.length} plan${planRows.length === 1 ? '' : 's'}`}
                 </button>
-                {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                {!tenantId ? <span style={{ fontSize: 13, color: 'var(--crit)' }}>{NO_TENANT}</span> : null}
                 {tenantId && !ccy && planRows.some(({ plan }) => !plan.currency) ? (
-                  <span style={{ fontSize: 13, color: '#ef8080' }}>
-                    Some of these rows have no currency of their own and {NO_CURRENCY_NOTE}, so there
-                    is nothing to price them in. Add a `currency` column to the sheet, or set the
-                    gym's currency on the settings screen.
+                  <span style={{ fontSize: 13, color: 'var(--crit)' }}>
+                    {gymErr
+                      ? <>Some of these rows have no currency of their own, and the gym record would
+                          not read &mdash; so what they would inherit is <strong>unknown</strong> rather
+                          than unset: {gymErr} Reload the page, or add a <span className="mono">currency</span>{' '}
+                          column to the sheet so the rows do not need to inherit one.</>
+                      : <>Some of these rows have no currency of their own and {NO_CURRENCY_NOTE}, so there
+                          is nothing to price them in. Add a <span className="mono">currency</span> column to
+                          the sheet, or set the gym&apos;s currency on the settings screen.</>}
                   </span>
                 ) : null}
                 <Result done={done} />
@@ -972,9 +1133,11 @@ function report(ok: number, bad: number, noun: string, verb: string): { text: st
  * time is the shape of a browser closed halfway through, and it is the row that
  * most needs to be visible.
  */
-function Runs({ runs, error, onUndo, undoing, message }: {
+function Runs({ runs, error, zone, onUndo, undoing, message }: {
   runs: ImportRun[] | null;
   error: string | null;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
   onUndo: (r: ImportRun) => void;
   undoing: string | null;
   message: string | null;
@@ -991,7 +1154,7 @@ function Runs({ runs, error, onUndo, undoing, message }: {
       sub="What each run offered, wrote and skipped. A payments run can be taken back — the payments are deleted, so every total returns to what it was, and the receipt stays."
     >
       {error ? (
-        <p style={{ margin: '12px 14px', fontSize: 13, color: '#ef8080' }}>
+        <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--crit)' }}>
           {error}. This is not a gym that has never imported anything — it is a read that failed,
           and running a file now cannot be checked against what you have already run. The line-level
           dedupe still holds either way: the database recognises a line it already has.
@@ -1006,13 +1169,13 @@ function Runs({ runs, error, onUndo, undoing, message }: {
           padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5,
         }}>
           <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 150 }}>
-            {new Date(r.startedAt).toLocaleString()}
+            {gymDateTimeText(r.startedAt, zone) ?? 'a time that could not be read'}
           </span>
           <span style={{ color: 'var(--ink2)', minWidth: 70 }}>{r.kind}</span>
           <span style={{ color: 'var(--ink2)', flex: 1, minWidth: 260 }}>
             {r.finishedAt === null ? (
               // The one line on this screen worth reading twice.
-              <span style={{ color: '#f0c04e' }}>
+              <span style={{ color: 'var(--warn)' }}>
                 Never finished — {r.rowsOffered} line{r.rowsOffered === 1 ? '' : 's'} were offered and
                 this run never reported back. Some may have been written. Run the same file again:
                 anything already recorded is recognised and skipped.
@@ -1027,7 +1190,7 @@ function Runs({ runs, error, onUndo, undoing, message }: {
             )}
           </span>
           {r.undoneAt ? (
-            <span style={{ color: 'var(--ink3)' }}>taken back {new Date(r.undoneAt).toLocaleDateString()}</span>
+            <span style={{ color: 'var(--ink3)' }}>taken back {gymDateText(r.undoneAt, zone) ?? 'on a date that could not be read'}</span>
           ) : r.kind === 'payments' ? (
             <button
               onClick={() => onUndo(r)}
@@ -1097,16 +1260,33 @@ function paymentReport(
 
 const OUTCOME_COLOUR: Record<Outcome, string> = {
   all: 'var(--ink2)',
-  partial: '#f0c04e',
-  none: '#ef8080',
+  partial: 'var(--warn)',
+  none: 'var(--crit)',
 };
 
+/**
+ * The ONLY confirmation after a bulk money write, and it was silent.
+ *
+ * This renders sentences like "Partly imported: 12 payment(s) recorded and 8
+ * refused" into a bare `<span>`, so a member of staff pressed Import, heard
+ * nothing, and read a partial failure as success — on a forty-payment write
+ * into the gym's ledger.
+ *
+ * `<Announce>` rather than a role on the span, because the span is not there
+ * until there is something to say, and a node inserted at the same instant as
+ * its text is not reliably announced. The region is mounted whether or not
+ * `done` is set; only the text changes. See studio-web/components/Banner.tsx.
+ */
 function Result({ done }: { done: { text: string; outcome: Outcome } | null }) {
-  if (!done) return null;
   return (
-    <span style={{ fontSize: 13, color: OUTCOME_COLOUR[done.outcome], flex: 1, minWidth: 220 }}>
-      {done.text}
-    </span>
+    <>
+      <Announce say={done?.text ?? null} tone={done && done.outcome !== 'all' ? 'crit' : undefined} />
+      {done ? (
+        <span style={{ fontSize: 13, color: OUTCOME_COLOUR[done.outcome], flex: 1, minWidth: 220 }}>
+          {done.text}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -1115,7 +1295,7 @@ function Failures({ failed }: { failed: { line: number; why: string }[] }) {
   return (
     <div style={{ padding: '0 14px 14px' }}>
       {failed.slice(0, 20).map((f) => (
-        <div key={f.line} style={{ fontSize: 12.5, color: '#ef8080' }}>line {f.line}: {f.why}</div>
+        <div key={f.line} style={{ fontSize: 12.5, color: 'var(--crit)' }}>line {f.line}: {f.why}</div>
       ))}
       {failed.length > 20 ? (
         <div style={{ fontSize: 12.5, color: 'var(--ink3)', marginTop: 4 }}>
@@ -1126,33 +1306,18 @@ function Failures({ failed }: { failed: { line: number; why: string }[] }) {
   );
 }
 
+// Named `Note`, so the sweep that moved six console pages onto the shared
+// banner — which greps for `function Banner` — never listed it either. This is
+// the screen where a bulk money write reports what it did.
 function Note({ tone, children }: { tone: 'warn' | 'info'; children: React.ReactNode }) {
   return (
-    <p style={{
-      border: '1px solid var(--ring)',
-      borderLeft: `3px solid ${tone === 'warn' ? '#f0c04e' : 'var(--brand)'}`,
-      borderRadius: 0, background: 'var(--surface)', padding: '14px 16px', fontSize: 13,
-      lineHeight: 1.55, color: 'var(--ink2)', margin: '0 0 22px',
-    }}>
+    <SharedBanner
+      tone={tone === 'warn' ? 'warn' : undefined}
+      live={false}
+      style={{ margin: '0 0 22px', lineHeight: 1.55 }}
+    >
       {children}
-    </p>
-  );
-}
-
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '12px 14px' }}>
-      <span style={{ display: 'block', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--ink3)' }}>{label}</span>
-      {/* An em-dash, never a zero: a figure that is not known and a figure that
-          is genuinely none must not read the same. */}
-      <span style={{
-        display: 'block', fontSize: 22, fontFamily: 'var(--mono)', marginTop: 4,
-        color: text === null ? 'var(--ink3)' : 'var(--ink)',
-      }}>
-        {text ?? '—'}
-      </span>
-      {note ? <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</span> : null}
-    </div>
+    </SharedBanner>
   );
 }
 

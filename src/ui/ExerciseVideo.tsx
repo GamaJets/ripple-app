@@ -15,13 +15,11 @@
 //     could not be reached. Not "your coach hasn't recorded one" either; that
 //     case is the caller's, because only the caller knows there is no clip.
 import { useEffect, useState } from 'react';
-import { BRAND } from '../lib/brands';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
 import { useTheme } from './components';
 import { sp, radius, type as ty } from '../theme/scale';
-import type { LoadStatus } from './loadStatus';
 import { playbackUrl, type VideoItem } from './exerciseVideos';
 
 type Phase = 'resolving' | 'ready' | 'unavailable' | 'no-player';
@@ -104,87 +102,6 @@ export function ExerciseVideo({
         {phase === 'resolving' ? 'Loading…'
           : phase === 'no-player' ? UPDATE_REQUIRED_NOTE
           : 'This clip could not be played.'}
-      </Text>
-    </View>
-  );
-}
-
-/**
- * The whole block a screen drops next to an exercise: the clip when there is
- * one, and a straight answer when there is not.
- *
- * `status` comes from useExerciseVideos and is the difference between "your
- * coach has not recorded this one" and "we could not read the library" — which
- * the client app has been rendering identically, always as the first one.
- *
- * 'partial' is a third answer and gets a third sentence. A library read that
- * stopped at its row limit really may not contain the clip for this exercise,
- * and it really may — the clip could be sitting just past the end of what came
- * back. Saying "no demonstration yet" there is the same lie as saying it over a
- * failed read, and it costs the same thing: a client doing a movement they have
- * never seen done, told their coach never filmed it.
- */
-export function ExerciseVideoBlock({
-  video,
-  exerciseName,
-  status,
-  onSearch,
-}: {
-  video: VideoItem | null;
-  exerciseName: string;
-  status: LoadStatus;
-  onSearch?: () => void;
-}) {
-  const t = useTheme();
-
-  if (status === 'error') {
-    return (
-      <View style={{ paddingVertical: sp.md }}>
-        <Text style={{ ...ty.label, color: t.ink3 }}>
-          The video library could not be loaded, so we cannot tell you whether your coach has a clip for this.
-        </Text>
-      </View>
-    );
-  }
-
-  // Only when there is no clip to show. A clip we DID find is a clip, however
-  // much of the library came back with it — the truncation cannot make a video
-  // that is on the screen not exist.
-  if (status === 'partial' && !video) {
-    return (
-      <View style={{ paddingVertical: sp.md }}>
-        <Text style={{ ...ty.label, color: t.ink3 }}>
-          We could only read part of the video library, so we cannot tell you whether there is a clip for this one.
-        </Text>
-      </View>
-    );
-  }
-
-  if (!video) {
-    return (
-      <View style={{ paddingVertical: sp.md }}>
-        <Text style={{ ...ty.label, color: t.ink3 }}>
-          {status === 'loading' ? 'Looking for a demonstration…' : 'No demonstration for this exercise yet.'}
-        </Text>
-        {status === 'ready' && onSearch ? (
-          <Pressable
-            onPress={onSearch}
-            accessibilityRole="button"
-            accessibilityLabel={`Search the web for ${exerciseName} technique`}
-            style={{ paddingVertical: sp.sm }}
-          >
-            <Text style={{ ...ty.label, color: t.brand }}>Look one up on the web</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ paddingVertical: sp.sm }}>
-      <ExerciseVideo video={video} exerciseName={exerciseName} />
-      <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
-        {video.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`}
       </Text>
     </View>
   );

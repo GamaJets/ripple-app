@@ -31,6 +31,11 @@
 // stops the retyping and grants it no more meaning than it had.
 
 import type { LoadStatus } from '../ui/loadStatus';
+// The account-scoping rule for a blob kept on the handset, and the two traps
+// that come with it. See the section at the foot of this file.
+import {
+  accountCacheKey, cacheForAccount, isAccountCacheKey, type DeviceCache,
+} from './deviceAccountCache';
 
 /** What the coach's typing means. See the header for why "invalid" is not 0. */
 export type RateInput =
@@ -132,9 +137,41 @@ export function goalsEmptyLine(status: LoadStatus, revenue: number, clients: num
   if (revenue > 0 || clients > 0) return null;
   if (status === 'loading') return 'Reading your targets…';
   if (status === 'error') {
-    return 'Your targets could not be read, so this is not "none set" — leave the screen and open it again once you have signal. Typing new ones now would save over whatever is already there.';
+    return 'Your targets could not be read, so this is not "none set". Leave the screen and open it again once you have signal. Typing new ones now would save over whatever is already there.';
   }
   return 'No targets set. Tap Edit to give yourself a monthly revenue or client number to work towards.';
+}
+
+/**
+ * What became of a target the coach just set.
+ *
+ * Three outcomes, and only one of them is "saved". Setting a goal used to be
+ * `onPress={() => { setGoals({…}); setGoalOpen(false); }}` — a void call, a
+ * sheet that closed, and a progress bar that redrew against the new number
+ * whichever of these actually happened.
+ *
+ *   · 'saved'        the account row was written and the row count says so.
+ *   · 'device-only'  the account write was deliberately SKIPPED, because the
+ *                    prefs read had failed and writing this handset's cache
+ *                    over targets that may exist elsewhere is exactly what that
+ *                    guard is for. The target is real on this phone and nowhere
+ *                    else, and a coach who reinstalls or picks up a second phone
+ *                    will find it gone.
+ *   · 'failed'       the write was attempted and did not land.
+ *
+ * A goal is the one figure on that screen the coach authored rather than the
+ * app computing, which makes it the one most worth telling them about.
+ */
+export type GoalSaveOutcome = 'saved' | 'device-only' | 'failed';
+
+export function goalSaveLine(outcome: GoalSaveOutcome): string | null {
+  if (outcome === 'saved') return null;
+  if (outcome === 'device-only') {
+    return 'Your targets are set on this phone only. They could not be read from your account earlier in this session, so nothing has been written there. '
+      + 'Saving over targets we could not read would be a guess. Open this screen again once you have signal and set them once more.';
+  }
+  return 'Your targets are set on this phone, and they did NOT reach your account. The bars below are measured against them either way, '
+    + 'but they will not be here on another phone or after a reinstall. Try again in a moment.';
 }
 
 /**
@@ -227,8 +264,50 @@ export function cooldownText(value: number | null | undefined): string {
  */
 export function cooldownNote(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) {
-    return 'Not set, so the app paces each client off how often they used to train — never closer than a week, never further than four.';
+    return 'Not set, so the app paces each client off how often they used to train: never closer than a week, never further than four.';
   }
   const n = Math.round(value);
   return `Never inside ${n} day${n === 1 ? '' : 's'}. Each client is still paced off their own rhythm above that, so somebody who trained fortnightly is left longer than somebody who trained daily.`;
 }
+
+/* ── whose targets these are ────────────────────────────────────────────────
+ *
+ * `useTrainerGoals` cached the coach's monthly revenue and client targets on
+ * the handset under `'repple.trainer.goals'` — one key, no account in it,
+ * cleared by nothing. That is the same shape src/lib/mealSwaps.ts and
+ * src/lib/handsetClips.ts were written to end, and it had the same two costs
+ * here: the next coach to sign in on a shared handset opened Analytics to the
+ * previous coach's numbers, and the hook's BACKFILL — the branch that publishes
+ * targets this device holds to an account that has none — then wrote them into
+ * `coach_prefs` under whoever was signed in. A coach's revenue target is a
+ * fact about their business, and it arrived in a stranger's account looking
+ * like something they had set themselves.
+ *
+ * The rule, the two traps and the argument for deleting the old key rather
+ * than migrating it are in src/lib/deviceAccountCache.ts. This is the naming,
+ * kept beside the goal arithmetic it belongs to.
+ */
+
+/** Every per-account goals key starts with this. */
+export const TRAINER_GOALS_CACHE_PREFIX = 'repple.trainer.goals:';
+
+/** The unqualified key this replaces. Removed on sight and never read: the
+ *  blob names no account, so reading it into the signed-in one is a guess, and
+ *  the cost of losing it is a coach typing two numbers again — against the
+ *  cost of a stranger's target published to their account as their own. */
+export const LEGACY_TRAINER_GOALS_KEY = 'repple.trainer.goals';
+
+/** Where this coach's cached targets live, or null when there is no account to
+ *  scope them to — which means DO NOT PERSIST. */
+export const trainerGoalsCacheKey = (uid: string | null | undefined): string | null =>
+  accountCacheKey(TRAINER_GOALS_CACHE_PREFIX, uid);
+
+/** The cache state for an account, hydrated:false, as the hook must set it
+ *  BEFORE reading — see the trap in src/lib/deviceAccountCache.ts. */
+export const trainerGoalsCache = (uid: string | null | undefined): DeviceCache =>
+  cacheForAccount(TRAINER_GOALS_CACHE_PREFIX, uid);
+
+/** Whether a stored key holds somebody's targets. The legacy key is
+ *  deliberately not one of these. */
+export const isTrainerGoalsCacheKey = (k: string): boolean =>
+  isAccountCacheKey(TRAINER_GOALS_CACHE_PREFIX, k);

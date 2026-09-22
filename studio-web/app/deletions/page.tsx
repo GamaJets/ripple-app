@@ -16,9 +16,95 @@
 // ── What this screen does not do differently ───────────────────────────────
 //
 // It calls exactly the same function, with the same two confirmations naming
-// the same person, and it states the same blast radius. This is a second door
-// onto one mechanism, not a second mechanism: two erasure paths that disagreed
-// about what survives would be worse than one that is hard to reach.
+// the same person. This is a second door onto one mechanism, not a second
+// mechanism: two erasure paths that disagreed about what survives would be
+// worse than one that is hard to reach.
+//
+// ── The blast radius the confirmation used to claim ────────────────────────
+//
+// It said "across 39 tables. Their invoices and memberships go too". BOTH
+// halves were wrong, and the second one was wrong in the direction that
+// actually hurts.
+//
+// The 39 is merely STALE. Part 41 records where it came from — a live count
+// against pg_constraint taken when the erasure function was written, when the
+// schema was a quarter of its present size. The real figure, measured against
+// the LIVE database (project phgfwzpkkwdysftlgkoq) on 14 September 2026 as the
+// transitive closure of `on delete cascade` from the row
+// `action_account_deletion()` actually deletes:
+//
+//   with recursive fk as (
+//     select (conrelid::regclass)::text as child,
+//            (confrelid::regclass)::text as parent
+//       from pg_constraint where contype='f' and confdeltype='c')
+//   , rec as (
+//     select 'auth.users'::text as tbl
+//      union
+//     select fk.child from fk join rec on fk.parent = rec.tbl)
+//   select count(*) from rec;
+//
+//   118 tables in `public`, 11 more inside Supabase's own `auth` schema
+//   (identities, sessions, refresh tokens, MFA factors — the sign-in account
+//   rather than gym records), 129 in all.
+//
+// So the sentence somebody read immediately before doing something with no undo
+// understated what it destroys by a factor of three.
+//
+// MEASURE THIS AGAINST THE LIVE DATABASE, NOT AGAINST setup.sql. This lane
+// counted the file first and got 120, having walked only the inline
+// `references` clauses in `create table`; the file also carries tables that
+// were later dropped or never reached this project. Worse, and the reason the
+// second half below was got wrong too: a `create table` clause is not the last
+// word on a foreign key. supabase/setup.sql:28188-28206 DROPS and RECREATES
+// three of them.
+//
+// ── "Their invoices and memberships go too" was INVERTED ───────────────────
+//
+// They do not go. The retention part of setup.sql — the one that adds
+// `gym_invoices.billed_name`, `gym_payments.payer_name` and
+// `memberships.member_label` — drops those three `_member_id_fkey` constraints
+// and recreates them ON DELETE SET NULL, precisely so a gym's books survive an
+// erasure. A BEFORE DELETE trigger (`profiles_retain_financial_record`) copies
+// the name onto each row first, so the record still reconciles. Confirmed live,
+// not read off the file:
+//
+//   gym_invoices.member_id   set null
+//   memberships.member_id    set null
+//   gym_payments.member_id   set null
+//
+// The old sentence therefore told an owner their invoices would be destroyed at
+// the moment they were deciding whether to press the button. Part 41's own
+// comment still carries the pre-retention wording, which is how both doors came
+// to repeat it.
+//
+// ── "with the person detached from them" ───────────────────────────────────
+//
+// Detached from the ACCOUNT, yes — every column above is `on delete set null`.
+// Not anonymous. Several surviving tables keep the name in their own text
+// columns, on purpose:
+//
+//   gym_invoices.billed_name, gym_payments.payer_name, memberships.member_label
+//                                    copied over by the trigger, so the books
+//                                    can still be reconciled
+//   gym_passes.holder_name           the name written at the desk
+//   gym_agreement_signatures.signed_name, .guardian_name
+//                                    "The name on a waiver IS the waiver" —
+//                                    the part's own words; it survives on
+//                                    purpose, as evidence
+//   gym_events.summary               composed at write time so the feed does
+//                                    not change when somebody is renamed or
+//                                    erased, which means it still names them
+//
+// An owner answering an erasure request repeats this sentence to the person who
+// asked, so it says detached rather than gone.
+//
+// ── The two doors agree, and on a live-measured figure ─────────────────────
+//
+// app/(owner)/deletions.tsx holds the same 118 in `CASCADE_TABLES`, measured
+// the same way on the same day by the lane working that file. This page states
+// it inline rather than importing it: the console builds on its own compiler
+// (scripts/check-studio.mjs) and does not reach into the phone app. If you add
+// a cascading foreign key, BOTH are stale — re-run the query above.
 //
 // ── The count that was a `.limit()` ────────────────────────────────────────
 //
@@ -35,11 +121,17 @@
 // source of truth and a way for a not-yet-loaded tenant to render an empty
 // queue that looks exactly like the good state.
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
+import { type Unread } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { readTenant } from '@/lib/currency';
+import { noGymNote } from '@lib/gymLink';
 import { readAll } from '@lib/rowCap';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
 /** A row of `pending_deletions`. Nulls stay null — a dash is not a zero. */
 interface Pending {
@@ -65,7 +157,6 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 /** A read that holds no rows: still in flight, or refused. */
-type Unread = 'loading' | 'failed' | null;
 
 /** A timestamp as the day it happened. Never the string "null". */
 const day = (iso: string | null): string => {
@@ -75,6 +166,10 @@ const day = (iso: string | null): string => {
 
 export default function Deletions() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymErr, setGymErr] = useState<string | null>(null);
 
@@ -88,15 +183,45 @@ export default function Deletions() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     // The two reads fail INDEPENDENTLY, deliberately. A gym that cannot read
     // its own history still has to see who is waiting, so a broken audit trail
     // must not blank the queue beside it.
+    // Whether each half came back. The stamp under the tiles is the age of the
+    // last read that came back WHOLE, so a refresh in which the queue failed
+    // must not move it — the rows on screen are still the earlier ones.
+    let queueWhole = false;
+    let logWhole = false;
+
     const [q, l] = await Promise.allSettled([
-      supabase
-        .from('pending_deletions')
-        .select('subject_id, full_name, role, deletion_requested_at, days_remaining')
-        .order('deletion_requested_at', { ascending: true }),
+      // Read whole, for the same reason the log below it is — and it took
+      // longer to get here than that one did. This was a bare `.select()` with
+      // no `.limit` and no paging, so PostgREST answered with at most a
+      // thousand rows, no error and no flag, and the three tiles built from it
+      // reported a prefix as a total: "Waiting" is `rows.length` and "Past
+      // thirty days" is `overdue.length`.
+      //
+      // The order is what makes that worse rather than merely wrong. It is
+      // `deletion_requested_at` ASCENDING, so the rows a truncation drops are
+      // the NEWEST requests — the ones whose thirty days have most recently
+      // started, on a clock that is statutory. A gym over the ceiling would
+      // have been told a smaller number of people were waiting than actually
+      // are, and the ones it did not mention would be the ones it had heard
+      // from most recently.
+      //
+      // `subject_id` is the tiebreaker, not decoration: `readAll` walks the set
+      // in ranges, and two rows requested in the same tick with no second key
+      // can swap between pages — which duplicates one and drops the other. The
+      // queue is one row per subject, so this orders it totally.
+      readAll<any>(
+        (from, to) => supabase
+          .from('pending_deletions')
+          .select('subject_id, full_name, role, deletion_requested_at, days_remaining')
+          .order('deletion_requested_at', { ascending: true })
+          .order('subject_id', { ascending: true })
+          .range(from, to),
+        'the people waiting to be erased',
+      ),
       // Read whole rather than to a ceiling. The count under this table is what
       // an owner would quote to a regulator, and `.limit(50)` printed as a
       // total is a number about a query rather than about the gym.
@@ -117,8 +242,16 @@ export default function Deletions() {
     // `data: null`, falls through `?? []`, and renders as "nobody is waiting":
     // a gym told it has no obligations because a read failed. That false
     // all-clear is the single worst thing this screen could do.
-    if (q.status === 'fulfilled' && !q.value.error) {
-      setQueue((q.value.data ?? []).map((r: any) => ({
+    // `readAll` throws on a database error rather than handing one back, so a
+    // refused read arrives here as a REJECTION and there is no `.error` left to
+    // check. The paragraph above still holds and is why this is written as one
+    // branch rather than two: a refusal must never reach the `?? []` that would
+    // render it as "nobody is waiting". It also throws `TruncatedRead` on a
+    // queue past the paging ceiling, which lands in the same place — a queue
+    // too large to read whole is a queue this screen must not put a number
+    // under, for the same reason a prefix was not one.
+    if (q.status === 'fulfilled') {
+      setQueue(q.value.map((r: any) => ({
         subjectId: String(r.subject_id),
         name: r.full_name ?? null,
         role: r.role ?? null,
@@ -126,9 +259,10 @@ export default function Deletions() {
         daysRemaining: typeof r.days_remaining === 'number' ? r.days_remaining : null,
       })));
       setQueueWhy(null);
+      queueWhole = true;
     } else {
       setQueue(null);
-      const why = q.status === 'rejected' ? q.reason?.message : (q.value as any).error?.message;
+      const why = q.reason?.message;
       setQueueWhy(`The erasure queue did not come back${why ? `: ${why}` : '.'} This is not a gym with nobody waiting — the clock is still running on anybody who has asked.`);
     }
 
@@ -141,29 +275,69 @@ export default function Deletions() {
         note: r.note ?? null,
       })));
       setLogWhy(null);
+      logWhole = true;
     } else {
       setLog(null);
       setLogWhy(`The record of erasures already carried out did not come back${l.reason?.message ? `: ${l.reason.message}` : '.'}`);
     }
+    return queueWhole && logWhole;
   }, []);
+
+  /*
+   * The statutory clock, kept running.
+   *
+   * `days_remaining` is computed by the `pending_deletions` view AT READ TIME,
+   * so before this every figure on this screen was frozen at the instant the
+   * tab opened: "Soonest due 3d" stayed 3d all morning, "Past thirty days"
+   * stayed at whatever it was, the amber and red bands never moved, and a
+   * member who submitted an erasure request an hour after the page loaded never
+   * appeared at all. The only reload was `run()`, after an erasure.
+   *
+   * This is the one screen in the product where that is a legal exposure rather
+   * than an inconvenience — the paragraph at the top of the page offers "how
+   * long is left of the thirty days this product promises them in its store
+   * listing", a sentence that is true when the tab opens and quietly stops
+   * being true on a screen an owner works through over a morning.
+   *
+   * Five minutes, plus every return to the tab. A day is 288 of these and the
+   * queue is small; the cost is nothing and the alternative is a clock that
+   * does not tick.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(load, { everyMs: 5 * 60_000 });
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
+      // An account with no gym never ran `load()`, so `queue` stayed null with
+      // `queueWhy` null and `unread` resolved to 'loading' — a statutory
+      // thirty-day queue rendering a spinner for ever, with nothing on screen
+      // to distinguish a slow database from an account that was never linked.
+      // The render below now stops before the spinner and says which it is.
       if (!who?.tenantId) return;
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
       setGymName(t.name); setGymErr(t.error);
-      await load();
+      // Through `refresh` rather than `load` directly, so the first read stamps
+      // the same way every later one does. A stamp that only appeared after a
+      // manual refresh would be worse than none: the figures would go from
+      // unlabelled to labelled without changing.
+      refresh();
     })();
     return () => { live = false; };
-  }, [load]);
+  }, [load, refresh]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -190,6 +364,17 @@ export default function Deletions() {
     );
   }
 
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/deletions">
+        <h1>Erasure queue</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('erasure requests')}
+        </p>
+      </Shell>
+    );
+  }
+
   const rows = queue ?? [];
   const overdue = rows.filter((p) => p.daysRemaining != null && p.daysRemaining <= 0);
   const clocks = rows.map((p) => p.daysRemaining).filter((d): d is number => d != null);
@@ -207,7 +392,16 @@ export default function Deletions() {
       // The database's own refusals are written for a person to read ("That
       // member has not asked to be deleted."), so they are shown rather than a
       // generic failure that hides which guard fired.
-      setMsg(e?.message ?? 'Nothing was deleted.');
+      // The database's own refusals are the reason this is worth classifying
+      // rather than replacing: `writeFailedText` prints the refusal's own words
+      // ("That member has not asked to be deleted.") for a refusal, and refuses
+      // to assert anything at all when nobody answered — which for an
+      // irreversible deletion is the one case that must not be guessed at.
+      setMsg(writeFailedText(e, {
+        what: 'That deletion',
+        unchanged: 'nothing was deleted and the account is still here',
+        howToCheck: 'Reload this page: an account that has actually been deleted is gone from the list below.',
+      }));
     } finally { setBusy(null); }
   };
 
@@ -222,7 +416,7 @@ export default function Deletions() {
       // store listing promises are already spent.
       render: (p) => p.daysRemaining == null
         ? <span className="dash">unknown</span>
-        : <span style={{ color: p.daysRemaining <= 0 ? 'var(--crit)' : p.daysRemaining <= 7 ? '#f0c04e' : 'var(--ink2)' }}>
+        : <span style={{ color: p.daysRemaining <= 0 ? 'var(--crit)' : p.daysRemaining <= 7 ? 'var(--warn)' : 'var(--ink2)' }}>
             {p.daysRemaining <= 0 ? 'Overdue' : `${p.daysRemaining}d`}
           </span> },
     { key: 'act', header: '', value: () => 0, align: 'right',
@@ -272,6 +466,13 @@ export default function Deletions() {
              note={log ? 'every one on record, not the last fifty' : undefined} />
       </div>
 
+      {/* The age of every figure above, and the only control in this console
+          that re-reads a screen without throwing away the page. `days_remaining`
+          is computed by the view at READ time, so without this line the clock
+          on the tiles is the clock at the moment the tab was opened. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="the erasure queue" style={{ margin: '-14px 0 22px' }} />
+
       {confirming ? (
         <div style={{
           margin: '0 0 22px', padding: '13px 15px', background: 'var(--surface2)',
@@ -282,10 +483,13 @@ export default function Deletions() {
               Erase {confirming.name ?? 'this account'}?
             </strong>{' '}
             This permanently deletes them and everything of theirs — profile, workouts, logs, scans,
-            messages and bookings, across 39 tables. Their invoices and memberships go too, which is
-            the opposite of what you would assume of a financial record and is worth reading twice.
-            Payments, door-log visits and guest passes stay, with the person detached from them.
-            Requested {day(confirming.requestedAt)}.
+            messages and bookings — across 118 tables of this gym&rsquo;s records, and their sign-in
+            account with them. Your financial record survives: invoices, memberships and payments
+            are kept, and so are door-log visits and guest passes. Those rows lose the link to the
+            account and keep the name, copied onto them as the account goes, so the books still
+            reconcile — detached, not anonymous. A guest pass keeps the name written at the desk, a
+            signed waiver keeps the name that was signed, and the activity feed keeps the sentence
+            it composed at the time. Requested {day(confirming.requestedAt)}.
           </p>
           {/* Two steps, and the second control is not where the first one was.
               The same two confirmations the phone asks for, for the same
@@ -321,11 +525,14 @@ export default function Deletions() {
 
       <Section title="Waiting" sub="Oldest request first, because that is the one closest to its deadline.">
         {unread ? (
-          <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
+          // Announced, and polite: the crit banner above has already
+          // interrupted with the database's own sentence. This one says which
+          // SECTION has no rows, which is the part that was silent.
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
             {unread === 'loading' ? 'Loading…' : 'Could not read the queue. The banner above says why.'}
           </div>
         ) : (
-          <DataTable
+          <DataTable noun="erasure requests"
             rows={rows} columns={cols} rowKey={(p) => p.subjectId}
             empty="Nobody has asked to be erased. That is the good state rather than a blank screen — this read came back, and it came back empty."
           />
@@ -338,11 +545,11 @@ export default function Deletions() {
       >
         {logWhy ? <Banner tone="crit">{logWhy}</Banner> : null}
         {log === null ? (
-          <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
             {logWhy ? 'Could not read the record of erasures already carried out.' : 'Loading…'}
           </div>
         ) : (
-          <DataTable
+          <DataTable noun="erasures carried out"
             rows={log} columns={logCols} rowKey={(a) => a.id}
             empty="No erasure has been carried out on this gym yet."
           />
@@ -376,24 +583,13 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface2)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '84ch',
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's surface and 84ch measure, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ background: 'var(--surface2)', maxWidth: '84ch' }}>{children}</SharedBanner>;
 }

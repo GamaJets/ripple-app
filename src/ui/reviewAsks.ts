@@ -31,7 +31,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
-import { capLimit, capped } from '../lib/rowCap';
+import { capLimit } from '../lib/rowCap';
+// The roster is up to ROW_CAP uuids and this read used to send all of them in
+// one `.in()`. See the note at the read below.
+import { readCappedByIds } from '../lib/cappedByIds';
 import { useAuthRevision } from './authRevision';
 import { useRoster } from './roster';
 import { isQueryableId } from '../lib/clientDrift';
@@ -119,16 +122,34 @@ export function useReviewAsks(): ReviewAsks {
       let goalsRead = true;
       if (ids.length) {
         const since = new Date(Date.now() - GOAL_FRESH_DAYS * 86_400_000).toISOString();
-        const { data, error } = await supabase
-          .from('goal_targets')
-          .select('client_id, achieved_at')
-          .in('client_id', ids)
-          .gte('achieved_at', since)
-          .order('achieved_at', { ascending: false })
-          .limit(capLimit());
+        // Chunked. `ids` is the coach's whole roster, which is up to ROW_CAP =
+        // 1000 uuids, and one `.in()` over that is a ~39KB request line against
+        // the 8KB proxies allow — a 414 that supabase-js does not reject on and
+        // that arrives as `data: null`. Here that would have read as "nobody has
+        // reached a goal", quietly, and a coach would simply never be offered
+        // the ask. The failure is invisible on the screen precisely because
+        // having nothing to ask about is the ordinary state of it.
+        //
+        // Still capped rather than finished: the `gte(since)` window above is
+        // what keeps this small, and the truncation rule below is a deliberate
+        // one — a short page is treated as unread wholesale. See
+        // src/lib/cappedByIds.ts.
+        // Named `goalRows` rather than destructured as `rows`: `rows` is this
+        // hook's own state one scope up, and a shadow of it here is the kind of
+        // thing that reads fine and breaks on the next edit.
+        const { rows: goalRows, truncated, error } = await readCappedByIds<any>(
+          ids,
+          (chunk) => supabase
+            .from('goal_targets')
+            .select('client_id, achieved_at')
+            .in('client_id', chunk)
+            .gte('achieved_at', since)
+            .order('achieved_at', { ascending: false })
+            .limit(capLimit()),
+        );
         if (error) { reportError('reviewAsks.goals', error); goalsRead = false; }
         else {
-          const page = capped(data);
+          const page = { rows: goalRows, truncated };
           // A truncated page would make some clients look like they have no
           // goal when they have one, so it is treated as unread wholesale
           // rather than as a shorter answer.

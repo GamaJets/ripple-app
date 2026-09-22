@@ -21,16 +21,17 @@
 // question. Rows imported before RepDB carry no description, and those show
 // nothing — never a filler sentence, because a fabricated description of a lift
 // is a fabricated fact about a product somebody is buying.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Ghost, Flag, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { Fetched } from '../../src/ui/fetched';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
@@ -45,7 +46,13 @@ export default function OwnerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status } = useExerciseDetail(name);
+  // `signedOut` was dropped. `useExerciseDetail` sets it when the row read
+  // returns nothing, because the `exercises` policy is `to authenticated` and a
+  // session that has not restored is handed no row and no error — reported as
+  // 'ready'. Without the flag this screen tells an owner "This movement is not
+  // in our catalogue" and then explicitly rules out the thing that happened:
+  // "nothing here is missing because of an error". Both sibling screens read it.
+  const { detail, display, status, signedOut, reload } = useExerciseDetail(name);
 
   // Gated on the licence recorded against the row, not on anything this screen
   // knows: an evaluation asset from a CC BY-NC preview bundle renders while
@@ -56,6 +63,18 @@ export default function OwnerExercise() {
   // movement must resolve its pictures the same way, and a picture that fails
   // to resolve is a silent empty box rather than an error anybody sees.
   const { frames, animUrl, animCacheKey } = useExerciseMedia(detail);
+  // The movement itself is the read. The media below is derived from the row
+  // this hook returns, so re-reading it re-resolves the demo too.
+  const pull = usePullToRefresh(useCallback(() => { void reload(); }, [reload]));
+
+  /* When this movement was last read. See the same paragraph on
+   * app/(owner)/brand.tsx: these two were the only reading screens in this app
+   * with a pull and no stamp, which is a gesture whose effect an owner cannot
+   * see. `useExerciseDetail` carries no stamp, so the screen keeps one, and a
+   * failed re-read does not move it — the row on screen is still the old one. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (status === 'ready') setFetchedAt(Date.now()); }, [status]);
+
   const caption = demoCaption(detail?.source, frames.length);
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -64,13 +83,19 @@ export default function OwnerExercise() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name="back" size={20} color={t.ink} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>
-        </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* The owner sees the catalogue in their own language too, and on
+            this screen the marker below is doing a second job: it is how an
+            owner reviewing the German library can see, movement by movement,
+            what is still English. */}
+        <PageHead title={display?.name.text || detail?.name || name || 'Exercise'} onBack={goBack} />
+        {/* `marginTop` because the kit's head carries no margin of its own. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'}
+                 style={{ marginTop: sp.lg, marginBottom: sp.md }} />
+
+        {display?.note ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
+        ) : null}
 
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (
@@ -79,8 +104,8 @@ export default function OwnerExercise() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
           </View>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
-            note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
+          <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
+            note="Nothing below is missing because it does not exist. We could not reach the catalogue. Try again once you have signal." />
         ) : animUrl ? (
           <>
             <DemoAnimation uri={animUrl} label={detail?.name || name}
@@ -90,7 +115,7 @@ export default function OwnerExercise() {
               stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+                <Flag tone={t.warn}>Evaluation asset: licensed for review only, never for release.</Flag>
               </View>
             ) : null}
           </>
@@ -108,26 +133,30 @@ export default function OwnerExercise() {
           // silhouette implying a demonstration we do not have — which on this
           // screen would misrepresent the product to the person buying it.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No illustration for this one' : 'Not in Our Catalogue'}
+            title={detail ? 'No Illustration for This One'
+              : signedOut ? 'Not Read on This Session'
+              : 'Not in Our Catalogue'}
             note={detail
               ? 'This movement has no artwork, so members see its name, its muscles and the written steps. Your coaches can film their own clip for it from the trainer app.'
-              : 'This movement is not in our catalogue, so there is no guide for it — nothing here is missing because of an error.'} />
+              : signedOut
+              ? 'This session was not allowed to read the catalogue, so nothing here says whether we hold this movement. That is a sign-in that has not restored, not a gap in the product.'
+              : 'This movement is not in our catalogue, so there is no guide for it. Nothing here is missing because of an error.'} />
         )}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (
           <View style={{ marginTop: sp.sm }}>
-            <Flag tone={t.warn}>Illustrations are served from the source dataset — not for release.</Flag>
+            <Flag tone={t.warn}>Illustrations are served from the source dataset. Not for release.</Flag>
           </View>
         ) : null}
 
         {detail ? (
           <>
             {/* ── what it is ───────────────────────────────────────────── */}
-            {detail.description ? (
+            {display?.description ? (
               <>
                 <Rule />
                 <Section>
-                  <Text style={{ ...ty.body, color: t.ink }}>{detail.description}</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>{display.description.text}</Text>
                 </Section>
               </>
             ) : null}
@@ -137,12 +166,12 @@ export default function OwnerExercise() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                 {detail.group ? (
                   <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>{detail.group}</Text>
                   </View>
                 ) : null}
                 {chips.map((c) => (
                   <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{c}</Text>
                   </View>
                 ))}
               </View>
@@ -164,12 +193,12 @@ export default function OwnerExercise() {
                   <SectionHead title="Muscles Worked" />
                   {detail.primaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
-                      <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
+                      <Text style={font('600')}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
                     </Text>
                   ) : null}
                   {detail.secondaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink2 }}>
-                      <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
+                      <Text style={font('600')}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
                     </Text>
                   ) : null}
                 </Section>
@@ -180,16 +209,23 @@ export default function OwnerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
+                  {/* Guarded by `detail.instructions.length` directly above, so
+                      the count is at least one — and a one-step movement (a
+                      hold, a carry, a stretch) read "1 steps". */}
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} Step${detail.instructions.length === 1 ? '' : 's'}`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
+                      {/* The step's number on a toned plate, as the look numbers
+                          every sequence; the ink is the hue's text step. */}
+                      <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: t.data.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...value(13), color: t.data.blueInk }}>{n + 1}</Text>
+                      </View>
                       <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
                     </View>
                   ))}
                 </Section>
               </>
-            ) : status === 'ready' ? (
+            ) : status === 'ready' && !signedOut ? (
               <>
                 <Rule />
                 <Section>
@@ -206,7 +242,6 @@ export default function OwnerExercise() {
           </>
         ) : null}
 
-        <Rule />
         <Section>
           <Ghost label="Exercise Library" icon="dumbbell" onPress={() => router.push('/(owner)/library')} />
         </Section>

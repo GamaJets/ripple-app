@@ -94,7 +94,7 @@ export function readValidityDays(text: string | null | undefined): TypedValidity
 /** Said next to the field. The whole of why this is safe to add to a package
  *  that has already been selling for two years. */
 export const VALIDITY_NOT_RETROACTIVE =
-  'A validity applies to packs bought from now on. Anything a client is already holding keeps the terms it was sold under — adding a window here does not take credits off anybody, and changing it later does not reach a pack somebody has already paid for.';
+  'A validity applies to packs bought from now on. Anything a client is already holding keeps the terms it was sold under. Adding a window here does not take credits off anybody, and changing it later does not reach a pack somebody has already paid for.';
 
 /** Said next to the field when it is empty, so that "no expiry" reads as a
  *  choice rather than as a box somebody did not fill in. */
@@ -263,41 +263,133 @@ export function expiryLine(p: PackExpiry, left: number | null, today: string): s
       if (left != null && left <= 0) return null;
       const when = n === 1 ? 'today is the last day' : `${n} days left`;
       return left == null
-        ? `This pack runs out on ${day} — ${when}.`
-        : `${left} session${left === 1 ? '' : 's'} on this pack, and it runs out on ${day} — ${when}.`;
+        ? `This pack runs out on ${day} (${when}).`
+        : `${left} session${left === 1 ? '' : 's'} on this pack, and it runs out on ${day} (${when}).`;
     }
     case 'lapsed':
       // Still spendable until the nightly pass runs, and saying otherwise would
       // be a claim the database has not made yet.
       return day ? `This pack ran out on ${day}. Anything still on it is being closed off.` : null;
-    case 'closed':
+    case 'closed': {
+      // ── two different things can be sitting on a closed pack ──────────
+      //
+      // `lost` is what `run_pack_expiry()` took OFF at the moment the window
+      // shut: sessions the member paid for and did not take.
+      //
+      // `left` is what is on the pack NOW, and on a closed pack that should be
+      // nought — the nightly pass reduces `sessions_total` to `sessions_used`
+      // precisely so every draw site in the database stops. There is one way
+      // it is not nought, and `packBalance` in ./packDraw.ts names it:
+      // `refund_pack_session` (supabase/parts/123) decrements `sessions_used`
+      // on the newest pack WITH USAGE and does not ask whether that pack's
+      // window has closed. So a member whose session is refunded after their
+      // pack ran out gets a credit back that nothing in the database will ever
+      // let them draw, and their balance goes up by one on a pack that is over.
+      //
+      // `packBalance.left` correctly leaves it out of the hero — a figure
+      // somebody books against must not include a credit that cannot be
+      // booked — and counts it in `onClosedPacks` so that it can be talked
+      // about. Nothing talked about it. Worse, this branch fell through to
+      // "Everything on it had been used", which is a confident false sentence
+      // about somebody's money: it had not been used, it had been given back,
+      // and it is stuck.
+      //
+      // Both facts print when both are true. They are separate events on
+      // separate days and merging them would lose one.
+      const back = left != null && left > 0 ? left : 0;
+      const parts: string[] = [];
       if (lost > 0) {
-        return day
+        parts.push(day
           ? `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out on ${day}, and they can no longer be booked.`
-          : `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out, and they can no longer be booked.`;
+          : `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out, and they can no longer be booked.`);
       }
+      if (back > 0) {
+        // Stated, and no further. `expiryLine` is read by BOTH apps — the
+        // client's Memberships & Packs and the coach's Payments, which falls
+        // through to it whenever `strandedNote` is null, and null is exactly
+        // this case. So it names no party and asks nobody for anything: "ask
+        // your coach" would be printed to the coach about their own client.
+        // Every other sentence in this function is voice-neutral for the same
+        // reason, and `strandedNote` is where the coach's half of the
+        // conversation lives.
+        parts.push(`${back} session${back === 1 ? '' : 's'} went back on to this pack after it had already run out, so ${back === 1 ? 'it cannot' : 'they cannot'} be booked. ${back === 1 ? 'It needs' : 'They need'} to move to a pack that is still open.`);
+      }
+      if (parts.length) return parts.join(' ');
+      // Only now, and only because both counts were read and both were nought.
       return day ? `This pack ran out on ${day}. Everything on it had been used.` : null;
+    }
   }
 }
 
 /**
- * What the COACH is told about a pack whose window closed with sessions on it,
- * or null when there is nothing to raise.
+ * What the COACH is told about a pack whose window closed, or null when there
+ * is nothing to raise.
  *
  * The counterpart of `expiryLine` and a different sentence on purpose: the
  * client's line states what happened to their money, and this one is about a
  * decision the coach has to make. It carries no amount, because the number of
  * sessions is the fact and `minorMoney` in src/lib/coachMoney.ts is the only
  * thing in this codebase that may put a currency in front of a figure.
+ *
+ * ── Why this takes `left` ─────────────────────────────────────────────────
+ *
+ * There are TWO ways a closed pack can be holding something, and until this
+ * parameter existed the coach was only ever told about one of them.
+ *
+ *   `sessionsExpired`  what `run_pack_expiry()` took off at the moment the
+ *                      window shut. Sessions the client paid for and did not
+ *                      take.
+ *   `left`             what is on the pack NOW, which on a closed pack should
+ *                      be nought. It is not nought when a session has been
+ *                      REFUNDED on to it since: `refund_pack_session`
+ *                      (supabase/parts/123) decrements `sessions_used` on the
+ *                      newest pack with usage and never asks whether that
+ *                      pack's window has closed, so the credit lands on a pack
+ *                      nothing will ever let anybody draw. `packBalance` in
+ *                      ./packDraw.ts counts it as `onClosedPacks`.
+ *
+ * Keying only on `sessionsExpired > 0` meant this returned null for exactly
+ * the refund case — and app/(trainer)/payments.tsx falls through to
+ * `expiryLine` whenever it does, which is why the coach's screen was showing
+ * the client's own voice-neutral sentence about their own client. The client's
+ * half of this was fixed first; this is the coach's half.
+ *
+ * The refund case is the one the coach can actually DO something about: the
+ * credit is stuck because of where it landed, and moving it is not a thing the
+ * client can do from their side. So it is stated to them as an act, where the
+ * client's line states it as a fact.
+ *
+ * `left` null is an unread balance and claims no refund it did not read, the
+ * same rule `expiryLine` keeps.
  */
-export function strandedNote(who: string | null | undefined, p: PackExpiry, today: string): string | null {
+export function strandedNote(who: string | null | undefined, p: PackExpiry, left: number | null, today: string): string | null {
   if (packWindow(p, today) !== 'closed') return null;
-  const lost = Number(p.sessionsExpired ?? 0);
-  if (!Number.isFinite(lost) || lost <= 0) return null;
+  const lostRaw = Number(p.sessionsExpired ?? 0);
+  const lost = Number.isFinite(lostRaw) && lostRaw > 0 ? Math.trunc(lostRaw) : 0;
+  const back = left != null && Number.isFinite(left) && left > 0 ? Math.trunc(left) : 0;
+  if (lost <= 0 && back <= 0) return null;
   const name = String(who ?? '').trim() || 'This client';
   const day = expiryDayLabel(p.expiresOn);
-  return `${name} paid for ${lost} session${lost === 1 ? '' : 's'} they did not take${day ? `, and the pack ran out on ${day}` : ''}.`
-    + ' Extending it, selling them something else or leaving it are all yours to choose — but they will notice, and it is better coming from you.';
+  const parts: string[] = [];
+  if (lost > 0) {
+    parts.push(`${name} paid for ${lost} session${lost === 1 ? '' : 's'} they did not take${day ? `, and the pack ran out on ${day}` : ''}.`
+      + ' Extending it, selling them something else or leaving it are all yours to choose, but they will notice, and it is better coming from you.');
+  }
+  if (back > 0) {
+    // A separate event on a separate day from the one above, so both print
+    // when both are true rather than one standing in for the other.
+    //
+    // Named as an act, not a fact. The client's line says "they need to move to
+    // a pack that is still open" and stops there, because that line is read by
+    // BOTH apps and "ask your coach" would be printed to the coach about their
+    // own client. This one is read only here, so it can say who has to move it,
+    // and the answer is the coach: a refund puts the credit back on the newest
+    // pack with usage, and nothing on the client's side can pick it up again.
+    parts.push(`${back} session${back === 1 ? '' : 's'} went back on to ${name === 'This client' ? 'their' : `${name}'s`} pack after it had already run out.`
+      + ` A refund does not reopen a window, so ${back === 1 ? 'that credit is' : 'those credits are'} sitting where nothing can book`
+      + ` ${back === 1 ? 'it' : 'them'}. Moving ${back === 1 ? 'it' : 'them'} on to a pack that is still open is yours to do, and only yours.`);
+  }
+  return parts.join(' ');
 }
 
 /** Said once wherever expired packs are listed. Nothing in this app gives a

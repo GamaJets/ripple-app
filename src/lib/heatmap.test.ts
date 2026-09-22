@@ -1,7 +1,11 @@
 // What one square of the consistency heatmap says.
 // Compile with tsc, run with node.
 //
-// The assertion that matters most: an unread log never reads as "no sessions".
+// The assertion that matters most: an unread log never reads as "nothing logged".
+//
+// The wording is EXERCISES, not sessions. The caller counts `workouts` rows and
+// this app writes one per movement, so "7 sessions" was read out over a single
+// visit to the gym — to the one reader who cannot see the grid and check.
 // A member shown "you did not train" for a month they trained every day of has
 // no way to tell the fault is ours.
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from './heatmap';
@@ -21,27 +25,27 @@ setAppLocale('en-GB');
 const two = heatmapDayLabel(day(2026, 7, 14), 2, TODAY);
 ok(/14/.test(two), `the square says which day it is — got ${two}`);
 ok(/Aug/.test(two), `and which month — got ${two}`);
-ok(/2 sessions/.test(two), `and how many sessions — got ${two}`);
-ok(/1 session\b/.test(heatmapDayLabel(day(2026, 7, 14), 1, TODAY)), 'one session is singular');
-ok(/no sessions/.test(heatmapDayLabel(day(2026, 7, 14), 0, TODAY)), 'and none is none');
+ok(/2 exercises/.test(two), `and how many exercises — got ${two}`);
+ok(/1 exercise\b/.test(heatmapDayLabel(day(2026, 7, 14), 1, TODAY)), 'one exercise is singular');
+ok(/nothing logged/.test(heatmapDayLabel(day(2026, 7, 14), 0, TODAY)), 'and none is none');
 
 // The one that must never collapse into the one above it.
 const unread = heatmapDayLabel(day(2026, 7, 14), null, TODAY);
 ok(/not read/.test(unread), `an unread log says so — got ${unread}`);
-ok(!/no sessions/.test(unread), 'and is never softened into "no sessions"');
+ok(!/nothing logged/.test(unread), 'and is never softened into "nothing logged"');
 
 const future = heatmapDayLabel(day(2026, 8, 30), 0, TODAY);
 ok(/still to come/.test(future), `a day that has not happened is not a day you missed — got ${future}`);
-ok(!/no sessions/.test(future), 'and does not accuse anybody of missing it');
+ok(!/nothing logged/.test(future), 'and does not accuse anybody of missing it');
 
 // Today itself is a day that has happened.
-ok(/no sessions/.test(heatmapDayLabel(TODAY, 0, TODAY)), 'today counts as a day, not as the future');
+ok(/nothing logged/.test(heatmapDayLabel(TODAY, 0, TODAY)), 'today counts as a day, not as the future');
 
 // Every square is named, whatever it holds. Eighty-four unnamed views is the
 // defect; an empty string would be the same defect with extra steps.
 for (const c of [null, 0, 1, 5]) {
   const s = heatmapDayLabel(day(2026, 7, 14), c, TODAY);
-  ok(s.trim().length > 6, `a square with ${String(c)} sessions still has a name — got ${JSON.stringify(s)}`);
+  ok(s.trim().length > 6, `a square with ${String(c)} exercises still has a name — got ${JSON.stringify(s)}`);
 }
 
 /* ── the column axis that did not exist ────────────────────────────────── */

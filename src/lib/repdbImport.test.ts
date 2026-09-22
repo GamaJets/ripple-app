@@ -9,7 +9,9 @@
 import {
   packTier, tierMayShip, demoLicenceFor, slug,
   catalogueId, mediaKey, stillFiles, animationFile, planRow, overlap,
+  IMPORT_TRANSLATION_LOCALES, planTranslations, translationCoverage,
 } from './repdbImport';
+import { TRANSLATION_LOCALES } from './catalogueLocale';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -182,6 +184,94 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   eq(slug('  Leading and trailing  '), 'leading-and-trailing', 'edges are trimmed rather than left as hyphens');
   eq(slug('90/90 Hip Stretch'), '90-90-hip-stretch', 'digits survive and the slash separates');
   for (const nothing of ['', null, undefined]) eq(slug(nothing), '', `${JSON.stringify(nothing)} slugs to nothing`);
+}
+
+// ── the translation set, where the vendor id trap appears a third time ─────
+{
+  // The record that broke the catalogue import once already: RepDB calls it
+  // `barbell-row` and displays "Bent-Over Barbell Row". `exercises.de.json`
+  // keys its German name by `barbell-row` too, so writing the translation under
+  // the vendor id points it at an exercise that does not exist — and the
+  // foreign key rejects it half way through the language rather than at the
+  // start of it.
+  const records = [
+    { id: 'barbell-row', name_en: 'Bent-Over Barbell Row' },
+    { id: 'back-squat', name_en: 'Back Squat' },
+    { id: 'plank', name_en: 'Plank' },
+  ];
+  const de = [
+    { id: 'barbell-row', name: 'Vorgebeugtes Langhantelrudern', description: 'Eine horizontale Zugübung.' },
+    { id: 'back-squat', name: 'Kniebeuge' },
+    // A localised entry for a movement the English set does not have. Guessing
+    // a catalogue id from the German name would mint a row nothing resolves.
+    { id: 'ghost-movement', name: 'Geisterübung' },
+    // Nothing translated at all. Part 790 refuses to store such a row and the
+    // reason is on screen: no row shows English AND SAYS it is English, where a
+    // blank name shows nothing.
+    { id: 'plank', name: '   ', description: null },
+  ];
+
+  const { rows, skipped } = planTranslations(records, de, 'de');
+  eq(rows.length, 2, 'two of the four localised entries become rows');
+  eq(rows[0], {
+    exerciseId: 'bent-over-barbell-row', locale: 'de',
+    name: 'Vorgebeugtes Langhantelrudern', description: 'Eine horizontale Zugübung.',
+  }, "the row is keyed by the slug of the ENGLISH name, never by RepDB's own id");
+  ok(!rows.some((r) => r.exerciseId === 'barbell-row'),
+    'and specifically NOT by the vendor id, which is the failure this join exists to prevent');
+  eq(rows[1].description, null, 'a name with no description is a row with a null description, not a blank one');
+
+  ok(skipped.some((s) => s.vendorId === 'ghost-movement' && s.reason === 'no-english-record'),
+    'a localised entry with no English counterpart is skipped and COUNTED, not guessed at');
+  ok(skipped.some((s) => s.vendorId === 'plank' && s.reason === 'nothing-to-translate'),
+    'an entry that translates nothing is skipped rather than written blank');
+
+  // Re-running is the whole reason the table is keyed (exercise_id, locale).
+  // Loading a language twice, or loading a corrected copy, must leave one row
+  // per movement — never a second exercise and never a second name.
+  const again = planTranslations(records, de, 'de');
+  eq(again.rows, rows, 'planning the same set twice produces the same rows');
+  const corrected = planTranslations(records, [{ id: 'back-squat', name: 'Langhantel-Kniebeuge' }], 'de');
+  eq(corrected.rows.length, 1, 'a corrected partial set is one row');
+  eq(corrected.rows[0].exerciseId, 'back-squat', 'against the SAME key, so the upsert replaces rather than adds');
+
+  // Two vendor records whose English names slug to one catalogue id would both
+  // write the same row and the second would win silently.
+  const collide = planTranslations(
+    [{ id: 'row-a', name_en: 'Bent-Over Row' }, { id: 'row-b', name_en: 'Bent-over Row' }],
+    [{ id: 'row-a', name: 'Vorgebeugtes Rudern' }, { id: 'row-b', name: 'Rudern vorgebeugt' }],
+    'de',
+  );
+  eq(collide.rows.length, 1, 'a catalogue id is written once');
+  ok(collide.skipped.some((s) => s.reason === 'duplicate'), 'and the collision is reported rather than swallowed');
+
+  eq(planTranslations(records, de, 'en' as any).rows, [],
+    "'en' is not a translation locale — English is exercises.name, and the planner refuses it outright");
+}
+
+// ── coverage, which is the number a run should be judged on ────────────────
+{
+  const rows = [
+    { exerciseId: 'back-squat', locale: 'de' as const, name: 'Kniebeuge', description: null },
+    // A row with a description and NO name does not make the movement
+    // translated: the name is what a member reads in a list of six hundred.
+    { exerciseId: 'plank', locale: 'de' as const, name: null, description: 'Eine Rumpfübung.' },
+  ];
+  const cov = translationCoverage(rows, new Set(['back-squat', 'plank', 'deadlift']));
+  eq(cov.translated, ['back-squat'], 'only a movement with a NAME counts as translated');
+  eq(cov.untranslated, ['deadlift', 'plank'],
+    'and the rest are named, because that list is what somebody works through next');
+}
+
+// ── the duplicated locale set has not drifted ──────────────────────────────
+{
+  // IMPORT_TRANSLATION_LOCALES is duplicated from TRANSLATION_LOCALES because
+  // scripts/import-repdb.mjs loads this module through Node's type stripping.
+  // Duplication that drifts silently is worse than no duplication; this is one
+  // of the three places that agreement is enforced, alongside the check
+  // constraint in supabase/parts/790 and scripts/check-translations.mjs.
+  eq([...IMPORT_TRANSLATION_LOCALES], [...TRANSLATION_LOCALES],
+    'the importer and the app agree on which languages exist');
 }
 
 if (errors.length) {

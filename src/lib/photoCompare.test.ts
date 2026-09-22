@@ -20,6 +20,13 @@ import {
   COMPARE_DISCLAIMER,
   type ScanReading,
 } from './photoCompare';
+// `readingText` and `deltaText` now write the READER's decimal separator, so
+// every assertion below that names a figure is an assertion about a locale.
+// Stated here rather than inherited from the runner, for the reason
+// units.test.ts states its own: a suite that asserts "80.1 kg" while passing on
+// a British laptop and failing on a German one is testing the laptop.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };

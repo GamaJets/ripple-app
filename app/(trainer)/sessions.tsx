@@ -30,36 +30,105 @@
 // work. See src/lib/trainerSessions.ts for why that is the right key rather
 // than a convenient one.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice, SyncBadge, FigureCard, TonedChip, type Tone } from '../../src/ui/kit';
+// The zone every time on this screen is drawn in — `when` formats in the phone's
+// own — so a coach marking Tuesday's sessions from another country can see whose
+// Tuesday it is. The same reader the Schedule tab names its zone with.
+import { deviceTimeZone } from '../../src/ui/availability';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
+// The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
+// against, recomputed at local midnight, on foreground and on focus — never
+// frozen at the moment a read happened to land. Read once, in one place, because
+// the marking queue and the record are two views of the same hours and a screen
+// a gym settles payroll against cannot hold two opinions about which of them
+// have finished. See src/ui/today.ts and `nowMs` below.
+import { useNow } from '../../src/ui/today';
 import { useTenant } from '../../src/ui/tenant';
 import { useAuth } from '../../src/ui/auth';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { minorFromWhole } from '../../src/lib/coachMoney';
+import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import type { MyCurrency } from '../../src/lib/currencySource';
 import { tapLight } from '../../src/ui/haptics';
 import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
-  MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, windowStart,
+  MARK_WINDOW_DAYS, awaitingOutcome, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
+import { floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
 // The record, as opposed to the queue. See "What Already Happened" below.
 import {
   pastSessions, pastVerdict, PAST_STATES, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
 } from '../../src/lib/sessionHistory';
+// ── and WHO wrote the record ──────────────────────────────────────────────
+//
+// `pastVerdict` says what happened and when somebody said so. It could not say
+// who, because nothing in this app had ever read `sessions.outcome_by` — the
+// column supabase/parts/33 added, and the trigger there has been filling from
+// `auth.uid()` on every mark since. An outcome decides whether the hour is paid
+// for and it can be written by the coach, by the gym owner correcting it, or by
+// a back-office job; "marked 14 March" against all three is the record a coach
+// has to dispute a payroll line from. See src/lib/outcomeAuthor.ts for the three
+// things this line refuses to say.
+import { fetchOutcomeAuthors, markedByLine, type OutcomeAuthors } from '../../src/lib/outcomeAuthor';
+// ── Finishing a session, as opposed to merely marking it ──────────────────
+//
+// This screen was the ONLY way a session ever got an outcome, and it asks the
+// question in isolation: what happened, four buttons, done. The exercises that
+// were actually done in the hour were typed on a different screen, carried no
+// session, and were never joined to it — so a coach could close a session with
+// no record of what it contained, or write the record and leave the session
+// open holding a settlement up.
+//
+// "Finish This Session" is the way in from here: it opens the log with this
+// session in hand, and Save writes both. What the log then does about marking
+// the session delivered — and why that is one press rather than two — is
+// argued in src/lib/sessionFinish.ts.
+import {
+  canFinish, fetchSessionLogCounts, finishBlockedNote, loggedAgainstLine,
+  loggedExercisesLine, type SessionLogCounts,
+} from '../../src/lib/sessionFinish';
 import {
   NO_FILTER, clientOptions, emptyFilterLine, filterActive, filterLine, filterSessions,
   stateCounts, type SessionFilter,
 } from '../../src/lib/sessionFilter';
 import { appLocale } from '../../src/lib/locale';
+// A day on this screen is a day in the coach's own life. `startsAt.slice(0, 10)`
+// is the UTC date of a row this screen renders in local time — see `byDay`.
+import { isoDay } from '../../src/lib/weekStart';
+import { localDate } from '../../src/lib/localDate';
+// ── Answering a request for an hour the coach never opened ────────────────
+//
+// This screen is where a coach settles what has already happened. The requests
+// queue is the opposite — what has not happened yet, and cannot until they
+// answer — and it is here rather than on a screen of its own for one reason: a
+// request stops meaning anything the moment its hour arrives (src/lib/
+// sessionRequests.ts · EXPIRY_RULE), so it has to be somewhere a working coach
+// already opens. A screen nobody visits is where a time-limited question goes
+// to lapse.
+//
+// It is drawn ABOVE the marking queue and separated by its own heading,
+// because the two lists are answers to different questions and the harm in
+// running them together is that "4 to mark" and "2 asking" become one number
+// that means neither.
+import { fetchCoachRequests, answerRequest, type CoachRequest } from '../../src/ui/sessionRequests';
+import {
+  COACH_ACCEPT_RULE, OUTCOME_LABEL, REQUEST_NOTE_MAX, answerRefusalNote,
+  answerTellLine, answeredConfirmation, coachQueue, coachQueueNote,
+} from '../../src/lib/sessionRequests';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { hitSlopFor } from '../../src/lib/a11y';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 
 /**
  * The four outcomes, in the order a person would consider them.
@@ -83,8 +152,8 @@ import { appLocale } from '../../src/lib/locale';
  */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; wholeDay: boolean; tone: (t: Theme) => string }[] = [
   { id: 'completed',      label: 'Went Ahead',    short: 'Done',        wholeDay: true, tone: (t) => t.brand },
-  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No show',   wholeDay: true, tone: (t) => t.crit },
-  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late cxl',   wholeDay: true, tone: (t) => t.s3 },
+  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No Show',   wholeDay: true, tone: (t) => t.crit },
+  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late Cxl',   wholeDay: true, tone: (t) => t.s3 },
   { id: 'cancelled',      label: 'Cancelled in Time', short: 'Cxl',     wholeDay: true, tone: (t) => t.ink3 },
 ];
 
@@ -100,17 +169,31 @@ const when = (iso: string) => {
   });
 };
 
-/** The mark beside a past session. A 6pt dot; the words stay in ink beside it,
- *  because `crit`/`warn`/`good` are marks in this app and never text colour. */
-const stateTone = (t: Theme, s: PastState): string => {
-  switch (s) {
-    case 'delivered': return t.brand;
-    case 'missed': return t.crit;
-    case 'late_cancelled': return t.s3;
-    case 'cancelled': return t.ink3;
-    case 'unmarked': return t.warn;
-  }
+/**
+ * The hour a request is about, written out — or null when it cannot be read.
+ *
+ * Deliberately NOT `when` above, which answers a dash. A dash is the right
+ * answer in a slot under a label and the wrong one as the subject of a
+ * sentence: "Say yes to — ?" is what `check:prose` exists to stop. A request
+ * whose hour will not parse is not drawn at all.
+ */
+const requestWhen = (iso: string): string | null => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(appLocale(), {
+    weekday: 'long', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+  });
 };
+
+/** The same five states as chip tones, by NAME — the kit picks the plate and the
+ *  ink, so nothing here colours text. Green delivered, red not attended, orange
+ *  a late cancellation (a fee may ride on it), grey a clean one, amber unmarked. */
+const STATE_TONE: Record<PastState, Tone> = {
+  delivered: 'brand', missed: 'red', late_cancelled: 'orange', cancelled: 'neutral', unmarked: 'amber',
+};
+/** `PAST_STATE_LABEL` is written to sit inside a sentence, so it is lower case;
+ *  standing alone on a chip it takes a capital. Same words, one source. */
+const chipWord = (s: PastState) => PAST_STATE_LABEL[s].charAt(0).toUpperCase() + PAST_STATE_LABEL[s].slice(1);
 
 /** A bare day, through `appLocale()` — a hardcoded tag is what `check:locale`
  *  refuses, and this string names the edge of what has been read. */
@@ -119,11 +202,31 @@ const dayOnly = (iso: string) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-/** Group by calendar day so a trainer can clear a whole day at once. */
+/**
+ * Group by calendar day so a trainer can clear a whole day at once.
+ *
+ * ── The day is the coach's own, not the UTC one ──────────────────────────
+ *
+ * This was `s.startsAt.slice(0, 10)`, which is the UTC date of a timestamp that
+ * every row on this screen RENDERS in local time. West of Greenwich the two
+ * disagree for every evening session: a coach in Los Angeles saw "6:30 PM" on a
+ * row filed under tomorrow, under a heading naming a day they had not worked
+ * yet. The whole-day mark buttons then acted on that set — so "everyone on
+ * Tuesday went ahead" marked Monday evening and Tuesday morning, and the
+ * sessions those outcomes belonged to were left in the queue holding payroll up.
+ *
+ * `isoDay` from src/lib/weekStart.ts is the local `YYYY-MM-DD` this app already
+ * uses everywhere a day is a day in somebody's life, and `localDate` reads it
+ * back without a timezone moving it. The label is the same day the rows say.
+ */
 function byDay(sessions: PtSession[]): { day: string; label: string; rows: PtSession[] }[] {
   const m = new Map<string, PtSession[]>();
   for (const s of sessions) {
-    const day = s.startsAt.slice(0, 10);
+    const at = new Date(s.startsAt);
+    // A row whose start will not parse is not filed under today: that would put
+    // it in a day a coach then marks wholesale. It gets its own bucket, sorted
+    // to the end, and is still markable one row at a time.
+    const day = Number.isFinite(at.getTime()) ? isoDay(at) : '';
     const list = m.get(day);
     if (list) list.push(s); else m.set(day, [s]);
   }
@@ -131,17 +234,25 @@ function byDay(sessions: PtSession[]): { day: string; label: string; rows: PtSes
     .sort((a, b) => b[0].localeCompare(a[0]))   // most recent day first
     .map(([day, rows]) => ({
       day,
-      label: new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, {
-        weekday: 'long', day: 'numeric', month: 'long',
-      }),
+      label: dayHeading(day),
       rows: rows.sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
     }));
+}
+
+/** The heading over a day's rows, in the reader's own locale. */
+function dayHeading(day: string): string {
+  const d = localDate(day);
+  if (!d) return 'Date not readable';
+  return d.toLocaleDateString(appLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 export default function TrainerSessions() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
+  const { tenant, refresh: refreshTenantRaw } = useTenant();
+  // Wrapped so the refresh list below is all promises. `useTenant().refresh`
+  // bumps a tick and returns nothing.
+  const refreshTenant = useCallback(async () => { refreshTenantRaw(); }, [refreshTenantRaw]);
   // ── who these sessions belong to ──────────────────────────────────────────
   //
   // The coach, by `trainer_id` — NOT the gym, by `tenant_id`.
@@ -171,7 +282,36 @@ export default function TrainerSessions() {
   // free" — `undefined` and null are different instructions and src/ui/floorQueue.ts
   // carries that distinction through unflattened.
   const { sessionFee: ownFee } = useMyTrainerProfile();
-  const feeToSnapshot = tenant?.sessionFee ?? ownFee;
+
+  /* ── and the currency, which for a coach with no gym is not the gym's ────
+   *
+   * The fee above already fell back to the coach's own rate. The CONVERSION did
+   * not: it read `tenant?.currency`, which is null for a coach who has no gym,
+   * so `minorFromWhole` returned null and every session such a coach ever
+   * delivered was filed with no rate at all — including after part 940 let them
+   * say what they charge in. Their own fee had a figure and no unit.
+   *
+   * `fetchMyCurrency` answers it under the one precedence rule, in
+   * src/lib/currencySource.ts: the gym on `profiles.tenant_id` is the
+   * authority, and `trainers.currency` applies if and only if there is no gym.
+   * src/lib/rateSnapshot.ts is where this screen, the schedule and the log
+   * screen agree on what to do with the answer — all three call the same
+   * function, because three sessions of the same hour's work filed three
+   * different ways is worse than three filed with nothing.
+   *
+   * Read only when the tenant provider is not already holding a gym currency.
+   * Where it is, that IS the authoritative answer, asking again would spend a
+   * read to be told the same thing, and the in-memory copy is the one that
+   * survives a coach standing in a basement with no signal.
+   */
+  const gymCcy = (tenant?.currency || '').trim() || null;
+  const [myCcy, setMyCcy] = useState<MyCurrency | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (gymCcy) { setMyCcy(null); return; }
+    void (async () => { const c = await fetchMyCurrency(); if (live) setMyCcy(c); })();
+    return () => { live = false; };
+  }, [gymCcy]);
 
   // Whether there is a gym behind these sessions, which decides only what the
   // screen CALLS the thing it is asking for. A gym trainer is holding up a
@@ -180,8 +320,31 @@ export default function TrainerSessions() {
   // that "payroll can be settled" names a process he does not have.
   const hasGym = !!tenant?.id;
 
-  const [queue, setQueue] = useState<PtSession[] | null>(null);
-  // Separate from `queue === null`, which only means "not read yet". A refused
+  /* ── the queue is DERIVED, and the reason is a clock ──────────────────────
+   *
+   * This was `useState`, filled once per read with `awaitingOutcome(mine)` —
+   * whose `now` defaults to `Date.now()` and was therefore the instant the READ
+   * landed. The record below is cut on `useNow`, which moves at local midnight,
+   * on foreground and on focus. Two clocks, one screen, and they disagree for
+   * as long as it is open: a 17:00 session read at 16:50 is not in the queue,
+   * and at 18:05 the record has it as "still needs an outcome recorded" while
+   * the Hero says 0 and nothing is holding payroll up. There is no row to mark
+   * it from, because every row that can be marked comes from the queue.
+   *
+   * `useNow` is the clock both halves settle on, and not because it is the one
+   * already here. It is the one the COACH acts on: the queue is a to-do list a
+   * gym settles payroll against, and an hour that has finished has finished
+   * whether or not this screen has re-read since. Freezing it at read time can
+   * only ever hide work; moving it can only ever offer work that is genuinely
+   * due. The record was moved onto `useNow` for this exact argument (see the
+   * `nowMs` note below) and the queue was left behind.
+   *
+   * Deriving it also removes the second copy of one fact. `mark` and `undo`
+   * each wrote to both `queue` and `all`, in the right order, by hand — and a
+   * third writer that forgot one of them is how the two halves of this screen
+   * come to disagree again.
+   */
+  // Separate from `all === null`, which only means "not read yet". A refused
   // or unreachable read used to land here as an empty queue, and an empty queue
   // is the screen's good state — so the coach got a tick and "nothing is
   // holding payroll up" at the exact moment the app had no idea what was
@@ -231,7 +394,6 @@ export default function TrainerSessions() {
       // ask for, and an empty queue would say "nothing outstanding" — which is
       // the one thing it must never say without having looked.
       reportError('sessions.awaiting', new Error('no signed-in coach to read sessions for'));
-      setQueue(null);
       setAll(null);
       haveRows.current = false;
       setFailed(true);
@@ -249,7 +411,6 @@ export default function TrainerSessions() {
       setAll(mine);
       haveRows.current = true;
       setLoadedDays(days);
-      setQueue(awaitingOutcome(mine));
       setFailed(false);
     } catch (e) {
       reportError('sessions.awaiting', e);
@@ -261,8 +422,8 @@ export default function TrainerSessions() {
       } else {
         // Leave the queue unknown rather than empty. [] here would be read as
         // "nothing outstanding", which is a claim about the gym's payroll this
-        // screen is in no position to make.
-        setQueue(null);
+        // screen is in no position to make. The queue is derived from `all`, so
+        // this is the one place that has to say "unknown" and it says it once.
         setAll(null);
         setFailed(true);
       }
@@ -273,7 +434,121 @@ export default function TrainerSessions() {
 
   useEffect(() => { void load(MARK_WINDOW_DAYS); }, [load]);
 
-  const loaded = queue !== null;
+  /* ── what the coach has been ASKED, as opposed to what they delivered ─────
+   *
+   * Its own state and its own read, deliberately not folded into `load`. The
+   * marking queue is `sessions`; this is `session_requests`, a different table
+   * with different policies, and a failure in either must not be reported as a
+   * failure in the other — a coach told "could not be read" over an empty
+   * requests list would stop looking, and the thing they stopped looking at is
+   * a client waiting for an answer.
+   */
+  const [reqs, setReqs] = useState<CoachRequest[] | null>(null);
+  const [reqStatus, setReqStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [reqNamesRead, setReqNamesRead] = useState(true);
+  const [answering, setAnswering] = useState<string | null>(null);
+  /** The coach's words on a decline, keyed by request. Optional — a coach who
+   *  declines without explaining has still given an answer, and a box that
+   *  demanded a reason would collect full stops typed to get past it. */
+  const [declineNote, setDeclineNote] = useState<Record<string, string>>({});
+
+  const loadRequests = useCallback(async () => {
+    const out = await fetchCoachRequests();
+    setReqs(out.rows);
+    setReqStatus(out.status);
+    setReqNamesRead(out.namesRead);
+  }, []);
+  useEffect(() => { void loadRequests(); }, [loadRequests]);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Both reads, and they stay two reads: the marking queue is `sessions` and
+   * the requests are `session_requests`, different tables with different
+   * policies, and one failing must not be reported as the other failing. The
+   * gesture asks for both because the coach pulling it down wants the screen
+   * to be right, not one half of it.
+   *
+   * Both are written from somewhere else: a client asking for an hour, and a
+   * session falling into the marking window because time passed. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(MARK_WINDOW_DAYS), loadRequests(), refreshTenant()]),
+    [load, loadRequests, refreshTenant],
+  ));
+
+  /**
+   * Say yes or no.
+   *
+   * Nothing is checked here before calling. The clash has to be tested inside
+   * the same transaction as the write or it is a test against a calendar that
+   * can change underneath it, and `answer_session_request` does exactly that,
+   * behind `select … for update` on the request row — so one question cannot
+   * become two sessions however many devices answer it. Every refusal comes
+   * back named, and `answerRefusalNote` is the one place it becomes a sentence.
+   */
+  async function answer(r: CoachRequest, accept: boolean) {
+    const when = requestWhen(r.startsAt);
+    if (!when) return;
+    // A courtesy, not the guarantee. Two taps in the same frame both pass this,
+    // and so do two handsets — which is exactly why the guarantee is the
+    // `select … for update` inside `answer_session_request` and not here. What
+    // this saves is the second alert.
+    if (answering) return;
+    setAnswering(r.id);
+    const words = (declineNote[r.id] ?? '').trim() || null;
+    const res = await answerRequest(r.id, accept, accept ? null : words);
+    setAnswering(null);
+    await loadRequests();
+    if (!res.ok) {
+      Alert.alert('Not Answered', answerRefusalNote(res.reason, res.className));
+      return;
+    }
+    setDeclineNote((p) => { const next = { ...p }; delete next[r.id]; return next; });
+    // The accepted session belongs on the coach's own calendar too, and that
+    // list is read by a different provider on a different screen. Nothing here
+    // writes to it: the row is in `sessions`, and the calendar's live
+    // subscription is what picks it up.
+    const push = await sendPushChecked(
+      [r.clientId],
+      accept ? 'Your session is on' : 'About that time',
+      accept ? `Your coach said yes to ${when}.` : `Your coach can’t do ${when}.`,
+      { route: '/(client)/request-session' },
+      'bookings',
+    );
+    // Three outcomes, and this warned on one of them. `ok` covers a send that
+    // was accepted and could only part-read the client's handsets (`partial`),
+    // and a send that was accepted while `notify_users` wrote no row at all
+    // (`recorded: 0`) — both of which read on screen exactly like the case
+    // where the client has been told. `answerTellLine` is the one place the
+    // three are separated, and it is tested there.
+    const lines = [answeredConfirmation(accept, when)];
+    const told = answerTellLine({
+      ok: push.ok, recorded: push.recorded, inboxKept: push.inboxKept, partial: push.partial,
+    });
+    if (told) lines.push(told);
+    Alert.alert(accept ? 'Session Created' : 'Answered', lines.join('\n\n'), [{ text: 'OK' }]);
+  }
+
+
+  /* ── the one clock ────────────────────────────────────────────────────────
+   *
+   * Read once, here, above BOTH halves of the screen, so the queue that offers
+   * a session to be marked and the record that says one still needs marking
+   * cannot be answering different questions about the same hour.
+   *
+   * `useNow`, not `Date.now()` in a memo body: the default is read when the
+   * memo runs, and both memos below are keyed on `all` — a list that moves when
+   * the server answers and never when time passes. So "has this hour finished
+   * yet" would be decided at whatever moment the read landed and then held.
+   * `check:frozen-day` looks for an EMPTY dependency array and cannot see that
+   * shape; `check:frozen-hook` names it, and this is its entry.
+   */
+  const nowMs = useNow().getTime();
+
+  const loaded = all !== null;
+  /** Everything in the window that has finished and that nobody has said what
+   *  happened to. Derived, not stored — see the note on `failed` above. */
+  const queue = useMemo(
+    () => (all === null ? null : awaitingOutcome(all, nowMs)), [all, nowMs]);
   const rows = queue ?? [];
 
   /* ── narrowing a quarter of sessions down to the one being looked for ────
@@ -306,7 +581,64 @@ export default function TrainerSessions() {
    * the evidence the hour was booked, and supabase/parts/195 is the argument
    * for why removing that evidence quietly improves every figure computed over
    * what is left. */
-  const history = useMemo(() => pastSessions(all ?? []), [all]);
+  // The same `nowMs` the queue above is cut on. A session that ends while this
+  // screen is open joins the record and the queue on the same tick, which is
+  // what stops the record saying "still needs an outcome recorded" about an
+  // hour the queue is not offering a button for.
+  const history = useMemo(() => pastSessions(all ?? [], nowMs), [all, nowMs]);
+
+  /* ── what was actually logged in each of these hours ──────────────────────
+   *
+   * A second read, deliberately its own: `workouts` is a different table with
+   * different policies from `sessions`, and one failing must not be reported as
+   * the other failing. It is also the read that must never be allowed to
+   * fabricate a zero — a coach shown "nothing was logged" about an hour they
+   * wrote up types it in again, and their client ends up with the same session
+   * twice. `loggedAgainstLine` is what holds that line; the status is carried
+   * rather than the map alone, because a map built from a failed read is an
+   * empty map and an empty map says "nothing" about every row in it.
+   */
+  const [logs, setLogs] = useState<SessionLogCounts>(
+    { status: 'loading', bySession: new Map(), namesBySession: new Map() });
+  const historyIds = useMemo(() => history.map((s) => s.id).join(','), [history]);
+  useEffect(() => {
+    const nothing: SessionLogCounts = { status: 'ready', bySession: new Map(), namesBySession: new Map() };
+    if (!USE_SUPABASE) { setLogs(nothing); return; }
+    const ids = historyIds ? historyIds.split(',') : [];
+    if (!ids.length) { setLogs(nothing); return; }
+    let live = true;
+    // The previous answer is kept while the next read is in flight, so widening
+    // the window does not blank every line that is already right.
+    setLogs((p) => ({ ...p, status: 'loading' }));
+    void fetchSessionLogCounts(supabase, ids).then((out) => { if (live) setLogs(out); });
+    return () => { live = false; };
+  }, [historyIds]);
+  /* ── who is on record as having marked each of these ─────────────────────
+   *
+   * A third read, its own again, and for the same reason the second one is:
+   * `sessions.outcome_by` sits on a row `fetchMySessions` already reads, but
+   * that function is shared with the dashboard card and widening its `select`
+   * would change what every caller carries. A label under a row fails the way a
+   * label should — 'error' and an empty map, and the marking queue above still
+   * draws.
+   *
+   * Keyed on the same `historyIds` as the logs, so widening the window re-reads
+   * both together rather than leaving one describing a set the other has left.
+   * The previous answer is kept while the next is in flight, so a wider read
+   * does not blank lines that are already right.
+   */
+  const [authors, setAuthors] = useState<OutcomeAuthors>(
+    { status: 'loading', bySession: new Map(), names: new Map() });
+  useEffect(() => {
+    const nothing: OutcomeAuthors = { status: 'ready', bySession: new Map(), names: new Map() };
+    if (!USE_SUPABASE) { setAuthors(nothing); return; }
+    const ids = historyIds ? historyIds.split(',') : [];
+    if (!ids.length) { setAuthors(nothing); return; }
+    let live = true;
+    setAuthors((p) => ({ ...p, status: 'loading' }));
+    void fetchOutcomeAuthors(supabase, ids).then((out) => { if (live) setAuthors(out); });
+    return () => { live = false; };
+  }, [historyIds]);
   /* The state is `pastVerdict`'s and is passed in rather than re-derived, so
    * the chip a coach filters by and the label printed on the row can never come
    * from two different opinions about the same session. */
@@ -327,7 +659,48 @@ export default function TrainerSessions() {
     () => who.find((c) => c.clientId === filter.clientId)?.name ?? null, [who, filter.clientId]);
   /** The instant the loaded window starts at — the edge of what this screen can
    *  answer for, named on screen rather than implied by a list that stops. */
-  const windowFrom = useMemo(() => windowStart(loadedDays), [loadedDays]);
+  //  The same `nowMs` the record above is cut on, so the edge this screen NAMES
+  //  and the edge it actually applies cannot drift apart across a midnight.
+  //  `windowStart` defaults its second argument to `Date.now()`, read in a memo
+  //  keyed on a day count that never changes on its own.
+  const windowFrom = useMemo(() => windowStart(loadedDays, nowMs), [loadedDays, nowMs]);
+
+  /* ── going off to finish one, and coming back ─────────────────────────────
+   *
+   * The log screen writes the entries AND marks the session delivered, so a
+   * session finished there is gone from this queue on the server and still
+   * drawn here until something re-reads. A coach who presses "Finish This
+   * Session", writes the hour up, comes back and sees the session still sitting
+   * in "waiting on an outcome" has been told the finish did not work — and the
+   * fix they reach for is to mark it a second time.
+   *
+   * So the return is re-read, and ONLY the return: a ref set on the way out and
+   * cleared on the way back in. A blanket reload on every focus would buy the
+   * same correctness and charge a read for every visit to the tab.
+   */
+  const wentToFinish = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!wentToFinish.current) return;
+    wentToFinish.current = false;
+    void load(loadedDays);
+  }, [load, loadedDays]));
+
+  const finish = (s: PtSession) => {
+    if (!s.clientId) return;
+    wentToFinish.current = true;
+    router.push({
+      pathname: '/(trainer)/log-session',
+      params: {
+        clientId: s.clientId,
+        // The name is a label and may legitimately not have been read. Sent as
+        // an empty string rather than the word "Client", which would put a
+        // placeholder in the title of a screen that writes to a real person.
+        name: s.clientName ?? '',
+        sessionId: s.id,
+        sessionAt: s.startsAt,
+      },
+    });
+  };
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
     // Unreachable in practice — with no uid the queue is `failed` and no row is
@@ -336,19 +709,28 @@ export default function TrainerSessions() {
     if (!uid) return;
     setBusy(s.id);
     try {
-      // Snapshot the gym's fee at the moment of marking, so a later fee change
-      // cannot rewrite what this session was worth. The snapshot is taken HERE
-      // and carried into the queue rather than recomputed at flush time: a
-      // session marked on Tuesday and sent on Thursday is worth what it was
-      // worth on Tuesday, and re-reading the fee would let a rate change in
-      // between quietly rewrite it.
-      // Converted by the gym's currency, never by a factor of a hundred: in
-      // yen that snapshot was a hundred times the fee and in dinar a tenth of
-      // it, on the column payroll is settled from. An independent coach's own
-      // fee has no currency recorded anywhere, so it converts to null and NO
-      // rate is written — payrollByTrainer falls back to the rate the gym
-      // states today, which is a figure somebody chose.
-      const rateCents = minorFromWhole(feeToSnapshot, tenant?.currency) ?? undefined;
+      // Snapshot the fee at the moment of marking, so a later fee change cannot
+      // rewrite what this session was worth. The snapshot is taken HERE and
+      // carried into the queue rather than recomputed at flush time: a session
+      // marked on Tuesday and sent on Thursday is worth what it was worth on
+      // Tuesday, and re-reading the fee would let a rate change in between
+      // quietly rewrite it.
+      //
+      // A SNAPSHOT ALREADY WRITTEN IS A HISTORICAL FACT. This changes what is
+      // filed from now on and nothing else — no session already delivered is
+      // re-derived, re-priced or backfilled by any of this, including the ones
+      // an independent coach delivered with no currency to convert by.
+      //
+      // Converted by whatever currency actually resolves — src/lib/rateSnapshot.ts
+      // holds the rule and all three writing screens call it — and never by a
+      // factor of a hundred: in yen that snapshot was a hundred times the fee
+      // and in dinar a tenth of it, on the column payroll is settled from. When
+      // nothing names a currency it stays null, `undefined` leaves rate_cents
+      // untouched, and payrollByTrainer falls back to the rate the gym states
+      // today, which is a figure somebody chose. A zero is not.
+      const rateCents = rateCentsToSnapshot({
+        gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+      }) ?? undefined;
       // ── the outcome, and the room it is recorded in ────────────────────
       //
       // This is the same money as the class tick, one session at a time, and
@@ -356,8 +738,9 @@ export default function TrainerSessions() {
       // try again", the row stayed in the list, and a coach clearing a day's
       // sessions in a basement did it three times and got nowhere.
       //
-      // `markMyOutcome` throws on a zero-row update as well as on a transport
-      // failure, and those are not the same event — one is the session not
+      // The direct write this replaced (`markMyOutcome`, removed from
+      // src/lib/trainerSessions.ts) threw on a zero-row update as well as on a
+      // transport failure, and those are not the same event — one is the session not
       // being theirs to mark, which will be true again next time. The queue
       // separates them: `refused` keeps the row in the list and says so,
       // `unsent` takes it off the list because the coach HAS decided and this
@@ -366,26 +749,33 @@ export default function TrainerSessions() {
         kind: 'session-outcome', sessionId: s.id, clientName: s.clientName ?? null, outcome, rateCents,
       });
       if (out === 'refused') {
-        Alert.alert('Not recorded',
-          'That outcome was not saved and is not waiting to send — the session may no longer exist, or it is not yours to mark.');
+        Alert.alert('Not Recorded',
+          'That outcome was not saved and is not waiting to send. The session may no longer exist, or it is not yours to mark.');
         return;
       }
-      setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
-      // The session leaves the queue and JOINS the record, in the same tap. It
-      // is the same row seen two ways, and letting the history keep saying
-      // "still needs an outcome" for one it has just been given would make the
-      // two halves of this screen disagree with each other in front of the
-      // person who resolved it.
+      // Nothing was kept. The session stays on the Mark Sessions queue, because
+      // that is where it actually still is — and the sentence names the cause,
+      // which unlike a refusal is one the coach can clear themselves.
+      if (out === 'full') {
+        Alert.alert('Not Recorded', floorFullLine('That outcome'));
+        return;
+      }
+      // The session leaves the queue and JOINS the record, in the same tap and
+      // now in the same write. It is the same row seen two ways: `awaitingOutcome`
+      // drops it the moment it has an outcome, and letting the history keep
+      // saying "still needs an outcome" for one it has just been given would
+      // make the two halves of this screen disagree with each other in front of
+      // the person who resolved it.
       setAll((prev) => (prev ?? []).map((x) => (x.id === s.id
         ? { ...x, outcome, outcomeAt: new Date().toISOString() } : x)));
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
       tapLight();
       if (out === 'unsent') {
-        Alert.alert('Kept on this phone', keptOfflineLine('That outcome'));
+        Alert.alert('Kept on This Phone', keptOfflineLine('That outcome'));
       }
     } catch (e) {
       reportError('sessions.mark', e);
-      Alert.alert('Not recorded', 'That outcome was not saved. Check your connection and try again.');
+      Alert.alert('Not Recorded', 'That outcome was not saved. Check your connection and try again.');
     } finally { setBusy(null); }
   };
 
@@ -408,26 +798,88 @@ export default function TrainerSessions() {
     setSending(true);
     try {
       const line = flushResultLine(await floor.flush());
-      if (line) Alert.alert('Sending finished', line);
+      if (line) Alert.alert('Sending Finished', line);
     } finally { setSending(false); }
   };
 
   const undo = async (entry: { s: PtSession; outcome: SessionOutcome }) => {
     if (!uid) return;
+    // The outcome as the coach chose it, named once. Three sentences below have
+    // to say what the RECORD still holds, and three copies of the same lookup is
+    // how they come to describe one row three ways.
+    const stands = OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome;
+    const who = entry.s.clientName ?? 'That session';
     try {
-      await clearMyOutcome(supabase, uid, entry.s.id);
+      // ── through the queue, like the mark it takes back ──────────────────
+      //
+      // This was `clearMyOutcome(supabase, uid, entry.s.id)` — straight to the
+      // server, while `mark` above goes through `floor.attempt`. The two halves
+      // of one feature met in exactly the conditions the queue was built for: a
+      // coach on a gym floor with no signal marked a session, the act was kept
+      // on the phone, they undid it in front of the client, the undo THREW, and
+      // when the signal came back the queue flushed the outcome they had
+      // retracted — onto that client's record and onto payroll.
+      //
+      // A retraction carries the same supersede key as the mark, so offline it
+      // replaces the queued act in place and nothing false is ever sent. When
+      // the mark HAD reached the server this is the clear that always had to
+      // happen, and it is now retried like everything else rather than lost to
+      // one failed round trip.
+      const out = await floor.attempt({
+        kind: 'session-outcome', sessionId: entry.s.id, clientName: entry.s.clientName ?? null, outcome: null,
+      });
+      if (out === 'refused') {
+        // The server read it and declined, so the outcome stands. Named as what
+        // is true of the RECORD, because that is what the coach has to act on.
+        Alert.alert('Not Undone',
+          `${who} is still recorded as “${stands}”. The session may no longer exist, or it is not yours to change.`);
+        return;
+      }
+      /* ── the fourth answer, which this handler did not have ──────────────
+       *
+       * `attempt` has four arms and `mark` above handles all four; this one
+       * stopped at three and fell through on 'full' — so the chip came off the
+       * screen, the row went back to unmarked, and NOTHING was alerted, over a
+       * record that still says "no show".
+       *
+       * It is reachable exactly where it hurts most. The comment above explains
+       * that a retraction supersedes a still-queued mark and so can never be
+       * refused a place in the queue — which is true, and it is why this looked
+       * safe. But the case it does not cover is the one that matters: the mark
+       * REACHED THE SERVER (so there is nothing queued to supersede), the coach
+       * then lost signal, and the queue filled with the morning's other work.
+       * `enqueueAct` refuses at `FLOOR_CAP`, `attempt` returns 'full', and the
+       * retraction is neither sent nor kept.
+       *
+       * Falling through there is the precise failure the header of this handler
+       * was written about, arriving from the other direction: the coach believes
+       * they took back a "no show" they did not, and the gym pays — or does not
+       * pay — on the outcome that is still recorded.
+       */
+      if (out === 'full') {
+        Alert.alert('Not Undone',
+          `${who} is still recorded as “${stands}”. ${floorFullLine('Taking that outcome back')}`);
+        return;
+      }
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
-      setQueue((prev) => [entry.s, ...(prev ?? [])]);
-      // Back to unmarked in the record too, for the same reason as above.
+      // Back to unmarked in the record, which is also what puts it back on the
+      // queue — one write, for the same reason as above.
       setAll((prev) => (prev ?? []).map((x) => (x.id === entry.s.id
         ? { ...x, outcome: null, outcomeAt: null } : x)));
       tapLight();
+      if (out === 'unsent') {
+        // Kept, not saved, and never the other way round. What matters to the
+        // coach here is the half that IS now true: the outcome they retracted
+        // will not be sent, whatever this phone was carrying.
+        Alert.alert('Kept on This Phone', keptOfflineLine('Taking that outcome back'));
+      }
     } catch (e) {
-      // The row keeps its outcome on the server, so saying nothing here leaves
-      // the coach believing they took back a "no show" they did not — and the
-      // gym pays, or does not pay, on the outcome that is still recorded.
+      // The row may keep its outcome on the server, so saying nothing here
+      // leaves the coach believing they took back a "no show" they did not —
+      // and the gym pays, or does not pay, on the outcome that is still
+      // recorded.
       reportError('sessions.undo', e);
-      Alert.alert('Not undone', `${entry.s.clientName ?? 'That session'} is still recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}”. Check your connection and tap undo again.`);
+      Alert.alert('Not Undone', `${who} may still be recorded as “${stands}”. Check your connection and tap undo again.`);
     }
   };
 
@@ -443,11 +895,11 @@ export default function TrainerSessions() {
       ? `\n\nYou have narrowed this list, so this is the ${day.rows.length} shown and not necessarily every unmarked session on that day. Clear the filters first if you meant all of them.`
       : '';
     Alert.alert(
-      `${label} — all ${day.rows.length}?`,
+      `${label} · All ${day.rows.length}?`,
       `Every unmarked session on ${day.label} that is shown below will be recorded as "${label}". You can undo each one afterwards.${narrowNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Mark all', onPress: async () => { for (const s of day.rows) await mark(s, outcome); } },
+        { text: 'Mark All', onPress: async () => { for (const s of day.rows) await mark(s, outcome); } },
       ],
     );
   };
@@ -459,34 +911,177 @@ export default function TrainerSessions() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
-        </View>
+        {/* ── the back control that pointed forwards ─────────────────────
+            This drew `FORWARD_ICON` — a bare `›` — in the back position,
+            behind an accessibility label that said "Back". Seen on a device,
+            reached by deep link from a notification: a chevron pointing away
+            from the direction it takes you, with no target ring around it,
+            beside Invoices and Statement which both draw the circled `‹`
+            that every other screen in this app uses.
 
-        <Hero
-          label="Waiting on an Outcome"
-          figure={fig(loaded ? rows.length : null)}
-          note={failed
-            ? 'Could not be read — this is not a count of zero.'
+            PageHead is that control now, with the title on the screen's
+            centre line the way the board opens every pushed page. It draws
+            the ring, the 44pt target and `BACK_ICON`, so it mirrors correctly
+            in RTL without this screen knowing about direction at all — which
+            is the whole point of src/ui/direction. */}
+        {/* No subtitle: "clear outstanding outcomes first, then review…" was
+            the page describing its own order, which the order already says. */}
+        <PageHead title="Mark Sessions" />
+        {(() => {
+          const tz = deviceTimeZone();
+          return (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
+              {tz ? `Times in ${tz.replace(/_/g, ' ')}` : 'Times in this phone’s time zone'}
+            </Text>
+          );
+        })()}
+
+        {/* ── the figure card ──────────────────────────────────────────────
+            The Hero this replaces drew the count on the ground; the board
+            draws every leading figure in a card, label over it and one line
+            under. Same figure and the same rule: a dash unless the read came
+            back, because a failed read is not a queue of zero — and this is
+            the screen a gym settles payroll from. */}
+        {/* The kit's FigureCard now — the hand-built version of it this was —
+            with the look's verdict beside the figure: amber while anything is
+            waiting, because an unmarked session is "slipping" and not yet
+            wrong, and the accent once the queue is clear. The mark sits beside
+            WORDS ("Holding payroll up", "All marked"), never alone, and there
+            is no mark at all over a read that did not come back. */}
+        <FigureCard
+          title="Waiting on an Outcome"
+          figure={loaded ? fig(rows.length) : null}
+          unit={loaded ? (rows.length === 1 ? 'session' : 'sessions') : undefined}
+          comparison={!loaded ? undefined : rows.length === 0 ? 'All marked' : (hasGym ? 'Holding payroll up' : 'Holding your record up')}
+          tone={!loaded ? undefined : rows.length === 0 ? t.brand : t.data.amber}
+          detail={failed
+            ? 'Could not be read. This is not a count of zero.'
             : !loaded
               ? 'Reading your sessions…'
               : rows.length === 0
-                ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
+                ? (hasGym ? 'Nothing outstanding. Payroll can be settled.' : 'Nothing outstanding. Every session you have delivered is on the record.')
                 : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
         />
 
-        <Rule />
+
+        {/* ── asked, and not yet answered ─────────────────────────────────
+            A client can now ask for an hour this coach never opened
+            (supabase/parts/740). It is a QUESTION and not a booking: nothing is
+            held, no credit has moved, and accepting is the only thing anywhere
+            in the app that turns one into a session.
+
+            It sits above the marking queue and under its own heading. The two
+            lists answer different questions — what has happened, and what has
+            not happened yet — and running them together would produce one
+            number that means neither.
+
+            Drawn whenever there is something to answer or something to say
+            about why there is not. Loading, failed and empty are three
+            different sentences, because an unread queue rendered as "nobody is
+            asking" is a client left waiting for an answer their coach was told
+            did not exist. */}
+        {USE_SUPABASE ? (
+          <Section>
+            <SectionHead title="Session Requests"
+              note={reqs && isWhole(reqStatus) ? (coachQueueNote(coachQueue(reqs).length) ?? 'Nothing waiting') : undefined} />
+
+            {reqStatus === 'error' ? (
+              <Flag tone={t.warn}>
+                Requests could not be read, so this is not a list of what your clients have asked for.
+                Anyone waiting on you is still waiting. Check again when you have signal.
+              </Flag>
+            ) : reqStatus === 'loading' ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Reading what your clients have asked for.</Text>
+            ) : (() => {
+              const pending = coachQueue(reqs ?? []);
+              if (!pending.length) {
+                return (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    Nobody is asking for a time right now. A client can ask for an hour you have not
+                    opened, and it will appear here.
+                  </Text>
+                );
+              }
+              return (
+                <>
+                  {reqStatus === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      There are more requests than fitted in one read, so this is the soonest of them
+                      rather than all of them.
+                    </Flag>
+                  ) : null}
+                  {/* A name that could not be READ is not a client with no
+                      name. Said once, above the rows, rather than a dash on
+                      each of them. */}
+                  {!reqNamesRead ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Your clients’ names could not be read, so the requests below say when rather than
+                      who. The times are right and you can still answer them.
+                    </Flag>
+                  ) : null}
+                  {pending.map((r, i) => {
+                    const rWhen = requestWhen(r.startsAt);
+                    if (!rWhen) return null;
+                    const mine = answering === r.id;
+                    return (
+                      <View key={r.id}>
+                        {i ? <Rule /> : null}
+                        <View style={{ paddingVertical: sp.md }}>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>{OUTCOME_LABEL.asked}</Text>
+                          <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: 2 }}>
+                            {r.clientName ? `${r.clientName} · ${rWhen}` : rWhen}
+                          </Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            {r.durationMin} min
+                          </Text>
+                          {r.note ? (
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>They said: {r.note}</Text>
+                          ) : null}
+
+                          <TextInput
+                            value={declineNote[r.id] ?? ''}
+                            onChangeText={(v) => setDeclineNote((p) => ({ ...p, [r.id]: v }))}
+                            placeholder="If you say no, tell them why (optional)"
+                            placeholderTextColor={t.ink3}
+                            maxLength={REQUEST_NOTE_MAX}
+                            accessibilityLabel="A reason, if you say no"
+                            style={{
+                              ...ty.caption, color: t.ink, backgroundColor: t.surface2,
+                              borderRadius: radius.sm, borderWidth: hairline, borderColor: t.ring,
+                              paddingHorizontal: sp.md, paddingVertical: sp.sm, marginTop: sp.md, minHeight: 44,
+                            }}
+                          />
+
+                          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, alignItems: 'center' }}>
+                            <Cta label={mine ? 'Saving…' : 'Yes'} onPress={() => { void answer(r, true); }}
+                              disabled={mine} a11yLabel={`Say yes to ${rWhen}`} />
+                            <Ghost label="No" onPress={() => { void answer(r, false); }}
+                              a11yLabel={`Say no to ${rWhen}`} />
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  <Notice kicker="WHAT YES DOES" title="It Creates the Session" note={COACH_ACCEPT_RULE} />
+                </>
+              );
+            })()}
+          </Section>
+        ) : null}
+
 
         {loaded && rows.length > 0 ? (
           <Section>
             <KpiRow items={[
               { label: 'Sessions', value: fig(rows.length) },
               { label: 'Days', value: fig(allDays.length) },
-              { label: 'Oldest', value: allDays.length ? allDays[allDays.length - 1].day.slice(5) : '—' },
+              // `.slice(5)` off a local `YYYY-MM-DD`, which is what `byDay` now
+              // keys on. The last bucket may be the unreadable-date one, whose
+              // key is the empty string — a dash there is the right answer, and
+              // an empty slot would look like a rendering fault.
+              { label: 'Oldest', value: fig(allDays.length ? (allDays[allDays.length - 1].day.slice(5) || null) : null) },
             ]} />
           </Section>
         ) : null}
@@ -499,7 +1094,7 @@ export default function TrainerSessions() {
         {!floor.queueRead ? (
           <View style={{ paddingTop: sp.sm }}>
             <Flag tone={t.warn}>
-              What this phone is still carrying could not be read, so whether any outcomes are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+              What this phone is still carrying could not be read, so whether any outcomes are waiting to go up is not known. Nothing has been lost, and it is not being written over either.
             </Flag>
           </View>
         ) : floorPendingNote(floor.unsent) ? (
@@ -538,16 +1133,28 @@ export default function TrainerSessions() {
             <Section>
               <SectionHead title="Find" note={narrowed ? 'Filtered' : undefined} />
 
-              <TextInput
-                value={filter.text}
-                onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
-                placeholder="Search a client's name"
-                placeholderTextColor={t.ink3}
-                accessibilityLabel="Search these sessions by client name"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }}
-              />
+              {/* The search pill, the same shape Clients and Meals take: a
+                  glass, the field, and a clear control once there is text. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                <Icon name="search" size={17} color={t.ink3} />
+                <TextInput
+                  value={filter.text}
+                  onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
+                  placeholder="Search a client's name"
+                  placeholderTextColor={t.ink3}
+                  accessibilityLabel="Search these sessions by client name"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }}
+                />
+                {filter.text ? (
+                  <Pressable onPress={() => setFilter((f) => ({ ...f, text: '' }))} hitSlop={hitSlopFor(24)}
+                    accessibilityRole="button" accessibilityLabel="Clear the client search">
+                    <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                  </Pressable>
+                ) : null}
+              </View>
 
               {/* One chip per client in the window, with how many sessions are
                   theirs — so a coach can see somebody has one before tapping
@@ -578,22 +1185,32 @@ export default function TrainerSessions() {
                   cannot see "cancelled late" has no way to learn that none of
                   their sessions is. */}
               {history.length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: who.length > 1 ? 0 : sp.md }}>
-                  {PAST_STATES.map((st) => {
+                /* The board's segment bar — one `surface2` pill, the chosen
+                   segment in ink — rather than a wrap of outlined chips. A
+                   fixed set of five states plus "All" for the no-filter
+                   position the chips used to reach by tapping the lit one
+                   again; it scrolls once the six outgrow the width, and each
+                   keeps its own width rather than squeezing a label to a
+                   syllable. The counts stay, for the reason above. */
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: who.length > 1 ? 0 : sp.md }}
+                  contentContainerStyle={{ flexDirection: 'row', minWidth: '100%', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}
+                  accessibilityRole="tablist">
+                  {([null, ...PAST_STATES] as (PastState | null)[]).map((st) => {
                     const on = filter.state === st;
+                    const label = st ? PAST_STATE_LABEL[st] : 'all';
                     return (
-                      <Pressable key={st} hitSlop={4}
-                        onPress={() => setFilter((f) => ({ ...f, state: on ? null : st }))}
-                        accessibilityRole="button" accessibilityState={{ selected: on }}
-                        accessibilityLabel={`${on ? 'Stop showing only sessions' : 'Show only sessions'} ${PAST_STATE_LABEL[st]}, ${counts[st]} of them`}
-                        style={{ borderWidth: hairline, borderColor: on ? t.brand : t.ring, borderRadius: radius.pill, backgroundColor: on ? t.brand : 'transparent', paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink2 }}>
-                          {PAST_STATE_LABEL[st]} · {counts[st]}
+                      <Pressable key={st ?? 'all'}
+                        onPress={() => setFilter((f) => ({ ...f, state: st }))}
+                        accessibilityRole="tab" accessibilityState={{ selected: on }}
+                        accessibilityLabel={st ? `Show only sessions ${label}, ${counts[st]} of them` : `Show every outcome, ${history.length} sessions`}
+                        style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                        <Text numberOfLines={1} style={{ ...ty.label, ...font(on ? '600' : '500'), ...numeric, color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>
+                          {label} · {st ? counts[st] : history.length}
                         </Text>
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               ) : null}
 
               {narrowed ? (
@@ -614,13 +1231,13 @@ export default function TrainerSessions() {
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Flag tone={t.crit}>Could not read your sessions</Flag>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              There may or may not be sessions waiting on an outcome — the app could not find out.
+              There may or may not be sessions waiting on an outcome; the app could not find out.
               {hasGym ? ' Do not settle payroll on this screen until it loads.' : ' Do not treat this as a clear queue until it loads.'}
             </Text>
             <Pressable onPress={() => void load(loadedDays)} hitSlop={8}
               accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
               style={{ marginTop: sp.lg, borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
             </Pressable>
           </View>
         ) : !loaded ? (
@@ -628,7 +1245,7 @@ export default function TrainerSessions() {
         ) : rows.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Icon name="check" size={26} color={t.brand} />
-            <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>All caught up</Text>
+            <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>All Caught Up</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
               Every session that has already happened has an outcome recorded{hasGym ? ', so nothing is holding payroll up.' : '.'}
             </Text>
@@ -644,13 +1261,30 @@ export default function TrainerSessions() {
         ) : days.map((day, di) => (
           <View key={day.day}>
             <Section>
-              <SectionHead title={day.label} note={`${day.rows.length} to mark`} />
+              <SectionHead title={day.label} note={`${day.rows.length} to Mark`} />
 
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
-                <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole day:</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole Day:</Text>
+                {/* The label is the control's own claim about an irreversible
+                    batch write, and it said "every session on Friday 14 March"
+                    while a filter was on — `days` is `byDay(shownRows)` and
+                    this acts on the shown rows only. `markDay`'s confirmation
+                    already corrects it, but the spoken label is the whole of
+                    what a VoiceOver user has BEFORE the dialog, and it is the
+                    sentence they act on. It says the count, and says "shown"
+                    when the list is narrowed, in the same words `narrowNote`
+                    uses.
+
+                    Vertical slop only: `paddingVertical: 5` around an 18pt
+                    caption is a 28pt row, under the 44 in src/lib/a11y.ts —
+                    and these chips sit 8pt apart, so horizontal slop would
+                    have neighbours fighting over the gap. */}
                 {WHOLE_DAY_OUTCOMES.map((o) => (
-                  <Pressable key={o.id} onPress={() => markDay(day, o.id)} hitSlop={6}
-                    accessibilityRole="button" accessibilityLabel={`Mark every session on ${day.label} as ${o.label}`}
+                  <Pressable key={o.id} onPress={() => markDay(day, o.id)}
+                    hitSlop={{ top: hitSlopFor(28), bottom: hitSlopFor(28), left: 0, right: 0 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Mark ${narrowed ? 'the' : 'all'} ${day.rows.length} ${day.rows.length === 1 ? 'session' : 'sessions'}${narrowed ? ' shown' : ''} on ${day.label} as ${o.label}`}
+                    accessibilityHint="Asks first. Each one can be undone afterwards."
                     style={{ borderWidth: hairline, borderColor: o.tone(t), borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
                     <Text style={{ ...ty.caption, color: o.tone(t) }}>{o.short}</Text>
                   </Pressable>
@@ -661,10 +1295,16 @@ export default function TrainerSessions() {
                 <View key={s.id}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ paddingVertical: sp.md, opacity: busy === s.id ? 0.5 : 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>
-                      {s.clientName ?? 'Client'}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {/* The name in the heading face, and the row's state as the
+                        amber chip the record below uses for the same state —
+                        one colour for "nobody has said" on both lists. */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: sp.md, rowGap: 2 }}>
+                      <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 120 }}>
+                        {s.clientName ?? 'Client'}
+                      </Text>
+                      <TonedChip label={chipWord('unmarked')} tone={STATE_TONE.unmarked} />
+                    </View>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {when(s.startsAt)} · {s.durationMin} min
                       {s.trainerName ? ` · ${s.trainerName}` : ''}
                     </Text>
@@ -672,11 +1312,30 @@ export default function TrainerSessions() {
                       {OUTCOMES.map((o) => (
                         <Pressable key={o.id} disabled={busy === s.id} onPress={() => mark(s, o.id)} hitSlop={4}
                           accessibilityRole="button" accessibilityLabel={`${s.clientName ?? 'Client'}: ${o.label}`}
+                          accessibilityState={{ disabled: busy === s.id, busy: busy === s.id }}
                           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: o.tone(t) }}>{o.short}</Text>
+                          <Text style={{ ...ty.label, ...font('600'), color: o.tone(t) }}>{o.short}</Text>
                         </Pressable>
                       ))}
                     </View>
+
+                    {/* The other half of the same act. The four buttons above
+                        close the session and say nothing about what was in it;
+                        this writes the hour up and closes it in one press. It
+                        is a Ghost and not a Cta: for a coach clearing a day of
+                        cancellations the four buttons are still the fast path,
+                        and this must not compete with them. */}
+                    {canFinish(s) ? (
+                      <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
+                        <Ghost label="Finish This Session"
+                          a11yLabel={`Write up and finish ${s.clientName ?? 'this client'}’s session`}
+                          onPress={() => finish(s)} />
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        {finishBlockedNote(s)}
+                      </Text>
+                    )}
                   </View>
                 </View>
               ))}
@@ -689,7 +1348,7 @@ export default function TrainerSessions() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Marked Just Now" note="Tap to undo" />
+              <SectionHead title="Marked Just Now" note="Tap to Undo" />
               {justMarked.map((e, i) => (
                 <View key={e.s.id}>
                   {i > 0 ? <Rule /> : null}
@@ -701,8 +1360,19 @@ export default function TrainerSessions() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         {when(e.s.startsAt)} · {OUTCOMES.find((o) => o.id === e.outcome)?.label}
                       </Text>
+                      {/* Beside the mark it is about. "Marked Just Now" reads
+                          as done, and for a mark made with no signal it is not:
+                          the decision is on this phone, the gym cannot see it
+                          and no credit has moved. The banner above counts what
+                          is waiting; only the row can say WHICH. Read off the
+                          queue itself, so it clears the moment the act goes up. */}
+                      {floor.pending.some((q) => q.act.kind === 'session-outcome' && q.act.sessionId === e.s.id) ? (
+                        <View style={{ marginTop: 3 }}>
+                          <SyncBadge state="queued" label="On This Phone · Waiting to Send" />
+                        </View>
+                      ) : null}
                     </View>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>Undo</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>Undo</Text>
                   </Pressable>
                 </View>
               ))}
@@ -722,7 +1392,7 @@ export default function TrainerSessions() {
             <Rule />
             <Section>
               <SectionHead title="What Already Happened"
-                note={`${history.length} in ${loadedDays} days`} />
+                note={`${history.length} in ${loadedDays} Days`} />
 
               {/* The edge of the window, said plainly. A list that simply stops
                   is read as a record that stops. */}
@@ -756,9 +1426,11 @@ export default function TrainerSessions() {
                           <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
                             {s.clientName ?? 'Client'}
                           </Text>
-                          {/* The tone is the dot. The label is ink beside it. */}
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, v.state) }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>{PAST_STATE_LABEL[v.state]}</Text>
+                          {/* The state as a toned chip: the word on its own
+                              plate, in that hue's INK — so the colour still
+                              never stands without the word, and the word is
+                              never drawn in a mark colour. */}
+                          <TonedChip label={chipWord(v.state)} tone={STATE_TONE[v.state]} />
                         </View>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {when(s.startsAt)} · {s.durationMin} min
@@ -770,6 +1442,61 @@ export default function TrainerSessions() {
                         {v.state === 'unmarked' ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{PAST_STATE_NOTE.unmarked}</Text>
                         ) : null}
+                        {/* ── and who said so ────────────────────────────
+                            The line above says the outcome; this says whose
+                            statement it is. It is the half a coach needs when
+                            the outcome is the one they disagree with — an
+                            outcome they did not record can be a gym owner's
+                            correction, and until now the record showed those
+                            two identically.
+
+                            `markedByLine` returns null for everything it is not
+                            entitled to say, including a session whose mark is
+                            still sitting in the floor queue on this phone. It
+                            never claims the session IS marked — `v.state` above
+                            is the only thing that says that, and an unmarked
+                            session gets no line here at all. */}
+                        {(() => {
+                          const said = markedByLine(
+                            authors.bySession.get(s.id), authors.status, uid, authors.names);
+                          return said ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{said}</Text>
+                          ) : null;
+                        })()}
+                        {/* ── what was done in the hour ──────────────────
+                            Drawn where it changes what somebody should do: on
+                            a session recorded as DELIVERED, where "nothing is
+                            filed against this session" is a real gap in the
+                            client's record, and on any session that has
+                            something filed against it whatever its state. A
+                            cancelled hour with nothing in it needs no sentence
+                            saying so.
+
+                            Never a bare count: `loggedAgainstLine` is the one
+                            place that decides what may be said, and a read that
+                            failed says so rather than reading as an empty
+                            session. */}
+                        {(() => {
+                          const n = logs.bySession.get(s.id) ?? 0;
+                          if (v.state !== 'delivered' && !(isWhole(logs.status) && n > 0)) return null;
+                          const counted = isWhole(logs.status) || logs.status === 'partial';
+                          const what = counted ? loggedExercisesLine(logs.namesBySession.get(s.id) ?? []) : null;
+                          return (
+                            <>
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                {loggedAgainstLine(logs.status, counted ? n : null)}
+                              </Text>
+                              {/* The movements themselves. A count says whether
+                                  the hour was written up; this says what was in
+                                  it, which is what a coach opening last Tuesday
+                                  came for. Withheld entirely when there is
+                                  nothing to name — never an empty sentence. */}
+                              {what ? (
+                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{what}</Text>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </View>
                     );
                   })}
@@ -784,9 +1511,10 @@ export default function TrainerSessions() {
                   onPress={() => void load(loadedDays + MARK_WINDOW_DAYS)}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: widening, busy: widening }}
                   accessibilityLabel={`Read the ${MARK_WINDOW_DAYS} days before ${dayOnly(windowFrom)}`}
                   style={{ borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm, opacity: widening ? 0.5 : 1 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
                     {widening ? 'Reading…' : 'Read Another 90 Days'}
                   </Text>
                 </Pressable>

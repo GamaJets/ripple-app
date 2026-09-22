@@ -26,19 +26,37 @@
 //
 // `status`, `scansStatus` and `saveFailed` make each of those visible. The
 // values themselves are unchanged: nothing here starts guessing.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
+import { coachingModeKey, LEGACY_COACHING_MODE_KEY } from '../lib/coachingModeStore';
+import {
+  scanMetricsKey, readScanMetrics, writeScanMetrics, mergeStoredMetrics,
+  LEGACY_SCAN_METRICS_KEY,
+} from '../lib/scanMetricsStore';
 import { manualBeatsScan } from '../lib/bodyFigures';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../lib/types';
-import type { Allergen } from '../lib/meals';
+import { readCoachingMode, readDiet, type CoachingMode, type Goal, type Diet } from '../lib/types';
+import { excludedAllergens, readAllergenColumn, readDislikes, type Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
+import { isDeviceAvatar } from '../lib/avatarImage';
 import { worstStatus, type LoadStatus } from './loadStatus';
+import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
+import { writeFailure } from '../lib/wroteRows';
+import { useRecoverRead } from './readRefresh';
+import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
+// `supabase.auth.*` resolves rather than rejecting on a dropped connection —
+// `{ data: { user: null }, error }` — and offline, DNS, a captive portal and a
+// 5xx are all branded as one AuthError, so a discarded error reads as "signed
+// out". src/lib/authReadFate.ts holds that discrimination against the installed
+// library and src/lib/authedUid.ts joins it to a uid; imported rather than
+// restated, so there is only ever one copy of it to keep true.
+import { uidFromAuth } from '../lib/authedUid';
+import { sexFromColumn } from '../lib/hrKcal';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -57,6 +75,13 @@ interface Value {
   /** null until the client tells us. Defaulted to 170 and rendered on their
    *  profile as their own height. */
   heightCm: number | null; setHeightCm: (v: number) => void;
+  /** null unless `clients.sex` holds one of the two letters the calorie
+   *  equations have. The member sets it in Edit Profile (22 Sep 2026); null is
+   *  "Not Say" or never answered, and app/(client)/workouts.tsx then says the
+   *  figure needs it rather than leaving a blank. */
+  sex: 'male' | 'female' | null;
+  /** The member's own answer, from Edit Profile. Null is "prefer not to say". */
+  setSex: (v: 'male' | 'female' | null) => void;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   /** Whether a coach is actually LINKED, which is a different question from
@@ -70,8 +95,44 @@ interface Value {
    *  offer the way in rather than hide it, because hiding it is the failure
    *  being fixed and showing it to somebody already coached costs them a tap. */
   coachLinked: boolean | null;
+  /** The id of the coach who trains them — `clients.trainer_id`, the same half
+   *  of the link `coachLinked` is derived from.
+   *
+   *  It exists because it was ALREADY being asked for and always answered null.
+   *  app/(client)/exercise.tsx read `(cd as any).trainerId ?? null` and handed
+   *  it to `videoForExercise` as the tie-break that decides whose demonstration
+   *  a member is shown. `Value` had no such field, so the cast produced
+   *  `undefined` on every render, every member got `null`, and rule 1 of the
+   *  clip ordering — the member's OWN coach's clip wins — could never fire:
+   *  wherever their coach had filmed a movement the platform also had, they
+   *  were served the platform's.
+   *
+   *  null is "nobody, or not read yet" and the two are deliberately NOT
+   *  separated here, because every reader of this field uses it as a TIE-BREAK
+   *  and both of those mean the same thing to a tie-break: no preference. A
+   *  reader that needs to tell an unread profile from an unlinked one has
+   *  `profileStatus` beside it. Nothing may be captioned off this id — whose
+   *  clip it is, is `clipOwner`'s question, and it is asked with this id rather
+   *  than answered by it. */
+  trainerId: string | null;
   diet: Diet; setDiet: (v: Diet) => void;
-  avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
+  /** EVERYTHING kept away from this member: their own list and what they told
+   *  their coach (`excludedAllergens`). This is what every meal, recipe search
+   *  and dish mark filters by. It is whole only when `profileStatus` is: both
+   *  halves come off the one `clients` row, and a row whose `coach_avoid`
+   *  could not be read is a failed read, never an empty coach list. */
+  avoid: Allergen[];
+  /** The member's own declared list, the only one they edit. Member-only in
+   *  the database (clients_avoid_is_the_clients). */
+  ownAvoid: Allergen[]; setOwnAvoid: (v: Allergen[]) => void;
+  /** What their coach recorded for them, `clients.coach_avoid`. Read-only
+   *  here: shown so the member can see what was added on their behalf. */
+  coachAvoid: Allergen[];
+  /** Ingredient words they would rather not eat. A preference, not safety. */
+  dislikes: string[];
+  /** Writes the whole list straight away and answers with why it did not
+   *  land, or null when it did. State moves only on a write that landed. */
+  setDislikes: (v: string[]) => Promise<string | null>;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number;
@@ -96,6 +157,21 @@ interface Value {
    *  client had been measured. */
   weightKg: number | null; bodyFatPct: number | null; muscleKg: number | null;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
+  /**
+   * Record a weight AND wait for the server to confirm it.
+   *
+   * `setWeightKg` is local state plus the debounced push six hundred
+   * milliseconds later, whose only outcome is `saveFailed` — which the weekly
+   * check-in never read, so it printed "your weight has been updated" over a
+   * write nobody had asked the server about. That figure drives the macro
+   * target, the goal projection, the meal plan's seed and the coach's console,
+   * and it was the one write on that screen with no confirmation at all.
+   *
+   * Resolves true only on a row the server said it changed. False means the
+   * figure is on this phone and nowhere else — and under Supabase the local
+   * cache is cleared at the next launch, so false is not "it will go up later".
+   */
+  saveWeightNow: (kg: number) => Promise<boolean>;
   scans: ScanRec[];
   /** Resolves true only once the scan row is on the server. False means the
    *  scan is on this phone for this session and will be gone at relaunch — the
@@ -140,6 +216,22 @@ interface Value {
    *  not be sent. The edit is on screen but not stored anywhere durable, and
    *  the local cache is cleared on launch, so it will be lost. */
   saveFailed: boolean;
+  /**
+   * Read the profile and the scan history again.
+   *
+   * A real re-read: it re-runs both server effects in this provider, so
+   * `profileStatus` and `scansStatus` go back through 'loading' and end at
+   * whatever the server says this time. It is not a state reset — nothing local
+   * is cleared, and a refused read leaves the fields on screen exactly where
+   * they were with the status saying they are not confirmed.
+   *
+   * Added because this is the provider behind the client's name, height, goal,
+   * injuries, weight, body fat and every scan-derived figure in the app, and a
+   * profile read that failed at launch had no way back at all short of killing
+   * the app — the retry loop in the profile effect gives up after its attempts
+   * and then nothing runs again until the signed-in uid changes.
+   */
+  reload: () => void;
 }
 const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
@@ -158,7 +250,14 @@ const KEY = 'repple.profile';
 //
 // It never overrides the server, it only fills in what the server cannot say —
 // and only where the server does not contradict it.
-const MODE_KEY = 'repple.coachingMode';
+//
+// Every word of that is about ONE PERSON, and the key used to say which person
+// nowhere: it was the unqualified `repple.coachingMode`, so on a shared gym
+// handset the reconcile below read the PREVIOUS member's answer, switched this
+// one to it, and promoted it onto this one's server row — where their coach
+// reads it, and behind which `soloHide` removes five screens from their app.
+// src/lib/coachingModeStore.ts is the whole argument, including why the old
+// unqualified key is removed rather than migrated.
 
 // No name yet means no initial. The old fallback was a hardcoded 'Y' — a
 // letter belonging to nobody, shown in the avatar of every user whose name
@@ -172,14 +271,26 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [heightCm, setHeightCm] = useState<number | null>(null);
+  /** Read for the heart-rate calorie model in src/lib/hrKcal.ts, which is
+   *  sex-specific — the two published equations differ enough that the weight
+   *  term changes sign, so there is no defensible default and this stays null
+   *  until the column says otherwise. The column has existed on `clients` all
+   *  along and nothing has ever WRITTEN it: no screen in the app, no importer,
+   *  no edge function. Reading it correctly is therefore all this can do, and
+   *  the screen that wanted the figure names the gap instead of printing one.
+   *  Adding the field is a product decision about labelling, not a code one. */
+  const [sex, setSex] = useState<'male' | 'female' | null>(null);
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>('meat');
-  const [avoid, setAvoid] = useState<Allergen[]>([]);
+  const [ownAvoid, setOwnAvoid] = useState<Allergen[]>([]);
+  const [coachAvoid, setCoachAvoid] = useState<Allergen[]>([]);
+  const [dislikes, setDislikesState] = useState<string[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
   const [coachLinked, setCoachLinked] = useState<boolean | null>(null);
+  const [trainerId, setTrainerId] = useState<string | null>(null);
   const [stepGoal, setStepGoal] = useState<number | null>(null);
   const [sleepGoalHours, setSleepGoalHours] = useState<number | null>(null);
   const [waterGoalGlasses, setWaterGoalGlasses] = useState<number | null>(null);
@@ -193,7 +304,29 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [nameSynced, setNameSynced] = useState(false);
   const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // What the rest of the app is told, which is the above with an ending on it.
+  //
+  // Neither of those two can leave 'loading' unless a request SETTLES, and no
+  // request in this app carries a timeout (src/lib/readDeadline.ts). The
+  // profile read is worse off than most: its three attempts are sequential
+  // `await`s, so a socket that accepts and then says nothing never even reaches
+  // the second one, and the loop that would have published 'error' after the
+  // third is unreachable. A member on a captive-portal wifi was left with
+  // Lifting Tools saying "Reading your measurements…" and Profile showing
+  // nothing, indefinitely, on a provider that mounts once per launch.
+  //
+  // The reads themselves are deliberately untouched. This provider's own header
+  // sets out what happened the last time a failed read and a live write were
+  // allowed to interleave — the member's recorded injuries overwritten with
+  // blanks — and `nameSynced` still arms the push only on a read that actually
+  // landed. All that changes is the sentence on screen while nothing answers.
+  const publishedProfileStatus = useReadDeadline(profileStatus);
+  const publishedScansStatus = useReadDeadline(scansStatus);
   const [saveFailed, setSaveFailed] = useState(false);
+  /** Bumped by `reload`, and read by both server effects below. A counter, so
+   *  two pulls in a row are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   /**
    * Bumped to make the push effect below run again without anything having
    * changed.
@@ -212,6 +345,51 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
    * queue that state is not already holding.
    */
   const [pushTick, setPushTick] = useState(0);
+  /** Whether the boot read of the local cache actually landed. A ref rather
+   *  than state because nothing renders from it and it is set once, before
+   *  `hydrated` unblocks the effect that reads it. */
+  const cacheRead = useRef(true);
+  /** Which account the fields above describe, readable from inside the auth
+   *  listener below. That effect is keyed on `readTick` alone, so `sbUid` in
+   *  its closure is whatever it was when the listener was registered — which is
+   *  precisely not the question "has the account changed since". */
+  const sbUidRef = useRef<string | null>(null);
+
+  /**
+   * Put every field describing a PERSON back to the value its `useState` opens
+   * with.
+   *
+   * Lifted out of the sign-out branch below because a sign-out is not the only
+   * way the account under this provider changes. `onAuthStateChange` raises
+   * SIGNED_IN for a new account without a SIGNED_OUT in between whenever one
+   * session replaces another in the same process, and the old code answered
+   * that with `loadForUser(id)` — which reads the SCANS and leaves everything
+   * else to the profile effect. That effect assigns a field only where it found
+   * one: `if (fromProfile) setName(…)`, `if (Array.isArray(r.injuries))
+   * setInjuries(…)`. So a new member whose `injuries` column is null kept the
+   * PREVIOUS member's disclosed injuries on screen — and, because the read
+   * itself succeeded, `nameSynced` armed the push effect, which then wrote that
+   * other person's injuries, goal, diet and allergens onto this member's
+   * `clients` row six hundred milliseconds later. The wipe therefore happens on
+   * the way IN, before the read lands and whatever it decides.
+   *
+   * Deliberately does NOT touch `nameSynced` or `sbUid`: those two are the push
+   * effect's arming gate and the caller owns the order they move in — see the
+   * note in the sign-out branch.
+   */
+  const forgetMember = () => {
+    setName(''); setDob(''); setPhoto(null); setHeightCm(null);
+    // `sex` was missing from the sign-out list this is lifted from, which is
+    // the recurring shape: four fields cleared and the fifth left standing.
+    setSex(null);
+    setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
+    setOwnAvoid([]); setCoachAvoid([]); setDislikesState([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
+    setCoachLinked(null); setTrainerId(null);
+    setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
+    setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
+    setScanMetrics({});
+    setSaveFailed(false);
+  };
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -225,10 +403,12 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.name === 'string' && p.name) setName(p.name);
           if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
           if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
+          if (p.sex === 'male' || p.sex === 'female') setSex(p.sex);
           if (typeof p.goal === 'string') setGoal(p.goal);
           setCoachingMode(readCoachingMode(p.coachingMode));
-          if (typeof p.diet === 'string') setDiet(p.diet);
-          if (Array.isArray(p.avoid)) setAvoid(p.avoid);
+          if (typeof p.diet === 'string') setDiet(readDiet(p.diet));
+          if (Array.isArray(p.avoid)) setOwnAvoid(p.avoid);
+          { const d = readDislikes(p.dislikes); if (d) setDislikesState(d); }
           if (Array.isArray(p.injuries)) setInjuries(p.injuries);
           if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
           if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
@@ -241,15 +421,50 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.waterGoalGlasses === 'number') setWaterGoalGlasses(p.waterGoalGlasses);
         }
       }
-    } catch {}
+    } catch (e) {
+      // ── the swallow that could delete a profile ──────────────────────────
+      //
+      // This was `catch {}`, and the two things it caught are not the same
+      // failure. Under USE_SUPABASE it is a `removeItem` that did not happen,
+      // which costs nothing: the server is the source of truth on that path and
+      // the effect below rewrites this key on the next edit anyway. On the
+      // other branch the local store IS the profile — name, height, diet,
+      // allergens, INJURIES — and `getItem` throwing, or a half-written blob
+      // failing `JSON.parse`, left every one of those at the constructed
+      // defaults above with nothing said. The effect below then wrote those
+      // defaults back over the real row, so a storage read that failed for one
+      // second deleted a member's disclosed injuries permanently. This file's
+      // own header describes the same shape happening against the server, and
+      // `nameSynced` is the guard that was put on that write; `cacheRead` is
+      // the same guard for this one.
+      //
+      // Both of those only on the branch that READ a profile. Under
+      // USE_SUPABASE this cache is the OFFLINE copy — it is how a knee
+      // disclosed in a basement gym survives until there is signal, per this
+      // file's own header — so a failed `removeItem` must not stop the effect
+      // below from writing it, and 'error' would be a claim about a server read
+      // that has not run yet and would contradict it a moment later.
+      if (!USE_SUPABASE) {
+        cacheRead.current = false;
+        setProfileStatus('error');
+      }
+      reportError('clientData.cache', e);
+    }
     setHydrated(true);
   })(); }, []);
 
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
+    // And not at all over a cache that was the profile and could not be read.
+    // `KEY` holds the whole thing as one object, so this line does not merge —
+    // it replaces — and after a failed boot read what it would write is this
+    // provider's constructed defaults. The screens are told rather than shown
+    // those defaults as fact: `profileStatus` is 'error', which is what
+    // `isWhole` gates on.
+    if (!cacheRead.current) return;
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, sex, goal, diet, avoid: ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, sex, goal, diet, ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -269,11 +484,25 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // defaults. Tracked rather than swallowed, because the push effect below
       // is about to publish whatever is on screen back to the server.
       let failed = false;
-      try {
-        const { data, error } = await supabase.from('profiles').select('full_name, avatar').eq('id', sbUid).single();
-        if (error) { reportError('clientData.hydrate.profiles', error); failed = true; }
-        else if (!cancelled) {
-          const fromProfile = typeof data?.full_name === 'string' ? data.full_name.trim() : '';
+      // Shared with the three other providers reading this same row on the
+      // same launch — src/ui/myProfile.ts. It was `.single()` here, which
+      // reports a MISSING row as the error PGRST116; the shared read is
+      // `maybeSingle`, because tenant.tsx and settings.tsx both have honest
+      // answers for a row that is not there. This call site does not: it arms
+      // an UPDATE of the whole `clients` row off a successful read, and a
+      // profiles row it never saw is not something to arm a write over. So the
+      // absence is turned back into a failure HERE, explicitly, rather than
+      // being inherited from a `.single()` nobody would think to look at.
+      const profOut = await readMyProfileRow(sbUid);
+      if (!profOut.ok) { reportError('clientData.hydrate.profiles', profOut.error); failed = true; }
+      else if (profOut.value == null) {
+        reportError('clientData.hydrate.profiles', new Error('no profiles row for the signed-in account'));
+        failed = true;
+      }
+      else if (!cancelled) {
+        {
+          const data = profOut.value;
+          const fromProfile = typeof data.full_name === 'string' ? data.full_name.trim() : '';
           if (fromProfile) setName(fromProfile);
           else {
             // The name signup collected, when the profiles row never received it.
@@ -303,9 +532,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               reportError('clientData.hydrate.authName', e);
             }
           }
-          if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
+          if (typeof data.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
-      } catch (e) { reportError('clientData.hydrate.profiles', e); failed = true; }
+      }
 
       // Read the rest of the profile back BEFORE the push effect below is allowed
       // to run. Without this the local state is still at its defaults (the local
@@ -313,10 +542,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // overwrite the user's real goal/diet/allergens on the server with those
       // defaults on every single app launch.
       try {
-        const { data: c, error: cErr } = await supabase
-          .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses')
-          .eq('id', sbUid).maybeSingle();
+        const cOut = await readMyClientRow(sbUid);
+        // Branched on `ok` rather than on a truthy error, because an outcome
+        // carries whatever was thrown and `throw undefined` is legal.
+        const cFailed = !cOut.ok;
+        const c = cOut.ok ? cOut.value : null;
         // maybeSingle, not single. `single()` treats NO ROW as the error
         // PGRST116, and having no `clients` row is not a failure — it is the
         // normal, permanent state of every coach and every gym owner, because
@@ -325,16 +555,51 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // and being structural it never cleared: the whole coach app ran with a
         // profile read it believed had failed. A row that is genuinely absent
         // now comes back as null with no error, which is the true answer.
-        if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
-        if (!cancelled && !cErr && c) {
+        if (!cOut.ok) { reportError('clientData.hydrate.clients', cOut.error); failed = true; }
+        if (!cancelled && !cFailed && c) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
           if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));
+          // Through `sexFromColumn`, because the column and this union do not
+          // speak the same language. `clients.sex` is checked `in ('f','m')`;
+          // this compared it against 'male' and 'female', which that
+          // constraint cannot hold, so the answer here was null for every
+          // member however the column read. Anything outside the two letters
+          // still leaves it null, and a null means the model declines to
+          // produce a figure rather than guessing at a body.
+          // ASSIGNED, not skipped — the same reading the three goal columns
+          // below get. `if (readSex) setSex(readSex)` only ever moved this
+          // field towards having a value: a column that is null, or holds
+          // something outside the two letters, left whatever was already in
+          // state. Edit Profile now writes `clients.sex`; before 22 Sep 2026 nothing
+          // did, and that branch never fired — which
+          // means the only way this field can hold a letter is by having been
+          // set for somebody else earlier in the process, and the only way it
+          // can be let go of is this line. src/lib/hrKcal.ts picks a different
+          // published equation for each sex (the weight term changes sign), so
+          // an inherited letter is not a cosmetic field on a profile screen, it
+          // is a different calorie figure for every session this member trains.
+          setSex(sexFromColumn(r.sex));
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
-          if (typeof r.diet === 'string' && r.diet) setDiet(r.diet as Diet);
-          if (Array.isArray(r.avoid)) setAvoid(r.avoid);
+          // `readDiet`, not `as Diet`. The column is plain text; the union is
+          // five values; and a value outside it reaches `mealAt`, whose pools
+          // for an unknown diet are empty and which then reads `.n` off null —
+          // a TypeError out of render that takes the whole nutrition screen.
+          if (typeof r.diet === 'string' && r.diet) setDiet(readDiet(r.diet));
+          if (Array.isArray(r.avoid)) setOwnAvoid(r.avoid);
+          // The coach's half of the exclusion list, and the dislikes, off the
+          // same row. A row that came back WITHOUT a readable `coach_avoid` is
+          // a read that did not give the whole list: it fails this attempt
+          // (status 'error' after the retries, push disarmed) rather than
+          // leaving `coachAvoid` at an empty default that reads as "the coach
+          // noted nothing". SQL null is read, and is nothing noted.
+          const ca = readAllergenColumn(r.coach_avoid);
+          const dl = readDislikes(r.dislikes);
+          if (ca) setCoachAvoid(ca);
+          if (dl) setDislikesState(dl);
+          if (!ca || !dl) { reportError('clientData.hydrate.coachAvoid', new Error('coach_avoid or dislikes unreadable')); failed = true; }
           // Reconcile the server's two-value answer with the four-value one
-          // the client actually gave (MODE_KEY above). The device is read
+          // the client actually gave (src/lib/coachingModeStore.ts). The device is read
           // inline rather than from state because this effect is keyed on the
           // signed-in uid and can land before a separately-loaded flag has —
           // and a restore that loses that race reverts the setting silently,
@@ -344,9 +609,22 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // true answer to "is anybody coaching me" and it is already in this
           // select.
           setCoachLinked(r.trainer_id != null);
+          // The id itself, not just whether there is one. Guarded on the
+          // type because the column is read back as `unknown`, and an
+          // empty string is not an id.
+          setTrainerId(typeof r.trainer_id === 'string' && r.trainer_id ? r.trainer_id : null);
           if (r.mode != null) {
             const stored = readCoachingMode(r.mode);
-            const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
+            // Under THIS account's key, not the handset's. `sbUid` is the id
+            // this effect is keyed on and the id the promotion below writes to,
+            // so the answer being read and the row being written are the same
+            // person by construction — which is the one thing the unqualified
+            // key could not say. A null key, or a read that will not answer,
+            // both come back as a value outside the union and `readCoachingMode`
+            // falls to 'online', which satisfies neither branch below: the
+            // server's answer stands untouched, which is the safe end.
+            const modeKey = coachingModeKey(sbUid);
+            const mine = readCoachingMode(modeKey ? await AsyncStorage.getItem(modeKey).catch(() => null) : null);
             const agreed =
               // 'hybrid' was written to the server as 'inperson'. Still true of
               // them while the server still says so; a coach who has since
@@ -359,15 +637,29 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               : mine === 'solo' && r.trainer_id == null ? 'solo'
               : stored;
             setCoachingMode(agreed);
-            if (agreed !== mine) AsyncStorage.setItem(MODE_KEY, agreed).catch(() => {});
+            if (agreed !== mine && modeKey) AsyncStorage.setItem(modeKey, agreed).catch(() => {});
             // Promote it. The column can hold the fuller answer now, and until
             // it does this device is the only thing that knows: the coach's
             // roster and the console both read the server, so a hybrid client
             // reads as in-person to everybody but themselves, and a new phone
             // would silently take the narrowed value as the truth.
             if (agreed !== stored) {
-              const { error: mErr } = await supabase.from('clients').update({ mode: agreed }).eq('id', sbUid);
-              if (mErr) reportError('clientData.promoteMode', mErr);
+              // Counted, not just error-checked: an UPDATE that matches no row
+              // comes back 204 with `error: null`, and the whole point of this
+              // write is that the server is the only copy the coach's roster
+              // and the console read. A promotion that silently landed nowhere
+              // leaves a hybrid client reading as in-person to everybody but
+              // themselves — which is the state this block exists to end.
+              // Deliberately does NOT forget the shared read (src/ui/myProfile.ts).
+              // This runs in the middle of the launch fan-out, and dropping the
+              // rows here would send the providers still waiting on them back to
+              // the server one at a time — which is the thing being fixed. It is
+              // safe only because `mode` is read by nothing but this provider,
+              // which already holds `agreed`; a promotion of any column another
+              // reader takes would have to forget.
+              const mRes = await supabase.from('clients').update({ mode: agreed }, { count: 'exact' }).eq('id', sbUid);
+              const mWhy = writeFailure('Your coaching mode', mRes);
+              if (mWhy) reportError('clientData.promoteMode', mRes.error ?? new Error(mWhy));
             }
           }
           if (Array.isArray(r.injuries)) setInjuries(r.injuries);
@@ -425,7 +717,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [sbUid]);
+  }, [sbUid, readTick]);
 
   // Publish the profile to the shared backend: it is the durable store (the local
   // cache is cleared on launch when USE_SUPABASE is on) and a LINKED trainer reads
@@ -446,7 +738,14 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // come back — and would overwrite this with a default while the
         // reconcile above was still reading it. This effect is gated on
         // nameSynced, so both reads have already landed and both succeeded.
-        try { await AsyncStorage.setItem(MODE_KEY, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
+        // Under this account's own key. The effect is already gated on `sbUid`,
+        // so the guard below can only be false if `coachingModeKey` refuses the
+        // id — and refusing to write is right when there is no account to write
+        // it for: a mode kept on the handset for nobody is the defect.
+        const modeKey = coachingModeKey(sbUid);
+        if (modeKey) {
+          try { await AsyncStorage.setItem(modeKey, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
+        }
         // Both results are now inspected. Refusing to look was what let a
         // client's edited goal, diet or allergen list disappear at the next
         // launch with the screen having said nothing.
@@ -466,11 +765,24 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // `count: 'exact'` makes the row count the answer instead.
         try {
           const [{ error: pErr, count: pCount }, { error: cErr, count: cCount }] = await Promise.all([
-            supabase.from('profiles').update({ full_name: name, avatar: photo }, { count: 'exact' }).eq('id', sbUid),
+            // `avatar` is a URL other accounts fetch, or nothing. It used to be
+            // whatever the picker handed back, which on a phone is a path inside
+            // THIS handset — the coach then read that path out of a shared row
+            // and drew a blank circle, and the member, whose own device could
+            // open its own file, had no way to know. src/ui/avatarUpload.ts is
+            // where a photo becomes a URL now; this is the second lock on the
+            // door, and it also clears the device paths already stored.
+            supabase.from('profiles').update({ full_name: name, avatar: isDeviceAvatar(photo) ? null : photo }, { count: 'exact' }).eq('id', sbUid),
             supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,
-              goal, diet, avoid,
+              // The column's own letters (part 01: 'f' | 'm'); null is the
+              // member choosing not to say, which the calorie model reads as unknown.
+              sex: sex === 'female' ? 'f' : sex === 'male' ? 'm' : null,
+              // The member's OWN list only. `coach_avoid` is their coach's and
+              // `dislikes` is written on its own (setDislikes below), so this
+              // whole-row push can never overwrite either with a stale copy.
+              goal, diet, avoid: ownAvoid,
               meals_per_day: mealsPerDay,
               step_goal: stepGoal,
               sleep_goal_hours: sleepGoalHours,
@@ -500,10 +812,16 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (cMissed) reportError('clientData.push.clients', new Error('update matched no rows'));
           setSaveFailed(!!(pErr || cErr || pMissed || cMissed));
         } catch (e) { reportError('clientData.push', e); setSaveFailed(true); }
+        // Both rows have just changed underneath the shared read that the other
+        // providers take their copy of this person from. Outside the try, so it
+        // runs on the failure path too: a write that threw may still have
+        // landed, and the safe move on "we do not know" is to make the next
+        // reader ask the server. src/ui/myProfile.ts.
+        forgetMyRows(sbUid);
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
+  }, [name, photo, dob, heightCm, sex, goal, diet, ownAvoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
 
   // Try the profile write again when the app can reach the server again.
   //
@@ -514,8 +832,60 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (saveFailed) setPushTick((n) => n + 1);
   }), [saveFailed]);
 
-  // Load locally-cached InBody composition metrics (keyed by scan date).
-  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
+  // ── The locally-cached InBody composition breakdowns ─────────────────────
+  //
+  // This used to be one unqualified key, `repple.scanMetrics`, read once with
+  // `[]` dependencies and merged back into every scan BY DAY. On the gym's
+  // shared handset that attached the previous member's visceral fat, BMR, fat
+  // and lean mass and five segmental lean figures to the next member's own scan
+  // of the same date, under their own name, on every screen that draws a
+  // composition breakdown. src/lib/scanMetricsStore.ts is the whole argument,
+  // including why the old key is removed rather than migrated.
+  //
+  // Null when nobody is signed in, which means no read and no write — not a
+  // fallback to a shared key.
+  const metricsKey = scanMetricsKey(sbUid);
+  // False until a read of THIS key has come back. It arms the write in
+  // `addScan`, and it is reset before every read — see the effect.
+  const [metricsHydrated, setMetricsHydrated] = useState(false);
+  useEffect(() => {
+    // Cleared BEFORE the read, not left at whatever the last key's read set it
+    // to. A flag that survived the key changing would let an account switch
+    // whose read then FAILED write this member's empty map straight over the
+    // other one's stored breakdowns — the one way to lose a measurement rather
+    // than merely show the wrong one. Lane 4 caught this in its own fix and
+    // src/ui/exerciseVideos.ts carries the same note; it is the same trap here.
+    setMetricsHydrated(false);
+    // No account is no store, and an empty map is the honest starting point for
+    // a session that has nobody in it. Every scan then shows the breakdown its
+    // own row carries and no other.
+    if (!metricsKey) { setScanMetrics({}); return; }
+    let live = true;
+    AsyncStorage.getItem(metricsKey)
+      .then((raw) => { if (live) { setScanMetrics(readScanMetrics(raw)); setMetricsHydrated(true); } })
+      // A store that would not answer is no cached breakdowns on screen, and
+      // `metricsHydrated` stays false, so nothing is written over bytes we
+      // never managed to read. The scans themselves are unaffected: their own
+      // `metrics` come from the server.
+      .catch(() => { if (live) setScanMetrics({}); });
+    return () => { live = false; };
+  }, [metricsKey]);
+  // The unqualified key this replaces, removed rather than migrated: nothing on
+  // the device distinguishes a single-owner handset's own old breakdowns from
+  // the previous member's on a shared one, and `scans.metrics` on the server is
+  // the record this was only ever a cache in front of. See the header of
+  // src/lib/scanMetricsStore.ts.
+  // The same, for the coaching mode. Removed rather than migrated for the
+  // reason src/lib/coachingModeStore.ts gives: the answer under it belongs to
+  // whoever last used this handset, the server already holds an answer for the
+  // person signing in now, and inheriting it writes a stranger's mode onto
+  // their row. Both removals run once per mount and are best-effort; a phone
+  // that will not let go of them still cannot hand them to anybody, because
+  // nothing reads either key any more.
+  useEffect(() => {
+    AsyncStorage.removeItem(LEGACY_SCAN_METRICS_KEY).catch(() => {});
+    AsyncStorage.removeItem(LEGACY_COACHING_MODE_KEY).catch(() => {});
+  }, []);
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   // Also re-runs on every auth state change (not just once at mount) — if the
   // Supabase session hasn't finished restoring yet at the exact moment this
@@ -526,6 +896,21 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     const loadForUser = async (id: string) => {
+      // ── A DIFFERENT ACCOUNT IS NOT A RE-READ ──────────────────────────────
+      //
+      // Dropped on the way IN, before the read below lands and whatever it
+      // decides — the rule src/lib/accountScopedState.ts states, applied to the
+      // React state rather than to a storage key. `forgetMember` says at length
+      // what it cost not to be here. The SAME account re-reading (a token
+      // refresh, a foreground, a `reload`) keeps what is on screen, so nothing
+      // blanks while a routine refresh runs.
+      //
+      // `nameSynced` first and by itself, for the ordering reason the sign-out
+      // branch gives: it is the push effect's arming gate, and it must be shut
+      // before any field is blanked so that effect can never see a cleared name
+      // beside the previous uid and conclude the member erased their profile.
+      if (sbUidRef.current && sbUidRef.current !== id) { setNameSynced(false); forgetMember(); }
+      sbUidRef.current = id;
       setSbUid(id);
       try {
         // Read newest-first and turned back below, rather than the ascending
@@ -549,27 +934,179 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     };
     (async () => {
       try {
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        const whoRes = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { reportError('clientData.hydrate.auth', authErr); setScansStatus('error'); setProfileStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out: there is no server-side profile or scan history to miss.
-        if (!id) { setScansStatus('ready'); setProfileStatus('ready'); return; }
-        if (!cancelled) await loadForUser(id);
+        // ── the error is classified, not merely noticed ────────────────────
+        //
+        // `if (authErr) → 'error'` treated every failure alike, and a genuine
+        // sign-out IS one of them: `getUser()` answers somebody with no session
+        // with `AuthSessionMissingError`, not with a clean null. So the app
+        // said "we could not read your profile" on the welcome screen of every
+        // launch nobody was signed in for, and `useRecoverRead` went on asking.
+        // The other direction is the expensive one and is why this uses the
+        // shared classification rather than reading `error` itself: an outage
+        // called 'signed-out' would publish 'ready' over an empty profile, and
+        // app/(client)/injuries.tsx prints "no injuries" on exactly
+        // `injuries.length === 0 && profileStatus === 'ready'`.
+        //
+        // Narrowed on `fate`, never on `!uid` — UidRead's members are told
+        // apart by fate, and `string` includes ''.
+        const who = uidFromAuth(whoRes);
+        if (who.fate !== null) {
+          if (who.fate === 'unreadable') {
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+            reportError('clientData.hydrate.auth', new Error('auth read unreadable — who is signed in could not be established'));
+            setScansStatus('error'); setProfileStatus('error');
+            return;
+          }
+          // Signed out: there is no server-side profile or scan history to miss.
+          setScansStatus('ready'); setProfileStatus('ready');
+          return;
+        }
+        if (!cancelled) await loadForUser(who.uid);
       } catch (e) { reportError('clientData.hydrate.auth', e); if (!cancelled) { setScansStatus('error'); setProfileStatus('error'); } }
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
       const id = session?.user?.id;
-      if (id) loadForUser(id);
+      if (id) { loadForUser(id); return; }
+      // ── a null session is not the same thing as a sign-out ───────────────
+      //
+      // SIGNED_OUT is the only event that means the session ENDED, and it is
+      // the only one auth-js raises after `_removeSession()` — every path that
+      // drops a session goes through it, including `getUser()` learning the
+      // JWT names a session the server no longer has. So gating on it loses
+      // nothing the clear below was written for.
+      //
+      // INITIAL_SESSION arrives with a null session for a reason that is NOT a
+      // sign-out, and it arrives here on every re-registration of this listener
+      // — this effect re-runs on `readTick`, which `reload` bumps, which
+      // `useRecoverRead` bumps on foreground and on reconnect.
+      // `_emitInitialSession` calls back with `null` whenever `getSession()`
+      // ERRORS, and `getSession()` errors when the access token has expired and
+      // the refresh could not be made — a dead gym wifi, a captive portal, the
+      // basement. The refresh token is still on the handset and still good; the
+      // member is still signed in and auth-js restores them on the next tick.
+      //
+      // Clearing on that is worse than the bug it fixes, because the member IS
+      // looking: `profileStatus` would be settled to 'ready' over an empty
+      // profile, and app/(client)/injuries.tsx prints "no injuries" on exactly
+      // `injuries.length === 0 && profileStatus === 'ready'`, foodlog and
+      // restaurant mark dishes safe off an emptied `avoid`, and the dashboard's
+      // `targetInputsUnknown` goes false so Fuel Today is drawn from the
+      // constructed 'muscle'/'meat' defaults. It does not self-heal on its own
+      // either: `sbUid` is null, so the read effect above no longer runs, and
+      // 'ready' is a whole status, so `useRecoverRead` stops asking.
+      if (event !== 'SIGNED_OUT') return;
+      // ── and when the session GOES ────────────────────────────────────────
+      //
+      // This listener used to be `if (id) loadForUser(id)` and nothing else, so
+      // a sign-out was not an event this provider had. Every field below stayed
+      // exactly as the departing member left it: their first name, their photo,
+      // their date of birth, their height, their disclosed injuries, their
+      // weight and body fat, their whole scan history.
+      //
+      // Nothing is on screen at that instant — the three Sign Out buttons all
+      // `router.replace('/welcome')` — but the provider is mounted at the root
+      // and outlives that. The next person to sign in on the same handset gets
+      // app/(client)/dashboard.tsx rendered from this state before their own
+      // read can land, and its header is `Good Morning, {firstName}` off
+      // `c.name`. A gym desk handset, or a member handing a phone to a friend,
+      // is greeted by name — somebody else's — with somebody else's face in the
+      // avatar and somebody else's injuries in the cards below. If the new
+      // member's profile read then fails, or their `profiles.full_name` is
+      // blank (the read only assigns a name it actually found), it does not
+      // clear on the next frame: it stays for the session.
+      //
+      // Cleared to the same values the `useState` calls above open with, so
+      // signing out returns this provider to the state a fresh launch has. The
+      // persist effect further up notices and overwrites the `repple.profile`
+      // blob on disk with the empty one, which takes the departing member's
+      // injuries off the handset as well as off the screen.
+      //
+      // `nameSynced` and `sbUid` FIRST — the order below is load-bearing and
+      // this comment used to describe the opposite of it. Those two are the
+      // push effect's arming gate, and disarming them before a single field is
+      // blanked is what stops that effect ever seeing a cleared name beside a
+      // live uid and concluding the member has just erased their own profile.
+      // Under React's batching the whole block is one render either way; under
+      // a legacy non-batched update it is not, and then only this order holds.
+      setNameSynced(false);
+      setSbUid(null);
+      sbUidRef.current = null;
+      // The fields themselves, through the same function the account-change
+      // path above uses, so the two can never come to clear different lists.
+      // They already had: `sex` was on neither list, and it is the field the
+      // heart-rate calorie model picks a published equation by.
+      //
+      // The cached composition breakdowns go with the scans they belong to, and
+      // `forgetMember` takes those too. They used not to go at all: this block
+      // cleared `scans` and left `scanMetrics` standing, and the read that
+      // filled it had `[]` dependencies so it never ran again — so the
+      // departing member's visceral fat, BMR and segmental lean stayed in
+      // memory for the life of the process and merged onto the next member's
+      // scan of the same date. The key effect above would reach the same state
+      // a render later, off `sbUid` going null; it is done here as well so that
+      // clearing a person's body record does not depend on the ordering of two
+      // effects.
+      forgetMember();
+      // 'ready', not 'error': there is genuinely no profile and no scan history
+      // to read for nobody, which is what the signed-out branch above says too.
+      setProfileStatus('ready'); setScansStatus('ready');
     });
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
-  }, []);
+  }, [readTick]);
+
+  /**
+   * The weight, written and confirmed, rather than typed and hoped for.
+   *
+   * The local state moves first — the screens the member is looking at are
+   * about to be right either way — and then the row is updated with
+   * `count: 'exact'`, because an UPDATE that matched no rows is not an error in
+   * PostgREST and this codebase has shipped that mistake four times. The
+   * debounced push runs afterwards with the same values and is idempotent.
+   *
+   * No queue: `manual_weight_kg` is a single column that a later check-in
+   * overwrites, and a stale weight replayed after a newer one would move the
+   * member's macro target backwards. The caller says "on this phone only"
+   * instead, which is the truth.
+   */
+  const saveWeightNow = useCallback(async (kg: number): Promise<boolean> => {
+    const at = new Date().toISOString();
+    setManualWeight(kg);
+    setManualAt(at);
+    if (!USE_SUPABASE || !sbUid) return false;
+    try {
+      const { error, count } = await supabase
+        .from('clients')
+        .update({ manual_weight_kg: kg, manual_at: at }, { count: 'exact' })
+        .eq('id', sbUid);
+      if (error) { reportError('clientData.saveWeightNow', error); return false; }
+      // `null` means the count did not come back, which is not evidence of
+      // failure — the same reading the debounced push takes of it.
+      if (count === 0) {
+        reportError('clientData.saveWeightNow', new Error('update matched no rows'));
+        return false;
+      }
+      return true;
+    } catch (e) {
+      reportError('clientData.saveWeightNow', e);
+      return false;
+    }
+  }, [sbUid]);
 
   const sorted = useMemo(() => {
     const byDay: Record<string, ScanRec> = {};
     for (const s of scans) byDay[s.takenAt.slice(0, 10)] = s; // one InBody scan per day, latest added wins
-    return Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s)));
+    // `mergeStoredMetrics` is this expression lifted out unchanged, so the one
+    // place the device cache reaches the rest of the app can be RUN by a test
+    // rather than read by a reviewer. Same rule as before: the row's own
+    // `metrics` always wins, a scan with one is returned by identity, and an
+    // empty cache returns the list element for element.
+    return mergeStoredMetrics(
+      Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)),
+      scanMetrics,
+    );
   }, [scans, scanMetrics]);
   // No placeholder body. When there is no scan, weight/body fat come from a
   // manual entry if there is one and are null otherwise - callers decide what
@@ -584,129 +1121,234 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : (latest ? latest.weightKg : null);
   const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : (latest ? latest.bodyFatPct : null);
 
-  const value: Value = {
+  // ── Why this value is memoised and its writers go through a ref ──────────
+  //
+  // This provider used to publish a plain object literal, rebuilt on every
+  // render — and with it eight fresh functions and three fresh arrays. That is
+  // the defect src/ui/roster.tsx documents at length: `useClientData()` handed
+  // back a different value every time, so a consumer keying an effect on it, or
+  // on any array off it, re-ran that effect for a body record nobody had
+  // touched. src/ui/badgeWatch.tsx keys its unlock check on `cd.weightSeries`
+  // and was re-running it on every render of this provider for exactly that
+  // reason.
+  //
+  // The writers are hoisted out and handed through a ref rather than frozen in
+  // a `useCallback`: `deleteScan` needs the CURRENT `scans` to put a row back
+  // after a refused delete, and every one of them needs the current `sbUid`, so
+  // freezing the implementations would freeze that state with them — the same
+  // bug one level down.
+  const addInjury: Value['addInjury'] = (v) => setInjuries((prev) => [v, ...prev]);
+  const updateInjury: Value['updateInjury'] = (id, patch) => setInjuries((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  const removeInjury: Value['removeInjury'] = (id) => setInjuries((prev) => prev.filter((i) => i.id !== id));
+  const setWeightKg: Value['setWeightKg'] = (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); };
+  const setBodyFat: Value['setBodyFat'] = (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); };
+  const addScan: Value['addScan'] = async (s: ScanRec): Promise<boolean> => {
+    setScans((p) => [...p, s]);
+    if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
+      setScanMetrics((prev) => {
+        const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! };
+        // Two guards, and neither is an "ignore":
+        //
+        //   · no key — nobody is signed in, so there is no account to keep this
+        //     under, and a shared key is the defect this provider was changed
+        //     to end. The breakdown is on screen for this session and the scan
+        //     itself has not reached the server either, because `addScan`
+        //     refuses without `sbUid`.
+        //   · not hydrated — the read of this key has not come back, or came
+        //     back refused. Writing now would put this session's map on top of
+        //     bytes we never managed to read, which is how a member loses a
+        //     breakdown rather than merely fails to gain one.
+        //
+        // `writeScanMetrics` rather than a bare stringify, so what goes to the
+        // store is exactly what `readScanMetrics` will accept back.
+        if (metricsKey && metricsHydrated) {
+          AsyncStorage.setItem(metricsKey, writeScanMetrics(nm)).catch(() => { /* on screen this session either way */ });
+        }
+        return nm;
+      });
+    }
+    setManualWeight(null); setManualBodyFat(null);
+    if (!USE_SUPABASE || !sbUid) return false;
+    try {
+      const { data, error } = await supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single();
+      if (error || !data?.id) { reportError('clientData.addScan', error); return false; }
+      // The caller's id was a local one ('s' + Date.now()); the row's id is
+      // the server's. They are swapped here rather than left to diverge,
+      // because `updateScan` and `deleteScan` address rows BY ID and a scan
+      // added this session would otherwise carry an id no row has — so
+      // correcting a scan you had just typed, which is when a typo is
+      // actually noticed, would silently match nothing.
+      setScans((p) => p.map((row) => (row.id === s.id ? { ...row, id: String(data.id) } : row)));
+      if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
+        // The composition breakdown is a second write against the row we just
+        // made. Losing it costs the InBody detail, not the scan, so the scan
+        // still counts as stored — but the failure is recorded rather than
+        // discarded.
+        // Counted for the same reason every other write on this row is: a
+        // 204 over zero rows is how the composition breakdown goes missing
+        // with nothing recorded anywhere, and the scan then reads as stored
+        // WITH its InBody detail when only half of it landed.
+        const mRes = await supabase.from('scans').update({ metrics: s.metrics }, { count: 'exact' }).eq('id', data.id);
+        const mWhy = writeFailure('The composition breakdown for that scan', mRes);
+        if (mWhy) reportError('clientData.addScan.metrics', mRes.error ?? new Error(mWhy));
+      }
+      return true;
+    } catch (e) { reportError('clientData.addScan', e); return false; }
+  };
+  const updateScan: Value['updateScan'] = async (id, patch): Promise<boolean> => {
+    // Applied locally first, exactly as addScan does, so the correction is on
+    // screen while the write is in flight — and reported honestly afterwards
+    // rather than assumed.
+    setScans((p) => p.map((row) => (row.id === id ? {
+      ...row,
+      takenAt: patch.takenAt ?? row.takenAt,
+      weightKg: patch.weightKg ?? row.weightKg,
+      bodyFatPct: patch.bodyFatPct ?? row.bodyFatPct,
+      skeletalMuscleKg: patch.skeletalMuscleKg !== undefined ? patch.skeletalMuscleKg : row.skeletalMuscleKg,
+    } : row)));
+    // A manual weight typed after the scan was taken would otherwise go on
+    // beating the corrected figure (see manualBeatsScan) — so the same clear
+    // addScan does is done here, because a correction is a statement that the
+    // scan is now the right answer.
+    setManualWeight(null); setManualBodyFat(null);
+    if (!USE_SUPABASE || !sbUid) return false;
+    const row: Record<string, unknown> = {};
+    if (patch.takenAt !== undefined) row.taken_at = String(patch.takenAt).slice(0, 10);
+    if (patch.weightKg !== undefined) row.weight_kg = patch.weightKg;
+    if (patch.bodyFatPct !== undefined) row.body_fat_pct = patch.bodyFatPct;
+    if (patch.skeletalMuscleKg !== undefined) row.skeletal_muscle_kg = patch.skeletalMuscleKg;
+    if (!Object.keys(row).length) return true;
+    try {
+      // `.eq('client_id', sbUid)` as well as the id. RLS already scopes this
+      // to the signed-in account, so the clause changes nothing about what is
+      // permitted — it is here so that a bug handing this an id from another
+      // account fails to match rather than relying on the policy as the only
+      // thing between a client and somebody else's body record.
+      //
+      // `.select('id')` so the count is readable. An update matching NO rows
+      // is not an error in PostgREST, and without this a correction to a scan
+      // that had already been deleted elsewhere would report success.
+      const { data, error } = await supabase.from('scans').update(row).eq('id', id).eq('client_id', sbUid).select('id');
+      if (error) { reportError('clientData.updateScan', error); return false; }
+      return Array.isArray(data) && data.length > 0;
+    } catch (e) { reportError('clientData.updateScan', e); return false; }
+  };
+  const deleteScan: Value['deleteScan'] = async (id): Promise<boolean> => {
+    const before = scans;
+    setScans((p) => p.filter((row) => row.id !== id));
+    if (!USE_SUPABASE || !sbUid) return false;
+    try {
+      const { data, error } = await supabase.from('scans').delete().eq('id', id).eq('client_id', sbUid).select('id');
+      if (error || !Array.isArray(data) || data.length === 0) {
+        // Put it back. A scan that is still on the server and gone from the
+        // screen is the worst of the three states: the client believes it is
+        // deleted, their coach still sees it, and the next launch brings it
+        // back with no explanation. Restoring makes the failure visible at
+        // the moment the caller can still say so.
+        setScans(before);
+        if (error) reportError('clientData.deleteScan', error);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      setScans(before);
+      reportError('clientData.deleteScan', e);
+      return false;
+    }
+  };
+  const impl = useRef({ addInjury, updateInjury, removeInjury, setWeightKg, setBodyFat, addScan, updateScan, deleteScan });
+  impl.current = { addInjury, updateInjury, removeInjury, setWeightKg, setBodyFat, addScan, updateScan, deleteScan };
+  const addInjuryStable = useCallback((...a: Parameters<typeof addInjury>) => impl.current.addInjury(...a), []);
+  const updateInjuryStable = useCallback((...a: Parameters<typeof updateInjury>) => impl.current.updateInjury(...a), []);
+  const removeInjuryStable = useCallback((...a: Parameters<typeof removeInjury>) => impl.current.removeInjury(...a), []);
+  const setWeightKgStable = useCallback((...a: Parameters<typeof setWeightKg>) => impl.current.setWeightKg(...a), []);
+  const setBodyFatStable = useCallback((...a: Parameters<typeof setBodyFat>) => impl.current.setBodyFat(...a), []);
+  const addScanStable = useCallback((...a: Parameters<typeof addScan>) => impl.current.addScan(...a), []);
+  const updateScanStable = useCallback((...a: Parameters<typeof updateScan>) => impl.current.updateScan(...a), []);
+  const deleteScanStable = useCallback((...a: Parameters<typeof deleteScan>) => impl.current.deleteScan(...a), []);
+
+  // The three charted series. Memoised for the same reason the value is: each
+  // used to be a freshly-built array on every render, and a chart keyed on one
+  // of them re-drew for a scan history that had not changed.
+  const weightSeries = useMemo(
+    () => [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
+    [sorted, manualIsCurrent, manualWeight, manualAt],
+  );
+  const bodyFatSeries = useMemo(
+    () => [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
+    [sorted, manualIsCurrent, manualBodyFat, manualAt],
+  );
+  // Scans that reported no muscle figure contribute no POINT, rather than a
+  // point at zero. A charted zero is not a small reading, it is a cliff: it
+  // dominates the axis and reads as total muscle loss between two scans.
+  const muscleSeries = useMemo(
+    () => sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
+    [sorted],
+  );
+  // The combined view: 'error' the moment either half failed, because a
+  // profile screen shows both at once and cannot honestly present half of it
+  // as the client's own data. 'partial' rolls up the same way — a truncated
+  // scan history makes the profile's total change since starting a figure
+  // over an unknown fraction of the record.
+  const status = worstStatus(publishedProfileStatus, publishedScansStatus);
+
+  // Both halves are always arrays in state; whether they are the WHOLE list
+  // is `profileStatus`'s to say, and every consumer already asks it.
+  const avoid = useMemo(() => excludedAllergens(ownAvoid, coachAvoid) ?? ownAvoid, [ownAvoid, coachAvoid]);
+
+  /** Dislikes are written on their own, not through the debounced whole-row
+   *  push: a coach may edit them too, and a stale whole-row copy from this
+   *  handset would overwrite what the coach added. Refused until the row has
+   *  been read, because writing over a list nobody has seen is how a real
+   *  list gets replaced by a default. */
+  const setDislikes = useCallback(async (next: string[]): Promise<string | null> => {
+    if (!USE_SUPABASE) { setDislikesState(next); return null; }
+    if (!sbUid || !nameSynced) return 'Your dislikes have not been read yet, so they cannot be changed. Pull down to try again.';
+    try {
+      const res = await supabase.from('clients').update({ dislikes: next }, { count: 'exact' }).eq('id', sbUid);
+      const why = writeFailure('Your dislikes', res);
+      if (why) { reportError('clientData.dislikes', res.error ?? new Error(why)); return why; }
+    } catch (e) {
+      reportError('clientData.dislikes', e);
+      return 'Your dislikes could not be saved. Check your connection and try again.';
+    }
+    setDislikesState(next);
+    forgetMyRows(sbUid);
+    return null;
+  }, [sbUid, nameSynced]);
+
+  const value = useMemo<Value>(() => ({
     id: sbUid ?? 'unknown', name, init: initials(name), setName,
-    dob, setDob, photo, setPhoto, heightCm, setHeightCm,
-    goal, setGoal, diet, setDiet, avoid, setAvoid,
+    dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex, setSex,
+    goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes,
     injuries,
     focusAreas, setFocusAreas,
-    addInjury: (v) => setInjuries((p) => [v, ...p]),
-    updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
-    removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
-    coachingMode, setCoachingMode, coachLinked,
+    addInjury: addInjuryStable, updateInjury: updateInjuryStable, removeInjury: removeInjuryStable,
+    coachingMode, setCoachingMode, coachLinked, trainerId,
     activity: 1.5, mealsPerDay, setMealsPerDay,
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
-    setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
+    setWeightKg: setWeightKgStable, setBodyFat: setBodyFatStable,
+    saveWeightNow,
     scans: sorted,
-    // A scan is the single most consequential thing a client records: it moves
-    // weight, body fat, muscle, every chart, and the macro targets they eat to.
-    // The insert used to be fire-and-forget — `.then(res => …, () => {})`, with
-    // `error` never read — so a refused write left the scan on screen, driving
-    // all of that, until the next launch dropped it. Now the caller is told.
-    addScan: async (s: ScanRec): Promise<boolean> => {
-      setScans((p) => [...p, s]);
-      if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
-        setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; });
-      }
-      setManualWeight(null); setManualBodyFat(null);
-      if (!USE_SUPABASE || !sbUid) return false;
-      try {
-        const { data, error } = await supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single();
-        if (error || !data?.id) { reportError('clientData.addScan', error); return false; }
-        // The caller's id was a local one ('s' + Date.now()); the row's id is
-        // the server's. They are swapped here rather than left to diverge,
-        // because `updateScan` and `deleteScan` address rows BY ID and a scan
-        // added this session would otherwise carry an id no row has — so
-        // correcting a scan you had just typed, which is when a typo is
-        // actually noticed, would silently match nothing.
-        setScans((p) => p.map((row) => (row.id === s.id ? { ...row, id: String(data.id) } : row)));
-        if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
-          // The composition breakdown is a second write against the row we just
-          // made. Losing it costs the InBody detail, not the scan, so the scan
-          // still counts as stored — but the failure is recorded rather than
-          // discarded.
-          const { error: mErr } = await supabase.from('scans').update({ metrics: s.metrics }).eq('id', data.id);
-          if (mErr) reportError('clientData.addScan.metrics', mErr);
-        }
-        return true;
-      } catch (e) { reportError('clientData.addScan', e); return false; }
-    },
-    updateScan: async (id, patch): Promise<boolean> => {
-      // Applied locally first, exactly as addScan does, so the correction is on
-      // screen while the write is in flight — and reported honestly afterwards
-      // rather than assumed.
-      setScans((p) => p.map((row) => (row.id === id ? {
-        ...row,
-        takenAt: patch.takenAt ?? row.takenAt,
-        weightKg: patch.weightKg ?? row.weightKg,
-        bodyFatPct: patch.bodyFatPct ?? row.bodyFatPct,
-        skeletalMuscleKg: patch.skeletalMuscleKg !== undefined ? patch.skeletalMuscleKg : row.skeletalMuscleKg,
-      } : row)));
-      // A manual weight typed after the scan was taken would otherwise go on
-      // beating the corrected figure (see manualBeatsScan) — so the same clear
-      // addScan does is done here, because a correction is a statement that the
-      // scan is now the right answer.
-      setManualWeight(null); setManualBodyFat(null);
-      if (!USE_SUPABASE || !sbUid) return false;
-      const row: Record<string, unknown> = {};
-      if (patch.takenAt !== undefined) row.taken_at = String(patch.takenAt).slice(0, 10);
-      if (patch.weightKg !== undefined) row.weight_kg = patch.weightKg;
-      if (patch.bodyFatPct !== undefined) row.body_fat_pct = patch.bodyFatPct;
-      if (patch.skeletalMuscleKg !== undefined) row.skeletal_muscle_kg = patch.skeletalMuscleKg;
-      if (!Object.keys(row).length) return true;
-      try {
-        // `.eq('client_id', sbUid)` as well as the id. RLS already scopes this
-        // to the signed-in account, so the clause changes nothing about what is
-        // permitted — it is here so that a bug handing this an id from another
-        // account fails to match rather than relying on the policy as the only
-        // thing between a client and somebody else's body record.
-        //
-        // `.select('id')` so the count is readable. An update matching NO rows
-        // is not an error in PostgREST, and without this a correction to a scan
-        // that had already been deleted elsewhere would report success.
-        const { data, error } = await supabase.from('scans').update(row).eq('id', id).eq('client_id', sbUid).select('id');
-        if (error) { reportError('clientData.updateScan', error); return false; }
-        return Array.isArray(data) && data.length > 0;
-      } catch (e) { reportError('clientData.updateScan', e); return false; }
-    },
-    deleteScan: async (id): Promise<boolean> => {
-      const before = scans;
-      setScans((p) => p.filter((row) => row.id !== id));
-      if (!USE_SUPABASE || !sbUid) return false;
-      try {
-        const { data, error } = await supabase.from('scans').delete().eq('id', id).eq('client_id', sbUid).select('id');
-        if (error || !Array.isArray(data) || data.length === 0) {
-          // Put it back. A scan that is still on the server and gone from the
-          // screen is the worst of the three states: the client believes it is
-          // deleted, their coach still sees it, and the next launch brings it
-          // back with no explanation. Restoring makes the failure visible at
-          // the moment the caller can still say so.
-          setScans(before);
-          if (error) reportError('clientData.deleteScan', error);
-          return false;
-        }
-        return true;
-      } catch (e) {
-        setScans(before);
-        reportError('clientData.deleteScan', e);
-        return false;
-      }
-    },
-    weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
-    bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
-    // Scans that reported no muscle figure contribute no POINT, rather than a
-    // point at zero. A charted zero is not a small reading, it is a cliff: it
-    // dominates the axis and reads as total muscle loss between two scans.
-    muscleSeries: sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
-    profileStatus, scansStatus, saveFailed,
-    // The combined view: 'error' the moment either half failed, because a
-    // profile screen shows both at once and cannot honestly present half of it
-    // as the client's own data. 'partial' rolls up the same way — a truncated
-    // scan history makes the profile's total change since starting a figure
-    // over an unknown fraction of the record.
-    status: worstStatus(profileStatus, scansStatus),
-  };
+    addScan: addScanStable, updateScan: updateScanStable, deleteScan: deleteScanStable,
+    weightSeries, bodyFatSeries, muscleSeries,
+    profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
+    status,
+  }), [
+    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex, setSex,
+    goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes, injuries, focusAreas, setFocusAreas,
+    addInjuryStable, updateInjuryStable, removeInjuryStable,
+    coachingMode, setCoachingMode, coachLinked, trainerId, mealsPerDay, setMealsPerDay,
+    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
+    weightKg, bodyFatPct, latest, setWeightKgStable, setBodyFatStable, saveWeightNow, sorted,
+    addScanStable, updateScanStable, deleteScanStable,
+    weightSeries, bodyFatSeries, muscleSeries,
+    publishedProfileStatus, publishedScansStatus, saveFailed, reload, status,
+  ]);
+  // Re-run these reads when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('clientData', status, reload);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

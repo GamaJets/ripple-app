@@ -15,7 +15,7 @@
 //
 // Both list reads swallowed their query too, so "no pending invitations" and
 // "we could not check" were the same empty screen.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +48,17 @@ interface TrainerInvitesValue {
   acceptTrainerInvite: (id: string) => Promise<boolean>;
   /** Resolves true when the decline was recorded. */
   declineTrainerInvite: (id: string) => Promise<boolean>;
+  /**
+   * Read both lists again.
+   *
+   * A real re-read: it bumps the key the one effect in this provider is keyed
+   * on, so the same query runs and `status` goes back through 'loading' to
+   * whatever the server says this time. Added because the owner's Trainers
+   * screen shows `sent` as its Pending Invites list and had no way to ask for
+   * it again — an invitation accepted in the other app stayed "Pending" here
+   * until the app was killed.
+   */
+  reload: () => void;
 }
 
 // The `SEQ` counter that minted `local-…` ids for optimistic invitations is
@@ -74,6 +85,8 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const [myName, setMyName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
 
   const DISMISS_KEY = 'repple.trainerInvites.dismissed';
   const markDismissed = (id: string) => {
@@ -149,7 +162,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, tick]);
 
   // Nothing goes on the list until the server has it.
   //
@@ -224,8 +237,31 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useTrainerInvites`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.sendTrainerInvite(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite });
+  impl.current = { sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite };
+  const sendTrainerInviteStable = useCallback((...a: Parameters<typeof sendTrainerInvite>) => impl.current.sendTrainerInvite(...a), []);
+  const revokeTrainerInviteStable = useCallback((...a: Parameters<typeof revokeTrainerInvite>) => impl.current.revokeTrainerInvite(...a), []);
+  const acceptTrainerInviteStable = useCallback((...a: Parameters<typeof acceptTrainerInvite>) => impl.current.acceptTrainerInvite(...a), []);
+  const declineTrainerInviteStable = useCallback((...a: Parameters<typeof declineTrainerInvite>) => impl.current.declineTrainerInvite(...a), []);
+  const value = useMemo<TrainerInvitesValue>(() => ({ sent, received, status, sendTrainerInvite: sendTrainerInviteStable, revokeTrainerInvite: revokeTrainerInviteStable, acceptTrainerInvite: acceptTrainerInviteStable, declineTrainerInvite: declineTrainerInviteStable, reload }), [sent, received, status, sendTrainerInviteStable, revokeTrainerInviteStable, acceptTrainerInviteStable, declineTrainerInviteStable, reload]);
   return (
-    <Ctx.Provider value={{ sent, received, status, sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

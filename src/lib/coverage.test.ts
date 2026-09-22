@@ -3,9 +3,10 @@ import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNew
 import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, suggestProgression } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
-import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
+import { rowToEntry, entryToRow, PERSISTED_FIELDS, WORKOUT_COLS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { localDay } from './attendance';
+import { isoDay as isoDayOf } from './weekStart';
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass, classFillState } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
@@ -44,7 +45,11 @@ import { progressOf, projectionOf, startPoint, isMeasured, isOverdue as goalIsOv
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
-import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef, isAcademyClip } from './exerciseId';
+import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef } from './exerciseId';
+// Whose a clip is, asked the one way this repo answers it. `isAcademyClip` used
+// to be imported here as a second way to ask it; it is gone, and the note where
+// it lived in exerciseId.ts says why.
+import { clipOwner } from './clipOwner';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, SIGNED_URL_TTL_S, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
@@ -52,7 +57,6 @@ import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, 
 import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput, isQueryableId } from './clientDrift';
-import { atRiskClient, noRecordOf } from './trainerMock';
 import { csvCell, csvRow, toCsv, minorToDecimal, isoDatePart, slug, buildGymExport, exportBlocker, incompleteWarning, EXPORT_PARTS, EXPORT_FILE, type GymExportInput, type PassType } from './gymExport';
 import {
   monthWindow, monthKeyOf, recentMonths, monthEnded, inMonth, dayInMonth, sliceMonth,
@@ -222,6 +226,44 @@ for (const k of ['sets', 'feel', 'cardio', 'kcal', 'zones']) {
 }
 ok(rowToEntry(sparseRow as never).sets === undefined, 'a null column should read back as undefined');
 
+// ── and the third end: what a READ actually asks the database for ──────────
+//
+// The two assertions above hold the writer and the reader against each other,
+// and both passed for months over a real defect, because the defect was in
+// neither of them. `WORKOUT_COLS` is the select list every coach-side read of
+// `workouts` uses, and it named neither `bw` nor `timed` — so on a coach's
+// screen `rowToEntry` mapped two columns that never came back, `isTimedSet`
+// and `isBodyweightSet` answered no to every set, a 45-second plank counted as
+// 45 reps, and a weighted one added seconds x kilograms to a tonnage. Then
+// `tempos` was added to both ends of the round trip and to the column list on
+// none of the four screens, so a coach could not see whether the tempo they
+// prescribed had happened.
+//
+// A column on the row and not on the read does not fail: it comes back
+// undefined, and undefined on this data means a set nobody did. So the list is
+// held against the row here, and anything deliberately left out of it has to be
+// named — which is the difference between a decision and an omission.
+const NOT_READ_BY_COACHES = new Set([
+  // The filter on every one of these reads already names it.
+  'user_id',
+  // Time in heart-rate zones. Checked by grep rather than assumed: nothing on
+  // any coach path reads `zones`, and the day one does it belongs on the list.
+  'zones',
+]);
+const asked = new Set(WORKOUT_COLS.split(',').map((c) => c.trim()));
+for (const col of Object.keys(entryToRow('user-1', fullEntry))) {
+  if (NOT_READ_BY_COACHES.has(col)) continue;
+  ok(asked.has(col),
+     `WORKOUT_COLS does not ask for "${col}", so a coach's read of it comes back undefined `
+     + 'and is read as absent — add it there, or add it to NOT_READ_BY_COACHES with a reason');
+}
+// And the exclusions themselves have to still be columns, or the list is a
+// place for a name to hide after the column it excused has been renamed.
+const written = new Set(Object.keys(entryToRow('user-1', fullEntry)));
+for (const col of NOT_READ_BY_COACHES) {
+  ok(written.has(col), `NOT_READ_BY_COACHES names "${col}", which entryToRow no longer writes`);
+}
+
 
 // ── gym revenue summary ─────────────────────────────────────────────────────
 // The whole point of these figures is that they refuse to invent. A gym with
@@ -231,7 +273,7 @@ const plan = (id: string, cents: number, interval: 'month'|'year'|'once'): Membe
   ({ id, name: id, priceCents: cents, currency: 'AED', interval, active: true });
 const mem = (id: string, planId: string | null, status: Membership['status'] = 'active'): Membership =>
   ({ id, memberId: 'm' + id, memberName: 'M', planId, planName: null,
-     startedOn: '2026-01-01', endsOn: null, status });
+     startedOn: '2026-01-01', endsOn: null, status, frozenFrom: null, frozenTo: null });
 const pay = (cents: number): GymPayment =>
   // The four fields supabase/parts/168 and 172 added are stated rather than
   // spread from a default, because a fixture that quietly defaults them is a
@@ -494,7 +536,7 @@ const NOW = Date.parse('2026-08-25T12:00:00Z');
 const sess = (o: Partial<PtSession>): PtSession => ({
   id: 's', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 ok(isDelivered({ outcome: 'completed' }), 'completed is delivered');
@@ -577,6 +619,64 @@ ok((settlementBlocker(unpricedTotal) ?? '').includes('rate'), 'blocker names the
 ok(payrollTotal([]).settleable === false, 'an empty period is not settleable');
 ok(payrollTotal([]).cents === null, 'an empty period has null pay, not 0');
 
+/* ── two coaches, two currencies ──────────────────────────────────────────
+   Every PayrollLine carries `currency` and `mixedCurrency` so a cross-currency
+   figure cannot be printed, and the gym-wide roll-up dropped both — producing a
+   single number the console's payroll header labelled with the gym's own three
+   letters. Its own comment calls that header "the single most important
+   decision on this screen". The per-trainer settle action was separately
+   guarded, so the money never moved wrongly; the number an owner reads before
+   deciding was wrong. Each fixture below is a fully marked, fully priced line,
+   so nothing but the currency is in question. */
+{
+  const line = (trainerId: string, cents: number, currency: string | null, mixed = false) => ({
+    trainerId, trainerName: trainerId, delivered: 1, noShows: 0, cancelled: 0, unmarked: 0,
+    cents, currency, mixedCurrency: mixed, priced: 1, payable: 1,
+  });
+  const same = payrollTotal([line('a', 5000, 'GBP'), line('b', 7000, 'GBP')]);
+  ok(same.cents === 12000, 'one currency across both coaches still totals');
+  ok(same.currency === 'GBP' && same.mixedCurrency === false, 'and is labelled with it');
+  ok(same.settleable === true, 'and can be settled');
+
+  const split = payrollTotal([line('a', 5000, 'GBP'), line('b', 7000, 'USD')]);
+  /* The SUM survives, and that is deliberate — closePayrollCurrency.test.ts
+     pins the contract that this function "adds lines and has no opinion about
+     money", because the month close and the snapshot both need the figure. What
+     was missing was any means for a caller to know it must not be PRINTED as an
+     amount. A first version of this fix nulled `cents` here and broke two
+     existing tests, which were right and it was wrong. */
+  ok(split.cents === 12000, 'the raw sum is still computed');
+  ok(split.currency === null && split.mixedCurrency === true, 'but there is no unit to print it in, and it says so');
+  ok(split.settleable === false, 'and a number that is not an amount cannot be settled');
+  ok((settlementBlocker(split) ?? '').toLowerCase().includes('currency'),
+    `the blocker names the currency, not a tidying job (got ${settlementBlocker(split)})`);
+
+  // A line that is itself mixed makes the total unlabellable in the same way.
+  const oneMixed = payrollTotal([line('a', 5000, null, true)]);
+  ok(oneMixed.mixedCurrency === true && oneMixed.settleable === false,
+    'a single trainer priced in two moneys has no settleable total either');
+  ok(settlementBlocker(oneMixed) !== null, 'and the blocker says so before anybody pays on it');
+
+  /* A figure with no currency at all — rates predating supabase/parts/1010 —
+     is NOT disagreement. Nothing has said it is a different money, only that
+     nobody wrote down which. Treating it as mixed was the first version of this
+     fix and it was worse than the bug it repaired: every gym whose rates
+     predate that part would have lost both its payroll total and its ability to
+     settle. So the figure survives and the LABEL is withheld, which is the one
+     thing that cannot be honestly supplied. */
+  const unlabelledTotal = payrollTotal([line('a', 5000, null)]);
+  ok(unlabelledTotal.cents === 5000, 'a priced line with no recorded currency still totals');
+  ok(unlabelledTotal.currency === null, 'but offers no label for it');
+  ok(unlabelledTotal.mixedCurrency === false, 'and is not reported as a mix, because nothing disagreed');
+  ok(unlabelledTotal.settleable === true, 'a legacy gym can still settle its payroll');
+
+  // One unlabelled line beside a labelled one withholds the label for both,
+  // because the sum is no longer known to be all of one money.
+  const partly = payrollTotal([line('a', 5000, 'GBP'), line('b', 2000, null)]);
+  ok(partly.cents === 7000, 'the figure is still the sum');
+  ok(partly.currency === null, 'and carries no unit, because one of its halves named none');
+}
+
 // ── gym payroll must not price unconfirmed work ──
 // Regression guard: payroll used to be sessions30 * fee, where sessions30 was
 // "booked and the clock has passed" — so it paid for no-shows and slots nobody
@@ -640,17 +740,23 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
   ok(mapped.unmatched.includes('Nickname'), 'an unrecognised column is reported, not silently dropped');
 
   // ── money ──
-  ok((parseMoneyCents('£1,234.56') as any).value === 123456, 'money strips a currency symbol and thousands comma');
-  ok((parseMoneyCents('1.234,56') as any).value === 123456, 'European decimal comma is read correctly');
-  ok((parseMoneyCents('1,234') as any).value === 123400, 'a lone separator before three digits is thousands, not decimals');
-  ok((parseMoneyCents('1,23') as any).value === 123, 'a lone separator before two digits is a decimal point');
-  ok((parseMoneyCents('50') as any).value === 5000, 'a bare integer is whole units');
-  ok((parseMoneyCents('0') as any).value === 0, 'zero is a real amount');
-  ok((parseMoneyCents('7.5') as any).value === 750, 'one decimal place is padded, not truncated');
-  ok((parseMoneyCents('(50.00)') as any).value === -5000, 'accounting parentheses mean negative');
-  ok(parseMoneyCents('1.2345').ok === false, 'four decimal places are refused rather than rounded');
-  ok(parseMoneyCents('n/a').ok === false, 'non-numeric text is refused');
-  ok(parseMoneyCents('').ok === false, 'an empty amount is refused');
+  //
+  // Every one of these names the currency, and that is the point rather than an
+  // inconvenience: `parseMoneyCents` scales by the places the money actually
+  // has, so a figure with no currency beside it is not an amount of anything.
+  // The zero- and three-place behaviour is pinned in importRoundTrip.test.ts.
+  ok((parseMoneyCents('£1,234.56', 'GBP') as any).value === 123456, 'money strips a currency symbol and thousands comma');
+  ok((parseMoneyCents('1.234,56', 'GBP') as any).value === 123456, 'European decimal comma is read correctly');
+  ok((parseMoneyCents('1,234', 'GBP') as any).value === 123400, 'a lone separator before three digits is thousands, not decimals');
+  ok((parseMoneyCents('1,23', 'GBP') as any).value === 123, 'a lone separator before two digits is a decimal point');
+  ok((parseMoneyCents('50', 'GBP') as any).value === 5000, 'a bare integer is whole units');
+  ok((parseMoneyCents('0', 'GBP') as any).value === 0, 'zero is a real amount');
+  ok((parseMoneyCents('7.5', 'GBP') as any).value === 750, 'one decimal place is padded, not truncated');
+  ok((parseMoneyCents('(50.00)', 'GBP') as any).value === -5000, 'accounting parentheses mean negative');
+  ok(parseMoneyCents('1.2345', 'GBP').ok === false, 'four decimal places are refused rather than rounded');
+  ok(parseMoneyCents('n/a', 'GBP').ok === false, 'non-numeric text is refused');
+  ok(parseMoneyCents('', 'GBP').ok === false, 'an empty amount is refused');
+  ok(parseMoneyCents('50.00').ok === false, 'and with no currency at all there is no figure — two places is not a default');
 
   // ── dates: the decision this module exists for ──
   ok((parseDate('2026-04-03') as any).value === '2026-04-03', 'ISO dates are unambiguous');
@@ -703,7 +809,8 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
     'Amy Chen,amy@example.com,"£1,234.56",2026-01-15,Card\n' +
     'Ben Ross,ben@example.com,69.00,2026-01-16,Bank Transfer\n' +
     ',,50.00,2026-01-17,Cash\n' +
-    'Cal Diaz,cal@example.com,-20.00,2026-01-18,Card\n'
+    'Cal Diaz,cal@example.com,-20.00,2026-01-18,Card\n',
+    undefined, 'GBP',
   );
   ok(pay.ready.length === 2, `payments with a payer and a good amount are ready (got ${pay.ready.length})`);
   ok(pay.ready[0].amountCents === 123456, 'a quoted, symbol-prefixed amount survives the CSV and the parser');
@@ -959,8 +1066,8 @@ ok(none.classes === 0 && none.fill === null && none.show === null, 'no classes y
 
 // ── one status vocabulary ──
 {
-ok(riskLabel('high') === 'At risk', '"Not delivering" is gone from the product');
-ok(riskLabel('ok') === 'On track', 'trainer "Healthy" and client "On track" are now the same word');
+ok(riskLabel('high') === 'At Risk', '"Not delivering" is gone from the product');
+ok(riskLabel('ok') === 'On Track', 'trainer "Healthy" and client "On Track" are now the same word');
 ok(riskLabel('watch') === 'Watch', 'the shared middle word survives');
 ok(riskLabel('idle') === 'Idle', 'idle is its own state');
 ok(riskLabel('something-new') === 'Idle', 'an unknown risk key reads as no assessment, not as a verdict');
@@ -1008,6 +1115,16 @@ ok(reconcile(0, 0).state === 'not_entered', 'nothing typed against a real zero i
 ok(reconcileNote(reconcile(34500, 34500), 'MRR') === null, 'agreement says nothing — no self-congratulation');
 ok((reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes('less'), 'a shortfall is described as less');
 ok((reconcileNote(reconcile(30000, 34500), 'MRR') ?? '').includes('more'), 'a surplus is described as more');
+// The PERIOD the register figure covers, in the sentence that quotes it. The
+// figure is offered under a "Use It" button that writes it into the owner's own
+// monthly numbers, so a register figure over one window quoted under a field
+// naming another is a wrong number in the scorecard the grade is computed from.
+ok((reconcileNote(reconcile(0, 31), 'joined this month', String, 'August 2026') ?? '').includes('for August 2026'),
+  'an un-entered figure names the month it is over');
+ok((reconcileNote(reconcile(40000, 34500), 'MRR', String, 'August 2026') ?? '').includes('for August 2026'),
+  'and so does a disagreement');
+ok(!(reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes(' for '),
+  'and a check with no period names none rather than inventing one');
 ok((reconcileNote(reconcile(40000, null), 'MRR') ?? '').includes('Nothing recorded'), 'no-record note explains why');
 
 // ── an unread register is not an empty one ────────────────────────────────
@@ -1047,7 +1164,7 @@ const NOW2 = Date.parse('2026-08-25T12:00:00Z');
 const s2 = (o: Partial<PtSession>): PtSession => ({
   id: 'x', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 const fresh = s2({ id: 'a' });
@@ -1140,10 +1257,18 @@ ok(findExercise('Kettlebell Windmill', cat) === null,
    'a movement the coach invented is absent, which is an answer rather than a failure');
 
 // Picking the clip. The substring rule is gone: a near-miss is the wrong lift.
+//
+// The 'db' prefixes are not decoration. `videoForExercise` classifies a clip
+// through `clipOwner`, which reads the ID, because the trainer column alone
+// cannot tell an Academy row from a clip stranded in a handset's AsyncStorage
+// after a refused insert — both carry `trainerId: null`. These three are all
+// rows in `exercise_videos` filmed by a coach, so they are all 'db…'. They had
+// no ids at all until the prefix started mattering, which left them exercising
+// a fallback rather than the rule.
 const vids = [
-  { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 't1' },
-  { exerciseId: null, name: 'Front Squat', trainerId: 't1' },
-  { exerciseId: 'back-squat', name: 'Coach Marcus — squat cues', trainerId: 't2' },
+  { id: 'db-t1-back', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 't1' },
+  { id: 'db-t1-front', exerciseId: null, name: 'Front Squat', trainerId: 't1' },
+  { id: 'db-t2-cues', exerciseId: 'back-squat', name: 'Coach Marcus — squat cues', trainerId: 't2' },
 ];
 ok(videoForExercise('Back Squat', vids)?.name === 'Back Squat', 'the clip linked by id wins');
 ok(videoForExercise('Front Squat', vids)?.name === 'Front Squat',
@@ -1274,10 +1399,14 @@ for (const v of variants) {
   ok(/^#[0-9a-f]{6}$/i.test(VARIANT_TILE[v]), `${v} tile is a full hex value`);
 }
 
-// The whole point: three apps, three colours. A duplicate would mean two
-// products look identical, which is what this change exists to fix.
+// This used to assert three DIFFERENT accents — three apps, three colours.
+// The approved redesign board (docs/claude-handoff, 19 Sep 2026) draws the
+// family in one green, and the reviewers chose that on purpose: what tells
+// the apps apart is the wordmark's COACH / STUDIO line and the icon plate,
+// not the accent. So the rule inverted: one accent, held the same across all
+// three so no build can drift to its own.
 const accents = variants.map((v) => VARIANT_ACCENT[v]);
-ok(new Set(accents).size === 3, 'no two apps share an accent');
+ok(new Set(accents).size === 1, 'the three apps share the family accent');
 ok(new Set(variants.map((v) => VARIANT_TILE[v])).size === 3, 'no two apps share an icon tile');
 ok(new Set(variants.map((v) => VARIANT_LABEL[v])).size === 3, 'no two apps share a name');
 
@@ -1369,7 +1498,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 // The third of CSV import that did not exist. A price list is the one sheet
 // where a misread cell becomes a wrong amount of money charged every month.
 {
-  const p = previewPlans('name,price,interval\nOff-peak,180,month\nAnnual,1800,year\nDay pass,45,once\n');
+  const p = previewPlans('name,price,interval\nOff-peak,180,month\nAnnual,1800,year\nDay pass,45,once\n', 'GBP');
   ok(p.ready.length === 3, 'three plans read');
   ok(p.rejected.length === 0, 'nothing rejected from a clean sheet');
   ok(p.ready[0].priceCents === 18000, 'price becomes minor units');
@@ -1384,51 +1513,57 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // not say. The import screen fills it from the gym, whose currency it knows,
   // and refuses the import when the gym has not set one either.
   ok(p.ready[0].currency === null, 'a sheet with no currency column states no currency — it does not default to one');
+  // The gym's currency is what such a sheet is PRICED in even so — it has to
+  // be, or there is no factor between 180 and 18000 — and that is the second
+  // argument. Stating no currency and being read in none are different facts.
+  ok(p.currency === 'GBP', 'the preview says which money it read the prices in');
+  ok(previewPlans('name,price\nGold,200\n').ready.length === 0,
+     'and with no currency anywhere, a price is refused rather than assumed into two places');
   ok(p.ready[0].active === true, 'plans default to on sale');
 
   // A sheet that DOES say is believed, and it outranks the gym's own currency
   // at the import screen: it is what that plan was actually priced in.
-  const withCcy = previewPlans('name,price,interval,currency\nOff-peak,180,month,GBP\n');
+  const withCcy = previewPlans('name,price,interval,currency\nOff-peak,180,month,GBP\n', 'GBP');
   ok(withCcy.ready.length === 1 && withCcy.ready[0].currency === 'GBP',
     'a currency column is read and kept, rather than being overwritten by a default');
 
   // The refusal that matters most. membership_plans.interval accepts only
   // month/year/once, so a quarterly plan has nowhere truthful to go: mapping
   // it to month divides the gym's recurring revenue by three.
-  const q = previewPlans('name,price,interval\nQuarterly,500,quarterly\n');
+  const q = previewPlans('name,price,interval\nQuarterly,500,quarterly\n', 'GBP');
   ok(q.ready.length === 0, 'a quarterly plan is not silently repriced');
   ok(q.rejected.length === 1, 'it is refused, not dropped');
   ok(/not month, year or one-off/.test(q.rejected[0]?.errors.join(' ') ?? ''), 'and says why');
 
   // A blank price is an unfinished row, not a free plan.
-  const blank = previewPlans('name,price\nUnnamed,\n');
+  const blank = previewPlans('name,price\nUnnamed,\n', 'GBP');
   ok(blank.ready.length === 0, 'a blank price is refused');
   ok(/unfinished row/.test(blank.rejected[0]?.errors.join(' ') ?? ''), 'blank price explains itself');
 
   // But a deliberate zero is a real thing a gym sells: staff, comp, founder.
-  const free = previewPlans('name,price\nStaff,0\n');
+  const free = previewPlans('name,price\nStaff,0\n', 'GBP');
   ok(free.ready.length === 1, 'a deliberate zero IS a plan');
   ok(free.ready[0]?.priceCents === 0, 'and stays zero');
 
-  const neg = previewPlans('name,price\nOops,-50\n');
+  const neg = previewPlans('name,price\nOops,-50\n', 'GBP');
   ok(neg.ready.length === 0, 'a negative price is refused');
 
   // Same plan twice is two prices for one thing.
-  const dup = previewPlans('name,price\nGold,200\ngold,250\n');
+  const dup = previewPlans('name,price\nGold,200\ngold,250\n', 'GBP');
   ok(dup.ready.length === 1, 'a duplicate plan name is refused');
   ok(/duplicate of line 2/.test(dup.rejected[0]?.errors.join(' ') ?? ''), 'and points at the first one');
 
-  const cur = previewPlans('name,price,currency\nGold,200,GBP\n');
+  const cur = previewPlans('name,price,currency\nGold,200,GBP\n', 'GBP');
   ok(cur.ready[0]?.currency === 'GBP', 'a real currency code is kept');
-  const badCur = previewPlans('name,price,currency\nGold,200,pounds\n');
+  const badCur = previewPlans('name,price,currency\nGold,200,pounds\n', 'GBP');
   ok(badCur.ready.length === 0, 'a currency that is not a code is refused');
 
-  const off = previewPlans('name,price,active\nRetired,200,no\n');
+  const off = previewPlans('name,price,active\nRetired,200,no\n', 'GBP');
   ok(off.ready.length === 1 && off.ready[0].active === false, 'no means not on sale');
-  const odd = previewPlans('name,price,active\nGold,200,maybe\n');
+  const odd = previewPlans('name,price,active\nGold,200,maybe\n', 'GBP');
   ok(odd.ready.length === 0, 'an unreadable yes/no is refused, not defaulted on sale');
 
-  const noCols = previewPlans('something,else\na,b\n');
+  const noCols = previewPlans('something,else\na,b\n', 'GBP');
   ok(noCols.missingRequired.includes('name') && noCols.missingRequired.includes('price'),
      'a sheet with neither column says so');
 }
@@ -1912,12 +2047,16 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
        'a class with no capacity cannot be joined');
   }
 
-  // What a coach programmes vs what anybody has filmed.
+  // What a coach programs vs what anybody has filmed.
   {
+    // The 'db' prefix is load-bearing and not decoration. coverageFor reads it
+    // through clipOwner, because an entry saved on the handset after a refused
+    // insert also carries `trainerId: null` and is NOT the Academy's — see the
+    // phone-only block in videoCoverage.test.ts.
     const vids = [
-      { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'me' },
-      { exerciseId: 'bench-press', name: 'Bench Press', trainerId: null },
-      { exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
+      { id: 'db1', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'me' },
+      { id: 'db2', exerciseId: 'bench-press', name: 'Bench Press', trainerId: null },
+      { id: 'db3', exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
     ];
     const programmed = ['Back Squat', 'Bench Press', 'Deadlift', 'Hip Thrust', 'back squat'];
     // An EMPTY set, not the default. coverageFor's fourth argument is the
@@ -1943,15 +2082,24 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(line !== null && line.includes('2 of the 4') && line.includes('Academy'),
        'the line names both jobs: what is missing, and what is only the Academy');
     const done = coverageLine(coverageFor(['Back Squat'], vids, 'me', NONE_ILLUSTRATED));
-    ok(done !== null && done.startsWith('Every movement you programme has your own clip'),
+    ok(done !== null && done.startsWith('Every movement you program has your own clip'),
        'and says so plainly when there is nothing left to film');
   }
 
-  // Which demo clip a client sees: their coach, then the Academy, then none.
+  // Which demo clip a client sees: their coach, then the Academy, then a clip
+  // held on this handset, then none.
   {
-    const mine    = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-me' };
-    const academy = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
-    const other   = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-someone-else' };
+    // These fixtures had no ids, and that was not a tidiness problem. `academy`
+    // — `trainerId: null`, no id — is character for character the shape of a
+    // clip stranded in a handset's AsyncStorage after a refused insert, and the
+    // assertion below asserted it WAS the Academy's. That is the defect's own
+    // conclusion drawn from the defect's own input, so the test agreed with the
+    // bug. The ids say which is which: 'db…' is a row in `exercise_videos`,
+    // 'vx…' is this phone and nowhere else.
+    const mine    = { id: 'db-coach-me', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-me' };
+    const academy = { id: 'db-academy', exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
+    const other   = { id: 'db-someone-else', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-someone-else' };
+    const handset = { id: 'vx7f3a9', exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
 
     ok(videoForExercise('Back Squat', [academy, other, mine], 'coach-me') === mine,
        'a member sees their OWN coach demonstrating, ahead of anything else');
@@ -1964,8 +2112,21 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(videoForExercise('Front Squat', [mine, academy], 'coach-me') === null,
        'and a different movement matches nothing — no fuzzy fallback, ever');
 
-    ok(isAcademyClip(academy) && !isAcademyClip(mine) && !isAcademyClip(other),
-       'an Academy clip is the one belonging to no coach');
+    // The two clips the trainer column cannot tell apart. If the id stopped
+    // being read, every line in this group flips.
+    ok(academy.trainerId === handset.trainerId,
+       'the Academy row and the handset entry are identical in the column the old test read');
+    ok(clipOwner(academy, 'coach-me') === 'platform',
+       'an Academy clip is the one belonging to no coach, and having a row');
+    ok(clipOwner(handset, 'coach-me') === 'local',
+       'and a clip stranded on one handset is NOT the Academy’s — no row, and no client can reach it');
+    ok(clipOwner(mine, 'coach-me') === 'mine' && clipOwner(other, 'coach-me') === 'other',
+       'a clip with a coach against it is theirs or a stranger’s, never the platform’s');
+
+    ok(videoForExercise('Back Squat', [handset, academy], 'coach-me') === academy,
+       'the Academy row is what the client is served, so it outranks a clip no client can reach');
+    ok(videoForExercise('Back Squat', [other, handset], 'coach-me') === handset,
+       'and the handset clip still plays over a stranger’s, because it is real and it is here');
   }
 
   // An average over no trainers is undefined, not zero.
@@ -2028,13 +2189,31 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(attributionLine({ loggedBy: 'coach-1' }, 'Dave', false) === 'Logged by you',
        'the coach sees it as their own entry');
     const amended = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', false);
-    ok(amended !== null && amended.startsWith('Logged by you · amended by them'),
+    ok(amended !== null && amended.startsWith('Logged by you · changed after it was filed'),
        'a coach is told plainly that their account of the session was changed');
     const clientSide = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', true);
-    ok(clientSide !== null && clientSide.startsWith('Logged by Dave · amended by you'),
-       'and the client is told their change is visible, rather than it being silent');
-    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · amended by you',
+    ok(clientSide !== null && clientSide.startsWith('Logged by Dave · changed after it was filed'),
+       'and the client is told the record moved, without claiming who moved it: amended_at has no author');
+    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · changed after it was filed',
        'an unreadable timestamp drops the date rather than rendering Invalid Date');
+
+    // Part 3230: `amended_by` names who. Only the member or the coach who logged
+    // the set can stamp it, so equal to loggedBy is the coach, anything else the member.
+    const at = '2026-09-21T09:00:00Z';
+    const byCoach = { loggedBy: 'coach-1', amendedAt: at, amendedBy: 'coach-1' };
+    const byMember = { loggedBy: 'coach-1', amendedAt: at, amendedBy: 'member-9' };
+    ok(attributionLine(byCoach, 'Dave', true)!.startsWith('Logged by Dave · changed by Dave'),
+       'a member told their coach corrected the set names the coach');
+    ok(attributionLine(byMember, 'Dave', true)!.startsWith('Logged by Dave · changed by you'),
+       'a member told they changed it hears "you"');
+    ok(attributionLine(byCoach, 'Dave', false)!.startsWith('Logged by you · changed by you'),
+       'a coach told they corrected their own set hears "you"');
+    ok(attributionLine(byMember, 'Dave', false)!.startsWith('Logged by you · changed by your client'),
+       'a coach told the member changed it hears "your client"');
+    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: at }, 'Dave', true)!.startsWith('Logged by Dave · changed after it was filed'),
+       'a change stamped before amended_by existed still says only what is known, and names nobody');
+    ok(!/\u2014/.test(attributionLine(byCoach, 'Dave', true)!),
+       'and none of these captions carries an em-dash');
   }
 
   // A coach's own exercise names, merged into the picker ahead of the built-ins.
@@ -2142,16 +2321,19 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const ago = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
 
   const mem = (memberId: string, memberName: string | null, status: Membership['status'], startedOn: string): Membership =>
-    ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status });
-  const pay = (id: string, memberId: string, amountCents: number, takenAt: string): GymPayment =>
-    ({ id, memberId, memberName: null, amountCents, currency: 'AED', method: 'card', takenAt, note: null,
+    ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status, frozenFrom: null, frozenTo: null });
+  // `currency` is a parameter and not a constant, because it being a constant is
+  // exactly why the cross-currency bug below survived: every fixture here was
+  // AED, so the path where two payments disagree had never run.
+  const pay = (id: string, memberId: string, amountCents: number, takenAt: string, currency = 'AED'): GymPayment =>
+    ({ id, memberId, memberName: null, amountCents, currency, method: 'card', takenAt, note: null,
        kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null });
   const visit = (id: string, memberId: string, enteredAt: string, classId: string | null = null): Visit =>
     ({ id, memberId, memberName: null, passId: null, classId, enteredAt, exitedAt: null, source: 'door', note: null });
   const book = (bookingId: string, memberId: string, startsAt: string, attended: boolean, status = 'booked'): MemberBooking =>
     ({ bookingId, memberId, classId: 'c-' + bookingId, classTitle: 'Spin', startsAt, status, attendedAt: attended ? startsAt : null });
   const sess = (id: string, clientId: string, startsAt: string, outcome: PtSession['outcome']): PtSession =>
-    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, });
+    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, });
   const pass = (id: string, holderId: string, total: number, spent: number): GymPass =>
     ({ id, passTypeId: 'pt1', passTypeName: '10-pack', kind: 'pack', covers: 'visit', holderId, holderName: null, hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null, usesTotal: total, usesSpent: spent, paidCents: null, currency: 'AED', note: null });
 
@@ -2231,6 +2413,24 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   ok(gone.paidCents === null, 'a member with no payment rows has paid an unknown amount, not 0');
   ok(floor.paidCents === 30000, 'and a member with two has the sum of them');
+  ok(floor.paidCurrency === 'AED', 'with the currency those two rows agree on');
+  /* ── two payments, two currencies ──────────────────────────────────────
+     A gym that changed its base currency, which gymRecord.ts records as having
+     happened live. The sum was 30000 with nothing to mark it, and the console
+     printed it with the gym's CURRENT three letters in front — which is a
+     bigger number wearing a unit that never applied to half of it. Every
+     sibling summariser in this codebase guards this; this one did not, and the
+     guard was at the call site instead, one caller deep. */
+  {
+    const mixedRec = { ...rec, payments: sliceReady([
+      pay('pay1', 'floor', 15000, ago(20), 'GBP'),
+      pay('pay2', 'floor', 15000, ago(50), 'AED'),
+    ]) };
+    const d = buildDossier('floor', mixedRec, NOW);
+    ok(d.paidCents === null, 'two currencies do not add up to a total');
+    ok(d.paidCurrency === null, 'and there is no unit to print one in');
+    ok(d.payments != null && d.payments.length === 2, 'the rows themselves are still all there to be listed');
+  }
   ok(buildDossier('floor', { ...rec, payments: sliceFailed('nope') }, NOW).paidCents === null, 'an unread payments table is not 0.00 either');
   const noClasses = buildDossier('floor', { ...rec, bookings: sliceReady([]) }, NOW);
   ok(noClasses.booked === 0 && noClasses.showRate === null, 'nobody who booked nothing has a 0% attendance rate');
@@ -2347,12 +2547,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(D(noData).reason.includes('Nothing recorded') && D(noData).reason.includes('40 days'), 'the reason says what is missing and for how long');
   ok(D(noData).kinds.length === 0, 'no check-ins, no logs, no visits, no sessions');
 
-  // The older boolean version of this idea, which returned FALSE for a client
-  // it had never seen a data point from. Pinned so it cannot regress.
-  ok(noRecordOf({ adherence: null, lastActive: 'no activity yet' }) === true, 'a client with nothing recorded is recognised as such');
-  ok(atRiskClient({ adherence: null, lastActive: 'no activity yet' }) === true,
-    'a client with NO record does not read as fine — absence of evidence is not evidence of health');
-  ok(atRiskClient({ adherence: 92, lastActive: '1d' }) === false, 'and a healthy, recently-active client still reads as fine');
+  // The older boolean version of this idea — `atRiskClient` / `noRecordOf` /
+  // `staleDays` in trainerMock.ts — is gone, and its tombstone in that file
+  // says why. It returned FALSE for a client it had never seen a data point
+  // from, was fixed by folding "no record" into "at risk", and that fix then
+  // flagged every hand-added client for ever because a boolean cannot say
+  // "unknown". `idle` is what says it, and it is pinned three lines above this.
 
   // ── no invented figures ──
   ok(D(noData).baselinePerWeek === null, 'a rate over an unobserved baseline is null, not 0');
@@ -2576,7 +2776,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // ── what it was for ──
   const mem = (memberId: string, startedOn: string, endsOn: string | null): Membership => ({
     id: 'ms-' + memberId, memberId, memberName: memberId, planId: 'p1', planName: 'Standard',
-    startedOn, endsOn, status: 'active',
+    startedOn, endsOn, status: 'active', frozenFrom: null, frozenTo: null,
   });
   ok(purposeOf([junePay('a', 100)], null, JUNE) === null,
      'with no roster read, no payment is attributed — every payer would otherwise look like a non-member');
@@ -2640,7 +2840,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     id, trainerId: 't1', trainerName: 'Alex', clientId: 'm1', clientName: 'Sara',
     startsAt: new Date(2026, 5, 10, 9, 0).toISOString(), durationMin: 60,
     status: 'booked', outcome, outcomeAt: outcome ? '2026-06-10T10:00:00.000Z' : null,
-    rateCents, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    rateCents, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const rec = (over: Partial<CloseRecord> = {}): CloseRecord => ({
     payments: sliceReady([junePay('a', 30000), junePay('b', 20000)]),
@@ -2846,6 +3046,35 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(life.volumeKg === 840 + 480 + 1040 + 400, 'lifetime tonnage is the sum of the months that have one');
   ok(life.kcal === 300, 'and only the entries that actually carried calories');
   ok(life.lifts === 1 && life.firstAt === at('2026-01-10'), 'one lift, first logged in January');
+
+  // ── a hold is not repetitions, in any of the three loops in longView.ts ──
+  //
+  // All three multiplied a plank's SECONDS by a load. The grid month, the
+  // lifetime tonnage and — worst — the Milestones timeline, where est1RM over
+  // forty-five "reps" lands as a personal record no real set can ever beat.
+  {
+    const holdLog = [
+      { t: at('2026-02-10'), exercise: 'Plank', sets: [[45, 10]] as [number, number][], timed: [true] },
+      { t: at('2026-02-11'), exercise: 'Bench', sets: [[5, 100]] as [number, number][] },
+    ];
+    const hCell = monthlyHistory(holdLog, NOW).find((c) => c.trained && c.volumeKg != null)!;
+    ok(hCell.volumeKg === 500, `the grid month prices the bench and not the plank, got ${hCell.volumeKg}`);
+    ok(hCell.topLift === 'Bench', 'so the top lift of the month is the lift, not the hold');
+    ok(lifetimeTotals(holdLog)!.volumeKg === 500, 'lifetime tonnage says the same');
+    const marks = prTimeline(holdLog);
+    ok(marks.every((m) => m.exercise !== 'Plank'),
+      'and no plank reaches the Milestones timeline as an estimated one-rep max');
+    ok(marks.length === 1 && marks[0].exercise === 'Bench', 'the real lift still records one');
+
+    // The bodyweight half was already right and stays right: a hold is skipped,
+    // a pull-up is priced.
+    const bwLog = [{ t: at('2026-02-12'), exercise: 'Pull-up', sets: [[10, 0]] as [number, number][], bw: [true] }];
+    const bwHist = [{ t: at('2026-01-01'), v: 80 }];
+    ok(lifetimeTotals(bwLog, bwHist)!.volumeKg === 800, 'ten pull-ups at 80 kg is still 800 kg');
+    const bwHold = [{ t: at('2026-02-12'), exercise: 'Plank', sets: [[45, 0]] as [number, number][], timed: [true], bw: [true] }];
+    ok(lifetimeTotals(bwHold, bwHist)!.volumeKg === null,
+      'while a bodyweight plank is no tonnage at all, not 3,600 kg');
+  }
 }
 
 
@@ -2862,9 +3091,9 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // Names chosen to break a naive writer: an inner quote, a comma, an
   // apostrophe. A gym really does have these members.
   const msIn: Membership[] = [
-    { id: 'ms1', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', startedOn: '2026-01-05', endsOn: null, status: 'active' },
-    { id: 'ms2', memberId: 'u2', memberName: "O'Brien, Sean", planId: null, planName: null, startedOn: '2025-11-30', endsOn: '2026-11-29', status: 'frozen' },
-    { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled' },
+    { id: 'ms1', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', startedOn: '2026-01-05', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
+    { id: 'ms2', memberId: 'u2', memberName: "O'Brien, Sean", planId: null, planName: null, startedOn: '2025-11-30', endsOn: '2026-11-29', status: 'frozen', frozenFrom: null, frozenTo: null },
+    { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled', frozenFrom: null, frozenTo: null },
   ];
   const payIn: GymPayment[] = [
     { id: 'pay1', memberId: 'u1', memberName: '"Bob" Smith', amountCents: 45000, currency: 'AED', method: 'card', takenAt: '2026-08-02T09:14:00.000Z', note: 'Renewal; said "thanks"\nsecond line of the note', kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },
@@ -2879,8 +3108,8 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     { bookingId: 'b2', memberId: 'u2', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: null },
   ];
   const sessIn: PtSession[] = [
-    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
-    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
   ];
   const ptIn: PassType[] = [
     { id: 'pt1', name: 'Guest pass', kind: 'guest', priceCents: 0, currency: 'AED', uses: 1, validDays: null, covers: 'visit', active: true },
@@ -2917,6 +3146,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     events: sliceReady([]), purchases: sliceReady([]),
     memberRecords: sliceReady([]), agreements: sliceReady([]),
     signatures: sliceReady([]), documents: sliceReady([]),
+    // And the five of the round after that: the order book, the closed months,
+    // the payroll adjustments, the accident book and the reconciliation marks.
+    // Stated for the same reason as the twelve above — this fixture is the
+    // tripwire that makes adding a part to EXPORT_PARTS a compile error.
+    orders: sliceReady([]), closes: sliceReady([]), adjustments: sliceReady([]),
+    equipmentLog: sliceReady([]), reconciles: sliceReady([]), costs: sliceReady([]),
   };
 
   // ── escaping: the assertion the whole file stands on ──
@@ -2947,14 +3182,15 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(back.rows[1][0] === 'Smith, Jr.' && back.rows[1][1] === '', 'the comma name did not shift the column after it');
 
   // ── money and dates leave as they are stored ──
-  ok(minorToDecimal(45000) === '450.00', 'minor units become an exact decimal');
-  ok(minorToDecimal(5) === '0.05', 'five fils is 0.05, not 5.00');
-  ok(minorToDecimal(0) === '0.00', 'a genuine zero is 0.00');
-  ok(minorToDecimal(-450) === '-4.50', 'a negative keeps its sign');
-  ok(minorToDecimal(123456789) === '1234567.89', 'and a large figure does not go near a float');
-  ok(minorToDecimal(null) === '', 'no recorded price is empty — a pass with no price is not a free pass');
-  ok(parseMoneyCents(minorToDecimal(45000)).ok && (parseMoneyCents(minorToDecimal(45000)) as any).value === 45000, 'the importer reads back the same integer');
-  ok((parseMoneyCents(minorToDecimal(5)) as any).value === 5, 'including the awkward sub-unit one');
+  ok(minorToDecimal(45000, 'AED') === '450.00', 'minor units become an exact decimal');
+  ok(minorToDecimal(5, 'AED') === '0.05', 'five fils is 0.05, not 5.00');
+  ok(minorToDecimal(0, 'AED') === '0.00', 'a genuine zero is 0.00');
+  ok(minorToDecimal(-450, 'AED') === '-4.50', 'a negative keeps its sign');
+  ok(minorToDecimal(123456789, 'AED') === '1234567.89', 'and a large figure does not go near a float');
+  ok(minorToDecimal(null, 'AED') === '', 'no recorded price is empty — a pass with no price is not a free pass');
+  ok(minorToDecimal(45000, null) === '', 'and an amount in no stated currency is empty too, never a bare figure');
+  ok(parseMoneyCents(minorToDecimal(45000, 'AED'), 'AED').ok && (parseMoneyCents(minorToDecimal(45000, 'AED'), 'AED') as any).value === 45000, 'the importer reads back the same integer');
+  ok((parseMoneyCents(minorToDecimal(5, 'AED'), 'AED') as any).value === 5, 'including the awkward sub-unit one');
   ok(isoDatePart('2026-08-02T09:14:00.000Z') === '2026-08-02', 'the date-only column is the day part of the stored timestamp');
   ok(isoDatePart(null) === '' && isoDatePart('not a date') === '', 'and anything unreadable is empty rather than guessed');
 
@@ -2997,7 +3233,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   // ── payments.csv round-trips through previewPayments ──
   const payCsv = fileFor(wx, 'payments.csv')!.text;
-  const pp = previewPayments(payCsv);
+  const pp = previewPayments(payCsv, undefined, 'AED');
   ok(pp.missingRequired.length === 0, 'the exporter writes the amount and date columns previewPayments requires');
   ok(pp.rows.length === 3 && pp.ready.length === 2, 'two attributed payments import; the unattributed one is refused');
   ok(pp.ready[0].amountCents === 45000, 'the money came back as the same integer minor units');
@@ -3009,7 +3245,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(sheetFor(wx, 'payments.csv').rows[0][8] === '45000', 'the authoritative amount_cents column is the stored integer itself');
 
   // ── plans.csv round-trips through previewPlans ──
-  const pl = previewPlans(fileFor(wx, 'plans.csv')!.text);
+  const pl = previewPlans(fileFor(wx, 'plans.csv')!.text, 'AED');
   ok(pl.missingRequired.length === 0 && pl.ready.length === 2, 'both plans import');
   ok(pl.ready[0].priceCents === 45000 && pl.ready[0].interval === 'month', 'price and billing period survive');
   ok(pl.ready[0].name === 'Monthly, full access', 'and a comma in a plan name does not split it');
@@ -3119,7 +3355,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ): PtSession => ({
     id, trainerId, trainerName: trainerId, clientId: null, clientName: null,
     startsAt: at(daysAgo), durationMin: 60, status: 'booked',
-    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, rateCurrency: null, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null,
   });
 
   const shift = (id: string, trainerId: string, daysAgo: number, hours: number, status: 'scheduled' | 'cancelled' = 'scheduled'): Shift => ({
@@ -3428,7 +3664,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   const mem = (id: string, started: string, status: Membership['status']): Membership => ({
     id: `m-${id}-${started}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
-    startedOn: started, endsOn: null, status,
+    startedOn: started, endsOn: null, status, frozenFrom: null, frozenTo: null,
   });
   const vis = (id: string, daysAgo: number, classId: string | null = null): Visit => ({
     id: `v-${id}-${daysAgo}`, memberId: id, memberName: id, passId: null, classId,
@@ -3605,7 +3841,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(gn.summary.bands === null,
     'so NO bands at all — a roster marked "nothing recorded" would be a statement about three failed queries wearing the clothes of a statement about the gym');
   ok(gn.rows![0].drift === null, 'and no verdict on the member: not judged, which is not the same as unknown');
-  ok(headline(gn)!.includes('unknown — not zero'), 'the headline says so in as many words');
+  ok(headline(gn)!.includes('unknown, not zero'), 'the headline says so in as many words');
 
   // ── no roster, and still loading ──
   const noRoster: RetentionRecord = {
@@ -3666,7 +3902,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   const imem = (id: string, status: Membership['status'] = 'active'): Membership => ({
     id: `m-${id}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
-    startedOn: '2025-06-01', endsOn: null, status,
+    startedOn: '2025-06-01', endsOn: null, status, frozenFrom: null, frozenTo: null,
   });
 
   // ── 5 · what was tried, read back ──
@@ -3893,7 +4129,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ): Membership => ({
     id, memberId, memberName: name, planId: plan,
     planName: plan === 'pl1' ? 'Monthly' : plan === 'pl2' ? 'Annual' : null,
-    startedOn: from, endsOn: to, status,
+    startedOn: from, endsOn: to, status, frozenFrom: null, frozenTo: null,
   });
   const pcVisit = (id: string, memberId: string | null, passId: string | null, at: string): Visit => ({
     id, memberId, memberName: null, passId, classId: null, enteredAt: at,
@@ -4004,7 +4240,11 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'fin left in 2025 and came back through a drop-in — a membership that ENDED before the pass does not make him an existing member');
   ok(coversDate(pcMems[6], '2026-02-01') === false && coversDate(pcMems[1], '2026-05-01') === true,
     'coversDate reads the end date rather than the status');
-  ok(pcBy.get('ann')!.firstUsedOn === '2026-01-12' && pcBy.get('ben')!.firstUsedOn === null,
+  // `gym_visits.entered_at` is a timestamptz served in UTC, so the day this
+  // reports is the READER's, derived from the instant rather than written out —
+  // the visit at 10:00Z is 11 January in Midway and 13 January in Kiritimati,
+  // and the old literal '2026-01-12' was Greenwich's answer for all of them.
+  ok(pcBy.get('ann')!.firstUsedOn === isoDayOf(new Date('2026-01-12T10:00:00Z')) && pcBy.get('ben')!.firstUsedOn === null,
     'when the pass was actually used comes from the door log, and is null rather than back-filled from the issue date');
   ok(pcBy.get('cara')!.name === null && pcBy.get('ann')!.name === 'Ann Wright',
     'a holder with no name recorded gets null — never the account id dressed up as a name');
@@ -4064,7 +4304,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   const pcNR = buildPassConversion(pcNoRoster, { today: PC_TODAY });
   ok(pcNR.passes!.issued === 8 && pcNR.holders === null && pcNR.counts === null && pcNR.joinedAfterRate === null,
     'a failed roster read leaves the pass counts standing and every conversion figure null — not a gym where no pass holder has ever joined');
-  ok(/unknown here — not none/.test(pcNR.headline ?? ''), 'and the headline says which');
+  ok(/unknown here, not none/.test(pcNR.headline ?? ''), 'and the headline says which');
   ok(pcNR.warning !== null && /whether any pass holder ever joined/.test(pcNR.warning!),
     'the banner names the missing ANSWER, not the missing query');
 
@@ -4650,7 +4890,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     id, trainerId: 't1', trainerName: 'Dana', clientId: null, clientName: null,
     startsAt: new Date(NOW - 5 * 86_400_000).toISOString(), durationMin: 60,
     status: 'booked', outcome: 'completed', outcomeAt: new Date(NOW - 5 * 86_400_000).toISOString(),
-    rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    rateCents, rateCurrency: null, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const owed = (rows: PtSession[], fee: number | null) =>
     payrollTotal(payrollByTrainer(rows, PAY_DELIVERED_ONLY, fee, NOW)).cents;

@@ -25,27 +25,45 @@
 // not a cosmetic glitch. `status` keeps loading / unreadable / capped / really
 // empty apart, and the counts are gated on 'ready' because a count over a
 // truncated read is a wrong number stated confidently.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead, PageHead, Ring } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
+import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 
 /** The equipment chip standing for rows where the catalogue records none.
  *
  *  Not "Bodyweight". A null equipment column means nobody wrote down what this
  *  movement is performed on — which is a gap in our data, and filing it under
- *  bodyweight would be inventing a fact about 88 exercises. It gets a chip of
- *  its own so those rows are still reachable rather than falling out of every
- *  filter and off the screen. */
-const UNRECORDED = 'Not recorded';
+ *  bodyweight would be inventing a fact about a movement. A cable fly landing
+ *  in a hotel-room program is what that invention costs.
+ *
+ *  It gets a chip of its own so those rows stay reachable rather than falling
+ *  out of every filter and off the screen.
+ *
+ *  ── on the figure that used to be here ──────────────────────────────────
+ *
+ *  This comment said "88 exercises". Measured against the live catalogue on
+ *  13 Sep 2026 it is 190 of 615 — near enough a THIRD of the movements, not
+ *  the seventh the old number implied. Nobody wrote 88 carelessly; it was
+ *  true when it was written, and the catalogue grew underneath it.
+ *
+ *  So the number is dated here rather than stated flat, and it is deliberately
+ *  not load-bearing: nothing reads it, the chip is derived from the rows in
+ *  hand, and the count a screen shows is counted at the time. A figure in
+ *  prose is a claim with no test behind it — the most it can honestly do is
+ *  say when somebody last looked. */
+const UNRECORDED = 'Not Recorded';
 
 const ALL = 'All';
 
@@ -83,7 +101,7 @@ function Chips({ options, value, onChange, a11y }: {
           <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
             accessibilityLabel={a11y(o)} accessibilityState={{ selected: on }}
             style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{o}</Text>
+            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{o}</Text>
           </Pressable>
         );
       })}
@@ -97,9 +115,29 @@ export default function OwnerLibrary() {
   const t = useTheme();
   const router = useRouter();
   const goBack = useBackFromHub('(owner)');
-  const { rows, status, reload } = useExerciseCatalogue();
+  // `signedOut` was not destructured, and it is the one flag this screen
+  // cannot do without. The `exercises` read policy is `to authenticated`, so a
+  // session that has not been restored yet is handed ZERO ROWS WITH NO ERROR
+  // and the hook reports 'ready'. Every gate below then passes and this screen
+  // told an owner sizing up the platform "The catalogue is empty." over nine
+  // hundred movements. The hook computes the flag for exactly this case;
+  // app/(client)/library.tsx and both exercise screens already read it.
+  const { rows, status, signedOut, reload } = useExerciseCatalogue();
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(ALL);
+
+  /* ── When the catalogue was last read ─────────────────────────────────
+     `useExerciseCatalogue` carries no stamp of its own, so the screen keeps
+     one: the moment `status` last settled on a read that came back. 'error'
+     deliberately does NOT move it — the rows on screen are still the earlier
+     read's, and saying otherwise would be the same lie one layer up. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (status === 'ready' || status === 'partial') setFetchedAt(Date.now());
+  }, [status]);
+  // The catalogue is the one server read behind every figure and row here —
+  // the filters below it are all client-side over the same rows.
+  const pull = usePullToRefresh(useCallback(() => { void reload(); }, [reload]));
   const [kit, setKit] = useState(ALL);
   // Rendered in pages. Hundreds of <ListRow>s mounted at once is a visibly
   // janky scroll on an older phone, and nobody reads past the first screenful.
@@ -122,7 +160,13 @@ export default function OwnerLibrary() {
   const list = useMemo(
     () => rows.filter((r: CatalogueRow) =>
       matches(r.group, group) && matches(r.equipment, kit) &&
-      (term === '' || r.name.toLowerCase().includes(term))),
+      // Both names, always, and the catalogue's synonyms. An owner who learned
+      // these movements in English types "squat" and must find the row their
+      // German library shows as "Kniebeuge"; a German-speaking owner types
+      // "Kniebeuge" and must find the same one; and an owner auditing whether
+      // the platform covers "butt kicks" must be told that it does, under the
+      // name Heel Flicks. See matchesSearch() in src/lib/catalogueLocale.ts.
+      matchesSearch(term, r.name, r.display, r.synonyms)),
     [rows, group, kit, term],
   );
   useEffect(() => { setShown(PAGE); }, [term, group, kit]);
@@ -132,7 +176,7 @@ export default function OwnerLibrary() {
   // 'partial' those rows are a prefix of the catalogue, so the counts would be
   // subtotals printed as totals — the exact thing src/lib/rowCap.ts exists to
   // stop. A dash is the honest answer, and PartialRead below says why.
-  const countable = status === 'ready';
+  const countable = status === 'ready' && !signedOut;
   // 'illustrated' is what the owner is being sold: a movement with artwork can
   // be shown to a member, one without is a name and some text.
   const illustrated = rows.filter((r) => r.hasDemo).length;
@@ -142,13 +186,39 @@ export default function OwnerLibrary() {
   // Equipment first, because that is the question this screen is open to answer.
   // A row with no equipment recorded says so rather than being left blank, which
   // would read as bodyweight.
-  const rowNote = (r: CatalogueRow) => [
+  const rowNote = (r: CatalogueRow) => {
+    // Why this row is in the results, when its own title does not say. Null on
+    // every row whose name matched and on every row of an unfiltered list —
+    // see matchedSynonym() in src/lib/catalogueLocale.ts.
+    const via = matchedSynonym(term, r.name, r.display, r.synonyms);
+    return [
+    // FIRST, ahead of the equipment this screen is otherwise organised by,
+    // because it is the only item on the line that explains why the row is on
+    // screen at all. An owner who typed "butt kicks" and is looking at a row
+    // called Heel Flicks needs this before anything else, and a note that runs
+    // out of room must lose the muscle group rather than this.
+    via ? `Matched “${via}”` : null,
     r.equipment ? cap(r.equipment) : 'Equipment not recorded',
     r.group,
     r.hasDemo ? 'illustrated' : null,
-  ].filter(Boolean).join(' · ');
+    // Which rows have no name in the reader's language, said on the row rather
+    // than only on the detail screen. In a list of 619 that IS the report an
+    // owner needs: the untranslated ones are the ones with the marker, and
+    // without it an English name among translated ones simply reads as the
+    // translation. fallbackTag returns null for everybody when the reader is
+    // English, so this line disappears entirely for them.
+    fallbackTag(r.display),
+    ].filter(Boolean).join(' · ');
+  };
 
   const emptyLine = () => {
+    // A read we were not allowed to make is not an empty catalogue, and the
+    // difference matters most to the person this screen is selling to.
+    if (signedOut) {
+      return 'The catalogue could not be read on this session. That is a sign-in that has not '
+        + 'restored, not a catalogue with nothing in it. Nothing below is a statement about what '
+        + 'the platform covers.';
+    }
     if (!filtering) return 'The catalogue is empty.';
     const bits: string[] = [];
     if (term) bits.push(`“${q.trim()}”`);
@@ -160,47 +230,55 @@ export default function OwnerLibrary() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={goBack} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What the platform can teach your members</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
-          </View>
-        </View>
+        <PageHead title="Exercise Library" onBack={goBack} />
 
-        <View style={{ marginTop: sp.lg }}>
-          <Hero
-            label="Movements in the Catalogue"
-            figure={countable ? String(rows.length) : '—'}
-            note={
-              status === 'loading' ? 'Reading the catalogue…'
-              : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
-              : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
-              : rows.length === 0 ? 'The catalogue came back empty.'
-              : 'Every one is available to your members and to your coaches, at no extra cost.'
-            }
-          />
-        </View>
+        {/* A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = countable ? String(rows.length) : '—';
+          const note =
+            status === 'loading' ? 'Reading the catalogue…'
+            : status === 'error' ? 'The catalogue could not be read, so this is unknown, not zero.'
+            : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
+            : signedOut ? 'Not read on this session. This is a sign-in that has not restored, not an empty catalogue.'
+            : rows.length === 0 ? 'The catalogue came back empty.'
+            : 'Every one is available to your members and to your coaches, at no extra cost.';
+          return (
+            <Section>
+              <SectionHead title="Movements in the Catalogue" />
+              {/* The count in a ring whose arc is the share of it that has a
+                  demonstration to watch. Both come from the same whole read or
+                  neither is drawn — a share of part of a catalogue is a wrong
+                  share, so under anything but `countable` it is a track and a
+                  dash. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={120} tone="purple"
+                  value={countable && rows.length > 0 ? illustrated / rows.length : null}
+                  figure={countable ? figure : null} sub="movements"
+                  spoken={`Movements in the catalogue, ${countable ? `${figure}, ${illustrated} illustrated` : 'no figure'}, ${note}`} />
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
 
-        <Rule />
+        <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'} />
 
-        <Section>
-          <SectionHead title="What it assumes you own" />
-          <KpiRow items={[
-            { label: 'Kinds of Kit', value: countable ? String(kitKinds) : '—' },
-            { label: 'Illustrated', value: countable ? String(illustrated) : '—' },
-            { label: 'Text Only', value: countable ? String(rows.length - illustrated) : '—' },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {countable
-              ? 'Filter by equipment below to see how much of the catalogue your floor can actually support. Your register is on the Equipment screen.'
-              : 'These stay blank until the whole catalogue has been read, rather than reporting a figure computed from part of it.'}
-          </Text>
-        </Section>
 
-        <Rule />
+        {/* What it assumes you own, as tiles on the ground. */}
+        <KpiRow tiles items={[
+          { label: 'Kinds of Kit', value: countable ? String(kitKinds) : '—', tone: 'amber' },
+          { label: 'Illustrated', value: countable ? String(illustrated) : '—', tone: 'purple' },
+          { label: 'Text Only', value: countable ? String(rows.length - illustrated) : '—', tone: 'neutral' },
+        ]} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: sp.lg }}>
+          {countable
+            ? 'Filter by equipment to see what your floor can support.'
+            : 'Blank until the whole catalogue has been read.'}
+        </Text>
+
 
         {/* ── finding one ────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
@@ -215,7 +293,7 @@ export default function OwnerLibrary() {
           ) : null}
         </View>
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle Group</Text>
         <Chips options={groups} value={group} onChange={setGroup}
           a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
 
@@ -240,8 +318,8 @@ export default function OwnerLibrary() {
             // Not "no exercises". The catalogue is there; we could not read it,
             // and an owner sizing up the platform must not be shown an empty
             // list as though that were the product.
-            <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
-              note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what the platform covers.">
+            <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
+              note="This is our end, not yours. The movements are still there. Nothing below this line is a statement about what the platform covers.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
               </View>
@@ -265,7 +343,7 @@ export default function OwnerLibrary() {
                       {i > 0 ? <Rule /> : null}
                       <ListRow
                         icon={r.hasDemo ? 'play' : 'dumbbell'}
-                        title={r.name}
+                        title={r.display.text}
                         note={rowNote(r)}
                         onPress={() => router.push({ pathname: '/(owner)/exercise', params: { name: r.name, from: 'ownerLibrary' } })}
                       />
@@ -275,7 +353,7 @@ export default function OwnerLibrary() {
                     <View style={{ marginTop: sp.md }}>
                       {/* A count, not a bare "Show more". The number is the
                           point: it says how much is still below. */}
-                      <Ghost label={`Show ${Math.min(PAGE, list.length - shown)} more of ${list.length - shown}`}
+                      <Ghost label={`Show ${Math.min(PAGE, list.length - shown)} More of ${list.length - shown}`}
                         onPress={() => setShown((n) => n + PAGE)} />
                     </View>
                   ) : null}

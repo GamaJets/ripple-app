@@ -38,7 +38,7 @@ create trigger clients_injuries_guard
 
 -- ── And a record when the coach loads one on purpose ───────────────────────
 --
--- A coach may put a movement that loads a disclosed injury into a programme
+-- A coach may put a movement that loads a disclosed injury into a program
 -- deliberately — training around a knee is their judgement and their client,
 -- and a squat is sometimes exactly the rehabilitation. What they may not do is
 -- do it without saying so.

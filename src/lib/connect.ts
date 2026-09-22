@@ -7,9 +7,36 @@ import { Linking } from 'react-native';
 import { appLink, WEB_ORIGIN } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
+// ── why every "who is signed in" in this file goes through one function ───
+//
+// Ten reads here asked `supabase.auth.getUser()` and dropped the `error` beside
+// it. That call does not reject when the auth server is unreachable — it
+// RESOLVES with `{ data: { user: null }, error }`, the same shape it resolves
+// with for somebody who genuinely has no session (src/lib/authReadFate.ts has
+// the library source and the reasoning). So `!uid` meant "nobody is signed in,
+// OR we could not ask", and this is the file where that ambiguity is about
+// somebody's payout account and somebody else's pack of ten sessions.
+//
+// What it did NOT mean, and this was checked rather than assumed: none of the
+// ten took the empty answer for an empty ANSWER. Every one of them already
+// returns `null` or `status: 'error'` — its own word for "could not read" —
+// because earlier parts hardened those same returns for the refused-read case
+// and the `!uid` guard shares them. The outage was therefore landing on the
+// harmless side of authReadFate.ts's asymmetry by inheritance, and one site was
+// not: `createPackage` told a coach "Not signed in." over an action that never
+// reached its insert.
+//
+// `signedInUid` keeps the two fates apart on the near side of that collapse. The
+// return types still cannot carry a third answer — widening them reaches
+// screens other lanes hold tonight — so an outage is RECORDED, under the
+// calling function's own key, and a sign-out is not, because somebody not being
+// signed in is not a fault. `authGateMessage` is for the site that speaks.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
+import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
-import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
+import { packBalance, readDraw, drew, drawReason, type DrawOutcome, type PackPurchase, type PackBalance } from './packDraw';
 import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
 import { subState } from './subscriptionScope';
 import type { CreditSession } from './sessionCredits';
@@ -34,7 +61,24 @@ import type { LoadStatus } from '../ui/loadStatus';
  * screen says nothing about fees or dashboards in that case rather than
  * guessing, which is the same rule the rest of it follows about money.
  */
-export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean; account_type: string | null }
+/**
+ * ── Why the two payout columns are on this type ───────────────────────────
+ *
+ * `charges_enabled` answers whether a client's card can be taken. It does NOT
+ * answer whether the money then reaches the coach, and supabase/parts/161 added
+ * the two columns that do: `payouts_enabled` (account → their bank) and
+ * `transfers_status` (Repple → the account, for a destination charge). The
+ * select below has always been `*`, so both values were arriving and being
+ * dropped by a type that did not name them — and app/(trainer)/payments.tsx
+ * drew "Payouts active" off the charges column alone.
+ *
+ * Both are NULLABLE and null means NOT RECORDED YET, never "no". Part 161 says
+ * so on the columns themselves: `account.updated` fills them in, and a null
+ * read as false would tell every coach whose webhook has not fired that Stripe
+ * will not pay them. The rules live in src/lib/payoutReach.ts, which keeps the
+ * three answers apart rather than letting a `!` in JSX decide.
+ */
+export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean; account_type: string | null; payouts_enabled: boolean | null; transfers_status: string | null }
 /**
  * A thing a trainer sells.
  *
@@ -143,7 +187,33 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
    *  is a different sentence on each model. */
   stripe_account_id?: string | null }
 
-const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
+/**
+ * Hand a URL to the browser, and say whether it went.
+ *
+ * It used to swallow the failure — `try { await Linking.openURL(url); } catch {}`
+ * — and every caller below then returned `{ ok: true }`, which was a statement
+ * about having RECEIVED a URL rather than about having opened one. So a member
+ * tapped Buy, no browser opened, the screen reported success, and
+ * app/(client)/packages.tsx cleared the discount code they had typed on the
+ * strength of it — while the only sentence left on screen told them a purchase
+ * "shows up here once Stripe confirms it, which can take a moment". They sat
+ * waiting for a checkout that was never started.
+ *
+ * `Linking.openURL` rejects when no handler can take the URL, and it also
+ * resolves `false` on some platforms rather than throwing. Both are failures
+ * here and both come back as false.
+ */
+const openUrl = async (url?: string | null): Promise<boolean> => {
+  if (!url) return false;
+  try {
+    const r = await Linking.openURL(url);
+    return r !== false;
+  } catch { return false; }
+};
+
+/** What a member is told when the URL was issued and nothing opened. Their
+ *  money has not moved: the checkout was never reached. */
+const BROWSER_DID_NOT_OPEN = 'Your browser did not open, so nothing has been started and nothing has been charged. Try again in a moment.';
 
 /**
  * Start / resume Stripe Connect onboarding for the signed-in trainer.
@@ -168,7 +238,7 @@ export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: s
   try {
     const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: `${WEB_ORIGIN}/connect-refresh`, return_url: `${WEB_ORIGIN}/connect-return` } });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start onboarding.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -176,33 +246,56 @@ export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: s
 /** The signed-in trainer's Connect account status. */
 export async function fetchMyConnect(): Promise<ConnectStatus | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.fetchMyConnect'); if (!uid) return null;
     // A refused read used to fall through to the same default a trainer with no
     // account gets — telling somebody who IS set up for payments that they are
     // not. null means "could not read"; the caller renders that differently.
     const { data, error } = await supabase.from('connect_accounts').select('*').eq('trainer_id', uid).maybeSingle();
     if (error) { reportError('connect.fetchMyConnect', error); return null; }
-    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false, account_type: null };
+    // The zeroed row a coach with NO account gets. The two payout fields are
+    // null rather than false here on purpose: there is no account, so Stripe has
+    // said nothing about paying one out, and 'unrecorded' is the honest reading
+    // of that. `payoutStage` answers 'none' for this row and the payout
+    // sentences are never reached.
+    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false, account_type: null, payouts_enabled: null, transfers_status: null };
   } catch { return null; }
 }
 
 /**
  * Packages the signed-in trainer sells.
  *
- * `[]` means they sell none. **`null` means we could not read them**, which the
- * payments screen must not render as "no packages yet" — a trainer told that
- * about their own price list will build it a second time, and their clients see
- * duplicates of everything they already sell.
+ * Empty rows under 'ready' means they sell none. **'error' means we could not
+ * read them**, which the payments screen must not render as "no packages yet" —
+ * a trainer told that about their own price list will build it a second time,
+ * and their clients see duplicates of everything they already sell.
+ *
+ * ── And why there is a limit on it now ─────────────────────────────────────
+ *
+ * There was no `.limit()` at all, which does not mean "no ceiling" — it means
+ * PostgREST's own, 1000 rows, applied silently and reported as a complete set.
+ * app/(trainer)/payments.tsx prints `.filter(active).length` as the number
+ * beside the "Your Packages" heading, so past a thousand packages that heading
+ * would have stated a floor as a total, with nothing anywhere to say so.
+ *
+ * A thousand packages is not a price list anyone has today. That is exactly the
+ * argument this codebase has stopped accepting: "the table only holds a few
+ * rows" is a fact about this month, the cost of `capLimit()` is one row, and
+ * `capped()` is what turns a hope into a claim the screen can act on.
  */
-export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
+export async function fetchMyPackages(): Promise<{ rows: TrainerPackage[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
-    const { data, error } = await supabase.from('trainer_packages').select('*').eq('trainer_id', uid).order('created_at', { ascending: false });
-    if (error) return null;
-    return (data as TrainerPackage[]) ?? [];
-  } catch { return null; }
+    const { uid } = await signedInUid('connect.fetchMyPackages'); if (!uid) return { rows: [], status: 'error' };
+    const { data, error } = await supabase.from('trainer_packages').select('*')
+      .eq('trainer_id', uid)
+      // `.order('id')` behind the date so the set is totally ordered: two
+      // packages created in the same second are two rows Postgres may return
+      // in either order, and at the cap that decides which is dropped.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(capLimit());
+    if (error) { reportError('connect.fetchMyPackages', error); return { rows: [], status: 'error' }; }
+    const page = capped((data as TrainerPackage[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) { reportError('connect.fetchMyPackages', e); return { rows: [], status: 'error' }; }
 }
 
 /**
@@ -216,8 +309,19 @@ export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
  */
 export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency: string; billing_interval?: 'month' | 'year' | null; validity_days?: number | null }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
+    const who = await signedInUid('connect.createPackage');
+    // The one site in these two files that SPOKE, and it said the wrong thing.
+    // This error string goes straight into an Alert headed "Could not save" on
+    // app/(trainer)/payments.tsx, and it used to read "Not signed in." — so a
+    // coach putting a package on sale during an auth outage was told their
+    // session had ended, over an action whose insert is three guards further
+    // down and was never reached. Nothing was written either way; what changes
+    // is that the sentence now matches which of the two actually happened.
+    // Guarded on `fate`, not on `!uid` — see the note in src/lib/signedInUid.ts.
+    // `uid` is `string | null` and a blank string is falsy, so only `fate` can
+    // discriminate the union for the compiler.
+    if (who.fate !== null) return { ok: false, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     // No fallback currency, on purpose. This used to be `p.currency || 'usd'`,
     // which is a literal that silently applies — and Repple is white-labelled,
     // so there is no currency that is right for both a London gym and a Dubai
@@ -229,7 +333,7 @@ export async function createPackage(p: { name: string; price_cents: number; sess
     // Part 97 refuses this combination in the database; refusing it here too
     // turns a constraint violation into a sentence. A recurring pack would
     // charge again every month for credits that are granted once.
-    if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack — sessions are granted once and nothing renews them.' };
+    if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack. Sessions are granted once and nothing renews them.' };
     // How long the buyer has to use the sessions, or null for a pack that does
     // not expire — which is every package this app has ever sold, and stays the
     // answer for anybody who leaves the field empty. No fallback and no
@@ -326,8 +430,7 @@ export async function updatePackage(id: string, patch: PackagePatch): Promise<{ 
  */
 export async function countActiveSubscribers(packageId: string): Promise<number | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.countActiveSubscribers'); if (!uid) return null;
     const { data, error } = await supabase.from('client_subscriptions').select('status')
       .eq('package_id', packageId).eq('trainer_id', uid).limit(capLimit());
     if (error) { reportError('connect.countActiveSubscribers', error); return null; }
@@ -384,33 +487,21 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
   } catch { return null; }
 }
 
-/**
- * The currency each of a set of packages is priced in.
- *
- * `client_purchases` DOES carry its own `currency` (part 132, written at
- * checkout from the Stripe session), and this comment said the opposite for
- * long enough to be worth correcting rather than deleting: it read "records
- * `amount_cents` and no currency at all", which stopped being true the day the
- * webhook started writing the column and was still here afterwards. The
- * fallback below is what remains of it — the only rows that still need a
- * package to name their unit are the ones written BEFORE part 132 whose
- * package the backfill could not reach. That makes an amount unlabelled whenever the package row is
- * actually GONE — deleted, not merely withdrawn — and an unlabelled amount
- * renders as a dash rather than as a number in a currency we picked. A
- * withdrawn package used to land here too, because pkg_read was `active or
- * trainer_id = auth.uid()`; part 147 gives the buyer their own purchases back,
- * so a coach retiring a pack no longer un-labels the money somebody paid.
- *
- * Ids absent from the returned map are ids we could not label. A read that
- * fails returns an empty map, which lands in the same place: dashes, not
- * dollars.
- */
-export async function packageCurrencies(ids: string[]): Promise<Map<string, string>> {
-  const labelled = await packageLabels(ids);
-  const out = new Map<string, string>();
-  labelled.forEach((v, k) => { if (v.currency) out.set(k, v.currency); });
-  return out;
-}
+// ── `packageCurrencies` lived here, and is gone ──────────────────────────
+//
+// Two lines over `packageLabels` below: the same read, with the name thrown
+// away. Nothing called it, and the dead-export ratchet described it as "the
+// check a coach's Connect payout screen needs before offering a currency" —
+// which is not what it did. It takes PACKAGE IDS and answers what unit each of
+// those was priced in; it cannot answer "which currencies has this coach
+// priced in", because it is never given a coach.
+//
+// A caller that wants only the unit reads `.currency` off `packageLabels`,
+// which is what every live caller already does. The rule both were written for
+// is unchanged and is stated on that function: an id absent from the map is a
+// package we could not READ, which is a dash, and never a number in a currency
+// this app chose. See white-label multi-currency — there is no default unit
+// anywhere in this product.
 
 /**
  * The name AND the currency of a set of packages, in one read.
@@ -433,10 +524,29 @@ export async function packageLabels(ids: string[]): Promise<Map<string, { name: 
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
   try {
-    const { data, error } = await supabase.from('trainer_packages').select('id, name, currency').in('id', unique).limit(capLimit());
-    if (error) { reportError('connect.packageLabels', error); return new Map(); }
+    // CHUNKED, and the limit that forces it is the REQUEST LINE rather than
+    // the row ceiling — the identical argument `fetchClientPurchases` makes
+    // three hundred lines below, which this call was the last copy not to
+    // follow. A client with a few hundred purchases produces a few hundred ids;
+    // at ~39 bytes each inside a PostgREST `in.("…","…")` list that is a query
+    // string past the 8KB request line nginx and most CDNs enforce, refused
+    // with a 414 that supabase-js does not reject on and that arrives as
+    // `data: null`. The old shape read that as "none of these packages could be
+    // read" and returned an empty map — which takes the name AND the currency
+    // off EVERY purchase at once, on the client's own record of what they paid
+    // for, so every amount renders as a dash and every pack as an unnamed one.
+    //
+    // `.order('id')` because a primary-key lookup is the only total order a
+    // page boundary can be drawn on, and `readByIds` pages rather than
+    // truncating, so the probe row is never mistaken for data either.
+    const rows = await readByIds<{ id: string; name: string | null; currency: string | null }>(
+      unique,
+      (chunk, from, to) => supabase.from('trainer_packages').select('id, name, currency')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the packages behind what you have bought',
+    );
     const out = new Map<string, { name: string | null; currency: string | null }>();
-    ((data as { id: string; name: string | null; currency: string | null }[]) ?? []).forEach((p) => {
+    rows.forEach((p) => {
       if (p?.id) out.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null });
     });
     return out;
@@ -464,7 +574,7 @@ export async function buyPackage(packageId: string, code?: string): Promise<{ ok
     const promo = String(code ?? '').trim();
     const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel'), ...(promo ? { promo_code: promo } : {}) } });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start checkout.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -495,7 +605,7 @@ export async function openPurchasePortal(purchaseId: string): Promise<{ ok: bool
       body: { action: 'purchase_portal', purchase_id: purchaseId, return_url: appLink('packages') },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not open billing.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -520,8 +630,7 @@ export function portalPurchase(rows: Purchase[] | null | undefined): Purchase | 
  */
 export async function fetchMyPurchases(): Promise<Purchase[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.fetchMyPurchases'); if (!uid) return null;
     // Capped, and a truncated read answers `null` — the same answer as a
     // refusal, because to the caller it is the same fact.
     //
@@ -594,8 +703,7 @@ export async function sessionsRemaining(trainerId?: string): Promise<number | nu
  */
 export async function sessionPacks(trainerId?: string): Promise<PackBalance | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.sessionsRemaining'); if (!uid) return null;
     // The three expiry columns come back with the balance, because a pack that
     // ran out of time and a pack that was used up are the same two numbers by
     // the time part 612's pass has run — `sessions_total` is reduced to
@@ -608,7 +716,25 @@ export async function sessionPacks(trainerId?: string): Promise<PackBalance | nu
     const { data, error } = await q;
     if (error) { reportError('connect.sessionsRemaining', error); return null; }
     if (!data) return null;
-    return packBalance(data as PackPurchase[]);
+    // `capLimit()` above asks for one row more than may be accepted, and until
+    // now nothing looked at the answer — so the probe row was being summed into
+    // the balance as though it were a purchase, and a set that had actually
+    // been cut was totalled as if it were whole. Both halves of the mistake
+    // src/lib/rowCap.ts names: no flag and no slice.
+    //
+    // `null` rather than the prefix, because null already means "we could not
+    // count them" here and that is precisely what a truncated read leaves us
+    // with. The two screens this feeds are built for it: the credits row shows
+    // a dash and says the balance could not be read, and `hadCredits` stays
+    // unknown so the "this booking was not drawn from your pack" warning is
+    // still offered. A prefix would instead hand somebody a smaller balance
+    // than they paid for, stated as a number.
+    const page = capped(data as PackPurchase[]);
+    if (page.truncated) {
+      reportError('connect.sessionsRemaining', new TruncatedRead('your session packs', ROW_CAP));
+      return null;
+    }
+    return packBalance(page.rows);
   } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
 }
 
@@ -665,8 +791,7 @@ export interface CoachPurchase extends Purchase {
  */
 export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('connect.fetchClientPurchases'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_purchases').select('*')
       .eq('trainer_id', uid).order('created_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('connect.fetchClientPurchases', error); return { rows: [], status: 'error' }; }
@@ -680,20 +805,51 @@ export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; s
     // no unit, and that is unrecoverable rather than unread.
     const pkgIds = [...new Set(page.rows.map((r) => r.package_id).filter(Boolean))] as string[];
     const pkgs = new Map<string, { name: string | null; currency: string | null }>();
-    if (pkgIds.length) {
-      // no-error-ok: a package we cannot read leaves the sale unlabelled and unpriced-in-anything, which is the same outcome as a package that was deleted — and both are reported by sumTaken as amounts missing from the total, never as dollars
-      const { data: rows } = await supabase.from('trainer_packages').select('id, name, currency').in('id', pkgIds).limit(capLimit());
-      (rows ?? []).forEach((p: any) => { if (p?.id) pkgs.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null }); });
-    }
+    try {
+      // Chunked, and the reason is the REQUEST LINE rather than the row cap.
+      // `page.rows` is `capLimit()`-bounded, so `pkgIds` can hold a thousand
+      // uuids; at ~39 bytes each inside `in.("…","…")` that is a ~39KB query
+      // string against the 8KB request line nginx and most CDNs enforce, and
+      // the proxy refuses past roughly two hundred. The refusal is a 414,
+      // supabase-js does not reject on it, and it arrives as `data: null` —
+      // indistinguishable from "none of these packages could be read".
+      //
+      // no-error-ok (about the ROW ceiling, which chunking now guarantees is
+      // never reached — each chunk is 150 ids against a 1000-row cap): a
+      // package we cannot read leaves the sale unlabelled and
+      // unpriced-in-anything, which is the same outcome as a package that was
+      // deleted — and both are reported by sumTaken as amounts missing from the
+      // total, never as dollars. The 414 was never covered by that argument:
+      // it takes the unit off EVERY sale at once, on a screen about money.
+      const pkgRows = await readByIds<any>(
+        pkgIds,
+        // `.order('id')` on a primary-key lookup is total, which is the
+        // contract `readAll` requires of every page it is handed.
+        (chunk, from, to) => supabase.from('trainer_packages').select('id, name, currency')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the packages these sales were made from',
+      );
+      pkgRows.forEach((p: any) => { if (p?.id) pkgs.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null }); });
+    } catch { /* an unread package leaves the sale unlabelled, exactly as a deleted one does */ }
 
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the purchase it labels is still real and still paid for
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked for the reason above, and with the same cost of not being: a
+      // 414 over the whole list puts a dash where the buyer's name goes on
+      // every row at once, which reads as a sales list nobody can be matched to.
+      //
+      // no-error-ok (about the ROW ceiling — one row per id, 150 ids a chunk):
+      // a name we cannot read stays null and renders as a dash; the purchase it
+      // labels is still real and still paid for.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients who bought these',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash, never a wrong name */ }
 
     const rows: CoachPurchase[] = page.rows.map((r) => ({
       ...r,
@@ -762,8 +918,7 @@ export interface CoachDispute {
  */
 export async function fetchMyDisputes(): Promise<{ rows: CoachDispute[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('connect.fetchMyDisputes'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_disputes')
       .select('id, stripe_dispute_id, stripe_charge_id, amount_cents, currency, reason, status, evidence_due_by, opened_at, closed_at, client_id, purchase_id, renewal_id')
       .eq('trainer_id', uid)
@@ -774,12 +929,28 @@ export async function fetchMyDisputes(): Promise<{ rows: CoachDispute[]; status:
 
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the dispute it labels is still live and still has a deadline on it
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((pr: any) => { if (pr?.id) names.set(pr.id, (pr.full_name || '').trim()); });
-    }
+    try {
+      // Chunked, about the REQUEST LINE and not the row cap. `clientIds` is
+      // bounded by a `capLimit()` read, so up to a thousand uuids at ~39 bytes
+      // each inside `in.("…","…")` — a ~39KB query string against an 8KB
+      // request line. The proxy refuses past roughly two hundred with a 414,
+      // supabase-js does not reject on it, and it lands as `data: null`, which
+      // is the same shape as no names coming back.
+      //
+      // no-error-ok (about the ROW ceiling: one row per id, 150 ids a chunk, so
+      // a chunk cannot reach it): a name we cannot read stays null and renders
+      // as a dash; the dispute it labels is still live and still has a deadline
+      // on it. What that argument does NOT cover is losing every name at once —
+      // a coach answering a chargeback has to know whose it is, and a list of
+      // dated dashes with money and deadlines on them is not answerable.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients who raised these disputes',
+      );
+      profs.forEach((pr: any) => { if (pr?.id) names.set(pr.id, (pr.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the dispute is still listed */ }
 
     const rows: CoachDispute[] = page.rows.map((r) => ({
       ...r,
@@ -836,7 +1007,7 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
     const { data, error } = await supabase.rpc('redeem_pack_session', { p_trainer: trainerId });
     if (error) {
       reportError('connect.redeemSession', error);
-      return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
+      return { ok: false, error: 'the server did not confirm it, which is not the same as having none left' };
     }
     // Zero rows back is not a redemption. `readDraw` is the row count this
     // function never had: [] and [row, row] and a word from a newer schema are
@@ -847,18 +1018,39 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
     return why ? { ok: false, error: why } : { ok: false };
   } catch (e) {
     reportError('connect.redeemSession', e);
-    return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
+    return { ok: false, error: 'the server did not confirm it, which is not the same as having none left' };
   }
 }
 
-/** The trainer OTHER clients, to push a freed slot to. Server-side lookup so no
- *  other-client identity leaks to the caller beyond opaque ids. */
-export async function reofferSlot(sessionId: string): Promise<string[]> {
+/**
+ * The trainer's OTHER clients, to push a freed slot to.
+ *
+ * Server-side lookup so no other-client identity leaks to the caller beyond
+ * opaque ids.
+ *
+ * ── null is not an empty roster ────────────────────────────────────────────
+ *
+ * This returned `[]` for three different things: a coach with nobody else on
+ * their book, a refused read, and a request nobody answered. The only caller
+ * does `offeredTo = others.length || null` and, on zero, sends no push and
+ * reports nothing — so a freed slot went un-offered to a full roster, silently,
+ * whenever the network hiccuped. Nobody was told: not the member who cancelled,
+ * not the coach, not the other clients who would have taken it.
+ *
+ * `null` now means "we could not ask", which is the distinction `redeemSession`
+ * directly above already draws for the same reason — its own comment ends "this
+ * is not the same as having none left". An empty array still means the coach
+ * genuinely has nobody else.
+ */
+export async function reofferSlot(sessionId: string): Promise<string[] | null> {
   try {
     const { data, error } = await supabase.rpc('reoffer_client_ids', { p_session: sessionId });
-    if (error) { reportError('connect.reofferSlot', error); return []; }
+    if (error) { reportError('connect.reofferSlot', error); return null; }
     return Array.isArray(data) ? data.map((r: any) => r.client_id).filter(Boolean) : [];
-  } catch { return []; }
+  } catch (e) {
+    reportError('connect.reofferSlot', e);
+    return null;
+  }
 }
 
 /**
@@ -896,6 +1088,53 @@ export async function refundSession(trainerId: string): Promise<{ ok: boolean; r
   }
 }
 
+/**
+ * Move one session credit on a pack the signed-in COACH sold (part 661).
+ *
+ * ── Why `refundSession` above is not this ────────────────────────────────
+ *
+ * That one is scoped `client_id = auth.uid()`: the CLIENT calls it, when they
+ * cancel outside the notice window, and it picks the pack for them. A coach
+ * calling it would match nothing. It also chooses "the newest pack with usage",
+ * which is right for a cancellation and wrong here — the coach is looking at
+ * ONE sale they have just refunded and means that one.
+ *
+ * ── The gap this closes ─────────────────────────────────────────────────
+ *
+ * `REFUND_DOES_NOT` in src/lib/refunds.ts is shown to the coach immediately
+ * before somebody's card is credited and says a refund "does not put a session
+ * credit back on a pack". That was true and there was no way to act on it
+ * anywhere in the product: a coach who refunded two sessions of a ten-pack gave
+ * the money back and left the credits, so the client had both.
+ *
+ * ── It does not refund money, and nothing bundles the two ────────────────
+ *
+ * Deliberately separate acts. A coach may take a credit off without giving
+ * money back (a session delivered off the books) and may give money back
+ * without taking a credit (a goodwill refund on a pack the client is keeping),
+ * and neither is rare. Bundling would make one of them impossible.
+ *
+ * `ok` is true only when the database says a credit moved — `readDraw` refuses
+ * to call anything a success that did not come back as exactly one row naming
+ * an outcome this build knows. `outcome` carries the answer for the sentence
+ * the screen says, including 'expired', which part 661 returns rather than
+ * putting a credit onto a pack no draw site will ever spend.
+ */
+export async function adjustPackCredit(purchaseId: string, delta: 1 | -1): Promise<{ ok: boolean; outcome: DrawOutcome; remaining: number | null }> {
+  try {
+    const { data, error } = await supabase.rpc('adjust_pack_credit', { p_purchase: purchaseId, p_delta: delta });
+    if (error) {
+      reportError('connect.adjustPackCredit', error);
+      return { ok: false, outcome: 'unknown', remaining: null };
+    }
+    const d = readDraw(data);
+    return { ok: drew(d), outcome: d.outcome, remaining: d.remaining };
+  } catch (e) {
+    reportError('connect.adjustPackCredit', e);
+    return { ok: false, outcome: 'unknown', remaining: null };
+  }
+}
+
 /* ── giving money back ────────────────────────────────────────────────────── */
 
 /**
@@ -923,29 +1162,96 @@ export async function refundSession(trainerId: string): Promise<{ ok: boolean; r
  */
 export interface RefundResult {
   ok: boolean;
-  /** Minor units Stripe actually returned. Stripe's figure, not the one asked
-   *  for; they are the same today and a Stripe-side adjustment that made them
-   *  differ would otherwise leave this app permanently out by it. */
-  refundedCents?: number;
-  /** The running total on the row after this refund. */
-  totalRefundedCents?: number;
+  /**
+   * Minor units Stripe actually returned. Stripe's figure, not the one asked
+   * for; they are the same today and a Stripe-side adjustment that made them
+   * differ would otherwise leave this app permanently out by it.
+   *
+   * `null` when the function answered `ok` without a readable figure on it —
+   * which is a refund that HAPPENED and whose amount we do not have. It was
+   * `Number(data.refunded_cents) || 0` and that told the coach "0.00 has gone
+   * back to them" about money that had already left their Stripe balance,
+   * beside a Refunded title. Null travels; the screen has a sentence for it.
+   */
+  refundedCents?: number | null;
+  /** The running total on the row after this refund, or null where the answer
+   *  carried none. Not 0: zero refunded in total, said after a refund, is a
+   *  figure that contradicts the act it is reporting. */
+  totalRefundedCents?: number | null;
   currency?: string | null;
   /** False when the money went back and this app could not record it. */
   mirrored?: boolean;
+  /**
+   * True when NOBODY KNOWS whether a refund was made.
+   *
+   * The third answer, and it is not `ok: false`. Every refusal the edge
+   * function returns happens either before `stripe.refunds.create` or is
+   * Stripe's own rejection of it, so for all of those "nothing has changed" is
+   * a true statement. The one case where it is not is a call that THREW on
+   * this side — the request may have reached Stripe and the answer may have
+   * been lost coming back — and `callRefund` writes a sentence saying exactly
+   * that.
+   *
+   * It needed a flag because that sentence was being overwritten. The screen
+   * appended "They have not been refunded and nothing on your side has
+   * changed." to every `ok: false`, under the title "No refund was made", so a
+   * coach read Stripe's warning and then a flat contradiction of it — and the
+   * obvious next act on a refund that did not happen is to make it again,
+   * which credits the client twice out of the coach's own balance.
+   */
+  unconfirmed?: boolean;
   error?: string;
 }
+
+/** Minor units, or null for anything that is not a number. A `bigint` reaches
+ *  an edge function's JSON as a string often enough that every money reader in
+ *  this codebase coerces one; what none of them may do is coerce an ABSENCE,
+ *  because `Number(null)` is 0 and 0 is an amount of money. The same five lines
+ *  as `minorOrNull` in src/lib/memberRecord.ts and src/lib/membershipOrder.ts,
+ *  both module-private there for the same reason this one is here. */
+const minorOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v.trim()) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
 
 async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?: number): Promise<RefundResult> {
   try {
     const { data, error } = await supabase.functions.invoke('connect-refund', {
       body: { kind, id, amount_cents: amountCents ?? null },
     });
-    if (error) { reportError('connect.refund', error); return { ok: false, error: error.message }; }
+    if (error) {
+      reportError('connect.refund', error);
+      // supabase-js puts the function's JSON error body on `error.context` (a
+      // Response) and leaves `error.message` as its own generic "Edge Function
+      // returned a non-2xx status code". Every refusal connect-refund writes
+      // is a specific, actionable sentence — the whole of this one has already
+      // been given back; your Stripe balance is too short to refund from; this
+      // charge is too old for the payment method — and all of them were being
+      // thrown away and replaced with that shrug, on the screen where a coach
+      // is trying to give somebody their money back. Read the body, exactly as
+      // src/lib/vision.ts already does.
+      //
+      // Still `unconfirmed: false`. Every non-2xx path in that function runs
+      // BEFORE `stripe.refunds.create` or is Stripe's own rejection of it, so
+      // no money has moved on any of them and the screen may say so.
+      let why = error.message;
+      try {
+        const body = await (error as { context?: { json?: () => Promise<{ error?: unknown }> } })?.context?.json?.();
+        if (body?.error) why = String(body.error);
+      } catch { /* the body was not JSON, which leaves supabase-js's own message */ }
+      return { ok: false, error: why };
+    }
     if (data?.ok) {
       return {
         ok: true,
-        refundedCents: Number(data.refunded_cents) || 0,
-        totalRefundedCents: Number(data.refunded_total_cents) || 0,
+        // `minorOrNull`, not `Number(x) || 0`. This is money that has already
+        // moved: an absent key, a null column and a bigint arriving as an
+        // unparseable string all used to land here as a confident 0.00 under
+        // the word "Refunded", and the coach's next act is to tell their client
+        // what went back.
+        refundedCents: minorOrNull(data.refunded_cents),
+        totalRefundedCents: minorOrNull(data.refunded_total_cents),
         currency: data.currency ?? null,
         mirrored: data.mirrored !== false,
       };
@@ -957,7 +1263,15 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
     // reached Stripe and the answer may have been lost on the way back. The
     // sentence says so rather than telling a coach to try again, because trying
     // again is how somebody gets refunded twice.
-    return { ok: false, error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again — a second attempt could give the money back twice.' };
+    return {
+      ok: false,
+      // The flag, not just the sentence. See `unconfirmed` on RefundResult:
+      // the screen has to be able to tell this apart from a clean refusal,
+      // because the sentence it appends to a clean refusal is the exact
+      // opposite of what is true here.
+      unconfirmed: true,
+      error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again. A second attempt could give the money back twice.',
+    };
   }
 }
 
@@ -1091,17 +1405,59 @@ export async function archivePromoCode(promotionCodeId: string): Promise<{ ok: b
  *
  * **Null is a read that did not land, and is not an empty pass list.** A member
  * holding six PT credits whose read failed must not be shown a zero.
+ *
+ * ── the pass's gym, and the session's gym ─────────────────────────────────
+ *
+ * This read used to filter on `holder_id` alone and did not even select
+ * `tenant_id`, so nothing downstream could tell one gym's pass from another's.
+ * Route 2 of part 370 can:
+ *
+ *     where p.holder_id = new.client_id
+ *       and p.tenant_id = new.tenant_id      ← and again in the shortfall test
+ *
+ * The pass's gym must equal the SESSION's gym. And `gym_passes_own_r` is
+ * `holder_id = auth.uid()` with no tenant clause at all — verified live — so
+ * this read returns every pass every gym has ever sold this member, while the
+ * coach's own copy of the same list (`gym_passes_staff_r`, `tenant_id =
+ * my_tenant()`) is already narrowed to the one gym that can pay. The two apps
+ * were reading different sets and only one of them matched the trigger.
+ *
+ * `sessions.tenant_id` is what route 2 compares against, and it is filled by
+ * `sessions_fill_tenant()` — a BEFORE INSERT trigger, read live — from
+ * `profiles.tenant_id` **of the trainer**. `staff_tenant_of(uuid)` is that same
+ * column, SECURITY DEFINER and granted to `authenticated`, so it is asked here
+ * rather than guessed: a client cannot read their coach's profile row directly
+ * unless the coach happens to be listed in the public directory.
+ *
+ * Every account is given its own personal tenant at signup (part 06), so an
+ * INDEPENDENT coach's tenant is their own personal space and no gym's pass will
+ * ever equal it. That is the case this fix is really about: a member holding a
+ * live gym PT pass who books an hour with an independent coach was counted onto
+ * that pass by the app, while the server matched nothing, drew nothing, and
+ * stamped `pack_draw_shortfall_at` on the coach's delivered hour.
+ *
+ * Three-state, like everything else on this path. The discriminator is carried,
+ * NOT filtered on: a member may hold passes from more than one gym and is owed
+ * a sentence about the one that cannot pay here, not a silently shorter list.
+ * `gymPtLines` in sessionCredits.ts is what judges it, because that is where
+ * the rest of route 2's predicate (`covers = 'pt'`, the expiry window) already
+ * lives. A discriminator that could not be READ makes the whole answer null —
+ * an unreadable "does this pass pay?" is not an answer of "yes" and not one of
+ * "no", and this module's rule is that an unread balance is unknown.
  */
 export async function myPtPasses(): Promise<PtPassRow[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
-    const { data, error } = await supabase
-      .from('gym_passes')
-      .select('id, pass_type_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)')
-      .eq('holder_id', uid)
-      .order('issued_on', { ascending: false })
-      .limit(capLimit());
+    const { uid } = await signedInUid('connect.myPtPasses'); if (!uid) return null;
+    const [passRes, coachRes] = await Promise.all([
+      supabase
+        .from('gym_passes')
+        .select('id, pass_type_id, tenant_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)')
+        .eq('holder_id', uid)
+        .order('issued_on', { ascending: false })
+        .limit(capLimit()),
+      supabase.from('clients').select('trainer_id').eq('id', uid).maybeSingle(),
+    ]);
+    const { data, error } = passRes;
     if (error) { reportError('connect.myPtPasses', error); return null; }
     if (!data) return null;
     const page = capped(data as unknown[]);
@@ -1112,6 +1468,29 @@ export async function myPtPasses(): Promise<PtPassRow[] | null> {
       reportError('connect.myPtPasses', new TruncatedRead('your gym passes', ROW_CAP));
       return null;
     }
+
+    // The gym a session with this member's coach will belong to.
+    //
+    // `undefined` and `null` are different answers and are both real. A member
+    // with no coach has no session to price, so there is nothing to compare a
+    // pass against and the passes are left unjudged — their balance at their own
+    // gym is still true and is still theirs. A coach who is on no gym's staff
+    // gives a null tenant, which route 2 answers with `if new.tenant_id is null
+    // then return new` — no pass pays, and that is a judgement, not an absence.
+    let sessionTenantId: string | null | undefined;
+    if (coachRes.error) {
+      // Not "they hold nothing" and not "the pass pays". We cannot say which,
+      // so we say we could not read it, which is what null means here.
+      reportError('connect.myPtPasses', coachRes.error);
+      return null;
+    }
+    const coachId = (coachRes.data as { trainer_id: string | null } | null)?.trainer_id ?? null;
+    if (coachId) {
+      const { data: tId, error: tErr } = await supabase.rpc('staff_tenant_of', { u: coachId });
+      if (tErr) { reportError('connect.myPtPasses', tErr); return null; }
+      sessionTenantId = (tId ?? null) as string | null;
+    }
+
     return page.rows.map((r: any) => {
       const ty = Array.isArray(r.gym_pass_types) ? r.gym_pass_types[0] : r.gym_pass_types;
       return {
@@ -1119,6 +1498,8 @@ export async function myPtPasses(): Promise<PtPassRow[] | null> {
         passTypeId: (r.pass_type_id ?? null) as string | null,
         passTypeName: (ty?.name ?? null) as string | null,
         covers: (ty?.covers ?? null) as string | null,
+        tenantId: (r.tenant_id ?? null) as string | null,
+        sessionTenantId,
         expiresOn: (r.expires_on ?? null) as string | null,
         usesTotal: (r.uses_total ?? 0) as number,
         usesSpent: (r.uses_spent ?? 0) as number,
@@ -1136,6 +1517,22 @@ export interface PtPassRow {
    *  NOT the same as a type that covers visits — an unnamed coverage is never
    *  assumed to be the one that lets a credit be spent. */
   covers: string | null;
+  /**
+   * The gym that SOLD this pass. `gym_passes.tenant_id`, which is NOT NULL in
+   * the live schema — a null here means the column did not come back, never a
+   * pass belonging to no gym.
+   */
+  tenantId: string | null;
+  /**
+   * The gym a session with this member's coach will BELONG to — the value route
+   * 2 compares `tenant_id` against, not a property of the pass.
+   *
+   * It is stamped on every row because the array is the only thing that reaches
+   * a caller, and the same answer is true of all of them. `undefined` is "there
+   * is no session to price" (the member has no coach); `null` is "the coach is
+   * on no gym's staff, so no pass can pay". See `gymPtLines`.
+   */
+  sessionTenantId?: string | null;
   expiresOn: string | null;
   usesTotal: number;
   usesSpent: number;
@@ -1154,8 +1551,7 @@ export interface PtPassRow {
  */
 export async function mySessionCredits(): Promise<CreditSession[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.mySessionCredits'); if (!uid) return null;
     const { data, error } = await supabase
       .from('sessions')
       .select('id, starts_at, status, outcome, series_id, pack_drawn_at, pack_drawn_kind, pack_drawn_purchase_id, pack_drawn_pass_id, pack_draw_shortfall_at, booking_drew_credit_at')

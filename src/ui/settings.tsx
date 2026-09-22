@@ -13,8 +13,18 @@
 //
 // So weightUnit and lengthUnit now follow the account (clients.weight_unit /
 // clients.length_unit, part 61), with AsyncStorage kept as the cache that makes
-// the first paint right and as the only store when there is no session or the
-// backend is off. The push toggle is deliberately left device-local.
+// the first paint right and as the store that carries a choice through a
+// refused update or a dead gym network. The push toggle is deliberately left
+// device-local.
+//
+// That cache is keyed by ACCOUNT — `repple.units:<uid>`, src/lib/unitCache.ts —
+// and this sentence used to end "and as the only store when there is no session
+// or the backend is off". It no longer does, and the change is deliberate
+// rather than an oversight: with nobody signed in there is no account to scope
+// a key to, so nothing is written at all. A unit tapped before anybody signs in
+// is on screen for that session and is not kept. The alternative is the
+// unqualified key this repair exists to end, where what is kept is inherited by
+// whoever signs in next.
 //
 // ── The notification toggles used to be scenery ────────────────────────────
 //
@@ -65,18 +75,32 @@
 // launch, forever. Nothing is written here until the row for this uid has come
 // back — and if that read FAILS, nothing is ever written for that session,
 // because a failed read is not permission to assume the server has nothing.
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
+import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
 import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
-import { consentFromStored, recordPushConsent } from '../lib/pushConsent';
-import { soundFromStored, recordRestSoundConsent } from '../lib/restTimer';
+import { consentFromStored, recordPushConsent, forgetPushConsent } from '../lib/pushConsent';
+import { soundFromStored, recordRestSoundConsent, forgetRestSoundConsent } from '../lib/restTimer';
 import { assertWrote, writeFailure } from '../lib/wroteRows';
+// `getUser()` resolves rather than rejecting when the auth host cannot be
+// reached, so `!auth?.user?.id` meant "signed out, or we could not ask, and
+// this file cannot tell which". `revokePushToken` above already reads its
+// `error` for exactly that reason; these two are the sites that did not.
+import { signedInUid } from '../lib/signedInUid';
+
 import type { WeightUnit, LengthUnit } from '../lib/units';
 import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
+import { SETTINGS_KEY } from '../lib/personalSettings';
+import { cacheHydrated, mayWriteCache, type DeviceCache } from '../lib/deviceAccountCache';
+import {
+  unitCache, parseCachedUnits, cachedUnitsBlob, chooseUnit, mayRefreshCache,
+  deviceSettingsBlob, legacyUnitRemnant, isWeightUnit, isLengthUnit,
+  NO_CACHED_UNITS, type CachedUnits, type ColumnRead,
+} from '../lib/unitCache';
 
 // Re-exported because every client screen has imported the weight unit from
 // here since before there was a units module, and the shape of the union is
@@ -220,9 +244,6 @@ const DEFAULTS: Settings = { notifPush: true, restSound: true, weightUnit: null,
 const DEVICE_REGION = deviceRegion();
 const Ctx = createContext<SettingsValue | null>(null);
 
-const isWeightUnit = (v: unknown): v is WeightUnit => v === 'kg' || v === 'lb';
-const isLengthUnit = (v: unknown): v is LengthUnit => v === 'cm' || v === 'in';
-
 /**
  * Is there still a row in `push_tokens` naming any of these tokens?
  *
@@ -232,6 +253,10 @@ const isLengthUnit = (v: unknown): v is LengthUnit => v === 'cm' || v === 'in';
  * completed is how a member who switched notifications off goes on getting them.
  */
 async function tokenRowsPresent(tokens: string[]): Promise<boolean | null> {
+  // Not chunked. `handsetPushTokens()` returns at most two: the one this app
+  // remembered in AsyncStorage and the one the OS will name right now, deduped
+  // against each other. It is THIS handset's addresses, not a list read out of
+  // a table, so no gym and no account can make it longer.
   const { data, error } = await supabase.from('push_tokens').select('token').in('token', tokens);
   if (error) { reportError('settings.push.revoke.verify', error); return null; }
   return (data?.length ?? 0) > 0;
@@ -284,12 +309,19 @@ async function tokenRowsPresent(tokens: string[]): Promise<boolean | null> {
  * is nothing to delete, and that is success without a delete being issued at
  * all — the case assertWrote would have wrongly called a failure.
  *
+ * Exported for ONE other caller: src/ui/signOutState.ts, which runs it while
+ * the session is still alive so that ending a session also ends this handset's
+ * registration. It is not exported for general use and there is no second copy
+ * of this logic anywhere — the two attempts, the identity check and the verify
+ * are the parts that are easy to get wrong, and a sign-out is the moment they
+ * matter most.
+ *
  * Resolves TRUE only when nothing in `push_tokens` can reach this handset any
  * more. A failed delete and a failed verify both resolve FALSE: "we could not
  * check" is not "it is gone", and this is the switch where the difference is
  * the member getting a notification they turned off.
  */
-async function revokePushToken(cancelled: () => boolean): Promise<boolean> {
+export async function revokePushToken(cancelled: () => boolean): Promise<boolean> {
   const tokens = await handsetPushTokens();
   // This handset has never registered and the OS will not name a token for it,
   // so there is no row that could be ours. Nothing to delete is not a failure.
@@ -352,6 +384,29 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
    *  `profiles` for a coach or owner, who has no clients row. Set by the read
    *  so the write cannot go somewhere the read never looked. */
   const unitHome = useRef<'clients' | 'profiles'>('clients');
+  /**
+   * The account-scoped device cache for the units: which account's key this
+   * provider is reading and writing, and whether a read of THAT key has come
+   * back. Built by `unitCache(uid)`, which hands it back un-hydrated — there is
+   * no way to construct one with the flag already true, which is the trap in
+   * src/lib/deviceAccountCache.ts closed by construction rather than by
+   * remembering to clear it.
+   */
+  const unitStore = useRef<DeviceCache>(unitCache(null));
+  /**
+   * The unit fields the device-global blob was carrying when this launch read
+   * it, carried back into every write of that blob.
+   *
+   * They are NEVER read into state — see src/lib/unitCache.ts for why adopting
+   * an unqualified unit into the signed-in account is a guess whose wrong
+   * answer is a stranger's figures in the wrong unit. They are preserved so
+   * that a member flipping a notification switch does not silently delete
+   * somebody's pre-migration choice on the way past.
+   */
+  const legacyUnits = useRef<Record<string, string>>({});
+  /** Whether a read of the device-global blob COMPLETED this launch. Arms the
+   *  write of it, exactly as `DeviceCache.hydrated` arms the unit cache's. */
+  const blobRead = useRef(false);
   const latest = useRef<Settings>(s);
   latest.current = s;
 
@@ -362,11 +417,52 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // this read lands, `s.notifPush` is still the DEFAULTS value — true — so a
   // reconciler that ran before it would register a push token for the one member
   // whose stored answer is that they do not want one, on every single launch.
+  //
+  // ── Why this is keyed on `rev` and not on mount ───────────────────────────
+  //
+  // It used to be `[]`. This provider is mounted at the root of app/_layout.tsx
+  // and outlives every sign-out, so one read on mount meant the answer belonged
+  // for ever to whoever was signed in when the app launched. On a shared gym
+  // handset member A's 'no' then governed member B's whole session: B's switch
+  // drawn off A's boolean, and `registerForPush()` refusing behind it, so B
+  // received nothing from their coach and nothing on screen said why.
+  //
+  // Re-reading is only half of it. `cacheLoaded` is the arming flag, and a flag
+  // that survives the account changing is the sharper trap — it would leave the
+  // reconciler below free to act on A's answer against B's account in the window
+  // before the re-read lands. So it is put back to false BEFORE the read, and
+  // the two latches are put back to 'unknown' in the same breath, which is a
+  // refusal for both gates rather than a guess. `clearPersonalDeviceState` does
+  // the same on the way out; this covers the sign-in the sign-out did not see —
+  // a token refresh into a different account, or a launch that restored one.
+  //
+  // The unit fields are no longer in this blob at all, and that is the repair
+  // in src/lib/unitCache.ts. They were the cache of an ACCOUNT-scoped setting
+  // kept under a key with no account in it, so the next member on the handset
+  // inherited them — and, because a NULL column deliberately does not overwrite
+  // a device value, kept them, with `resolveUnits` reporting the stranger's
+  // choice as `weightSource: 'chosen'`. Their cache now lives under
+  // `repple.units:<uid>` and is read by the units effect below, which owns them
+  // end to end. The two legacy fields are still on the device: unread, and
+  // written back untouched, because a correction is a second recorded fact.
   const [cacheLoaded, setCacheLoaded] = useState(false);
   useEffect(() => { (async () => {
+    setCacheLoaded(false);
+    // False BEFORE the read, for the same reason `cacheLoaded` is: a hydration
+    // flag that survives is a write armed by a read that belongs to a previous
+    // launch of this effect.
+    blobRead.current = false;
+    legacyUnits.current = {};
+    forgetPushConsent();
+    forgetRestSoundConsent();
+    setS((prev) => ({ ...prev, notifPush: DEFAULTS.notifPush, restSound: DEFAULTS.restSound }));
     let raw: string | null = null;
     try {
-      raw = await AsyncStorage.getItem('repple.settings');
+      raw = await AsyncStorage.getItem(SETTINGS_KEY);
+      // Held whether or not the blob has anything else in it, and held before
+      // the two consents are read out, so that the very first write of this
+      // blob after a launch cannot drop a pre-migration unit.
+      legacyUnits.current = legacyUnitRemnant(raw);
       if (raw) {
         // Read key by key rather than spreading the parsed object over state.
         // Every phone that ran an older build still has `notifEmail` in this
@@ -376,11 +472,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const patch: Partial<Settings> = {};
         if (typeof c.notifPush === 'boolean') patch.notifPush = c.notifPush;
         if (typeof c.restSound === 'boolean') patch.restSound = c.restSound;
-        if (isWeightUnit(c.weightUnit)) patch.weightUnit = c.weightUnit;
-        if (isLengthUnit(c.lengthUnit)) patch.lengthUnit = c.lengthUnit;
+        // `c.weightUnit` / `c.lengthUnit` are deliberately not read. This key
+        // names no account; the value in it belongs to whoever used this
+        // handset last and there is nothing on the device that says who.
         if (Object.keys(patch).length) setS((prev) => ({ ...prev, ...patch }));
       }
-    } catch { raw = null; }
+      // Only now. A read that threw must not arm the write: `{}` would be this
+      // provider claiming the blob holds no pre-migration unit on the strength
+      // of never having seen it, and the next flip of a notification switch
+      // would write that claim down. The consents still work for this session
+      // — the latches below are published either way — they simply are not
+      // persisted until a launch manages to read the key.
+      blobRead.current = true;
+    } catch { raw = null; legacyUnits.current = {}; }
     finally {
       // Publish the answer before anything is allowed to act on it. Until this
       // line runs, src/lib/pushConsent.ts says 'unknown' and registerForPush()
@@ -399,34 +503,182 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       recordRestSoundConsent(soundFromStored(raw));
       setCacheLoaded(true);
     }
-  })(); }, []);
+  })(); }, [rev]);
 
-  // The account's answer, which wins over the cache when there is one. Keyed on
-  // the auth revision, not on mount: providers that read on mount alone ran
-  // before anybody had signed in and were never asked again — see authRevision.tsx.
+  // ── The units: this account's cache, then this account's row ──────────────
+  //
+  // Keyed on the auth revision, not on mount: providers that read on mount
+  // alone ran before anybody had signed in and were never asked again — see
+  // authRevision.tsx.
+  //
+  // This effect now owns the units end to end — the device cache as well as the
+  // account row — because the two decisions are one decision and splitting them
+  // across two effects is what let a device value with no account in it survive
+  // an account change. src/lib/unitCache.ts holds the rule and the argument.
+  //
+  // ── What a member sees before the read lands ──────────────────────────────
+  //
+  // The figure is DRAWN, not withheld, and it is drawn with its unit named.
+  // src/lib/unitPreference.ts argues that side out in full: a weight has a true
+  // value in every unit at once, so withholding it would blank the dashboard,
+  // the goal, the scans and two dozen more screens for anybody whose read is in
+  // flight, which is a worse product and a worse prompt to go and choose. So
+  // the units start null on every account change, `resolveUnits` falls to the
+  // handset's region, and it reports `'device'` — which is what `deviceUnitNote`
+  // turns into "Not set yet — showing pounds, from your phone's region."
+  //
+  // That means a member on a shared handset can see one AsyncStorage read's
+  // worth of the region unit before their own cached choice replaces it. That
+  // is the trade this takes, deliberately: a figure that changes once from a
+  // unit labelled as a guess into the member's own is a correction the reader
+  // can see the basis for. What it replaces is the defect — a stranger's unit,
+  // shown immediately, reported as `'chosen'`, with no note under it and the
+  // Settings pill tinted as though the member had picked it.
+  //
+  // `unitsLoaded` is put back to FALSE here for the same reason `cacheLoaded`
+  // is: a flag that survives the account changing tells the screens which wait
+  // on it that the new person's units are settled while they are still the old
+  // person's.
   useEffect(() => {
     if (!USE_SUPABASE) { setUnitsLoaded(true); return; }
     let cancelled = false;
     writable.current = null;
+    // Synchronously, before anything is awaited: the cache record for nobody,
+    // un-hydrated, so that nothing can be written under the previous account's
+    // key while the new account is being resolved.
+    unitStore.current = unitCache(null);
+    setUnitsLoaded(false);
+    // The units on screen belong to the account that has just left. Dropped on
+    // the way IN, before the read lands and whatever it decides — the rule in
+    // src/lib/accountScopedState.ts. A provider mounted at the root of
+    // app/_layout.tsx outlives every sign-out, so without this the departing
+    // member's unit stays on screen under the next member's name.
+    setS((prev) => ({ ...prev, weightUnit: null, lengthUnit: null }));
+
+    /** What THIS account's own key held. Nothing until a read of it lands, and
+     *  nothing is never "prefers metric". */
+    let cached: CachedUnits = NO_CACHED_UNITS;
+
+    /**
+     * One row read, turned into what this provider holds and what the device
+     * may be told.
+     *
+     * The account's stated column always wins. Everything else keeps what is
+     * already on screen and only fills a hole with the cache — so a NULL column
+     * cannot erase a choice (the property this file has always protected) and
+     * cannot lose a unit the member tapped while the read was in flight either.
+     */
+    const apply = (w: ColumnRead<WeightUnit>, l: ColumnRead<LengthUnit>, uid: string) => {
+      const wc = chooseUnit(w, cached.weightUnit);
+      const lc = chooseUnit(l, cached.lengthUnit);
+      setS((prev) => ({
+        ...prev,
+        weightUnit: wc.from === 'account' ? wc.chosen : (prev.weightUnit ?? wc.chosen),
+        lengthUnit: lc.from === 'account' ? lc.chosen : (prev.lengthUnit ?? lc.chosen),
+      }));
+      // Only the account's own answer is written back to the handset. The other
+      // three origins are, in order, what the cache already holds, a nothing,
+      // and a nothing that came out of a read NOBODY COMPLETED — and the last
+      // is the one that would destroy this member's choice.
+      if (!mayRefreshCache(wc.from) && !mayRefreshCache(lc.from)) return;
+      const store = unitStore.current;
+      // `mayWriteCache` is the hydration gate; the uid comparison is the second
+      // half of it, because the account may have changed since this read began.
+      if (!mayWriteCache(store) || store.uid !== uid) return;
+      const blob = cachedUnitsBlob({ weightUnit: wc.chosen, lengthUnit: lc.chosen });
+      const done = blob == null
+        ? AsyncStorage.removeItem(store.key)
+        : AsyncStorage.setItem(store.key, blob);
+      done.catch((e: unknown) => reportError('settings.units.cache.write', e));
+    };
+
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
-        // Signed out: the device cache is the whole story, and there is nothing
-        // to push to. Not an error state.
-        if (!uid) { if (!cancelled) setUnitsLoaded(true); return; }
-        const { data, error } = await supabase
-          .from('clients').select('weight_unit, length_unit').eq('id', uid).maybeSingle();
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('settings.units.who');
         if (cancelled) return;
-        if (error) {
+        if (who.fate === 'unreadable') {
+          // ── the branch that threw away the only copy ──────────────────────
+          //
+          // This used to be the same line as the signed-out case below, and
+          // that made the offline launch the launch that ignores the offline
+          // cache. The member's chosen unit is under `repple.units:<uid>` —
+          // the key NEEDS the account — so a `getUser()` that resolved with
+          // `user: null` behind a retryable error skipped the cache read
+          // entirely, and then set `unitsLoaded` true, which by its own
+          // documented contract says the account's preference HAS been read
+          // and there was none. A member who chose pounds got the region's
+          // kilograms, on precisely the launch where the cache was the only
+          // thing that still knew.
+          //
+          // The uid cannot be recovered from here — no uid, no key — so the
+          // cache still cannot be opened. What changes is that nothing is
+          // CLAIMED about it. `unitsLoaded` stays false, which is the truth:
+          // the preference has not been read. `unitStore.current` stays the
+          // un-hydrated `unitCache(null)` set at the top of this effect, so
+          // `mayWriteCache` refuses and this launch writes nothing over a key
+          // it could not read. The units on screen stay null and
+          // `resolveUnits` keeps labelling the region's answer as the guess it
+          // is, rather than as the member's own.
+          //
+          // The outage itself is recorded by `signedInUid` under this context.
+          return;
+        }
+        // Signed out. There is no account to scope a cache to and nothing to
+        // push to, and the region guess is the whole story. Not an error state.
+        if (who.fate !== null) { setUnitsLoaded(true); return; }
+        const uid = who.uid;
+
+        // ── This account's own cached units ──────────────────────────────────
+        //
+        // Under `repple.units:<uid>`, which is the repair: the key names the
+        // account, so what comes out of it was put there by that account and
+        // nobody else on this handset can be read out of it.
+        const store = unitCache(uid);
+        unitStore.current = store;
+        if (store.key) {
+          try {
+            const raw = await AsyncStorage.getItem(store.key);
+            cached = parseCachedUnits(raw);
+            // Hydrated only on a read that RETURNED. An empty store is a read
+            // that landed; a read that threw is not, and leaving the flag false
+            // is what stops this session writing over bytes nobody could read.
+            if (!cancelled) unitStore.current = cacheHydrated(store);
+          } catch (e) {
+            reportError('settings.units.cache', e);
+          }
+        }
+        if (cancelled) return;
+        if (cached.weightUnit || cached.lengthUnit) {
+          setS((prev) => ({
+            ...prev,
+            weightUnit: prev.weightUnit ?? cached.weightUnit,
+            lengthUnit: prev.lengthUnit ?? cached.lengthUnit,
+          }));
+        }
+        // Shared with clientData.tsx, which reads this same row on the same
+        // launch for the rest of the member's profile — src/ui/myProfile.ts.
+        // The outcome carries the error, so the guard below still tells a
+        // refused read apart from an account that has no `clients` row.
+        const cOut = await readMyClientRow(uid);
+        if (cancelled) return;
+        // Branched on `ok` and not on a truthy error. An outcome carries
+        // whatever was thrown, and `throw undefined` is legal — testing the
+        // error would let that one through as a successful read of nothing.
+        if (!cOut.ok) {
           // The read failed. Leave `writable` null so nothing is pushed for the
           // rest of this session: the client may well have chosen pounds on
           // another device, and publishing this device's default over it is
           // precisely the failure this guard exists for.
-          reportError('settings.units.read', error);
+          //
+          // 'failed' rather than 'never': an unread column is not a NULL one,
+          // so this keeps what the cache held and writes nothing back to it.
+          reportError('settings.units.read', cOut.error);
+          apply({ read: 'failed' }, { read: 'failed' }, uid);
           setUnitsLoaded(true);
           return;
         }
+        const data = cOut.value;
         // maybeSingle rather than single: a trainer or owner signed into the
         // same build has no `clients` row, and that is an absence, not a fault
         // to report.
@@ -440,30 +692,38 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         let row: { weight_unit?: unknown; length_unit?: unknown } | null = data ?? null;
         let home: 'clients' | 'profiles' = 'clients';
         if (!row) {
-          const { data: prof, error: profErr } = await supabase
-            .from('profiles').select('weight_unit, length_unit').eq('id', uid).maybeSingle();
+          // The same shared read the tenant, profile and invites providers are
+          // taking on this launch, for its own two columns.
+          const pOut = await readMyProfileRow(uid);
           if (cancelled) return;
-          if (profErr) {
+          if (!pOut.ok) {
             // Same reasoning as the clients read above: a failed read leaves
             // `writable` null so this device publishes nothing over a choice
-            // made elsewhere.
-            reportError('settings.units.read', profErr);
+            // made elsewhere, and says 'failed' rather than 'never' so the
+            // member's cached unit survives it.
+            reportError('settings.units.read', pOut.error);
+            apply({ read: 'failed' }, { read: 'failed' }, uid);
             setUnitsLoaded(true);
             return;
           }
-          row = prof ?? null;
+          row = pOut.value ?? null;
           home = 'profiles';
         }
         unitHome.current = home;
-        if (row) {
-          const patch: Partial<Settings> = {};
-          if (isWeightUnit(row.weight_unit)) patch.weightUnit = row.weight_unit;
-          if (isLengthUnit(row.length_unit)) patch.lengthUnit = row.length_unit;
-          // NULL columns mean "never chosen" and deliberately do NOT overwrite
-          // what this device already had — a client who set pounds before this
-          // shipped keeps pounds, and the next tap writes it to their account.
-          if (Object.keys(patch).length) setS((prev) => ({ ...prev, ...patch }));
-        }
+        // Three answers per column, and the third is the one that gets
+        // collapsed. A NULL column means "never chosen" and deliberately does
+        // NOT overwrite what this ACCOUNT's cache held — a member who set
+        // pounds and whose write never reached the server keeps pounds, and the
+        // next tap writes it up. NO ROW AT ALL in either table is 'failed', not
+        // 'never': an account with nowhere to have stated a preference has not
+        // told us it has none.
+        apply(
+          row ? (isWeightUnit(row.weight_unit) ? { read: 'said', unit: row.weight_unit } : { read: 'never' })
+            : { read: 'failed' },
+          row ? (isLengthUnit(row.length_unit) ? { read: 'said', unit: row.length_unit } : { read: 'never' })
+            : { read: 'failed' },
+          uid,
+        );
         writable.current = uid;
         setUnitsLoaded(true);
       } catch (e) {
@@ -500,12 +760,31 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
-        // Signed out. Nothing is registered against anybody, and asking the OS
-        // for a token now would put a permission prompt in front of the welcome
-        // screen.
-        if (!uid || cancelled) return;
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('settings.push.apply');
+        if (cancelled) return;
+        // Both fates stop here, and unusually that is the ANSWER rather than a
+        // fallback: the two things below this line are registering a push token
+        // against an account and deleting one, and neither may be done under an
+        // identity that was not established. Acting on a false sign-out is what
+        // would be dangerous here — a revoke would silence a handset whose
+        // owner never asked for silence.
+        //
+        //   'signed-out'  — nothing is registered against anybody, and asking
+        //                   the OS for a token now would put a permission
+        //                   prompt in front of the welcome screen.
+        //   'unreadable'  — we could not ask. A member who turned push off
+        //                   keeps their stale `push_tokens` row for one more
+        //                   launch, which is the same deferral `revokePushToken`
+        //                   already calls 'off-pending', and this effect re-runs
+        //                   on the next auth revision.
+        //
+        // What is new is that the second one is no longer invisible:
+        // `signedInUid` reports it under this context, so an applier that never
+        // applied leaves a trace instead of looking like a device with nobody
+        // on it.
+        if (who.fate !== null) return;
+
         if (latest.current.notifPush) {
           // Idempotent, and deliberately still done here even though auth.tsx
           // registers too: this is what re-registers the handset of somebody
@@ -535,7 +814,43 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // read the answer back out of AsyncStorage would let the very next chime
     // through after they turned it off.
     if (patch.restSound !== undefined) recordRestSoundConsent(patch.restSound ? 'yes' : 'no');
-    AsyncStorage.setItem('repple.settings', JSON.stringify(next)).catch(() => {});
+    // Only the two device-local answers go into the device-global blob now. The
+    // legacy unit fields it may still be carrying are written back untouched —
+    // they belong to whoever used this handset before, they are read by nothing
+    // (src/lib/unitCache.ts), and deleting them here would be the sweep this
+    // repair exists to avoid. Armed on `blobRead`: a blob nobody managed to
+    // read is not a blob known to hold no unit.
+    if (blobRead.current) {
+      AsyncStorage.setItem(SETTINGS_KEY, deviceSettingsBlob(next, legacyUnits.current)).catch(() => {});
+    }
+    // The units go under this account's own key, and only once a read of that
+    // key has come back. `mayWriteCache` is that gate; a null key means nobody
+    // is signed in, and nobody signed in has no unit preference to keep.
+    //
+    // Written whatever the server write below does. The cache is what carries a
+    // member's choice through a refused update or a dead gym network — if it
+    // waited on the row landing, the one case where it is the only copy is the
+    // one case it would not exist.
+    if (patch.weightUnit !== undefined || patch.lengthUnit !== undefined) {
+      const store = unitStore.current;
+      // Not hydrated is a REFUSAL, and the cost of it is a real one: a member
+      // who taps a unit in the moment between an account change and that
+      // account's key coming back sees the tap on screen and does not keep it.
+      // That is the smaller loss. The blob written here is computed from the
+      // whole of `next`, so a tap on the weight before the read lands would
+      // write `{"weightUnit":"kg"}` over a key that holds a LENGTH this launch
+      // has not looked at — destroying a second answer in order to store the
+      // first.
+      if (mayWriteCache(store)) {
+        // Never null on this path — `SettingsPatch` cannot express a null unit,
+        // so `next` holds at least one — but a null means REMOVE THE KEY and
+        // removing is not what a tap does. Checked rather than assumed.
+        const blob = cachedUnitsBlob({ weightUnit: next.weightUnit, lengthUnit: next.lengthUnit });
+        if (blob != null) {
+          AsyncStorage.setItem(store.key, blob).catch((e: unknown) => reportError('settings.units.cache.write', e));
+        }
+      }
+    }
     // Only the unit columns go up. The notification preference now reaches the server: it is applied to `push_tokens`, so a handset that opted out receives nothing whatever a sending screen believes
     // because push permission genuinely is a property of this handset.
     const uid = writable.current;
@@ -561,6 +876,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // is a report rather than an alert; the point is that the report happens at
     // all, so the unit a coach reads and TYPES on somebody else's record has an
     // audit trail when it does not follow them to a second phone.
+    // The row this account's providers share a read of has just changed, so
+    // the held copy is dropped before the request is even sent. Dropped rather
+    // than patched: what is shared is the read, not an answer anybody keeps in
+    // step, and the next reader asking the server is the whole of the fix.
+    forgetMyRows(uid);
     supabase.from(unitHome.current).update(row, { count: 'exact' }).eq('id', uid)
       .then((r) => {
         const why = writeFailure('Your units', r);
@@ -589,9 +909,34 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // an answer. Screens get a unit they can always render; the `*Chosen` and
   // `*Source` fields beside it are what stop that unit being mistaken for
   // something the member said.
-  const units = resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION);
+  // Memoised because `resolveUnits` builds a fresh object every time it is
+  // called, and that object is spread straight into the context value below.
+  // See the note under it.
+  const units = useMemo(() => resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION), [s.weightUnit, s.lengthUnit]);
+
+  // ── Why `set` and `setPushEnabled` are handed out through a ref ───────────
+  //
+  // This provider used to publish an inline object literal, so `useSettings()`
+  // returned a different value on every render — and both functions on it were
+  // different functions again. A consumer that keys an effect on the context
+  // value, or on either function, then re-runs that effect on every render of
+  // this provider, and any effect that writes a setting builds a machine that
+  // cannot stop. src/ui/roster.tsx documents the shape at length.
+  //
+  // The wrappers are created once and read the current implementations out of
+  // a ref, so they are stable for the life of the provider while still closing
+  // over this render's `s` — `set` merges a patch into the CURRENT settings, so
+  // freezing the implementation would freeze the settings it merges into.
+  const impl = useRef({ set, setPushEnabled });
+  impl.current = { set, setPushEnabled };
+  const setStable = useCallback((...a: Parameters<typeof set>) => impl.current.set(...a), []);
+  const setPushEnabledStable = useCallback((...a: Parameters<typeof setPushEnabled>) => impl.current.setPushEnabled(...a), []);
+  const value = useMemo<SettingsValue>(
+    () => ({ notifPush: s.notifPush, restSound: s.restSound, ...units, set: setStable, setPushEnabled: setPushEnabledStable, unitsLoaded }),
+    [s.notifPush, s.restSound, units, setStable, setPushEnabledStable, unitsLoaded],
+  );
   return (
-    <Ctx.Provider value={{ notifPush: s.notifPush, restSound: s.restSound, ...units, set, setPushEnabled, unitsLoaded }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

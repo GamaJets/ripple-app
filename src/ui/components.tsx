@@ -1,19 +1,18 @@
 // Shared UI primitives + the live theme. The theme is one of 10 palettes
 // (Elevated Teal default), selectable by client & trainer. An optional accent
 // override sits on top for owner white-labelling. Both persist.
-import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, TextInput, useColorScheme } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ReactNode, createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react';
+import { View, Text, Pressable, TextInput, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  paletteByKey, paletteForScheme, highContrast, brandInkFor,
+  paletteByKey, paletteForScheme, highContrast, withAccent,
   DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta,
 } from '../theme/tokens';
-import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
-// `value` is aliased to `figure` so it can't shadow <Tile/>'s `value` prop.
-import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
+import { passwordNeedsSpoken } from '../lib/passwordNeeds';
+import { hitSlopFor } from '../lib/a11y';
+import { reportError } from '../lib/reportError';
 
 interface ThemeControls {
   /** The palette the member CHOSE. Not necessarily the one on screen — see
@@ -90,7 +89,22 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
       // choice that does not change the app under them on upgrade.
       setFollowState(f != null ? f === '1' : p == null);
       setContrastState(c === '1');
-    } catch {}
+    } catch (e) {
+      // Four preferences, and a read that fails leaves all four at the values
+      // above: the default palette, the accent the build ships with, follow-
+      // the-system on, and high contrast OFF. That last one is the reason this
+      // is reported rather than left silent. A member who turned high contrast
+      // on did so because they could not read the app without it, and this is
+      // the one failure here that hands them back the version they could not
+      // read — with no error to explain it, because there is no honest one to
+      // show: the app cannot say "your settings are missing" when it does not
+      // know whether any were stored.
+      //
+      // Nothing is written back on this path. The setters below only run when a
+      // member changes a setting, so an unreadable store is never overwritten
+      // with these defaults, and the next launch reads the real values again.
+      reportError('theme.prefs', e);
+    }
   })(); }, []);
 
   const setPalette = (k: string) => {
@@ -116,30 +130,41 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const shownPalette = follow ? paletteForScheme(palette, scheme) : palette;
   const base = paletteByKey(shownPalette);
 
-  // Each app is drawn in its own colour. Applied only to the DEFAULT palette:
-  // if somebody has deliberately chosen midnight or cream, that is their choice
-  // and this must not quietly override it. An explicit accent still wins over
-  // both, which is the white-label case a gym uses for its own branding.
-  //
-  // The test is on the CHOSEN palette, not the shown one. A member on the
-  // default who is following their phone into Clinical Light has still not
-  // chosen a palette, and the variant colour is still the right mark for their
-  // app; `brandInkFor` measures the label against it either way, so the light
-  // ground does not cost them a readable button.
-  const withVariant: Theme = palette === DEFAULT_PALETTE
-    ? { ...base, brand: VARIANT_ACCENT[VARIANT], brandInk: brandInkFor(VARIANT_ACCENT[VARIANT]) }
-    : base;
+  // The three apps were each drawn in their own colour here, on the default
+  // palette only. The approved board draws the family in one green, which is
+  // now the default palette's own brand, so there is nothing to override: the
+  // palette carries it, and its `brandInk` was measured against it in
+  // tokens.ts rather than recomputed here. A white-label accent still wins
+  // below, exactly as before.
+  const withVariant: Theme = base;
 
-  const branded: Theme = accent
-    ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }
-    : withVariant;
-  const theme: Theme = contrast ? highContrast(branded) : branded;
-  return (
-    <ThemeCtx.Provider value={{
-      palette, setPalette, accent, setAccent, follow, setFollow, contrast, setContrast,
-      scheme, shownPalette, palettes: PALETTES, theme,
-    }}>{children}</ThemeCtx.Provider>
-  );
+  const branded: Theme = accent ? withAccent(withVariant, accent) : withVariant;
+  // ── Why the theme and the four setters are held still ─────────────────────
+  //
+  // `theme` is built out of spreads, so it used to be a NEW object on every
+  // render of this provider — and `useTheme()` is called by very nearly every
+  // component in all three apps, most of which build their styles in a
+  // `useMemo` keyed on it. A fresh theme is a fresh everything, downstream, for
+  // a colour nobody changed. The four setters were plain arrows, so the context
+  // value was new on every render too; see src/ui/roster.tsx for what a
+  // consumer that keys an effect on such a value ends up doing.
+  //
+  // The setters go through a ref rather than being frozen in place, because
+  // `setPalette` and the rest read this render's state. Freezing them would
+  // freeze that state with them, which is the same defect one level down.
+  const theme = useMemo<Theme>(() => (contrast ? highContrast(branded) : branded), [contrast, shownPalette, palette, accent]); // eslint-disable-line react-hooks/exhaustive-deps -- `branded` is a pure function of exactly these four
+  const impl = useRef({ setPalette, setAccent, setFollow, setContrast });
+  impl.current = { setPalette, setAccent, setFollow, setContrast };
+  const setPaletteStable = useCallback((...a: Parameters<typeof setPalette>) => impl.current.setPalette(...a), []);
+  const setAccentStable = useCallback((...a: Parameters<typeof setAccent>) => impl.current.setAccent(...a), []);
+  const setFollowStable = useCallback((...a: Parameters<typeof setFollow>) => impl.current.setFollow(...a), []);
+  const setContrastStable = useCallback((...a: Parameters<typeof setContrast>) => impl.current.setContrast(...a), []);
+  const value = useMemo<ThemeControls>(() => ({
+    palette, setPalette: setPaletteStable, accent, setAccent: setAccentStable,
+    follow, setFollow: setFollowStable, contrast, setContrast: setContrastStable,
+    scheme, shownPalette, palettes: PALETTES, theme,
+  }), [palette, setPaletteStable, accent, setAccentStable, follow, setFollowStable, contrast, setContrastStable, scheme, shownPalette, theme]);
+  return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;
 }
 
 export function useTheme(): Theme {
@@ -152,49 +177,36 @@ export function useThemeControls(): ThemeControls {
   return c;
 }
 
-export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
-  const t = useTheme();
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: layout.gutter }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{title}</Text>
-        {subtitle ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{subtitle}</Text> : <View style={{ height: sp.md }} />}
-        {children}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
+/* ── Screen / Card / Tile / Row / Btn used to live here ────────────────────
+ *
+ * They were this file's original primitives and src/ui/kit.tsx superseded every
+ * one of them — Section, ListRow, KpiRow, Ghost and the rest, which 142 files
+ * import. Nothing had imported the five since, and `scripts/check-dead-exports.mjs`
+ * is what noticed: five exported components in src/ui that no non-test file
+ * mentioned. They are deleted rather than kept "in case", because a second set
+ * of primitives with the same names as the real ones is how a screen ends up
+ * drawn half in each.
+ *
+ * The `s` StyleSheet went with them — card/tile/row/btn were its only four
+ * entries — and so did the whole `../theme/scale` import, whose six names were
+ * used by nothing else in this file.
+ */
 
-export function Card({ children, tint }: { children: ReactNode; tint?: boolean }) {
-  const t = useTheme();
-  return <View style={[s.card, { backgroundColor: tint ? t.surface2 : t.surface, borderColor: t.ring }]}>{children}</View>;
-}
+/** The eye glyph's drawn size. Named so the icon and its touch target cannot
+ *  disagree — otherwise they are the same number written twice. */
+const EYE_SIZE = 20;
 
-export function Tile({ label, value, unit, foot }: { label: string; value: string; unit?: string; foot?: string }) {
-  const t = useTheme();
-  return (
-    <View style={[s.tile, { backgroundColor: t.surface, borderColor: t.ring }]}>
-      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink3, textTransform: 'capitalize' }}>{label}</Text>
-      <Text style={{ ...figure(24), color: t.ink, marginTop: 4 }}>
-        {value}{unit ? <Text style={{ ...ty.label, color: t.ink3 }}> {unit}</Text> : null}
-      </Text>
-      {foot ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{foot}</Text> : null}
-    </View>
-  );
-}
-
-export function Row({ children }: { children: ReactNode }) {
-  return <View style={s.row}>{children}</View>;
-}
-
-export function Btn({ label, onPress, primary }: { label: string; onPress?: () => void; primary?: boolean }) {
-  const t = useTheme();
-  return (
-    <Pressable onPress={onPress} style={[s.btn, { backgroundColor: primary ? t.brand : t.surface2, borderColor: t.ring }]}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: primary ? t.brandInk : t.ink }}>{label}</Text>
-    </Pressable>
-  );
-}
+/**
+ * The slop that brings the eye up to a reachable control.
+ *
+ * The Pressable has no width of its own: it is absolutely positioned with
+ * `end`, so it shrink-wraps the glyph. A hand-typed `hitSlop={10}` therefore
+ * bought a 40pt target — four short of the floor src/lib/a11y.ts sets and
+ * argues for ("used one-handed, mid-set, with a wet screen"). `hitSlopFor` is
+ * that arithmetic, so the two numbers cannot drift apart again if either moves.
+ * Vertically the control already spans the field and the extra costs nothing.
+ */
+const EYE_SLOP = hitSlopFor(EYE_SIZE);
 
 // Password input with a tappable eye toggle so people can check what they
 // typed before submitting. `style` should be the same object used for
@@ -225,7 +237,7 @@ export function PasswordField({
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
-          style={[fieldStyle, { paddingRight: 44 }]}
+          style={[fieldStyle, { paddingEnd: 44 }]}
           accessibilityLabel={accessibilityLabel}
           autoFocus={autoFocus}
         />
@@ -233,22 +245,15 @@ export function PasswordField({
           onPress={() => setVisible((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={visible ? 'Hide password' : 'Show password'}
-          hitSlop={10}
-          style={{ position: 'absolute', right: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
+          hitSlop={EYE_SLOP}
+          style={{ position: 'absolute', end: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
         >
-          <Icon name={visible ? 'eye-off' : 'eye'} size={20} color={t.ink3} />
+          <Icon name={visible ? 'eye-off' : 'eye'} size={EYE_SIZE} color={t.ink3} />
         </Pressable>
       </View>
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  card: { borderWidth: hairline, borderRadius: radius.md, padding: sp.lg, marginBottom: sp.md },
-  tile: { flex: 1, borderWidth: hairline, borderRadius: radius.md, padding: sp.lg },
-  row: { flexDirection: 'row', gap: sp.md, marginBottom: sp.md },
-  btn: { paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.sm, borderWidth: hairline, alignItems: 'center' },
-});
 
 /**
  * The password rules, shown while somebody types rather than after they are
@@ -268,25 +273,47 @@ export function PasswordRules({ value }: { value: string }) {
   const rules = passwordRules(value);
   const started = (value || '').length > 0;
   return (
-    <View style={{ marginTop: 8, marginBottom: 4 }} accessibilityRole="summary"
-      accessibilityLabel={`Password needs ${rules.filter((r) => !r.met).map((r) => r.label).join(', ') || 'nothing further'}`}>
-      <Text style={{ fontSize: 12, color: t.ink3, marginBottom: 4 }}>Needs:</Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {rules.map((r) => (
-          <View key={r.label} style={{
-            flexDirection: 'row', alignItems: 'center', gap: 4,
-            paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
-            backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
-          }}>
-            {/* The glyph itself is the channel — a tick or a bullet — and the
-                pill behind it still carries the good tint. The 11pt character
-                takes ink, because good as text does not clear 4.5:1. */}
-            <Text style={{ fontSize: 11, color: r.met ? t.ink2 : t.ink3 }}>
-              {r.met ? '✓' : '•'}
-            </Text>
-            <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>
-          </View>
-        ))}
+    <View style={{ marginTop: 8, marginBottom: 4 }}>
+      {/* ── One element, not eleven ──────────────────────────────────────────
+          The summary role and the label below used to sit on the OUTER View and
+          were read by nobody. React Native's `accessible` defaults to false on a
+          View (Pressable is the one that opts itself in), and a View that is not
+          an accessibility element does not get to speak for its children: the
+          role and the label are inert, the eleven Texts stay individually
+          focusable, and what VoiceOver actually offered was a swipe through
+          "Needs:", "bullet", "8 characters or more", "bullet", "a lowercase
+          letter" … — eleven stops, with the tick and the bullet announced as
+          punctuation and nothing anywhere saying which rules are MET. The one
+          attribute that carried that fact was the one the platform ignored.
+
+          `accessible` is the missing word. With it this is a single stop that
+          says what is still missing, once, in a sentence — and the tick/bullet
+          glyphs stop being read at all, which is right: they are the visual
+          channel for a fact the sentence now states outright.
+
+          The "should be accepted" note is deliberately OUTSIDE this group. A
+          label REPLACES its subtree rather than adding to it (see rule 3 of
+          scripts/check-a11y.mjs), so anything swept inside here is a sentence
+          the reader loses. */}
+      <View accessible accessibilityRole="summary" accessibilityLabel={passwordNeedsSpoken(rules)}>
+        <Text style={{ fontSize: 12, color: t.ink3, marginBottom: 4 }}>Needs:</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {rules.map((r) => (
+            <View key={r.label} style={{
+              flexDirection: 'row', alignItems: 'center', gap: 4,
+              paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
+              backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
+            }}>
+              {/* The glyph itself is the channel — a tick or a bullet — and the
+                  pill behind it still carries the good tint. The 11pt character
+                  takes ink, because good as text does not clear 4.5:1. */}
+              <Text style={{ fontSize: 11, color: r.met ? t.ink2 : t.ink3 }}>
+                {r.met ? '✓' : '•'}
+              </Text>
+              <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>
+            </View>
+          ))}
+        </View>
       </View>
       {started && rules.every((r) => r.met) ? (
         <Text style={{ fontSize: 12, color: t.ink3, marginTop: 6 }}>

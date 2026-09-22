@@ -9,13 +9,15 @@
 //
 // Tap to share, so it can be pasted into a bug report. Uses React Native's
 // built-in Share rather than expo-clipboard, which is not a dependency here.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, Share } from 'react-native';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import { useTheme } from './components';
 import { WhatsNewSheet } from './WhatsNew';
 import { sp, radius, hairline, type as ty, numeric } from '../theme/scale';
+import { END_ALIGN, FORWARD_CHAR } from './direction';
+import { lastUpdateCheck, watchUpdateCheck, updateCheckLine, type UpdateCheck } from '../lib/updateCheck';
 
 /** Short form of an update UUID — enough to match against `eas update:list`. */
 const shortId = (id: string | null): string => (id ? id.slice(0, 8) : '—');
@@ -29,15 +31,24 @@ export function BuildInfo() {
   // gives every app the same route to it.
   const [notesOpen, setNotesOpen] = useState(false);
 
+  // Whether this phone ASKED for an update, which is a different question from
+  // which bundle it is running and the one the rows below could never answer.
+  // A device stuck on an old bundle and a device that is genuinely current look
+  // identical here without it — see src/lib/updateCheck.ts for the morning that
+  // cost.
+  const [check, setCheck] = useState<UpdateCheck>(lastUpdateCheck);
+  useEffect(() => watchUpdateCheck(setCheck), []);
+
   const appVersion = Constants.expoConfig?.version ?? '—';
   // In development (and in Expo Go) there is no embedded update to report.
   const embedded = Updates.isEmbeddedLaunch;
   const rows: [string, string][] = [
-    ['App version', appVersion],
+    ['App Version', appVersion],
     ['Runtime', Updates.runtimeVersion ?? '—'],
     ['Channel', Updates.channel ?? 'none (dev build)'],
     ['Update', embedded ? 'embedded (no OTA applied)' : shortId(Updates.updateId)],
     ['Published', Updates.createdAt ? Updates.createdAt.toLocaleString() : '—'],
+    ['Last Check', updateCheckLine(check, (t) => new Date(t).toLocaleTimeString())],
   ];
 
   const share = async () => {
@@ -55,10 +66,10 @@ export function BuildInfo() {
         paddingHorizontal: sp.lg, paddingVertical: 13, marginBottom: sp.sm,
       }}>
       <View>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s new</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s New</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>What changed in {appVersion}</Text>
       </View>
-      <Text style={{ ...ty.body, color: t.ink3 }}>›</Text>
+      <Text style={{ ...ty.body, color: t.ink3 }}>{FORWARD_CHAR}</Text>
     </Pressable>
     <WhatsNewSheet visible={notesOpen} force onClose={() => setNotesOpen(false)} />
 
@@ -70,7 +81,7 @@ export function BuildInfo() {
           paddingVertical: 9, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
         }}>
           <Text style={{ ...ty.label, color: t.ink2 }}>{k}</Text>
-          <Text style={{ ...ty.label, ...numeric, color: t.ink, flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>{v}</Text>
+          <Text style={{ ...ty.label, ...numeric, color: t.ink, flexShrink: 1, textAlign: END_ALIGN }} numberOfLines={1}>{v}</Text>
         </View>
       ))}
       <Text style={{ ...ty.caption, color: copied ? t.brand : t.ink3, paddingVertical: sp.sm }}>

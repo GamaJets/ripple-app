@@ -23,6 +23,11 @@
 // picking better hex codes. So colour is never the only channel here: every
 // zone mark carries its NUMBER and its NAME, and colour merely confirms what
 // the text already said. Do not render a zone as a bare colour swatch.
+
+// The one answer in this codebase to "how old is this member". See ageFromDob
+// below for what happened while there were two.
+import { ageFromDob as ageFromDobExact } from './age';
+
 export type ZoneNo = 1 | 2 | 3 | 4 | 5;
 
 export interface ZoneDef {
@@ -50,8 +55,65 @@ export function zoneDef(no: ZoneNo): ZoneDef { return BY_NO[no]; }
 export function zoneColor(no: ZoneNo): string { return BY_NO[no].color; }
 export function zoneName(no: ZoneNo): string { return BY_NO[no].name; }
 
+/**
+ * The age this scale falls back to when the app does not know the member's.
+ *
+ * It is thirty because that is what this function has always used, and it is
+ * named because the number was doing something nobody had said out loud. A max
+ * heart rate of 190 puts zone 5 at 175 bpm; a fifty-five-year-old's own scale
+ * puts it at 152. So a member the app had no date of birth for was being told
+ * to push for a figure 23 bpm above the top of their range — on the one screen
+ * in this app that asks somebody to work harder, at the age where that is least
+ * safe to be wrong about.
+ *
+ * The guess is kept rather than the zones withheld, for the reason
+ * src/lib/unitPreference.ts sets out at length about units: a member mid-set
+ * with a live bpm on screen and no colour on it is a worse product AND a worse
+ * prompt to go and fill the field in. What made it a defect was never that
+ * thirty is a guess — it was that the guess was indistinguishable from a
+ * measurement. `hrScaleNote` is what keeps the two apart, and every screen that
+ * prints a zone prints it.
+ */
+export const ASSUMED_AGE = 30;
+
+/** Whether the zones are drawn against the member's OWN age or against
+ *  `ASSUMED_AGE`. Never guessed at by a caller — a screen asking "is this a
+ *  real age" and answering it with its own `age > 0` is a second copy of the
+ *  rule that can disagree with this one. */
+export type HrScaleBasis = 'age' | 'assumed';
+
+export function hrScaleBasis(age?: number | null): HrScaleBasis {
+  return typeof age === 'number' && Number.isFinite(age) && age > 0 ? 'age' : 'assumed';
+}
+
+/**
+ * Estimated maximum heart rate, on the studio's own 220 − age.
+ *
+ * Deliberately still 220 − age and not Tanaka (208 − 0.7 × age): the five zones
+ * at the top of this file are the Orange-Theory scale, the percentages are that
+ * scale's, and swapping the formula underneath them would move every band on
+ * every member's history by a few bpm to be differently approximate. It is an
+ * ESTIMATE either way, which is what `hrScaleNote` says.
+ */
 export function maxHr(age?: number | null): number {
-  return 220 - (age && age > 0 ? age : 30);
+  return 220 - (hrScaleBasis(age) === 'age' ? (age as number) : ASSUMED_AGE);
+}
+
+/**
+ * The line a screen shows beside a zone it drew without knowing the age.
+ *
+ * Null when the age is real, so a screen can render it unconditionally and say
+ * nothing to the member it is right for — the same rule `deviceUnitNote` and
+ * `localeNote` follow, and for the same reason: a line of apology on every
+ * screen is a nag that gets no field filled in.
+ *
+ * It names the number as well as the fault, because "your zones may be wrong"
+ * with nothing to act on is worse than silence. The route is stated in the
+ * words of the screen that fixes it.
+ */
+export function hrScaleNote(age?: number | null): string | null {
+  if (hrScaleBasis(age) === 'age') return null;
+  return `These zones are worked out from an age of ${ASSUMED_AGE}, because your date of birth is not on your profile. They are a guess, not your scale. Add it in Profile and they redraw around you.`;
 }
 
 /** Which zone a bpm reading falls in. */
@@ -71,6 +133,40 @@ export const zoneKey = (no: ZoneNo): keyof ZoneSeconds => KEY[no];
 export const zoneSecondsTotal = (z: ZoneSeconds): number => z.z1 + z.z2 + z.z3 + z.z4 + z.z5;
 
 /**
+ * The part of a session that is NOT in the zone breakdown.
+ *
+ * The elapsed clock is wall time — `Date.now()` minus the start minus anything
+ * paused — so it stays true whatever the phone is doing. The zone breakdown is
+ * banked a second at a time by a timer, and iOS stops delivering timers to an
+ * app that is not on screen. So a 46-minute ride with the phone in a pocket
+ * came back as 46:07 on the clock and 12:56 across the five zones, and the
+ * screen printed both without a word about why they disagree.
+ *
+ * The gap is not guessable. While the app was away there were no readings, so
+ * there is no zone to credit — and crediting the last one seen would invent the
+ * evidence, which is the one thing this figure must not do: splat points are
+ * minutes at zone 4 or above, and a fabricated minute is a fabricated splat.
+ *
+ * So it is reported instead. `zoneSecondsTotal + uncountedSeconds = elapsed`,
+ * which is what makes the two numbers on the screen add up to the same session.
+ * It also covers the other way to bank nothing — the session on screen with no
+ * heart rate arriving at all — because to a reader those are the same fact:
+ * this much of it was not measured.
+ */
+export function uncountedSeconds(z: ZoneSeconds, elapsedSec: number): number {
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return 0;
+  return Math.max(0, Math.round(elapsedSec) - zoneSecondsTotal(z));
+}
+
+/** Below this the gap is timer jitter rather than a missing stretch of the
+ *  session, and saying so would be noise on every ride. */
+export const UNCOUNTED_FLOOR_SEC = 5;
+
+/** What the screen says when a real part of the session was never measured. */
+export const UNCOUNTED_NOTE =
+  'Zones are counted only while this session is on screen and a heart rate is arriving. The rest of the time is not credited to any zone, because nothing was measured to say which one it was.';
+
+/**
  * Splat points — one per whole minute spent at or above zone 4, the same rule a
  * studio uses. Returns 0 rather than a fraction: a partial minute is not a splat.
  */
@@ -80,13 +176,43 @@ export function splatPoints(z: ZoneSeconds): number {
 
 export interface HrSample { t: string; bpm: number }
 
-/** Age from a date-of-birth string (YYYY-MM-DD or ISO). null if unparseable. */
+/**
+ * Age from a date-of-birth string (YYYY-MM-DD or ISO). null if unparseable.
+ *
+ * ── Why this delegates rather than doing the arithmetic ───────────────────
+ *
+ * It used to be `Math.round((now − Date.parse(dob)) / 365.25 days)`, and there
+ * are two things wrong with that, one of which is not a rounding nicety.
+ *
+ * `Math.round` rounds to the NEAREST year, so every member more than six
+ * months past their last birthday was aged UP by one. Somebody born in
+ * January 1990 is 36 in September 2026 and this function said 37. That is not
+ * a display problem here: `maxHr` is 220 − age and every zone boundary is a
+ * percentage of it, so the whole scale on the Recovery screen and on the
+ * session heart-rate sheet sat one beat low.
+ *
+ * Worse, it disagreed with the app's OTHER answer to the same question.
+ * src/lib/age.ts counts whole years and rolls over on the birthday, and
+ * app/(client)/workouts.tsx — the live session runner, where a member watches
+ * the colour change mid-set — has always used it. So one member had two ages
+ * and two zone scales: a reading of 154 bpm was "Zone 3 · Base" inside the
+ * session and "Zone 4 · Push" on Recovery a tap later, and the splat points
+ * the two screens counted for the same hour did not agree either.
+ *
+ * `Date.parse` on a bare `YYYY-MM-DD` is also UTC midnight, which is the
+ * previous day west of Greenwich — the bug src/lib/localDate.ts exists for,
+ * and which `src/lib/age.ts` already reads through `dateParts` to avoid.
+ *
+ * There is one age in this codebase and it is that one. What stays here is the
+ * sanity bound: an unborn or 120-year-old member is a broken row rather than a
+ * scale to draw somebody's training zones against, and `null` sends the caller
+ * to `ASSUMED_AGE` with `hrScaleNote` saying so.
+ */
 export function ageFromDob(dob?: string | null, nowMs: number = Date.now()): number | null {
   if (!dob) return null;
-  const b = Date.parse(dob);
-  if (!isFinite(b)) return null;
-  const yrs = (nowMs - b) / (365.25 * 24 * 3600 * 1000);
-  return yrs > 0 && yrs < 120 ? Math.round(yrs) : null;
+  const age = ageFromDobExact(String(dob), new Date(nowMs));
+  if (age == null || !Number.isFinite(age)) return null;
+  return age > 0 && age < 120 ? age : null;
 }
 
 /** Seconds in each zone, inferred from the gap between consecutive samples. */
@@ -102,6 +228,61 @@ export function timeInZones(samples: HrSample[], age?: number | null): ZoneSecon
     out[KEY[zoneOf(pts[i].bpm, age)]] += dt;
   }
   return out;
+}
+
+/**
+ * The zone breakdown rebuilt from the WATCH's own samples, over a known window.
+ *
+ * `timeInZones` above is for a chart: it takes whatever series it is handed and
+ * assumes ten seconds for the last point, because a chart has no window and no
+ * stake in the total. This one is for the record. It is given the session's own
+ * start and end, so the last sample runs to the end of the session rather than
+ * to a flat guess, and nothing outside the window is credited to it.
+ *
+ * It exists because banking a second at a time cannot survive the phone leaving
+ * the screen — iOS stops delivering timers, and a 46-minute ride came back with
+ * 12:56 across the zones. The watch was recording the whole time; only our
+ * counting stopped. So the counting is thrown away and the measurement is used.
+ *
+ * A GAP IS NOT CREDITED. Where consecutive samples are more than
+ * `MAX_SAMPLE_GAP_SEC` apart the watch was not reporting — taken off, between
+ * workouts, out of range — and the zone it was in is not a fact anybody has.
+ * Those seconds fall out of the total and `uncountedSeconds` reports them,
+ * which is the same answer this file gives everywhere else: say what was
+ * measured, and say plainly how much was not.
+ *
+ * Returns null rather than an empty breakdown when there is nothing to rebuild
+ * from, so a caller can keep what it already had instead of replacing a real
+ * count with zeros. One sample is also null: a single reading says what the
+ * heart was doing at one instant and nothing about how long it did it.
+ */
+export const MAX_SAMPLE_GAP_SEC = 120;
+
+export function zonesFromSamples(
+  samples: HrSample[], age: number | null | undefined, startISO: string, endISO: string,
+): ZoneSeconds | null {
+  const t0 = Date.parse(startISO); const t1 = Date.parse(endISO);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
+
+  const pts = samples
+    .map((s) => ({ ms: Date.parse(s.t), bpm: s.bpm }))
+    .filter((s) => Number.isFinite(s.ms) && Number.isFinite(s.bpm) && s.bpm > 0)
+    .filter((s) => s.ms >= t0 && s.ms <= t1)
+    .sort((a, b) => a.ms - b.ms);
+  if (pts.length < 2) return null;
+
+  const out = emptyZoneSeconds();
+  for (let i = 0; i < pts.length; i++) {
+    const until = i + 1 < pts.length ? pts[i + 1].ms : t1;
+    const dt = (until - pts[i].ms) / 1000;
+    if (!Number.isFinite(dt) || dt <= 0) continue;
+    // Beyond the cap the watch was not reporting, and what it was not
+    // reporting is not something to file under a zone.
+    if (dt > MAX_SAMPLE_GAP_SEC) continue;
+    out[KEY[zoneOf(pts[i].bpm, age)]] += dt;
+  }
+  for (const k of ['z1', 'z2', 'z3', 'z4', 'z5'] as const) out[k] = Math.round(out[k]);
+  return zoneSecondsTotal(out) > 0 ? out : null;
 }
 
 /** Low / high / average bpm across a series (null if empty). */

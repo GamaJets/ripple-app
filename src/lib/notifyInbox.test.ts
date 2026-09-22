@@ -42,6 +42,11 @@ for (const p of KNOWN_PUSHES.filter((x) => [
   'Session booked', 'Session cancelled', 'A new offer', 'New booking',
   'Your coach asked about an injury', 'Your coach asked for your intake',
   'The slot you were waiting for is yours', 'A client set a personal best',
+  // The two halves of an answered coaching request. Nothing else in the
+  // product ever tells a client their request was answered — `coach_requests`
+  // is not rendered on the client side once the row leaves 'pending' — and a
+  // declined one has no surface at all.
+  'Your coaching request was accepted', 'Your coaching request was declined',
 ].includes(x.title))) {
   ok(inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is worth an inbox row`);
 }
@@ -55,6 +60,16 @@ for (const p of KNOWN_PUSHES.filter((x) => /message/i.test(x.title))) {
 for (const p of KNOWN_PUSHES.filter((x) => /just opened|has read your/i.test(x.title))) {
   ok(!inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is noise in an inbox`);
 }
+// Dropped: the three whose row a trigger writes inside the same transaction.
+// Not a judgement about whether the news is worth keeping — it is worth
+// keeping, and it IS kept; it is written by supabase/parts/158 and 493 rather
+// than by recordInbox, and a second copy would read as a second event.
+for (const p of KNOWN_PUSHES.filter((x) => [
+  'New coaching request', 'A class you booked is not running', 'Classes you booked are not running',
+].includes(x.title))) {
+  ok(!inboxDecision(p.title, p.body, p.route).record,
+    `“${p.title}” from ${p.where} must NOT be recorded — a trigger already wrote that row`);
+}
 
 // The catalogue is the thing the two rules above are read against, so it has to
 // still contain them. An empty filter passes a `for` loop silently.
@@ -62,21 +77,37 @@ ok(KNOWN_PUSHES.length >= 20, 'the catalogue still lists every push in the repo'
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
 ok(byTitle('The slot you were waiting for is yours').length === 2,
   'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
-// Seven of the twenty: four that route to a chat thread (two from
-// messaging.ts, one from the coach's broadcast, one from the coach's nudge, all
-// four already written by part 26), two slot races, and one read receipt.
-// Stated as a total so that a rule which starts dropping something it did not
-// drop before fails here rather than quietly emptying somebody's inbox.
+// Six of the twenty-five: two slot races, one read receipt, and three whose row
+// a database trigger writes inside the same transaction (a coaching request by
+// part 158, a called-off class by part 493, singular and plural). Stated as a
+// total so that a rule which starts dropping something it did not drop before
+// fails here rather than quietly emptying somebody's inbox.
+//
+// It was TEN, and the four that went were the chat pushes: two from
+// messaging.ts, one from the coach's broadcast and one from the coach's nudge.
+// They are not classified differently — they are not SENT any more. Each wrote
+// a `messages` row and then pushed it, while part 26's trigger was already
+// pushing the same row, so every message arrived on the phone twice. The row
+// rule that dropped them here is what made the duplicate invisible; it stays,
+// and the loop below still asserts it against the two `SERVER_WRITTEN` chat
+// rows and the hand-written cases underneath.
 //
 // The three added when the notice fan-out and the invoice notification were
 // built are all on the recorded side, which is the whole point of them: they
 // are the kinds nothing else in the product tells anybody about. So is the
 // personal best: a coach who missed the banner learns about a record only by
-// opening that client's training screen and reading the sets.
-eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 7,
-  'seven of the twenty pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 13,
-  'the other thirteen are');
+// opening that client's training screen and reading the sets. So are the two
+// halves of an answered coaching request, for the sharper version of the same
+// reason: a declined client has no screen anywhere that would ever show them
+// the answer.
+// The four added when the catalogue was read against the tree — 'A session
+// request', its two answers, and a session that MOVED — are all recorded, by
+// the default and correctly: nothing else tells either party any of them
+// happened, and a moved appointment is the one a missed banner costs most.
+eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 6,
+  'six of the twenty-five pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 19,
+  'the other nineteen are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 
@@ -101,6 +132,23 @@ eq(inboxDecision('A nudge from your coach', 'How is your week going?', '/(client
 // And the converse: the word "message" somewhere else is not a chat message.
 eq(inboxDecision('Message from your coach', 'Session times move next week.', '/(client)/calendar').record, true,
   'a push about the calendar is recorded whatever its heading says');
+
+/* ── and the two TITLE rules are scoped to their own routes ────────────── */
+
+// The titles the slot-race and read-receipt rules were written about are
+// literals in this repository. The titles they are APPLIED to are not: an owner
+// types the heading on app/(owner)/promotions.tsx, and `noticeNotification`
+// puts the gym's own name inside 'A notice from …'. Unscoped, a gym announcing
+// a new room silently reached every member with no inbox row behind the push.
+eq(inboxDecision('Our new studio just opened', '25% off with code OPEN25.', '/(client)/explore').record, true,
+  'an owner’s offer is recorded however they worded it');
+eq(inboxDecision('A notice from Just Opened Fitness', 'We close at 4pm on Sunday.', '/(client)/notices').record, true,
+  'a gym whose NAME trips the slot rule still gets its notice recorded');
+// The refusals themselves are unchanged, on the routes those pushes carry.
+eq(inboxDecision('A slot just opened', '6:30 PM on Tue is available.', '/(client)/calendar').record, false,
+  'the slot race is still refused on the route it is actually sent with');
+eq(inboxDecision('Your coach has read your injuries', 'They have seen what you disclosed.', '/(client)/injuries').record, false,
+  'the read receipt is still refused on the injuries route');
 
 /* ── a row with nothing to show is not written ─────────────────────────── */
 
@@ -131,6 +179,9 @@ eq(inboxIcon('/(client)/injuries'), 'heart', 'an injury ask is drawn as a heart'
 // it is a row that looks unclassified in a list where every neighbour is.
 eq(inboxIcon('/(client)/intake'), 'pencil', 'an intake ask is drawn as something to fill in');
 eq(inboxIcon('/(client)/notices'), 'info', 'a notice from a gym or a coach is drawn as a notice');
+eq(inboxIcon('/(client)/request-session'), 'calendar', 'a yes or no about an hour is drawn with the calendar');
+eq(inboxIcon('/(client)/my-coach'), 'people', 'an accepted coaching request is drawn as people');
+eq(inboxIcon('/(client)/trainers'), 'people', 'and so is a declined one');
 eq(inboxIcon('/(owner)/dashboard'), 'bell', 'an unmapped route falls back to the bell');
 eq(inboxIcon(null), 'bell', 'no route falls back to the bell');
 eq(inboxIcon(''), 'bell', 'an empty route falls back to the bell');
@@ -140,10 +191,40 @@ eq(inboxIcon('/(client)/calendar-archive'), 'bell', 'the icon map matches whole 
 
 // Every icon the map can yield has to be one the inbox is able to draw. This is
 // a type-level fact made runtime-checkable, because the map is data.
-const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil'];
+// 'people' and 'grid' joined the list when a push started using them. They were
+// always in `InboxIcon` and always drawn by src/ui/Icon.tsx — the routes that
+// yield them ('/(trainer)/dashboard', '/(trainer)/payments') had only ever been
+// reached by SERVER_WRITTEN rows, which this assertion does not cover. An
+// answered coaching request is the first PUSH to open one.
+const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil', 'people', 'grid'];
 for (const p of KNOWN_PUSHES) {
   ok(DRAWABLE.includes(inboxIcon(p.route)), `${p.where} yields a drawable icon`);
 }
+
+// ── and the bell is not a drawable icon, it is the absence of one ────────
+//
+// The loop above passed on 'A session request' for a year. The bell IS
+// drawable, so "yields a drawable icon" is true of a route nobody has ever put
+// in the table — and this file says in four separate comments that the bell
+// means "we have no idea what this is". So the assertion that catches a missing
+// entry has to be about the bell specifically, and it has to be an EQUALITY:
+// `every belled row is deliberate` is unfalsifiable if the list is derived from
+// the same table it is checking.
+//
+// Routeless rows are excluded rather than listed. A row with nowhere to go is
+// what the bell is for, and three server-written kinds are routeless for
+// reasons their own parts argue at length (parts 146 and 159).
+//
+// One ROUTED kind is left, and it is the only one: '/(trainer)/nudges' is
+// 'bell' in TRAINER_NAV and 'bell' in the table above, deliberately and with
+// its own note. Anything else appearing here is a route somebody added and
+// nobody gave a shape to.
+const BELLED_ROUTES = [...new Set([
+  ...KNOWN_PUSHES.filter((p) => p.route && inboxDecision(p.title, p.body, p.route).record && inboxIcon(p.route) === 'bell').map((p) => p.route!),
+  ...SERVER_WRITTEN.filter((s) => s.route && inboxIcon(s.route) === 'bell').map((s) => s.route!),
+])].sort();
+eq(BELLED_ROUTES.join(' | '), '/(trainer)/nudges',
+  'the only routed notification drawn with the generic bell is the one the icon table names on purpose');
 
 /* ── where a stored row may send you ───────────────────────────────────── */
 

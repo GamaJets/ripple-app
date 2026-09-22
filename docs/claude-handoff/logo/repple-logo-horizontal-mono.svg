@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" role="img" aria-labelledby="title desc">
+  <title id="title">Repple monochrome</title>
+  <desc id="desc">One-color Repple horizontal logo for print, engraving, and single-color reproduction</desc>
+  <g fill="#000000" fill-rule="evenodd">
+    <g transform="translate(0 9) scale(1.2)">
+      <path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z"/>
+      <path d="M33 4h18l-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z"/>
+    </g>
+    <path d="M78 52V12h19c10 0 16 5 16 13 0 5-3 10-8 12l11 15h-12L95 39h-7v13H78Zm10-31v10h8c4 0 7-2 7-5s-3-5-7-5h-8Z"/>
+    <path d="M123 12h34v9h-24v6h22v9h-22v7h25v9h-35V12Z"/>
+    <path d="M168 52V12h19c11 0 17 5 17 14s-6 14-17 14h-9v12h-10Zm10-31v10h8c5 0 8-2 8-5s-3-5-8-5h-8Z"/>
+    <path d="M213 52V12h19c11 0 17 5 17 14s-6 14-17 14h-9v12h-10Zm10-31v10h8c5 0 8-2 8-5s-3-5-8-5h-8Z"/>
+    <path d="M258 12h10v31h22v9h-32V12Z"/>
+    <path d="M298 12h34v9h-24v6h22v9h-22v7h25v9h-35V12Z"/>
+  </g>
+</svg>

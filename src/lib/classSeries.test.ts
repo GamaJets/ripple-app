@@ -17,7 +17,7 @@
 //      booked the old one turn up an hour out. `test:zones` runs this suite
 //      under three timezones for lines like that one.
 import {
-  seriesKey, seriesOf, weeksLater, duplicatePlan, duplicateBrief,
+  atTimeOfDay, daysLater, seriesKey, seriesOf, weeksLater, duplicatePlan, duplicateBrief,
   duplicateBlocker, duplicateOutcome,
   type SeriesClass,
 } from './classSeries';
@@ -179,6 +179,45 @@ const mixed: SeriesClass[] = [
 ];
 eq(seriesOf(term[0], mixed).length, 3, 'a different class at the same hour is not part of this series');
 eq(seriesOf(term[0], mixed)[0].id, 't0', 'and the series comes back oldest first');
+
+/* ── correcting a class that was typed in at the wrong time ────────────── */
+
+// The Manage sheet on app/(trainer)/classes.tsx builds a corrected start out of
+// these two, in this order. Neither may move the clock by accident: a class
+// nudged a day and landing an hour out is a room full of people at the wrong
+// time, which is the same failure the Repeat loop had.
+const sixPm = at(2026, 3, 3, 18);
+
+eq(new Date(daysLater(sixPm, 1)!).getHours(), 18, 'a day later is the same hour');
+eq(new Date(daysLater(sixPm, -1)!).getHours(), 18, 'and so is a day earlier');
+eq(new Date(daysLater(sixPm, 1)!).getDate(), 4, 'the date moves forward');
+eq(new Date(daysLater(sixPm, -1)!).getDate(), 2, 'and back');
+eq(daysLater(sixPm, 0), sixPm, 'no nudge is no change at all');
+eq(daysLater('not a date', 1), null, 'an unreadable start moves nowhere');
+eq(daysLater(sixPm, Number.NaN), null, 'and neither does a nudge that is not a number');
+
+// The whole point of `setDate`. Every zone that has a clocks change has one of
+// these fortnights in it, and the suite runs under six.
+for (const around of [at(2026, 3, 28, 18), at(2026, 10, 30, 18), at(2026, 11, 6, 18)]) {
+  for (const n of [-7, -1, 1, 7]) {
+    eq(new Date(daysLater(around, n)!).getHours(), 18,
+      `a 6pm class nudged ${n} days around a clocks change is still at 6pm`);
+  }
+}
+
+const moved = atTimeOfDay(sixPm, 6, 30);
+eq(new Date(moved!).getHours(), 6, 'the hour is set');
+eq(new Date(moved!).getMinutes(), 30, 'and the minute');
+eq(new Date(moved!).getDate(), 3, 'and the day is left alone');
+eq(new Date(moved!).getSeconds(), 0, 'a class starts on the minute');
+
+// A stepper that wraps must not roll a class into tomorrow, which is a class
+// the members who booked it cannot find.
+eq(new Date(atTimeOfDay(sixPm, 24, 0)!).getDate(), 3, 'hour 24 stays on the same day');
+eq(new Date(atTimeOfDay(sixPm, 24, 0)!).getHours(), 0, 'as midnight');
+eq(new Date(atTimeOfDay(sixPm, -1, 0)!).getHours(), 23, 'and a negative hour wraps within the day');
+eq(new Date(atTimeOfDay(sixPm, 18, 60)!).getMinutes(), 0, 'minute 60 is the top of the hour');
+eq(atTimeOfDay('not a date', 6, 30), null, 'an unreadable start has no time of day to set');
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

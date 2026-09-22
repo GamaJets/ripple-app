@@ -11,9 +11,10 @@ import { useState } from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Rect, Line, Circle } from 'react-native-svg';
 import { useTheme } from './components';
+import type { Theme } from '../theme/tokens';
 import { sp, radius, hairline, type as ty, numeric, value } from '../theme/scale';
 import {
-  type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr,
+  type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr, hrScaleNote,
   ZONE_NOS, zoneName, zoneKey, emptyZoneSeconds, zoneSecondsTotal,
   type ZoneNo, type ZoneSeconds,
 } from '../lib/hr';
@@ -50,6 +51,42 @@ const mmss = (sec: number) => {
   const m = Math.round(sec / 60);
   return m >= 1 ? `${m} min` : `${Math.round(sec)}s`;
 };
+
+/**
+ * One of the three figures above the chart — low, average, high.
+ *
+ * The figure stays ink; the zone it belongs to is carried by a dot beside the
+ * label, never by colouring the number itself.
+ *
+ * A module-scope PLAIN FUNCTION, called as `{stat('Low', showLow, t)}`, and not
+ * a component written as `<Stat label="Low" …/>`. Declared inside the render
+ * body it was a new function object on every render, so React saw a different
+ * element TYPE each time and unmounted and remounted all three figures rather
+ * than updating them.
+ *
+ * This one is NOT a screen. `HrZoneChart` is shared: it is rendered directly by
+ * app/(client)/recovery.tsx and by src/ui/SessionHrSheet.tsx, which in turn is
+ * mounted by app/(client)/activity.tsx and app/(client)/workouts.tsx — so the
+ * teardown happened on four separate screens, and on `workouts.tsx`, which
+ * re-renders while a session is being logged. The chart also holds its own
+ * `setW` from `onLayout`, so a remount is not free of consequences even for
+ * static text. Nothing in `stat` holds a TextInput or an accessibility prop —
+ * the `accessible` label belongs to the `<Svg>` below and is untouched — so
+ * what this cost was work, not a member's caret and not a wrong figure.
+ *
+ * At module scope because it closes over nothing from the render body: `value`
+ * and `ty` are module imports and the theme is passed. No `key`: the three
+ * calls are written out, not mapped.
+ */
+const stat = (label: string, v: number, t: Theme, tone?: string) => (
+  <View style={{ alignItems: 'center', flex: 1 }}>
+    <Text style={{ ...value(19), color: t.ink }}>{v}</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+      {tone ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} /> : null}
+      <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{label}</Text>
+    </View>
+  </View>
+);
 
 export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, subtitle, height = 172 }: {
   samples: HrSample[];
@@ -102,18 +139,6 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const showAvg = hasSeries ? stats!.avg : (typeof avgBpm === 'number' ? avgBpm : null);
   const showHigh = hasSeries ? stats!.high : (typeof maxBpm === 'number' ? maxBpm : null);
 
-  // The figure stays ink; the zone it belongs to is carried by a dot beside the
-  // label, never by colouring the number itself.
-  const Stat = ({ label, value: v, tone }: { label: string; value: number; tone?: string }) => (
-    <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ ...value(19), color: t.ink }}>{v}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-        {tone ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} /> : null}
-        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{label}</Text>
-      </View>
-    </View>
-  );
-
   return (
     <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
       {title ? <Text style={{ ...ty.head, color: t.ink }}>{title}</Text> : null}
@@ -121,15 +146,22 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
 
       {(showLow != null || showAvg != null || showHigh != null) ? (
         <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 12 }}>
-          {showLow != null ? <Stat label="Low" value={showLow} /> : null}
-          {showAvg != null ? <Stat label="Avg" value={showAvg} tone={t.brand} /> : null}
-          {showHigh != null ? <Stat label={hasSeries ? 'High' : 'Max'} value={showHigh} tone={t.crit} /> : null}
+          {showLow != null ? stat('Low', showLow, t) : null}
+          {showAvg != null ? stat('Avg', showAvg, t, t.brand) : null}
+          {showHigh != null ? stat(hasSeries ? 'High' : 'Max', showHigh, t, t.crit) : null}
         </View>
       ) : <View style={{ height: 12 }} />}
 
       {hasSeries ? (
         <View onLayout={(e) => setW(Math.max(200, e.nativeEvent.layout.width))}>
-          <Svg width={w} height={height} accessibilityLabel={`Heart-rate chart, low ${stats!.low}, average ${stats!.avg}, high ${stats!.high} bpm`}>
+          {/* `accessible` as well as the label. An <Svg> is a plain view to
+              the accessibility tree and a label on its own does not make it a
+              stop — react-native-svg can also surface its child shapes as
+              separate nodes on Android, which turns one chart into a hundred
+              unnamed ones. Marked as a single element, it is one stop that
+              states the three figures the picture is drawn from. */}
+          <Svg width={w} height={height} accessible
+            accessibilityLabel={`Heart-rate chart, low ${stats!.low}, average ${stats!.avg}, high ${stats!.high} bpm`}>
             {bands.map((b) => {
               const yTop = yOf(Math.min(b.hiBpm, hi));
               const yBot = yOf(Math.max(b.loBpm, lo));
@@ -171,6 +203,20 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
           are too close together to carry meaning alone — see src/lib/hr.ts. */}
       <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <ZoneBoard seconds={tiz} current={peakZone} />
+        {/* ── whose scale this is ────────────────────────────────────────
+            `hrScaleNote` was written for exactly this and its own header says
+            "every screen that prints a zone prints it". The tree had one
+            caller. Every band drawn above is `220 − age`, and with no date of
+            birth on the profile that age is an assumed thirty — so a
+            fifty-five-year-old read a full coloured scale about twenty-five bpm
+            out, presented as their own.
+
+            It lives on the CHART rather than on each screen, so a screen cannot
+            forget it: this component is what draws the bands. Null when the age
+            is real, which is most people. */}
+        {hrScaleNote(age) ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{hrScaleNote(age)}</Text>
+        ) : null}
       </View>
     </View>
   );

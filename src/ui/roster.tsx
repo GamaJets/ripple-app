@@ -25,15 +25,39 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
+import { excludedAllergens, readAllergenColumn } from '../lib/meals';
+import {
+  clientModesKey, readClientModes, writeClientModes, LEGACY_CLIENT_MODES_KEY,
+} from '../lib/clientModeOverrides';
+import { accountStateStep } from '../lib/accountScopedState';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+// A page of clients is up to ROW_CAP uuids, and five reads here used to put all
+// of them into one `.in()`. See the note above the profiles read below.
+import { readByIds } from '../lib/idLookup';
+import { readCappedByIds } from '../lib/cappedByIds';
 import { useAuthRevision } from './authRevision';
+// Who is signed in, and — when nobody is — WHICH of the two reasons it was.
+// `supabase.auth.*` does not reject on a dropped connection: it resolves
+// `{ data: { user: null }, error }` for any AuthError, and offline, DNS, a
+// captive portal and a 5xx are all branded as one. So a discarded `error` here
+// reads a basement weights room as a sign-out. The discrimination is written
+// once, in src/lib/authReadFate.ts, and joined to a uid in src/lib/authedUid.ts;
+// this file imports it rather than restating it.
+import { uidFromAuth } from '../lib/authedUid';
 import { endCoaching, endCoachingWithReason, type EndReason } from '../lib/endCoaching';
 import { reportError } from '../lib/reportError';
 import { activeInjuries, type Injury } from '../lib/injuries';
 import { mergeRoster } from '../lib/rosterMerge';
+// Whether a per-client figure may be spoken at all, given how completely the
+// read behind it landed. Two ways to come up short — a capped page and a read
+// that did not happen — and only one of them was being carried here.
+import { lastActiveCell, weightDeltaCell, type StatReach } from '../lib/rosterStatReach';
+// The rule for the `unread` column, from the module that owns it. See the
+// read below: this roster used to parse the same column beside it, laxly.
+import { rowToThread } from '../lib/coachThreads';
 
 /**
  * Whether a disclosure is new enough that a coach has probably not seen it.
@@ -50,7 +74,6 @@ const isRecent = (at: string | undefined): boolean => {
 };
 
 let SEQ = 900;
-const MODE_KEY = 'repple.clientModes';
 
 interface RosterValue {
   roster: RosterClient[];
@@ -84,8 +107,15 @@ interface RosterValue {
    * asked why must not be made to invent an answer.
    */
   removeClient: (id: string, reason?: EndReason | null, note?: string | null) => Promise<boolean>;
-  /** Resolves true only when the classification was stored server-side. It is
-   *  always kept on this device, so false means "this phone only", not "lost". */
+  /** Resolves true only when the classification was stored server-side.
+   *
+   *  False no longer means "kept on this phone" unconditionally. The device copy
+   *  is account-scoped now, and it is written only when there is a signed-in
+   *  coach to scope it to AND the read off their key landed — so a tap made
+   *  before the roster has hydrated, or after a refused read, applies for this
+   *  session and is not persisted. That is deliberate: the alternative is a
+   *  shared key, which is the defect, or an empty map written over the coach's
+   *  own classifications, which loses them. */
   setClientMode: (id: string, mode: CoachedMode) => Promise<boolean>;
   /** Re-read the roster from the server. Screens call this on focus, so an
    *  injury a client recorded a minute ago is on the coach's page by the time
@@ -110,7 +140,114 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const [modeOverrides, setModeOverrides] = useState<Record<string, CoachedMode>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
-  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem(MODE_KEY); if (raw) setModeOverrides(JSON.parse(raw)); } catch { /* local classification only; the roster itself is unaffected */ } })(); }, []);
+  // ── Which coach's classifications these are ───────────────────────────────
+  //
+  // They used to live under one unqualified key, `repple.clientModes`, read once
+  // on mount and written by every tap. A key with no account in it is a key the
+  // next account inherits, and nothing cleared this one — so on a gym's shared
+  // handset the next coach to sign in read the previous coach's classification
+  // of any client the two of them share, in place of the server's own mode. The
+  // key is account-scoped now; src/lib/clientModeOverrides.ts holds the shape,
+  // the parsing, and why the old blob is dropped rather than migrated.
+  //
+  // Two refs rather than two pieces of state, because the writers below run from
+  // event handlers and must see the current values rather than the ones from the
+  // render that created them.
+  //
+  //   · `modesKey`      — the key this coach's overrides belong under. Null
+  //                       means there is no account to scope them to, and a null
+  //                       means DO NOT WRITE. There is no shared key to fall
+  //                       back to; falling back is the defect.
+  //   · `modesHydrated` — whether the read off that key LANDED. An empty map
+  //                       from a refused read is not "this coach has classified
+  //                       nobody", and writing it back would take their own
+  //                       classifications off the phone.
+  const modesKey = useRef<string | null>(null);
+  const modesHydrated = useRef(false);
+  /** Keep the map under the signed-in coach's key, if there is one and if what
+   *  is in memory came from it. Both guards are independent and both are
+   *  necessary — see the note above. */
+  const persistModes = (next: Record<string, CoachedMode>) => {
+    const key = modesKey.current;
+    if (!key || !modesHydrated.current) return;
+    AsyncStorage.setItem(key, writeClientModes(next))
+      .catch((e) => reportError('roster.writeModes', e));
+  };
+  /**
+   * Apply the account-change rule to the overrides, and answer with the key to
+   * read — null when there is nothing to read.
+   *
+   * `accountStateStep` (src/lib/accountScopedState.ts) is the rule, shared with
+   * every other screen holding account-scoped state, and it is used here rather
+   * than restated so the copies cannot drift. Its two halves both matter to this
+   * provider:
+   *
+   *   · A NULL SESSION IS NOT ALWAYS A SIGN-OUT. auth-js emits one whenever
+   *     `getSession()` errors — a token that could not be refreshed in a
+   *     basement weights room. `hold` is the answer there, and it changes
+   *     nothing: a coach on bad wifi keeps the classifications on screen.
+   *   · A DIFFERENT ACCOUNT IS NOT A RE-READ. The departing coach's map is
+   *     dropped on the way IN, before the new read lands and whatever it
+   *     decides, because this provider is mounted for the life of the app.
+   *
+   * The writer is disarmed on every path but `hold`, which is the trap on its
+   * own: a flag that survived the key changing would let a read that then failed
+   * write an empty map over the NEW coach's own classifications.
+   */
+  const stepModes = (who: string | null): string | null => {
+    const step = accountStateStep({
+      key: clientModesKey(who),
+      onScreenKey: modesKey.current,
+      onScreenSaved: modesHydrated.current,
+    });
+    if (step.do === 'hold') return null;
+    if (step.do === 'forget') {
+      setModeOverrides({});
+      modesHydrated.current = false;
+      modesKey.current = null;
+      return null;
+    }
+    // Only when the map on screen is somebody ELSE's. The same coach refreshing
+    // — which every screen does on focus — keeps what is already there while the
+    // read runs, so a focus does not blank the roster's chips for a frame.
+    if (step.forget) setModeOverrides({});
+    modesHydrated.current = false;
+    modesKey.current = null;
+    return step.key;
+  };
+
+  // ── Which coach the LIST belongs to ───────────────────────────────────────
+  //
+  // A ref rather than `uid`, because `hydrate` is created once (`[]` deps) and
+  // would otherwise compare against the uid from the render that built it.
+  //
+  // This provider is mounted at the root of the trainer app and outlives every
+  // sign-out, so `roster` — a list of named people, their weight changes and
+  // their disclosed injuries — is React state that survives an account change
+  // unless something clears it. `modeOverrides` was already handled, by
+  // `accountStateStep`; the list itself was not, and the two must not be able
+  // to disagree about whose data is on screen.
+  const uidRef = useRef<string | null>(null);
+  /**
+   * There is nobody signed in, established rather than assumed.
+   *
+   * Clears the list AND the id, because both are the departing coach's. `uid`
+   * mattering is not theoretical: `addClient` uses it as the `trainer_id` it
+   * writes, so a stale one files the next coach's hand-added client in the
+   * previous coach's book.
+   *
+   * `roster` is dropped unconditionally where `modeOverrides` goes through
+   * `accountStateStep`'s three-way rule, and the asymmetry is deliberate: the
+   * overrides can be the only copy of an answer a coach gave, and the rule
+   * exists to avoid destroying one; the roster is the server's own answer and
+   * re-reading it costs a request.
+   */
+  const forgetCoach = () => {
+    stepModes(null);
+    setRoster([]);
+    setUid(null);
+    uidRef.current = null;
+  };
 
   // A signed-in coach sees ONLY their linked clients, and a clean slate if they
   // have none. With no session there is nothing to read and nothing to show —
@@ -128,15 +265,75 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // when nobody is signed in, and treating that as an error latched this
         // provider into 'error' on the first tick — before anybody had signed
         // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        const sessRes = await supabase.auth.getSession();
         if (cancelled()) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        // `error` is READ, not discarded. The line this replaces was
+        // `const { data: sess } = await supabase.auth.getSession()`, and a null
+        // session is not always a sign-out: auth-js emits one whenever
+        // `getSession()` errors — an access token that expired where there was
+        // no signal to refresh it. That branch then published 'ready', which is
+        // the claim that the list on screen IS the server's answer, over a
+        // question that was never asked. Classified by the shared module, and
+        // narrowed on `fate` rather than on `!uid`, because UidRead's members
+        // are told apart by fate and `string` includes ''.
+        const sessRead = uidFromAuth({ data: { user: sessRes.data?.session?.user }, error: sessRes.error });
+        if (sessRead.fate === 'unreadable') {
+          // Nothing was established about who is signed in, so nothing on
+          // screen can be vouched for — and nothing is cleared either: a coach
+          // on bad wifi keeps their clients, with the status saying they are
+          // not confirmed.
+          // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+          reportError('roster.session', new Error('auth read unreadable — who is signed in could not be established'));
+          setStatus('error');
+          return;
+        }
+        if (sessRead.fate === 'signed-out') { forgetCoach(); setStatus('ready'); return; }
+        const whoRes = await supabase.auth.getUser();
         if (cancelled()) return;
-        if (authErr) { setStatus('error'); return; }
-        const uid = auth?.user?.id;
-        if (!uid) { setRoster([]); setStatus('ready'); return; }
+        const who = uidFromAuth(whoRes);
+        if (who.fate === 'unreadable') {
+          // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+          reportError('roster.getUser', new Error('auth read unreadable — who is signed in could not be established'));
+          setStatus('error');
+          return;
+        }
+        if (who.fate === 'signed-out') { forgetCoach(); setStatus('ready'); return; }
+        const uid = who.uid;
+        // ── A DIFFERENT COACH IS NOT A REFRESH ──────────────────────────────
+        //
+        // Dropped on the way IN, before the read below lands and whatever it
+        // decides — the same rule `accountStateStep` applies to the overrides,
+        // and for the same reason. Without it, a coach switching accounts whose
+        // `clients` read then failed kept the PREVIOUS coach's clients on
+        // screen: `if (error) { if (manual.length) setRoster(manual); … }`
+        // leaves the list untouched when the new coach has no hand-added
+        // clients, so their roster showed somebody else's people, by name,
+        // under a status that only says the list may be incomplete.
+        //
+        // The same coach refreshing — which every screen does on focus — keeps
+        // what is already there, so a focus does not blank the list for a frame.
+        if (uidRef.current && uidRef.current !== uid) setRoster([]);
+        uidRef.current = uid;
         setUid(uid);
+        // This coach's classifications, off a key with their account in it. The
+        // read is armed only once it has LANDED; a throw leaves the writer
+        // disarmed, which shows the server's own modes — the true fallback for
+        // "we could not read what this device remembered".
+        const mKey = stepModes(uid);
+        if (mKey) {
+          try {
+            const raw = await AsyncStorage.getItem(mKey);
+            if (cancelled()) return;
+            setModeOverrides(readClientModes(raw));
+            modesKey.current = mKey;
+            modesHydrated.current = true;
+          } catch (e) { reportError('roster.readModes', e); }
+          // The unqualified blob, removed UNREAD. It carries no account, so
+          // reading it into this coach is a guess — see the header of
+          // src/lib/clientModeOverrides.ts.
+          AsyncStorage.removeItem(LEGACY_CLIENT_MODES_KEY)
+            .catch((e) => reportError('roster.dropLegacyModes', e));
+        }
         // Both halves of the roster are load-bearing, so a failure in either one
         // means the list on screen is incomplete and must not be presented as
         // the whole roster.
@@ -176,7 +373,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // refreshes with nothing wrong on the server. `clients` carries no
         // created_at (see the join-date note below), so id is the stable key.
         const { data: cls, error } = await supabase.from('clients')
-          .select('id, goal, diet, meals_per_day, avoid, mode, injuries').eq('trainer_id', uid)
+          .select('id, goal, diet, meals_per_day, avoid, coach_avoid, mode, injuries').eq('trainer_id', uid)
           .order('id', { ascending: true }).limit(capLimit());
         if (cancelled()) return;
         // Split apart what used to be one branch. A refused read is 'error'
@@ -190,13 +387,40 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const ids = linked.map((c: any) => c.id);
         const names: Record<string, string> = {};
         try {
-          // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer, so
-          // one profile per id cannot reach the ceiling. The limit is written
-          // down anyway: the bound lives in another statement, and a later edit
-          // that widens the client read should not have to notice this one.
+          // ── Why this is chunked and the comment that was here was not ─────
+          //
+          // It read `.in('id', ids).limit(capLimit())` under a note reasoning
+          // about the ROW ceiling: one profile per id, ids capped at ROW_CAP,
+          // so the answer cannot truncate. That reasoning is correct and it is
+          // about the wrong limit. `ids` is up to ROW_CAP = 1000 uuids, and a
+          // uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list —
+          // a ~39KB REQUEST LINE against the 8KB one nginx and most CDNs
+          // enforce by default, which is roughly two hundred ids. Past that the
+          // proxy refuses before the database ever sees the query, the refusal
+          // is a 414, supabase-js does not reject on it, and it arrives as
+          // `data: null`.
+          //
+          // `data: null` is the same shape as "no names came back", and the
+          // fallback three lines down turns that into the word 'Client'. So a
+          // coach with two hundred and fifty clients did not lose one name to
+          // RLS — which is what the `no-error-ok` below is about, and is
+          // genuinely fine — they opened their roster and found two hundred and
+          // fifty rows all called Client, with no error anywhere and nothing to
+          // pull to refresh into working. See src/lib/idLookup.ts.
+          //
+          // `readByIds` rather than `readCappedByIds`: this is one row per id
+          // by construction, the screen needs every one of them, and finishing
+          // a chunk costs nothing when a chunk of 150 ids answers with 150 rows.
           // no-error-ok: a name we cannot read falls back to 'Client'; the person is still on the roster
-          const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-          (profs || []).forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
+          const profs = await readByIds<any>(
+            ids,
+            // `.order('id')` on a primary-key lookup is total, which is the
+            // contract `readAll` requires of every page it is handed.
+            (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+              .in('id', chunk).order('id', { ascending: true }).range(from, to),
+            'your clients’ names',
+          );
+          profs.forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
         } catch { /* a missing name falls back to 'Client'; the client is still listed */ }
         // When each linked client joined THIS coach's book. `clients` has no
         // created_at of its own, and the account's own creation date is the
@@ -210,11 +434,23 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // rows it did get on relationships that are over.
         const joined: Record<string, string> = {};
         try {
+          // Chunked for the same reason the names above are, and with the same
+          // cost of not being: a 414 on the whole list would put a dash in the
+          // "with you since" column of every client at once, which reads as a
+          // record that does not know when anybody joined.
           // no-error-ok: a join date we cannot read stays null and renders '—'; the client is listed either way
-          const { data: rel } = await supabase
-            .from('coaching_relationships').select('client_id, created_at')
-            .eq('coach_id', uid).in('client_id', ids).limit(capLimit());
-          (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
+          const rel = await readByIds<any>(
+            ids,
+            // `.order('id')` and not `client_id`: unique (coach_id, client_id)
+            // makes client_id unique under this filter today, but the primary
+            // key is total whatever the constraint does next.
+            (chunk, from, to) => supabase
+              .from('coaching_relationships').select('id, client_id, created_at')
+              .eq('coach_id', uid).in('client_id', chunk)
+              .order('id', { ascending: true }).range(from, to),
+            'when your clients joined your book',
+          );
+          rel.forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
         } catch { /* a missing join date is null, never a guessed one */ }
         // Real per-client stats (best-effort; RLS lets a trainer read linked clients' rows).
         // These are decorations on a row that exists either way, so a failure
@@ -244,16 +480,59 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // the row a newest-first cap drops first.
         let statsTruncated = false;
         let scansTruncated = false;
+        // ── And the other half of "we cannot say" ──────────────────────────
+        //
+        // A read that was CUT SHORT and a read that did not HAPPEN leave this
+        // loader in the same place — no rows for that client — and only the
+        // first of the two was being carried. So a refused or dropped stats
+        // read set `partialFailure` (which moves the whole roster to 'error',
+        // correctly) and then went on to render every client's row as "no
+        // activity yet", which is the exact sentence the note above says a
+        // coach acts on by chasing somebody who has been training all month. A
+        // banner saying the roster may be incomplete does not unsay it: the
+        // sentence is on the person's own card.
+        //
+        // Separate from `partialFailure` because it decorates ROWS rather than
+        // deciding the status, and separate into two because the weight delta
+        // and the last-active line fail for different reads.
+        let statsFailed = false;
+        let scansFailed = false;
+        //
+        // ── And why all three are CHUNKED but still capped ────────────────
+        //
+        // `ids` is up to ROW_CAP = 1000 uuids and each of these was one
+        // `.in()`. A uuid costs about 39 bytes inside a PostgREST `in.(…)`
+        // list, so that is a ~39KB request line against the 8KB proxies allow —
+        // a 414 that supabase-js does not reject on, arriving as `data: null`.
+        // Every one of the three then reports exactly what a client with no
+        // history reports, and the paragraph above is the reason that matters:
+        // "no activity yet" is a claim about a PERSON, and a coach acts on it by
+        // chasing somebody who has been training all month.
+        //
+        // `readCappedByIds` and not `readByIds`: everything above about
+        // newest-first and a deliberate ceiling stays true, and finishing these
+        // reads would walk every scan two hundred clients have ever recorded to
+        // compute a "last active" the first page already answered. Chunking
+        // makes truncation less likely too — a thousand ids used to share one
+        // 1000-row ceiling and now seven chunks have one each — but the flag is
+        // still carried, because less likely is not never.
         try {
-          const { data: sc, error: scErr } = await supabase.from('scans')
-            .select('client_id, weight_kg, taken_at, metrics').in('client_id', ids)
-            .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
+          const { rows: scRows, truncated: scCut, error: scErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('scans')
+              .select('client_id, weight_kg, taken_at, metrics').in('client_id', chunk)
+              .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
           // supabase-js resolves on a database error, so the catch below never
           // saw the failure that actually happens. Without this, a refused read
           // left every client reading "no activity yet" — which is a claim
           // about the client, and a coach acts on it by chasing them.
-          if (scErr) partialFailure = true;
-          const scPage = capped(sc);
+          if (scErr) { partialFailure = true; statsFailed = true; scansFailed = true; }
+          // Already trimmed to the cap, chunk by chunk. A client's rows are
+          // all in one chunk — the chunking is by client id — so the global
+          // reverse below still puts each client's own history oldest-first,
+          // which is the only ordering this loop depends on.
+          const scPage = { rows: scRows, truncated: scCut };
           if (scPage.truncated) { statsTruncated = true; scansTruncated = true; }
           const byC: Record<string, { w: number; t: number; m: any }[]> = {};
           // Back to oldest-first per client: the loop below reads arr[0] as the
@@ -262,28 +541,43 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           // roster — a client who lost 4 kg shown as having gained it.
           scPage.rows.slice().reverse().forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
           for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = arr.length > 1 ? Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10 : null; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
-        } catch { /* stats decorate a row that is listed regardless */ }
+        } catch { partialFailure = true; statsFailed = true; scansFailed = true; }
         try {
-          const { data: wo, error: woErr } = await supabase.from('workouts')
-            .select('user_id, performed_at').in('user_id', ids)
-            .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
-          if (woErr) partialFailure = true;
-          const woPage = capped(wo);
+          const { rows: woRows, truncated: woCut, error: woErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('workouts')
+              .select('user_id, performed_at').in('user_id', chunk)
+              .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
+          if (woErr) { partialFailure = true; statsFailed = true; }
+          const woPage = { rows: woRows, truncated: woCut };
           if (woPage.truncated) statsTruncated = true;
           woPage.rows.forEach((r: any) => { if (st[r.user_id]) st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.performed_at)); });
-        } catch { /* as above */ }
+        } catch { partialFailure = true; statsFailed = true; }
         try {
-          const { data: ci, error: ciErr } = await supabase.from('check_ins')
-            .select('user_id, at, adherence').in('user_id', ids)
-            .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
-          if (ciErr) partialFailure = true;
-          const ciPage = capped(ci);
+          const { rows: ciRows, truncated: ciCut, error: ciErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('check_ins')
+              .select('user_id, at, adherence').in('user_id', chunk)
+              .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
+          if (ciErr) { partialFailure = true; statsFailed = true; }
+          const ciPage = { rows: ciRows, truncated: ciCut };
           if (ciPage.truncated) statsTruncated = true;
+          // `seen` is per client and the rows arrive newest-first WITHIN each
+          // chunk, which is all this needs: a client's rows are all in one
+          // chunk, so the first one seen for them is still their newest.
           const seen = new Set<string>();
           ciPage.rows.forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });
-        } catch { /* as above */ }
+        } catch { partialFailure = true; statsFailed = true; }
         if (statsTruncated) partialRead = true;
+        // How completely the three stat reads landed, in the shape the rule
+        // takes. src/lib/rosterStatReach.ts holds it, and holds it alone: the
+        // two suppressions below used to be ternaries in a map callback, which
+        // is where the failed half of "short read" went missing the first time.
+        const statsReach: StatReach = { truncated: statsTruncated, failed: statsFailed };
+        const scansReach: StatReach = { truncated: scansTruncated, failed: scansFailed };
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
         // The two suppressions the capped stat pages force, spelled out:
         //
@@ -291,12 +585,15 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     acts on it by chasing someone who has done nothing wrong. It is
         //     only true when we saw every row. Absent from a capped page means
         //     unknown, which is a dash.
+        //     A read that FAILED says no more about the client than a capped
+        //     one does, so it draws the same dash: `statsFailed` is carried
+        //     beside `statsTruncated` above for exactly this line.
         //   · a weight delta is last minus first, and a newest-first cap drops
         //     the first. Computing it from the tail of a client's history does
         //     not produce a smaller number, it produces a wrong one — often the
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
-        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', handAdded: false, goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', handAdded: false, goal: goalMap[c.goal] || 'General', weightDelta: weightDeltaCell(sc.wDelta, scansReach), adherence: sc.adh != null ? sc.adh : null, lastActive: lastActiveCell(sc.last ? ago(sc.last) : null, statsReach), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: excludedAllergens(readAllergenColumn(c.avoid), readAllergenColumn(c.coach_avoid)) ?? undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
         // ── One row per person, not one row per table ──────────────────────
         //
         // These two lists used to be concatenated, on the assumption that a
@@ -321,12 +618,36 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // Unread counts, one read for the whole roster rather than one per
         // client. A failure leaves them null — the count is unknown, and the
         // row says so with a dash instead of asserting that nobody is waiting.
+        //
+        // Per CLIENT, and that is the whole of what this map says. A row that
+        // comes back carries a count for that client; a client with no row in
+        // it keeps whatever they had, which is null. Those are different facts
+        // and downstream they are told apart by `handAdded`, marked above at the
+        // only place that knows which table a row came out of:
+        // `coach_unread_counts()` enumerates `clients`, so every LINKED client
+        // gets a row here — zero included — and a hand-added `coach_clients`
+        // row never can, because there is no account and no thread behind one.
+        // Its null is the absence of a thread rather than an unknown count, and
+        // nothing about it changes with a retry.
         let unread: Record<string, number> | null = null;
         try {
           const { data: uc, error: ucErr } = await supabase.rpc('coach_unread_counts');
           if (!ucErr && Array.isArray(uc)) {
             unread = {};
-            for (const row of uc as any[]) unread[String(row.client_id)] = Number(row.unread) || 0;
+            for (const row of uc as any[]) {
+              // Parsed by the module that owns this column instead of beside
+              // it. `coach_threads()` left-joins the same `coach_unread_counts()`
+              // and src/lib/coachThreads.ts states the rule for the value: a
+              // count only where a real number came back, truncated, never
+              // negative. This loop read `Number(row.unread) || 0`, which turns
+              // a string, a null, a missing key and a NaN alike into 0 — and 0
+              // on this column is the sentence "nobody is waiting for you",
+              // said out of a value nobody could read. A row whose count does
+              // not parse is left OUT of the map, so that client keeps its null
+              // and draws a dash.
+              const t = rowToThread(row);
+              if (t.clientId && t.unread != null) unread[t.clientId] = t.unread;
+            }
           }
         } catch { /* stays null, and null prints as a dash */ }
         const withUnread = unread
@@ -342,10 +663,11 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     hydrate(() => cancelled);
     return () => { cancelled = true; };
   }, [authRev, hydrate]);
-  /** Keep the coach's answer on this device. Persisted, because the server can
-   *  only hold the narrowed one until the CHECK constraints are widened. */
+  /** Keep the coach's answer on this device, under their own key and only when
+   *  `persistModes` is armed. In memory either way, so the chip responds to the
+   *  tap whatever the store is doing. */
   const rememberMode = (id: string, mode: CoachedMode) => {
-    setModeOverrides((p) => { const next = { ...p, [id]: mode }; try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* the override still applies this session */ } return next; });
+    setModeOverrides((p) => { const next = { ...p, [id]: mode }; persistModes(next); return next; });
   };
   const addClient = async (name: string, goal: string, mode: CoachedMode = 'online'): Promise<boolean> => {
     const n = name.trim();
@@ -362,9 +684,26 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     let writerId = uid;
     if (!writerId) {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        writerId = auth?.user?.id ?? null;
-        if (writerId) setUid(writerId);
+        // Classified rather than collapsed. `auth?.user?.id ?? null` with the
+        // `error` left off the line reads an outage as "nobody is signed in",
+        // and the report that followed said so in those words — about a coach
+        // who was signed in the whole time, over a client they had just typed
+        // and were about to lose. The uid is the `trainer_id` this row is
+        // filed under, so there is no guessing at it: the two outcomes are
+        // both a refusal to write, and they are recorded differently.
+        const who = uidFromAuth(await supabase.auth.getUser());
+        if (who.fate !== null) {
+          reportError('roster.addClient.session', new Error(
+            who.fate === 'signed-out'
+              ? 'no signed-in coach to attribute the client to'
+              // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+              : 'auth read unreadable — who is signed in could not be established',
+          ));
+        } else {
+          writerId = who.uid;
+          uidRef.current = who.uid;
+          setUid(who.uid);
+        }
       } catch (e) { reportError('roster.addClient.session', e); }
     }
     if (!writerId) { reportError('roster.addClient', new Error('no signed-in coach to attribute the client to')); return false; }
@@ -467,7 +806,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
       if (!(id in p)) return p;
       const next = { ...p };
       delete next[id];
-      try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* the in-memory drop still applies this session */ }
+      persistModes(next);
       return next;
     });
   };

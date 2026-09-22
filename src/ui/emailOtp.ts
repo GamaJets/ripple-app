@@ -1,4 +1,4 @@
-// What a six-digit email confirmation can fail with, said in sentences.
+// What an email confirmation code can fail with, said in sentences.
 //
 // ── Why a code and not a link ──────────────────────────────────────────────
 //
@@ -36,8 +36,106 @@
  */
 export type OtpOutcome = { ok: true } | { ok: false; reason: string };
 
-/** How many digits Supabase issues. Its own default, and not ours to choose. */
+/**
+ * How many digits the EMAIL code has.
+ *
+ * This said 6, and called it "Supabase's own default, and not ours to choose".
+ * Both halves were wrong, and together they made signing in by email
+ * impossible: 6 IS the default, but the length is configurable (Auth → Sign In
+ * / Providers → Email → Email OTP length), the project had been set to 8, and
+ * the screen drew six boxes for a code that arrives with eight digits in it.
+ * There was no way to finish typing it. Reported from a real inbox.
+ *
+ * The project setting has since been put back to 6 and verified by reading it
+ * off the dashboard, so this is 6 again — but for a different reason than
+ * before. It is not "what Supabase issues". It is what THIS project is
+ * configured to issue, it can be changed by somebody who never opens this
+ * repository, and everything the app SAYS about the code is derived from it so
+ * the sentence and the boxes cannot disagree again.
+ *
+ * MIN_OTP_SUBMIT below is the belt to this braces: if the setting moves again,
+ * the screen still lets the member try.
+ */
 export const EMAIL_OTP_LENGTH = 6;
+
+/**
+ * The shortest code the screen will accept a submission of.
+ *
+ * The boxes are drawn at EMAIL_OTP_LENGTH, but the input no longer REFUSES a
+ * shorter one, and that is deliberate. The length is a dashboard setting on a
+ * server nobody has to redeploy: the moment it moves from 8 to 6, an app that
+ * only submits at exactly 8 is broken in the other direction, and the member
+ * sees six digits typed into eight boxes with nothing happening.
+ *
+ * So the boxes describe what to EXPECT and the Confirm button decides when to
+ * TRY. Supabase's verifyOtp is the only thing that can say whether a code is
+ * right, and it does not need our help guessing the length first.
+ */
+export const MIN_OTP_SUBMIT = 4;
+
+/**
+ * The most digits the field will HOLD, as opposed to expect.
+ *
+ * The braces to MIN_OTP_SUBMIT's belt, and the half of that argument which was
+ * missing. The screen already refused to give up on a code SHORTER than the
+ * boxes it drew; it silently truncated a LONGER one, because the input sliced
+ * what it was given down to the drawn length and then auto-submitted the
+ * truncation. An eight-digit code arriving at a six-box screen became a
+ * six-digit code, was sent, and came back refused — "that code was not right"
+ * about a code that was entirely right.
+ *
+ * That path is not hypothetical and it is not rare: it is exactly what AUTOFILL
+ * does. A person typing reveals the problem one digit at a time and stops; the
+ * keyboard's one-time-code suggestion delivers the whole thing in a single
+ * `onChangeText`, so the truncation and the wrong answer happen together with
+ * nothing on screen to explain them.
+ *
+ * Ten rather than the drawn length, because the point is to stop guessing:
+ * Supabase's setting goes to eight, this leaves headroom above that, and
+ * `verifyOtp` remains the only thing that decides whether a code is right.
+ */
+export const MAX_OTP_ENTRY = 10;
+
+/**
+ * The length as a WORD, for prose.
+ *
+ * The defect this exists to prevent is not the number, it is the number
+ * written twice. "the six digits we just emailed you" sat three lines above
+ * `length={EMAIL_OTP_LENGTH}`, so the boxes followed the constant and the
+ * sentence did not. Anything that tells a member how long the code is reads
+ * this, never a literal.
+ */
+export const spellDigits = (n: number): string =>
+  ({ 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine' } as Record<number, string>)[n]
+  ?? String(n);
+
+// ── Why this file reads `currentReach()` and not `useReachability()` ───────
+//
+// The two generic fallbacks below used to end "Check your connection and try
+// again" — the sentence src/lib/reachability.ts exists to replace, because half
+// of what lands on them is the server having read the request and declined it.
+//
+// This is not a screen, so it cannot call `useReachability`. It does not need
+// to. The hook exists to RE-RENDER a component when the answer changes; these
+// functions are called once, in a catch, and produce a sentence that is stored
+// and shown as it stood at that moment. `currentReach()` is the same store read
+// imperatively, which is what src/lib/readRefresh.ts and src/ui/offlineFlush.tsx
+// already do from outside React.
+//
+// Reading it here is in fact the BETTER instrument, and the ordering is why:
+// `observedFetch` is installed on the Supabase client itself
+// (src/lib/supabase.ts), so the very request that produced this error has
+// already filed its own verdict — `noteThrown` on a transport failure,
+// `noteReached` on a 4xx, which is the server talking — before supabase-js
+// hands the error back to `src/ui/auth.tsx` and it reaches us. A hook value
+// captured at the last render would be older than that.
+//
+// And on the sign-in path specifically, where nobody is signed in: none of this
+// needs a session. The store is a module singleton, `ReachabilityProbe` is
+// mounted in app/_layout.tsx above every gate, and the probe deliberately
+// carries no key — see the note on `knock` in src/ui/reachability.tsx. So the
+// answer is as good here as anywhere in the app.
+import { currentReach, retryLine } from '../lib/reachability';
 
 interface Failure { code: string; message: string; status: number | null }
 
@@ -95,7 +193,7 @@ export function emailCodeError(e: unknown): string {
     return 'Too many tries. Wait a moment, then enter the code again.';
   }
   if (f.code === 'invalid_credentials' || f.code === 'validation_failed' || /invalid|incorrect|token/i.test(f.message)) {
-    return 'That code was not right. Check the newest email — the code is six digits, and a new one replaces the old.';
+    return `That code was not right. Check the newest email. The code is ${spellDigits(EMAIL_OTP_LENGTH)} digits, and a new one replaces the old.`;
   }
   if (f.code === 'user_not_found') {
     return 'There is no account waiting on that address. Check the address, or create the account again.';
@@ -106,7 +204,11 @@ export function emailCodeError(e: unknown): string {
   if (f.code === 'user_banned') {
     return 'That account has been suspended. Contact your gym.';
   }
-  return verbatim(f, 'The code could not be checked. Check your connection and try again.');
+  // Reached only when the failure carries no code we know AND no words of its
+  // own, so there is nothing specific left to say about the code itself.
+  // `retryLine` is then the whole of what is knowable: whether this phone
+  // reached us at all.
+  return verbatim(f, `The code could not be checked. ${retryLine(currentReach())}`);
 }
 
 /**
@@ -122,7 +224,7 @@ export function emailResendError(e: unknown): string {
 
   if (f.code === 'over_email_send_rate_limit' || f.code === 'over_request_rate_limit' || f.status === 429
     || /rate limit|too many|security purposes|after \d+ seconds/i.test(f.message)) {
-    return 'No code was sent — too many have been requested. Wait a moment, then ask again.';
+    return 'No code was sent. Too many have been requested. Wait a moment, then ask again.';
   }
   // GoTrue answers a resend for an already-confirmed address with a 422 whose
   // code is the catch-all `validation_failed`, so this one is matched on prose.
@@ -130,19 +232,21 @@ export function emailResendError(e: unknown): string {
     return 'That address is already confirmed, so there is no code to send. Go back and sign in with your password.';
   }
   if (f.code === 'user_not_found') {
-    return 'No code was sent — there is no account waiting on that address. Go back and create it.';
+    return 'No code was sent. There is no account waiting on that address. Go back and create it.';
   }
   if (f.code === 'email_address_invalid' || f.code === 'validation_failed') {
-    return 'No code was sent — that address was not accepted. Go back and check it.';
+    return 'No code was sent. That address was not accepted. Go back and check it.';
   }
   if (f.code === 'email_address_not_authorized') {
-    return 'No code was sent — that address is not allowed to receive mail from us yet.';
+    return 'No code was sent. That address is not allowed to receive mail from us yet.';
   }
   if (f.code === 'email_provider_disabled' || f.code === 'signup_disabled') {
-    return 'No code was sent — email sign-up is switched off right now.';
+    return 'No code was sent. Email sign-up is switched off right now.';
   }
   if (f.code === 'user_banned') {
-    return 'No code was sent — that account has been suspended. Contact your gym.';
+    return 'No code was sent. That account has been suspended. Contact your gym.';
   }
-  return verbatim(f, 'The code could not be sent. Check your connection and try again.');
+  // As above: no code, no message, so the only honest second half is the one
+  // that says whether the request left the phone.
+  return verbatim(f, `No code was sent. ${retryLine(currentReach())}`);
 }

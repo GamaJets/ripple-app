@@ -70,24 +70,40 @@
 // believes it is doing — and there are two dozen sendPush() call sites, none of
 // them this file's to edit, any one of which a call-site check would have been
 // forgotten at. src/ui/settings.tsx carries the long note.
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Alert, Pressable, TextInput } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, ScrollView, Alert, Pressable, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
+import { useTheme, useThemeControls } from '../../src/ui/components';
+import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
+import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, ListRow, PageHead, Flag, IconPlate, Expandable, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
-import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
+import { fmtDay } from '../../src/lib/format';
+import { sp, layout, hairline, type as ty, radius, elevation, font } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyOutcome } from '../../src/lib/coachCurrency';
-import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
-import { shareTextFile } from '../../src/lib/exportShare';
+import { fetchMyCurrency, setMyCoachCurrency } from '../../src/lib/myCurrency';
+// The plan name for the Subscription row's caption, and nothing else — the
+// billing screen owns everything that can be done about it.
+import { fetchMySubscription } from '../../src/lib/billing';
+import { myCurrencyLine, type MyCurrency } from '../../src/lib/currencySource';
+import {
+  exportMyDataDetailed, readMyFile, requestAccountDeletion, withdrawAccountDeletion,
+  fetchDeletionRequestedAt, type ExportFile,
+} from '../../src/lib/gdpr';
+import { fileShareBlocker, shareBinaryFile, shareTextFile } from '../../src/lib/exportShare';
+import { BRAND } from '../../src/lib/brands';
+import {
+  COACH_DELETION_FILES_NOTE,
+  coachDataFilename, fileSizeLabel, filesRowNote, incompleteExportLine, saveFileFailure,
+} from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN } from '../../src/lib/coachPrefs';
 import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
@@ -96,7 +112,7 @@ import { useChannelPrefs, setChannel } from '../../src/ui/coachNotify';
 import {
   COACH_CHANNELS, channelState, channelsNote,
   CHANNEL_UNKNOWN_LABEL, CHANNEL_MASTER_NOTE, CHANNEL_STILL_RECORDED,
-  CHANNEL_QUIET_COST, CHANNEL_ACCOUNT_WIDE,
+  CHANNEL_ACCOUNT_WIDE, CHANNEL_LOCAL_NOTE,
 } from '../../src/lib/coachNotify';
 import { useQuietHours, saveQuietHours } from '../../src/ui/quietHours';
 import {
@@ -104,13 +120,14 @@ import {
   zoneMovedNote, QUIET_HELD_NOT_DELAYED, QUIET_ZONE_NOTE, QUIET_ORDER_NOTE,
   type QuietHours,
 } from '../../src/lib/quietHours';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -161,7 +178,7 @@ function TriSwitchRow({ t, label, note, state, onPress, first }: {
       <View style={{ flex: 1 }}>
         <Text style={{ ...ty.body, color: t.ink }}>{label}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-          {unknown ? `${CHANNEL_UNKNOWN_LABEL} — ${note}` : note}
+          {unknown ? `${CHANNEL_UNKNOWN_LABEL}. ${note}` : note}
         </Text>
       </View>
       <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: unknown ? t.surface2 : on ? t.brand : t.surface3, borderWidth: hairline, borderColor: unknown ? t.ring : on ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -171,13 +188,23 @@ function TriSwitchRow({ t, label, note, state, onPress, first }: {
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { owner: 'Gym owner', trainer: 'Trainer', client: 'Member' };
+const ROLE_LABEL: Record<string, string> = { owner: 'Gym Owner', trainer: 'Trainer', client: 'Member' };
 
-/** A timestamp as the day it happened, or a dash. Never the string "null". */
+/**
+ * A timestamp as the day it happened, or a dash. Never the string "null".
+ *
+ * `String(iso).slice(0, 10)` is the UTC date of a timestamptz, and the sentence
+ * this feeds — "You asked to be deleted on X" — is about a day in the coach's
+ * own life. A coach at UTC+14 who tapped the button at nine on the morning of
+ * the 1st was told they had asked on the 31st; one at UTC-11 who tapped it in
+ * the evening was told they had asked tomorrow. Neither is a date they could
+ * check against their own memory of doing it, which is the only thing this line
+ * is for. `fmtDay` reads the instant in the reader's own zone and writes it the
+ * way their locale writes a day, instead of as a bare column value.
+ */
 function day(iso: string | null): string {
   if (!iso) return '—';
-  const d = String(iso).slice(0, 10);
-  return d.length === 10 ? d : '—';
+  return fmtDay(iso);
 }
 
 export default function TrainerSettings() {
@@ -206,7 +233,7 @@ export default function TrainerSettings() {
     const next = state === 'off';
     const ok = await setChannel(key, next);
     if (!ok) {
-      Alert.alert('Not Saved', 'The server did not take that change, so nothing has moved. Your notifications carry on exactly as they were — try again once you have signal.');
+      Alert.alert('Not Saved', 'The server did not take that change, so nothing has moved. Your notifications carry on exactly as they were. Try again once you have signal.');
     }
     // Re-read rather than assume: what the switch shows next comes from the
     // row, which is the same discipline `loadPending` above keeps.
@@ -255,7 +282,7 @@ export default function TrainerSettings() {
     // coach's 10pm at 11pm for half the year and a Los Angeles coach's in the
     // afternoon — a silence at the wrong hours is harder to diagnose than none.
     if (!zone) {
-      Alert.alert('Cannot set quiet hours on this phone',
+      Alert.alert('Cannot Set Quiet Hours on This Phone',
         "This phone did not report which timezone it is in, and quiet hours are applied by a server that has no other way to know. Without it the hours would be applied in the wrong ones, so nothing has been set.");
       return;
     }
@@ -279,17 +306,23 @@ export default function TrainerSettings() {
   // this actually converts, so nobody expects it to rewrite stored history.
   const weightNote = convertedNote(st.weightUnit);
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('trainerSettings');
   const lock = useAppLock();
   const toggleLock = async () => {
     if (!lock.available) {
-      Alert.alert('Not available on this device',
+      Alert.alert('Not Available on This Device',
         'Set up Face ID, Touch ID or a passcode in iOS Settings, then this can be turned on.');
       return;
     }
     const want = !lock.enabled;
     const ok = await lock.setEnabled(want);
     if (!ok && want) {
-      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+      Alert.alert('Not Turned On', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
 
@@ -319,7 +352,7 @@ export default function TrainerSettings() {
   useEffect(() => {
     let live = true;
     (async () => {
-      const { prefs, status } = await fetchCoachPrefs();
+      const { prefs, status } = await fetchCoachPrefs(auth.user?.id ?? null);
       if (!live) return;
       setCooldownStatus(status === 'ready' ? 'ready' : 'error');
       // Only fill the box from a read that ANSWERED. An empty box after a
@@ -341,7 +374,7 @@ export default function TrainerSettings() {
       return;
     }
     const value = parsed.kind === 'empty' ? null : parsed.value;
-    const ok = await saveCoachPrefs({ nudgeCooldownDays: value });
+    const ok = await saveCoachPrefs(auth.user?.id ?? null, { nudgeCooldownDays: value });
     if (!ok) {
       // Not "saved". The write is checked for a row count rather than for the
       // absence of an error, because a refused upsert comes back clean.
@@ -366,25 +399,72 @@ export default function TrainerSettings() {
     const res = await st.setPushEnabled(want);
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
-      Alert.alert('Not on this build yet',
-        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+      Alert.alert('Not on This Build Yet',
+        'This version of the app cannot receive push notifications at all. That needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
       // Not "…switched off for Repple Coach". This is a white-label build and
       // the app on this phone may not be called Repple at all.
-      Alert.alert('Turned off on your phone',
+      Alert.alert('Turned Off on Your Phone',
         "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
       return;
     }
     // 'off-pending'. Said out loud rather than hoped over: a coach who has just
     // turned notifications off and then gets one needs to have been told it
     // might happen. The reconciler in src/ui/settings.tsx retries every launch.
-    Alert.alert('Saved, but not confirmed',
-      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+    Alert.alert('Saved, but Not Confirmed',
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list, so you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const { tenant, role, status: tenantStatus, loading: tenantLoading, refresh: refreshTenant, updateTenant, setOwnCurrency } = useTenant();
+
+  // ── Appearance, as the board's three radio rows ─────────────────────────
+  //
+  // Board page 20 draws Settings with Light / Dark / System under an
+  // "Appearance" heading. The coach app never had a palette screen of its own;
+  // the SETTING has always existed — `AppThemeProvider` in src/ui/components.tsx
+  // holds the member's chosen palette and whether to follow the phone — so
+  // these three rows are a view onto that and not a second store. "System" is
+  // the follow; "Light" and "Dark" turn the follow off and move the chosen
+  // palette to its counterpart of that scheme (`paletteForScheme`), which is
+  // exactly what the client's Match System toggle resolves to. The coach's
+  // own palette is never rewritten to a different family: a coach on Mono
+  // Noir who taps Light lands on Swiss Ivory, its declared counterpart.
+  const theme = useThemeControls();
+  const appearance: 'light' | 'dark' | 'system' = theme.follow ? 'system' : metaByKey(theme.palette).light ? 'light' : 'dark';
+  const chooseAppearance = (k: 'light' | 'dark' | 'system') => {
+    if (k === 'system') { theme.setFollow(true); return; }
+    theme.setFollow(false);
+    theme.setPalette(paletteForScheme(theme.palette, k));
+  };
+
+  // The plan name under the Subscription row, read once. Null is "not known"
+  // — a refused read, no backend, or no subscription row — and the caption
+  // then describes the screen rather than stating a plan. It never says "no
+  // plan": `fetchMySubscription` returns `sub: null` for a refused read as
+  // well as for a coach who has not subscribed, and only the billing screen
+  // tells those apart with its own sentences.
+  const [plan, setPlan] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { sub, error } = await fetchMySubscription();
+      if (!live || error) return;
+      setPlan(sub?.plan ?? null);
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // The Notifications row on the board opens a preferences screen. This app's
+  // notification preferences live on THIS screen — the push switch, the six
+  // categories and quiet hours — so the row scrolls to them rather than
+  // opening a second copy. `notifY` is the section's offset within the scroll
+  // content, measured on layout, so a longer or shorter Signed-in card above
+  // it cannot put the jump in the wrong place.
+  const scrollRef = useRef<ScrollView>(null);
+  const notifY = useRef(0);
+  const jumpToNotifications = () => scrollRef.current?.scrollTo({ y: notifY.current, animated: true });
 
   // ── The currency, and the reason this control is on the COACH's screen ──
   //
@@ -413,6 +493,28 @@ export default function TrainerSettings() {
   const [curMsg, setCurMsg] = useState<{ bad: boolean; text: string } | null>(null);
   const [curBusy, setCurBusy] = useState(false);
 
+  // ── the THIRD route, for a coach who has no gym at all ──────────────────
+  //
+  // The two routes above both write `tenants.currency`, and both need a
+  // tenant. A coach whose `profiles.tenant_id` is null has none, so this
+  // screen used to draw them one sentence — "This account is not attached to a
+  // gym, so there is nothing here to price" — and no control of any kind.
+  // That is not a dead end in some corner of the product: it is Add Package
+  // disabled, no invoice issuable, and every session filed at a null rate,
+  // for the coach this app is mostly sold to. `revoke_staff_role()` (part 711)
+  // puts a coach into exactly that state by design, the moment a gym takes
+  // them off its staff.
+  //
+  // Part 940 gives them `trainers.currency`, and `fetchMyCurrency` reads the
+  // two in the one order that can never disagree: the gym wherever there is
+  // one, their own only where there is not. `own` here is that read, and the
+  // picker below is drawn from `own.canSetOwn` rather than from "there is no
+  // code" — because a failed read has no code either, and offering a choice
+  // over one is how a currency that already exists gets overwritten.
+  const [own, setOwn] = useState<MyCurrency | null>(null);
+  const loadOwnCurrency = useCallback(async () => { setOwn(await fetchMyCurrency()); }, []);
+  useEffect(() => { void loadOwnCurrency(); }, [loadOwnCurrency]);
+
   const chooseCurrency = async (code: string) => {
     if (curBusy) return;
     setCurBusy(true);
@@ -423,6 +525,12 @@ export default function TrainerSettings() {
       // false here is a write that really did not land rather than an RLS
       // narrowing reported as success.
       outcome = (await updateTenant({ currency: code })) ? 'set' : 'refused';
+    } else if (!tenant && tenantStatus === 'ready') {
+      // No gym, established rather than assumed — `tenantStatus === 'ready'`
+      // is doing the work here, because `!tenant` is also true of a read that
+      // failed. The server checks the same thing again and refuses with
+      // 'has-tenant' if it disagrees; this only decides which route to try.
+      outcome = await setMyCoachCurrency(code);
     } else {
       outcome = await setOwnCurrency(code);
     }
@@ -434,6 +542,10 @@ export default function TrainerSettings() {
     // optimistic about it. `setOwnCurrency` refreshes itself, so this is only
     // the owner branch above catching up.
     if (outcome === 'set' && role === 'owner') refreshTenant();
+    // The coach's own currency is not in the tenant provider, so it is re-read
+    // here for the same reason: what the screen says next has to come from the
+    // database rather than from the tap that hoped it would.
+    if (outcome === 'set') void loadOwnCurrency();
   };
 
   // null = not read yet. `requestedAt: null` inside a loaded object means
@@ -460,23 +572,23 @@ export default function TrainerSettings() {
 
   const withdraw = () => {
     Alert.alert(
-      'Withdraw your deletion request?',
+      'Withdraw Your Deletion Request?',
       'Your coaching account and everything in it will be kept. You can ask to be deleted again at any time.',
       [
-        { text: 'Leave it pending', style: 'cancel' },
-        { text: 'Withdraw request', onPress: async () => {
+        { text: 'Leave It Pending', style: 'cancel' },
+        { text: 'Withdraw Request', onPress: async () => {
           if (withdrawing) return;
           setWithdrawing(true);
           try {
             const ok = await withdrawAccountDeletion();
             if (!ok) {
               reportError('trainerSettings.withdraw', new Error('withdraw_account_deletion did not clear the request'));
-              Alert.alert('Not withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
+              Alert.alert('Not Withdrawn', `Your deletion request is still in place. Nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
               return;
             }
             // Re-read rather than assume: what shows next comes from the row.
             await loadPending();
-            Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+            Alert.alert('Request Withdrawn', 'Your account will be kept and nothing has been deleted.');
           } finally { setWithdrawing(false); }
         } },
       ],
@@ -484,6 +596,43 @@ export default function TrainerSettings() {
   };
 
   useEffect(() => { void loadPending(); }, [loadPending]);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Four server reads sit behind this screen and each one has a state where
+   * an unread answer looks exactly like a real one: the notification channels
+   * (an empty muted set is "everything on"), the quiet-hours window and
+   * whether the server enforces it, the gym row, and whether a deletion
+   * request is pending — the last being the one a coach comes back to this
+   * screen specifically to check.
+   *
+   * The units and the app lock are not in here. Both live on this handset,
+   * this screen is the only thing that writes them, and there is no other copy
+   * for a refresh to go and find. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    loadPending(), Promise.resolve(channels.reload()),
+    Promise.resolve(quiet.reload()), Promise.resolve(refreshTenant()),
+  ]), [loadPending, channels, quiet, refreshTenant]));
+
+  /**
+   * The manifest the last export produced, or null before there has been one.
+   *
+   * `exportMyDataDetailed` has returned `files` since the day it was written and
+   * this screen took `res.json` and threw the rest away — so a coach's
+   * photographs, their message attachments and any injury document of their own
+   * were the one part of their record they could not get back, on the screen
+   * whose whole purpose is getting it back. The member's side of the app
+   * (app/(client)/settings.tsx) has had this since the manifest existed.
+   *
+   * Held rather than re-fetched, so the row below lists exactly what the file
+   * they just saved says they have. `complete` is kept beside it because a
+   * count over a short read is the same defect as `"workouts": []` over a
+   * refused one — `filesRowNote` refuses to state one.
+   */
+  const [files, setFiles] = useState<ExportFile[] | null>(null);
+  const [filesComplete, setFilesComplete] = useState(true);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [savingPath, setSavingPath] = useState<string | null>(null);
 
   const exportData = async () => {
     if (exporting) return;
@@ -497,28 +646,59 @@ export default function TrainerSettings() {
       // why those tables are filtered by hand instead of left to RLS.
       const res = await exportMyDataDetailed({ coach: true });
       const json = res.json;
-      await shareTextFile(json, 'repple-coach-my-data.json', 'application/json', 'Export my data');
+      // The filename comes from the brand rather than from a literal, the same
+      // argument `MY_DATA_FILENAME` makes for the member's half: a coach at a
+      // white-labelled chain saving 'repple-coach-my-data.json' has been handed
+      // a file named after a company they do not deal with.
+      await shareTextFile(json, coachDataFilename(BRAND.id), 'application/json', 'Export my data');
+      // The manifest, so the files can be saved from the row below. Kept
+      // whether or not the export was complete, along with WHETHER it was.
+      setFiles(res.files);
+      setFilesComplete(res.complete);
       if (!res.complete) {
         // A partial export handed over silently is the same failure one level
-        // up: somebody deletes their account believing they have a copy.
-        Alert.alert(
-          'That copy is incomplete',
-          `${res.failed.length} part${res.failed.length === 1 ? '' : 's'} of your record could not be read `
-          + `(${res.failed.map((f) => f.table).join(', ')}). The file has been saved and says so inside, `
-          + 'but do not treat it as a full copy, and do not delete your account on the strength of it. '
-          + 'Try again in a moment, or email support@repplefitness.com.',
-        );
+        // up: somebody deletes their account believing they have a copy. The
+        // parts are NAMED rather than counted, and the sentence is the one the
+        // member's screen shows, from src/lib/dataExport.ts — two wordings for
+        // one fact is how they come to disagree.
+        Alert.alert('That Copy Is Incomplete',
+          incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail));
       }
     } catch (e) {
       reportError('trainerSettings.export', e);
-      Alert.alert('Export failed', 'Nothing was exported. Check your connection and try again.');
+      Alert.alert('Export Failed', 'Nothing was exported. Check your connection and try again.');
     } finally { setExporting(false); }
   };
 
+  /**
+   * Hand one of the coach's own files to the share sheet.
+   *
+   * One at a time, and that is not a limitation being apologised for: the share
+   * sheet takes one file, and a message attachment can be 64 MB of video
+   * (supabase/parts/124), so a bundle assembled in memory is a crash at the
+   * exact moment somebody is taking their last copy.
+   *
+   * `shareBinaryFile` reports whether it actually landed, and a silent success
+   * would be somebody believing they have saved something they have not.
+   */
+  const saveFile = async (f: ExportFile) => {
+    if (savingPath) return;
+    setSavingPath(f.path);
+    try {
+      const b64 = await readMyFile(f.bucket, f.path);
+      if (!b64) { Alert.alert('Not Saved', saveFileFailure(fileShareBlocker())); return; }
+      // The object key's last segment — the name this app chose at upload, and
+      // already safe on every platform, so nothing here has to invent one.
+      const name = f.path.split('/').pop() || 'file';
+      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
+      if (!ok) Alert.alert('Not Saved', saveFileFailure(fileShareBlocker()));
+    } finally { setSavingPath(null); }
+  };
+
   const signOut = () => {
-    Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
-      { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } },
+    Alert.alert('Sign Out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
+      { text: 'Stay Signed In', style: 'cancel' },
+      { text: 'Sign Out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
 
@@ -529,30 +709,41 @@ export default function TrainerSettings() {
       if (!ok) {
         // `requestAccountDeletion` returns false only when the write was
         // refused. Saying "noted" here would be inventing a promise.
-        Alert.alert('Not requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again, or contact your gym.');
+        Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again, or contact your gym.');
         return;
       }
       await loadPending();
       Alert.alert(
-        'Deletion requested',
-        `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nYou will be signed out now.`,
-        [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } }],
+        'Deletion Requested',
+        `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nSigning you out of this phone now.`,
+        [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }],
       );
     } catch (e) {
       reportError('trainerSettings.delete', e);
-      Alert.alert('Not requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
+      Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again.');
     } finally { setDeleting(false); }
   };
 
   const deleteAccount = () => {
     Alert.alert(
-      'Delete your coaching account?',
-      'This asks for your Repple Coach account and everything of yours to be permanently erased — your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
+      'Delete Your Coaching Account?',
+      'This asks for your Repple Coach account and everything of yours to be permanently erased: your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
       'Your clients are not deleted. They stay with the gym, but they lose you as their coach, and anything you wrote only to them goes with your account.\n\n' +
-      `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.`,
+      `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.\n\n` +
+      // The sentence above promises "your videos, your messages and your session
+      // history" are erased, and the member's screen has carried the countervailing
+      // detail since it was written (app/(client)/settings.tsx:396). This screen
+      // carried none of it. Parts 1120, 1151 and 1152 are now applied, so what
+      // this note has to be careful about has MOVED rather than gone: coach-logos,
+      // coach-docs, exercise-videos and the coach's half of message-media are all
+      // on `object_purge` now, and a coach whose documents have been accepted can
+      // be erased — but a queued row is a delete that has been SENT, and the
+      // acceptances go with the account. Both are said out loud in the wording.
+      // One wording, from src/lib/dataExport.ts, so the two screens cannot drift.
+      COACH_DELETION_FILES_NOTE,
       [
-        { text: 'Keep my account', style: 'cancel' },
-        { text: 'Request deletion', style: 'destructive', onPress: () => { void run(); } },
+        { text: 'Keep My Account', style: 'cancel' },
+        { text: 'Request Deletion', style: 'destructive', onPress: () => { void run(); } },
       ],
     );
   };
@@ -562,23 +753,89 @@ export default function TrainerSettings() {
     : pending === null
       ? 'Checking whether you already have a deletion request open…'
       : pending.requestedAt
-        ? `You asked to be deleted on ${day(pending.requestedAt)}. Your gym's owner carries it out. Only you can take the request back — nobody can withdraw it on your behalf.`
+        ? `You asked to be deleted on ${day(pending.requestedAt)}. Your gym's owner carries it out. Only you can take the request back; nobody can withdraw it on your behalf.`
         : 'You have no deletion request open.';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Who you are signed in as, your data & this build</Text>
+        {/* ── the header, as board page 17 draws it ─────────────────────────
+            A back chevron at the leading edge and "Settings" centred over the
+            rows — no eyebrow and no subtitle. */}
+        <PageHead title="Settings" />
 
-        <Rule />
+
+        {/* ── the five rows the board opens with ────────────────────────────
+            Profile, Notifications, Subscription, Integrations, Help & Support,
+            in that order, each a round icon, a title, a caption and a chevron.
+            Every caption is either a description of the screen it opens or a
+            value that was READ: the name under Profile is the session's, the
+            plan under Subscription is the subscriptions row's or absent. The
+            board's sample captions ("Pro Plan", "Apple Health, MyFitnessPal")
+            are not reproduced as text. */}
+        <Section>
+          <ListRow icon="me" tone="brand" title="Profile"
+            note={auth.loading ? 'Checking…' : (auth.user?.name || 'How clients see you')}
+            onPress={() => router.push('/(trainer)/profile')} />
+          <ListRow icon="bell" tone="amber" title="Notifications"
+            note="Push, what you are told about, and quiet hours"
+            onPress={jumpToNotifications} />
+          <ListRow icon="chart" tone="orange" title="Subscription"
+            note={plan ? `${plan} Plan` : 'Your plan, payment method and invoices'}
+            onPress={() => router.push('/(trainer)/billing')} />
+          <ListRow icon="heart" tone="pink" title="Integrations"
+            note="Your watch and the apps that feed your day"
+            onPress={() => router.push('/(trainer)/devices')} />
+          <ListRow icon="message" tone="blue" title="Help & Support"
+            note="Tell us what to improve, or ask for help"
+            onPress={() => router.push('/(trainer)/feedback')} />
+        </Section>
+
+
+        {/* ── Appearance: Light / Dark / System (board page 20) ─────────────
+            Three radio rows over the one theme setting, see `chooseAppearance`
+            above. The sentence under them says what "System" is doing right
+            now, in the client Appearance screen's own words, because a row
+            called System that does not say which way the phone went is a
+            switch nobody can check. */}
+        <Section>
+          <SectionHead title="Appearance" />
+          {([
+            { key: 'light', label: 'Light', icon: 'sun' },
+            { key: 'dark', label: 'Dark', icon: 'moon' },
+            { key: 'system', label: 'System', icon: 'settings' },
+          ] as const).map((row, i) => {
+            const on = appearance === row.key;
+            return (
+              <Pressable key={row.key} onPress={() => chooseAppearance(row.key)}
+                accessibilityRole="radio" accessibilityState={{ selected: on }}
+                accessibilityLabel={`${row.label} appearance`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <IconPlate icon={row.icon} tone={on ? 'brand' : 'neutral'} />
+                <Text style={{ ...ty.head, ...font(on ? '700' : '500'), color: t.ink, flex: 1 }}>{row.label}</Text>
+                {on ? <Icon name="check" size={19} color={t.brandText} /> : null}
+              </Pressable>
+            );
+          })}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {appearance === 'system'
+              ? (theme.scheme
+                ? `Your phone is in ${theme.scheme} mode, so this shows ${metaByKey(theme.shownPalette).name}.`
+                : 'Your phone has not said whether it is in light or dark mode, so nothing changes until it does.')
+              : `${metaByKey(theme.palette).name}, in both of your phone's modes.`}
+          </Text>
+        </Section>
+
 
         {/* The permanent way back to the first-run list. The row on the Clients
             screen removes itself once every step is done, and a screen reachable
@@ -588,22 +845,21 @@ export default function TrainerSettings() {
             item on that list, which is the other reason it belongs here. */}
         <Section>
           <SectionHead title="Getting Started" />
-          <ListRow icon="sparkle" title="Getting Started"
+          <ListRow icon="sparkle" tone="purple" title="Getting Started"
             note="What is set up, and what is still worth doing"
             onPress={() => router.push('/(trainer)/getting-started')} />
         </Section>
 
-        <Rule />
 
+        {/* The Sign Out Ghost that closed this card is the Log Out row above
+            now — one control, where the board puts it, rather than the same
+            fate offered twice on one screen. */}
         <Section>
-          <SectionHead title="Signed in as" />
+          <SectionHead title="Signed In As" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking…' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking…' : fig(auth.user?.email)} />
           <Line t={t} label="Role" value={auth.loading ? 'Checking…' : fig(auth.user ? ROLE_LABEL[auth.user.role] ?? auth.user.role : null)} />
           <Line t={t} label="Gym" value={tenantLoading ? 'Checking…' : fig(tenant?.name)} />
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign Out" onPress={signOut} />
-          </View>
 
           {/* A phone left on a bench is a phone left on a bench, whichever of
               the three apps is installed. */}
@@ -613,7 +869,6 @@ export default function TrainerSettings() {
             on={lock.enabled} onPress={() => { void toggleLock(); }} />
         </Section>
 
-        <Rule />
 
         {/* Notifications.
             The coach app had no notification preference at all — not a broken
@@ -624,13 +879,14 @@ export default function TrainerSettings() {
             removes this handset's row from `push_tokens`, which is the table
             the send-push edge function resolves recipients from, so it reaches
             every sender at once rather than each of two dozen call sites. */}
+        <View onLayout={(e) => { notifY.current = e.nativeEvent.layout.y; }}>
         <Section>
           <SectionHead title="Notifications" />
           <SwitchRow t={t} first label="Push Notifications"
             note="Session bookings and cancellations, client messages, and requests to coach"
             on={st.notifPush} onPress={() => { void togglePush(); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Turning this off takes this phone off the list entirely. Your clients can still message you and book with you — you will see it next time you open the app rather than as it happens, and your other devices are unaffected.
+            Turning this off takes this phone off the list entirely. Your clients can still message you and book with you. You will see it next time you open the app rather than as it happens, and your other devices are unaffected.
           </Text>
 
           {/* ── the categories ────────────────────────────────────────────
@@ -640,19 +896,33 @@ export default function TrainerSettings() {
               to stop 11pm chat pings also stopped hearing that a client's card
               was declined, and would not turn it back on.
 
-              These five are a SERVER preference, because every coach-directed
-              notification is remote — sent by a client's handset, by a trigger,
-              or by an edge function — and a device-local switch would read
-              "off" while the banner kept arriving. The filter is applied in
-              supabase/functions/send-push and notify-message, where the
+              The first five are a SERVER preference, because those
+              notifications are remote — sent by a client's handset, by a
+              trigger, or by an edge function — and a device-local switch would
+              read "off" while the banner kept arriving. The filter is applied
+              in supabase/functions/send-push and notify-message, where the
               recipients are resolved. src/lib/coachNotify.ts carries the whole
               argument.
+
+              The sixth, Your Own Book, is the one thing on this list that is
+              not somebody else doing something — an unmarked session, an
+              overdue invoice, a client who has stopped — so there is no trigger
+              to hang it on and this phone works it out. The ANSWER still lives
+              in the same table, so it follows the coach between phones; only
+              the place it is applied differs, and `CoachChannelDef.local` is
+              what says which is which.
 
               An unread preference is NOT "opted in": a switch whose value has
               not been read draws in neither position and says so, because a
               coach who taps a guessed switch has just saved the guess. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>What you are told about</Text>
+            {/* marginBottom, because the row under this one is drawn with
+                `first` and `first` means paddingTop: 0. Seen on an iPhone 17
+                Pro at the default text size: this heading and the words
+                "Client Messages" had no gap at all between them and read as one
+                two-line title, with the first switch apparently belonging to
+                nothing. The same is true of the heading below. */}
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>What You Are Told About</Text>
             {channelNote ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{channelNote}</Text>
             ) : null}
@@ -663,12 +933,20 @@ export default function TrainerSettings() {
                   note={c.note}
                   state={channelState(c.key, channels.muted, channels.status)}
                   onPress={() => { void toggleChannel(c.key); }} />
-                {/* Shown under the money switch alone, so it means something
-                    when it appears. A missed chat message is visible the next
-                    time the coach opens the app; a failed subscription payment
-                    is a client who has quietly stopped paying. */}
+                {/* Only under the two switches whose muting costs something a
+                    coach would not notice, and each says its OWN cost — a
+                    failed subscription payment and an unmarked session are
+                    different harms, and one shared sentence would have named
+                    the wrong one under one of them. */}
                 {c.quietCost && channelState(c.key, channels.muted, channels.status) === 'off' ? (
-                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{CHANNEL_QUIET_COST}</Flag>
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{c.quietCost}</Flag>
+                ) : null}
+                {/* And under the one that this phone works out for itself,
+                    because "arrives with no signal" and "only as current as the
+                    last time you opened the app" are both true of it and of
+                    nothing else in the list. */}
+                {c.local ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_LOCAL_NOTE}</Text>
                 ) : null}
               </View>
             ))}
@@ -689,7 +967,7 @@ export default function TrainerSettings() {
               which they will not trust the switches above either. Three states,
               three sentences: available, not yet, and could-not-find-out. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>When you will not be buzzed</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>When You Will Not Be Buzzed</Text>
 
             {quiet.status === 'loading' ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your quiet hours…</Text>
@@ -752,8 +1030,8 @@ export default function TrainerSettings() {
             </>)}
           </View>
         </Section>
+        </View>
 
-        <Rule />
 
         {/* How often Quiet Clients may raise the same person. See the long note
             on `saveCooldown` above for why this is a floor rather than an
@@ -761,28 +1039,39 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Quiet Clients" />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
-            <View style={{ flex: 1, paddingRight: sp.md }}>
-              <Text style={{ ...ty.body, color: t.ink }}>Shortest gap between approaches</Text>
+            <View style={{ flex: 1, paddingEnd: sp.md }}>
+              <Text style={{ ...ty.body, color: t.ink }}>Shortest Gap Between Approaches</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {cooldownStatus === 'ready'
                   ? cooldownNote(cooldownStored)
                   : (rateFieldNote(cooldownStatus === 'loading' ? 'loading' : 'error') ?? '')}
               </Text>
             </View>
-            <TextInput
-              value={cooldownBox}
-              onChangeText={(v) => { setCooldownBox(v); setCooldownMsg(null); }}
-              onBlur={() => { void saveCooldown(); }}
-              keyboardType="number-pad"
-              maxLength={3}
-              accessibilityLabel="Shortest number of days between two approaches to the same client"
-              placeholder="days"
-              placeholderTextColor={t.ink3}
-              style={{
-                ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
-                paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: 'right',
-              }}
-            />
+            {/* The unit is a LABEL beside the box, not the placeholder inside
+                it. Seen on an iPhone 17 Pro: unset, this control was a grey
+                pill containing the single word "days" and nothing else — no
+                number, no caret, nothing saying it could be typed in — and the
+                moment a coach typed 10 the word "days" vanished, taking the
+                unit away at exactly the point it started to matter. Now the
+                box says what is stored (or that nothing is) and the unit
+                stands next to it in both states. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <TextInput
+                value={cooldownBox}
+                onChangeText={(v) => { setCooldownBox(v); setCooldownMsg(null); }}
+                onBlur={() => { void saveCooldown(); }}
+                keyboardType="number-pad"
+                maxLength={3}
+                accessibilityLabel="Shortest number of days between two approaches to the same client"
+                placeholder="Not set"
+                placeholderTextColor={t.ink3}
+                style={{
+                  ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+                  paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: END_ALIGN,
+                }}
+              />
+              <Text style={{ ...ty.body, color: t.ink3 }}>days</Text>
+            </View>
           </View>
           {cooldownMsg ? (
             <Flag tone={/did not save|not a number/.test(cooldownMsg) ? t.crit : t.good}>{cooldownMsg}</Flag>
@@ -794,7 +1083,6 @@ export default function TrainerSettings() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* Units.
             The coach portal had no unit control at all, so every coach read
@@ -809,7 +1097,7 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Units" />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
-            <View style={{ flex: 1, paddingRight: sp.md }}>
+            <View style={{ flex: 1, paddingEnd: sp.md }}>
               <Text style={{ ...ty.body, color: t.ink }}>Weight</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {weightNote ?? "What you read and type, including when you log a session on a client's record"}
@@ -822,7 +1110,7 @@ export default function TrainerSettings() {
                   <Pressable key={u} onPress={() => st.set({ weightUnit: u })}
                     accessibilityRole="radio" accessibilityState={{ selected: on }}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{u}</Text>
                   </Pressable>
                 );
               })}
@@ -830,7 +1118,6 @@ export default function TrainerSettings() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* Currency.
             The setting six other screens point at and none of them could
@@ -855,15 +1142,48 @@ export default function TrainerSettings() {
               Your gym could not be read, so what it charges in is not known. That is a read that failed rather than a setting nobody has made, and nothing can be changed until it can be read.
             </Flag>
           ) : !tenant ? (
-            <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
-              This account is not attached to a gym, so there is nothing here to price.
-            </Text>
+            // NO GYM — and, since part 940, no longer a dead end.
+            //
+            // Four different sentences under here and they are four different
+            // facts. `own` is null until the read comes back; after that the
+            // gap says which of "could not read", "not deployed yet", "no
+            // coach record" and "you have not chosen" is true, and only the
+            // last of them draws a picker. `canSetOwn` is the gate rather than
+            // "there is no code", because a failed read has no code either and
+            // a picker over one can overwrite a currency that already exists.
+            !own ? (
+              <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>Reading what you charge in…</Text>
+            ) : own.currency ? (<>
+              <Line t={t} first label="Priced In" value={own.currency} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
+            </>) : own.canSetOwn ? (<>
+              <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
+                You are attached to no gym, so what you charge in is yours to say, and until you say it every amount in this app is withheld rather than guessed at: your analytics, your invoices, the price of anything you sell and the rate every session is filed at. Repple is white-labelled and there is no default that would be right for both a London coach and a Tokyo one. Choose once. It is not editable afterwards, because every price you go on to store is denominated in it.
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                {CURRENCY_CHOICES.map((c) => (
+                  <Pressable key={c} onPress={() => { void chooseCurrency(c); }} disabled={curBusy}
+                    accessibilityRole="button" accessibilityState={{ disabled: curBusy }}
+                    accessibilityLabel={`Price me in ${c}`}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2, opacity: curBusy ? 0.5 : 1 }}>
+                    <Text style={{ ...ty.label, color: t.ink2 }}>{c}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>) : (
+              // Everything else this read can come back as. A mark, never ink
+              // on the sentence: nothing here has gone wrong on the coach's
+              // account, and two of the three are somebody else's deploy.
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                {myCurrencyLine(own.gap ?? 'unreadable', 'nothing in this app can be priced')}
+              </Flag>
+            )
           ) : tenant.currency ? (<>
-            <Line t={t} first label="Priced in" value={tenant.currency} />
+            <Line t={t} first label="Priced In" value={tenant.currency} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
           </>) : (<>
             <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
-              Nobody has said what you charge in, so every amount in this app is withheld rather than guessed at — your analytics, your invoices and the price of anything you sell. Repple is white-labelled and there is no default that would be right for both a London gym and a Dubai one. Choose once and every screen follows.
+              Nobody has said what you charge in, so every amount in this app is withheld rather than guessed at: your analytics, your invoices and the price of anything you sell. Repple is white-labelled and there is no default that would be right for both a London gym and a Dubai one. Choose once and every screen follows.
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {CURRENCY_CHOICES.map((c) => (
@@ -888,19 +1208,42 @@ export default function TrainerSettings() {
           ) : null}
         </Section>
 
-        <Rule />
+
+        <Section>
+          <SectionHead title="Account &Amp; Sign-in" />
+          {/* The other half of src/lib/accountSecurity.ts. It was written,
+              tested and wired into the CLIENT app only, so a coach who wanted
+              to change their password had to sign out and trigger a reset email
+              for a password they had not forgotten — and had no route at all to
+              a new address, which is the only way back in if they lose it. */}
+          <ListRow icon="lock" tone="neutral" title="Change Password or Email"
+            note="The password you sign in with, and the address a reset would go to"
+            onPress={() => router.push('/(trainer)/account')} />
+        </Section>
+
 
         <Section>
           <SectionHead title="Your Data" />
-          <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
-            note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep"
+          <ListRow icon="share" tone="blue" title={exporting ? 'Preparing Export…' : 'Export My Data'}
+            note="Your account and your coaching business (your price list, invoices, receipts, payouts, costs and enquiries) as a JSON file you can keep, plus a list of every file you hold"
             onPress={exportData} />
+          {/* Only after an export, because the manifest is what the export
+              produced and this row must list exactly what that file says the
+              coach holds. `filesRowNote` refuses to state a count over a read
+              that came back short. A JSON bundle cannot carry the bytes — a
+              message attachment is up to 64 MB of video and base64 in a string
+              is a third larger again — so the files are saved one at a time. */}
+          {files !== null ? (
+            <ListRow icon="camera" tone="teal" title="Save My Files"
+              note={filesRowNote(files.length, filesComplete)}
+              onPress={() => { if (files.length > 0) setFilesOpen(true); }} />
+          ) : null}
           {pending?.requestedAt ? (
-            <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
+            <ListRow icon={BACK_ICON} tone="amber" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
               note="Keep your account. You can withdraw right up until the deletion is carried out."
               onPress={withdraw} />
           ) : (
-            <ListRow icon="minus" tone={t.crit} title={deleting ? 'Requesting…' : 'Delete My Account'}
+            <ListRow icon="minus" tone="red" title={deleting ? 'Requesting…' : 'Delete My Account'}
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}
@@ -913,18 +1256,76 @@ export default function TrainerSettings() {
             : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{requestLine}</Text>}
         </Section>
 
-        <Rule />
 
         {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
         <Section>
           <SectionHead title="Build" />
           <BuildInfo />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+        </Section>
+        {/* What the Build card is FOR, behind a fold: it is an instruction to
+            whoever is diagnosing an update, not something a coach reads. */}
+        <Expandable title="About the Build Card">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
             Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
           </Text>
+        </Expandable>
+
+        {/* ── Log Out, in its own card, LAST ────────────────────────────────
+            The last thing on the page, under Build: the approved look ends
+            every settings page on it, and the one control that ends the
+            session does not belong between two rows a thumb is aiming for.
+            The same `useSignOutAndSay` fate the
+            Ghost at the foot of the old Signed-in card went through — the
+            confirmation and the "could not be ended" sentence are unchanged.
+            The board draws the words in red. This app does not: `t.crit` as
+            ink measures 3.03–4.05:1 on every palette (scripts/check-contrast.mjs),
+            so the red PLATE carries the colour (its glyph is the red's measured ink) and the label stays ink, the same
+            split every Flag on this screen makes. No chevron, because it is an
+            action and not a screen. */}
+        <Section>
+          <Pressable onPress={signOut} accessibilityRole="button" accessibilityLabel="Log out"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+            <IconPlate icon="lock" tone="red" />
+            <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>Log Out</Text>
+          </Pressable>
         </Section>
 
       </ScrollView>
+
+      {/* The files themselves, one at a time. Named in the coach's own words by
+          `FILE_KINDS` in src/lib/gdpr.ts, because "photo_1724.jpg" tells nobody
+          which of these is their physiotherapy report. */}
+      <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.title, color: t.ink }}>Your Files</Text>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
+            {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(files ?? []).map((f, i) => (
+              <View key={f.path}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => { void saveFile(f); }} disabled={!!savingPath}
+                  accessibilityRole="button" accessibilityLabel={`Save ${f.what}`}
+                  accessibilityState={{ disabled: !!savingPath }}
+                  style={{ paddingVertical: sp.md, opacity: savingPath && savingPath !== f.path ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>{f.what}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {savingPath === f.path ? 'Saving…' : fileSizeLabel(f.sizeBytes)}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+            <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
+              accessibilityLabel="Close your files"
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Done</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

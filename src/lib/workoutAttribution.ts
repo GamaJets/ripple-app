@@ -9,7 +9,7 @@ import type { WorkoutEntry } from './mockData';
 
 /** The logged-by line for a workout, or null when the person logged it themselves. */
 export function attributionLine(
-  e: Pick<WorkoutEntry, 'loggedBy' | 'amendedAt'>,
+  e: Pick<WorkoutEntry, 'loggedBy' | 'amendedAt' | 'amendedBy'>,
   coachName: string | null,
   viewerIsTheClient: boolean,
 ): string | null {
@@ -21,7 +21,18 @@ export function attributionLine(
   const stamp = Number.isNaN(when.getTime())
     ? ''
     : ` on ${when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
-  // Said plainly on both sides. The coach needs to know their account of the
-  // session was changed; the client needs to know their change is visible.
-  return `${by} · amended by ${viewerIsTheClient ? 'you' : 'them'}${stamp}`;
+  // WHO, since part 3230. Only two people can stamp a change: the member the
+  // set is about, and the coach who logged it. So `amendedBy` equal to
+  // `loggedBy` is the coach, and anything else is the member. Said from the
+  // reader's side on both apps.
+  //
+  // No `amendedBy` means the change was stamped before that column existed.
+  // Then we know THAT it changed and not who, and we say only what we know:
+  // guessing would tell somebody they did a thing they may not have done.
+  if (!e.amendedBy) return `${by} · changed after it was filed${stamp}`;
+  const coachChangedIt = e.amendedBy === e.loggedBy;
+  const changer = coachChangedIt
+    ? (viewerIsTheClient ? who : 'you')
+    : (viewerIsTheClient ? 'you' : 'your client');
+  return `${by} · changed by ${changer}${stamp}`;
 }

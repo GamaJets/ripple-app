@@ -17,6 +17,7 @@
 // it.
 
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import type { SessionOutcome } from './gymSessions';
 import type { GymClass } from './gymSchedule';
 
@@ -80,10 +81,18 @@ export async function fetchPtSlots(
   // A failure to read the names must not be reported as "the sessions have no
   // names" — that is the difference between not loaded and loaded-and-empty,
   // one level down. So it throws like everything else.
+  // CHUNKED. The read above is `capLimit()`, so `rows` can be a thousand
+  // sessions, and every session carries TWO ids — a trainer and a client — so
+  // `ids` can be two thousand uuids. At about 39 bytes each inside an
+  // `in.("…","…")` list that is a 78KB request line; nginx and most CDNs refuse
+  // past 8KB, which is roughly two hundred. The 414 arrives as `data: null`,
+  // which is indistinguishable from "none of these people has a profile", and
+  // the board would render a whole week of one-to-ones with nobody's name on
+  // it. 150 at a time (src/lib/idLookup.ts) cannot reach that limit.
   const names = new Map<string, string>();
-  if (ids.length) {
+  for (const chunk of chunkIds(uniqueIds(ids))) {
     const { data: profs, error: nameErr } = await sb
-      .from('profiles').select('id, full_name').in('id', ids);
+      .from('profiles').select('id, full_name').in('id', chunk);
     if (nameErr) throw nameErr;
     (profs ?? []).forEach((p: any) => {
       const n = (p.full_name || '').trim();
@@ -473,14 +482,14 @@ export function slotBlocker(s: NewPtSlot): string | null {
   if (!Number.isFinite(s.durationMin) || s.durationMin <= 0) {
     return 'How long is it? A slot needs a length in minutes.';
   }
-  if (s.durationMin > 8 * 60) return 'That is longer than eight hours — check the minutes.';
+  if (s.durationMin > 8 * 60) return 'That is longer than eight hours. Check the minutes.';
   // A held hour is one nobody may take; a booked one is an hour somebody has.
   // Asking for both is not a slot with a preference, it is two different
   // decisions, and picking either would put an hour on the board that the owner
   // did not describe. `ptEntry` reads a blocked slot as holding no place at all,
   // so the member booked into one would vanish from the board's own headcount.
   if (s.blocked && s.clientId) {
-    return 'A held hour cannot also be booked to somebody. Book it, or hold it — not both.';
+    return 'A held hour cannot also be booked to somebody. Book it, or hold it, not both.';
   }
   return null;
 }
@@ -511,7 +520,7 @@ export function bookingRefusalNote(error: unknown): string | null {
   if (!e) return null;
   if (e.code === '23P01') {
     return 'That trainer already has a booked session overlapping this time. '
-      + 'Two people cannot have the same hour with them — move one of the two first.';
+      + 'Two people cannot have the same hour with them. Move one of the two first.';
   }
   if (e.code === '23503') {
     const where = `${e.message ?? ''} ${e.details ?? ''}`;
@@ -565,7 +574,7 @@ export async function createPtSlot(
   }
 
   const id = (data as any)?.id as string | undefined;
-  if (!id) throw new Error('The slot was not written — nothing came back from the insert.');
+  if (!id) throw new Error('The slot was not written. Nothing came back from the insert.');
   return id;
 }
 
@@ -620,7 +629,7 @@ export async function updatePtSlot(
     throw note ? new Error(note) : error;
   }
   if (!data || (data as any[]).length === 0) {
-    throw new Error('Nothing was changed — that slot may no longer exist, or it may not be yours to change.');
+    throw new Error('Nothing was changed. That slot may no longer exist, or it may not be yours to change.');
   }
 }
 
@@ -640,12 +649,20 @@ export async function fetchTrainerOptions(
   const ids: string[] = assertWhole(data as any[] | null, "this gym's trainers").map((r: any) => r.id as string);
   if (!ids.length) return [];
 
-  const { data: profs, error: nameErr } = await sb
-    .from('profiles').select('id, full_name').in('id', ids);
-  if (nameErr) throw nameErr;
-  const names = new Map<string, string>(
-    (profs ?? []).map((p: any) => [p.id as string, (p.full_name || '').trim()]),
-  );
+  // Chunked for the same reason as fetchPtSlots above. The paragraph over the
+  // `trainers` read argues that a thousand trainers is not a gym, and that is
+  // true of the ROW count — it is not a bound on the request line, because
+  // `capLimit()` is the only thing standing between this list and a thousand
+  // uuids, and the 414 that a thousand would earn comes back as `data: null`:
+  // a picker with no trainers in it, on the screen that attaches one to a
+  // class.
+  const names = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: profs, error: nameErr } = await sb
+      .from('profiles').select('id, full_name').in('id', chunk);
+    if (nameErr) throw nameErr;
+    (profs ?? []).forEach((p: any) => names.set(p.id as string, (p.full_name || '').trim()));
+  }
 
   return ids
     .map((id) => ({ id, name: names.get(id) || null }))

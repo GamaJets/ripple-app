@@ -25,11 +25,97 @@ if (!url || !key) {
   );
 }
 
+// A ceiling on every request this console sends.
+//
+// `src/lib/requestTimeout.ts` is the product's one answer to a socket that is
+// accepted and then answers nothing, and its header carries the argument for
+// both numbers — thirty seconds for a call, two minutes for a transfer, the
+// second set by Supabase's own 150-second edge-function limit. It was written
+// for the phone. Nothing about it is a phone: the wrapper is structurally typed
+// over `fetch`, and the condition it closes is worse here than there.
+//
+// ── What a hung request does to THIS console ──────────────────────────────
+//
+// Not "shows an error late". The three-state discipline every screen here is
+// built on collapses to one state, permanently:
+//
+//   · `components/Gate.tsx` renders "Reading your account…" and stays. Its
+//     unreadable branch — the one with the Try Again button and the sentence
+//     saying this is not you being signed out — is reached only when `loadMe`
+//     REJECTS, and a hung fetch never rejects.
+//   · `components/Fetched.tsx` sets `running.current = true` before awaiting
+//     and clears it in a `finally` that never runs, so "Read again" disables
+//     itself for good. The one control on the page for getting out of this is
+//     the one the condition takes away.
+//   · every `Read<T>` sits at 'loading', which `Unresolved` draws as
+//     "Loading…" — the sentence this console's whole discipline exists to keep
+//     distinct from "empty" and from "refused".
+//
+// A front desk on gym wifi behind a captive portal gets that, with nothing to
+// press, and reloads the tab — which `Fetched`'s own header says nobody does
+// because it discards a half-typed form.
+//
+// ── Why the wrapper rather than a second one ──────────────────────────────
+//
+// Because two ceilings in one product is two numbers to disagree, which is the
+// case `scripts/check-sql-caps.mjs` argues at length about a different pair.
+// This console shares the database, the row-level policies and every figure
+// with the phone; it should not give up at a different moment.
+//
+// One thing it does NOT close, and it is worth writing down: a WRITE that timed
+// out may have committed and had only its reply lost. The screens here worded a
+// thrown write as "was NOT closed", "Nothing was taken back", "the original
+// still stands in full" — which is true of a refusal and is a claim this
+// console cannot make about a request nobody answered. `retryOnTimeout` already
+// refuses to resend one for exactly that reason.
+//
+// The wording has now caught up, and it is `writeFailed` at the bottom of this
+// file: three states rather than two, with the ambiguous one asserting nothing
+// about the database and saying instead how to find out. It lives here because
+// this is the file that introduced the ambiguity — the ceiling above is what
+// made a throw mean something new — and because the `online` half of the
+// evidence is a browser fact that src/lib is not allowed to know.
+import { withRequestTimeout } from '@lib/requestTimeout';
+import { failedWriteNote, writeFate, mayRetryWrite, type WriteSubject } from '@lib/failedWrite';
+import { refused, type Said } from '@lib/consoleSay';
+// Which `supabase.auth.*` errors are a verdict about the credential and which
+// are the question going unasked. The distinction is the reason ME_UNREADABLE
+// below is reachable at all; its header records what the library actually does.
+import { authReadUnreadable } from '@lib/authReadFate';
+
 export const supabase = createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  // Realtime is a WebSocket and is untouched by this. Every read, every write
+  // and every storage upload this console makes goes through here. Wrapped in
+  // an arrow rather than passed as a bare `fetch` so the global keeps its own
+  // receiver — an unbound `fetch` throws "Illegal invocation" in a browser.
+  global: { fetch: withRequestTimeout((input, init) => fetch(input, init)) },
 });
 
-export type Role = 'client' | 'trainer' | 'owner';
+/**
+ * What `profiles.role` may hold. Four values since supabase/parts/711.
+ *
+ * `receptionist` is the person on the gym's front desk, and adding it here
+ * grants nothing on its own — exactly as adding it to the CHECK constraint
+ * granted nothing. Every staff policy in that schema spells its roles out, and
+ * only two were widened to admit this one: `gym_visits` (select, insert,
+ * update) and `gym_member_records` (select). A receptionist reading anything
+ * else gets a refusal or no rows.
+ *
+ * That is narrower than part 711's own footer says. The footer has the desk
+ * reading the gym's own row — "`tenants_read`, which is role-agnostic" — and
+ * `tenants_read` was dropped by part 142 and replaced by `tenants_owner_rw`,
+ * `tenants_trainer_r` and `tenants_client_r`. A receptionist matches none of
+ * the three: they are not the owner, they have no `trainers` row (part 711
+ * refuses them one on purpose) and they are nobody's coaching client. So the
+ * gym's name, currency and timezone are unreadable to this role, and the
+ * screens below have to say so rather than print a fallback that looks like a
+ * setting nobody made.
+ *
+ * The console offers a receptionist ONE screen, /door, and offers it the half
+ * of that screen the policies above actually cover. See components/Shell.tsx.
+ */
+export type Role = 'client' | 'trainer' | 'owner' | 'receptionist';
 
 export interface Me {
   id: string;
@@ -61,17 +147,114 @@ export interface Me {
   roleUnknown: boolean;
 }
 
+/**
+ * "We could not tell." The fourth answer, and the one that was missing.
+ *
+ * `loadMe` opens with `supabase.auth.getUser()`, a NETWORK call. Thirty of the
+ * console's thirty-one callers awaited it inside an async IIFE with no `try`
+ * around it: if it rejected the IIFE rejected unhandled, `setMe` never ran,
+ * `me` stayed `undefined` for ever, and twenty-nine routes sat on the word
+ * "Loading…" in a bare `<div>` — no rail, no gym name, no heading, nothing
+ * announced and nothing to press. A front desk on a dropping connection got
+ * nine characters and no way to tell whether the gym was down, they were
+ * signed out, or the tab was broken.
+ *
+ * Reported as a value rather than left as a rejection, and NOT collapsed into
+ * `null`. Null means "nobody is signed in", which is a statement about the
+ * person; this means "the question could not be asked", which is a statement
+ * about the connection. Telling somebody they are signed out because a request
+ * timed out sends them to re-enter a password that was never the problem —
+ * exactly the substitution `roleUnknown` was added to this file to stop one
+ * layer down.
+ *
+ * ── a correction, and the one that made this sentinel reachable ───────────
+ *
+ * This paragraph used to open: "It rejects on a dropped connection." That is
+ * FALSE, and it was false the day it was written. It is left recorded here
+ * rather than quietly deleted, because the whole apparatus below — the
+ * sentinel, the `authUnread` state on every dashboard that consumes it — was
+ * built on it and was unreachable for the exact failure it was written for.
+ *
+ * What `supabase.auth.getUser()` actually does, read in the installed package
+ * (`@supabase/auth-js` v2.112.3 under studio-web/node_modules, `GoTrueClient.js`,
+ * the `catch` at the end of `_getUser`; the v2.110.2 copy at the repo root is
+ * identical): it catches, and for ANY error carrying the library's
+ * `__isAuthError` brand it RESOLVES with `{ data: { user: null }, error }`.
+ * Only a non-AuthError is rethrown. And `lib/fetch.js` `_handleRequest` turns
+ * a failed `fetch` — offline, DNS, CORS, captive portal, aborted navigation —
+ * into `new AuthRetryableFetchError(message, 0)`, which IS an AuthError.
+ *
+ * So a dropped connection was the one case that never threw. The `catch` below
+ * did not fire, `user` was `null`, `loadMe` returned `null`, and the console
+ * read that as "signed out": an auth outage put the sign-in form in front of a
+ * signed-in owner and asked them for a password that was working fine. The
+ * substitution this file argues against twice, performed by this file.
+ *
+ * The `error` half is now read, and classified — see `@lib/authReadFate`, and
+ * see its header for why an expired session and an unreachable server are
+ * separable and which way an unrecognised error is made to fall.
+ */
+export const ME_UNREADABLE = 'unreadable' as const;
+
+/** What `loadMe` can answer: a person, nobody, or "we could not tell". */
+export type MeRead = Me | null | typeof ME_UNREADABLE;
+
 /** Who is signed in, and what the database says they are. */
-export async function loadMe(): Promise<Me | null> {
-  const { data: auth } = await supabase.auth.getUser();
-  const user = auth?.user;
+export async function loadMe(): Promise<MeRead> {
+  let user: { id: string; email?: string | null } | null | undefined;
+  try {
+    // `error`, not the absence of a user. `getUser()` resolves rather than
+    // rejects for every AuthError including the network ones, so `user` is
+    // `null` both when nobody is signed in and when nobody could be asked —
+    // see the correction in ME_UNREADABLE above for what that cost.
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    if (authErr && authReadUnreadable(authErr)) return ME_UNREADABLE;
+    // An error the classifier calls 'signed-out' falls through to the `!user`
+    // line below and answers `null`, which is the true answer for it.
+    user = auth?.user;
+  } catch {
+    // Still reachable, and still ME_UNREADABLE — but not for the reason the
+    // corrected sentence gave. `_getUser` rethrows anything WITHOUT the
+    // `__isAuthError` brand, and `__loadSession` guards its storage reads with
+    // `finally` rather than `catch`: a blocked `localStorage` (Safari private
+    // browsing, a locked-down profile) or a failing Web Locks acquisition
+    // escapes as a plain DOMException. The ceiling wrapper at the top of this
+    // file does NOT land here — its rejection happens inside auth-js's own
+    // `fetch` call and comes back branded as an AuthRetryableFetchError, which
+    // is exactly why the line above had to exist.
+    //
+    // The one thing that must not happen here is a silent `null` — signed out
+    // and unreachable are different facts and they send a person to two
+    // different places.
+    return ME_UNREADABLE;
+  }
   if (!user) return null;
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('full_name, role, tenant_id, weight_unit')
-    .eq('id', user.id)
-    .single();
+  let data: any;
+  let error: unknown;
+  try {
+    // The profile read handles its own `error` below — supabase-js resolves on
+    // a database refusal — but it is a second network call and it can reject
+    // for the same reason the first one can.
+    ({ data, error } = await supabase
+      .from('profiles')
+      .select('full_name, role, tenant_id, weight_unit')
+      .eq('id', user.id)
+      .single());
+  } catch {
+    // Here we DO know who they are, so this is not ME_UNREADABLE: it is the
+    // state this function already had a name for. Every screen renders "We
+    // could not read your account" for it, which is the true sentence.
+    return {
+      id: user.id,
+      email: user.email ?? null,
+      fullName: null,
+      role: null,
+      tenantId: null,
+      weightUnit: null,
+      roleUnknown: true,
+    };
+  }
 
   // Three outcomes, not two.
   //
@@ -109,3 +292,79 @@ export async function loadMe(): Promise<Me | null> {
   };
 }
 
+
+/* ── what a failed write may honestly be said to have done ─────────────────
+ *
+ * See the note beside `withRequestTimeout` above, and src/lib/failedWrite.ts
+ * for the argument in full. Three states:
+ *
+ *   REFUSED      the database read it and declined. Nothing happened.
+ *   UNREACHABLE  this browser was offline. Nothing was sent.
+ *   UNANSWERED   it went out and nothing came back. WE DO NOT KNOW — it may be
+ *                in the database with only the reply lost.
+ *
+ * Every screen that words a thrown write goes through here, so the sentence
+ * cannot drift back to fourteen versions of "Nothing was saved".
+ */
+
+export type { WriteSubject };
+
+/**
+ * Whether this browser believes it has a connection.
+ *
+ * The ONLY positive evidence that a request never left, and the reason this
+ * wrapper exists rather than the screens calling `failedWriteNote` directly.
+ * `navigator.onLine` is famously weak — it is true behind a captive portal —
+ * but it is only ever consulted to move an answer TOWARDS "nothing was sent",
+ * and the direction it is weak in is the harmless one: a portal that swallows
+ * the request leaves `onLine` true, so the fate stays 'unanswered' and the
+ * screen says it does not know. Null where it cannot be asked at all, which is
+ * every server render.
+ */
+function deviceOnline(): boolean | null {
+  try {
+    if (typeof navigator === 'undefined') return null;
+    const v = (navigator as { onLine?: boolean }).onLine;
+    return typeof v === 'boolean' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a plain "try again" may be offered after this failure.
+ *
+ * False for the ambiguous one — a retry control beside "we do not know whether
+ * that went through" is an invitation to create the duplicate the sentence has
+ * just warned about, which is the same judgement `retryOnTimeout` makes about
+ * resending a write automatically.
+ */
+export function mayRetryAfter(err: unknown): boolean {
+  return mayRetryWrite(writeFate(err, { online: deviceOnline() }));
+}
+
+/**
+ * The `Said` a console form sets after a write threw.
+ *
+ * Always `refused`, in `consoleSay`'s sense — the tone is about whether the
+ * thing the person wanted has demonstrably happened, and in none of the three
+ * states has it. `crit` is right for the ambiguous one too: "we do not know
+ * whether that payment went through" is exactly the sentence that must not wait
+ * politely behind a screen reader's queue.
+ */
+export function writeFailed(err: unknown, subject: WriteSubject): Said {
+  return refused(failedWriteNote(err, subject, { online: deviceOnline() }));
+}
+
+/**
+ * The same sentence as a bare string, for the screens that hold their error in
+ * a `useState<string | null>` rather than a `Said`.
+ *
+ * Two entry points rather than one wrapped in the other at every call site,
+ * because half this console predates `consoleSay` and converting those forms is
+ * a separate change from telling the truth about a timed-out write. Both go
+ * through `failedWriteNote`, so the wording cannot differ between them.
+ */
+export function writeFailedText(err: unknown, subject: WriteSubject): string {
+  return failedWriteNote(err, subject, { online: deviceOnline() });
+}

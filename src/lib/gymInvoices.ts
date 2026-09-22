@@ -32,9 +32,11 @@
 // against a named payment, which is the only version of that sentence the
 // record can stand behind.
 
-import { assertWhole, capLimit } from './rowCap';
+import { capLimit, readAll } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import type { InvoiceStatus } from './gymRecord';
+import { readMinorAmount } from './coachMoney';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args: any) => any };
 
@@ -56,12 +58,12 @@ export const INVOICE_STATUSES: readonly InvoiceStatus[] =
  * written by hand may carry it; it is not in the picker.
  */
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
-  draft: 'Draft — not sent',
-  open: 'Open — sent and unpaid',
+  draft: 'Draft · not sent',
+  open: 'Open · sent and unpaid',
   paid: 'Paid',
   overdue: 'Overdue',
-  void: 'Void — cancelled before payment',
-  written_off: 'Written off — not going to be paid',
+  void: 'Void · cancelled before payment',
+  written_off: 'Written off · not going to be paid',
 };
 
 /** The statuses an owner may choose. See the note on `overdue` above. */
@@ -90,41 +92,51 @@ export interface GymInvoiceRow {
 /* ── what an owner typed ───────────────────────────────────────────────────── */
 
 export type AmountInput =
-  | { kind: 'amount'; cents: number }
+  | { kind: 'amount'; minorUnits: number }
   | { kind: 'bad'; reason: string };
 
 /**
- * An amount of money, as typed, in whole units → minor units.
+ * An amount of money, as typed, in whole units → minor units of THIS gym's
+ * currency.
  *
- * Written here rather than left to `parseFloat` at the call site because the
- * interesting cases are the ones a person types by accident and none of them is
- * visible in a JSX file: a currency symbol, a thousands comma, a third decimal
- * place, a lone minus. `parseFloat('1,250.00')` is 1 — not an error, not NaN,
- * ONE — and the invoice for 1,250 goes out for a penny.
+ * The currency is an argument and there is no default, because the number of
+ * minor units in a whole one is not two everywhere. This function used to end
+ * `Math.round(Number(bare) * 100)` regardless, which is right for a sterling
+ * gym, files a ¥5,000 Tokyo invoice as ¥500,000, and refuses a Kuwaiti gym's
+ * 82.500 outright before storing 82.50 as 8.250 KWD — wrong by a factor of ten
+ * in the direction the member does not notice.
  *
- * Three decimal places are refused rather than rounded. `amount_cents` is an
- * integer, so 10.005 has to become either 1000 or 1001 and neither is what the
- * person meant; being told costs a keystroke and guessing costs the invoice.
+ * `readMinorAmount` in coachMoney.ts is the one reader for this in the product:
+ * it takes the decimal places from the currency, refuses a thousands separator
+ * rather than guessing which side of the Channel the typist grew up on, and
+ * refuses a third decimal place rather than rounding it. Only the two refusals
+ * that are about an INVOICE rather than about an amount are written here.
  */
-export function parseAmount(input: string | null | undefined): AmountInput {
-  const raw = String(input ?? '').trim();
-  if (!raw) return { kind: 'bad', reason: 'An invoice needs an amount.' };
-  // The gym's currency is whatever `tenants.currency` says. A symbol typed in
-  // front of the digits is not a second opinion on that and is simply dropped —
-  // refusing it teaches nothing.
-  const bare = raw.replace(/[,\s]/g, '').replace(/^[^\d.-]+/, '');
-  if (/-/.test(raw)) {
+export function parseAmount(
+  input: string | null | undefined,
+  currency: string | null | undefined,
+): AmountInput {
+  // Read before the shape check, so "−60" is refused as a negative invoice
+  // rather than as an unreadable one. A minus is not a typo; it is somebody
+  // meaning to reverse a bill, and the answer names the way to do that.
+  if (/-/.test(String(input ?? ''))) {
     return { kind: 'bad', reason: 'An invoice cannot be for a negative amount. To take one back, void it or write it off.' };
   }
-  if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
-    return { kind: 'bad', reason: 'Enter the amount as a number — 60, or 82.50. Two decimal places at most.' };
+  // NOT a charge. A gym invoice is a bill the gym issues and settles against a
+  // `gym_payments` row — cash, card machine, bank transfer — and no code path
+  // hands this figure to Stripe: `settleInvoice` below LINKS a payment, it does
+  // not create one. So a Kuwaiti gym bills the 82.505 KWD it means to bill.
+  const read = readMinorAmount(input, currency, false);
+  if (!read.ok) return { kind: 'bad', reason: read.reason };
+  // `gym_invoices.amount_cents` is a plain integer column, so anything past
+  // 2^31−1 is rejected by the database with a 22003 after the form has closed.
+  // The ceiling is in MINOR units, which is what the column holds — a
+  // zero-decimal currency therefore gets a hundred times the headroom in whole
+  // units, which is the arithmetic those currencies are quoted in.
+  if (read.minorUnits > 2_147_483_647) {
+    return { kind: 'bad', reason: 'That is more than Repple will record on one invoice. Check the zeros.' };
   }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
-  // `amount_cents` is a plain integer column, so anything past 2^31-1 is
-  // rejected by the database with 22003 after the form has closed.
-  if (cents > 2_147_483_647) return { kind: 'bad', reason: 'That is more than Repple will record on one invoice — check the zeros.' };
-  return { kind: 'amount', cents };
+  return { kind: 'amount', minorUnits: read.minorUnits };
 }
 
 export interface InvoiceDraft {
@@ -150,13 +162,13 @@ export function invoiceBlocker(d: InvoiceDraft, currency: string | null): string
   if (!currency) {
     return 'This gym has not set its currency, so there is nothing to bill in. An invoice is what somebody is asked to pay, and no default here would be right for half the gyms running Repple.';
   }
-  const amt = parseAmount(d.amount);
+  const amt = parseAmount(d.amount, currency);
   if (amt.kind === 'bad') return amt.reason;
-  if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date — YYYY-MM-DD.';
+  if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date: YYYY-MM-DD.';
   // A due date is optional and its absence is a decision: an invoice with no
   // due date is never overdue, which is correct for a receipt and wrong for a
   // bill. The screen says so; this only refuses one that is unreadable.
-  if (d.dueOn && !isoDay(d.dueOn)) return 'The due date has to be a real date — YYYY-MM-DD, or empty for an invoice with no due date.';
+  if (d.dueOn && !isoDay(d.dueOn)) return 'The due date has to be a real date: YYYY-MM-DD, or empty for an invoice with no due date.';
   if (d.dueOn && d.dueOn < d.issuedOn) {
     return 'The due date is before the issue date, so this invoice would be overdue the moment it was raised.';
   }
@@ -169,6 +181,12 @@ export function isoDay(s: string | null | undefined): boolean {
   const v = String(s ?? '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const d = new Date(`${v}T00:00:00Z`);
+  // utc-day-ok: this states no day to anybody — it asks whether the string it
+  // was handed survives a round trip, which is how `2026-02-31` is caught after
+  // Date has rolled it into March. Both ends of that trip must be the same
+  // calendar or the comparison is meaningless, and the string was anchored at
+  // UTC midnight one line up. A local read here would fail every valid date for
+  // every reader who is not on UTC.
   return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === v;
 }
 
@@ -181,6 +199,13 @@ export function isoDay(s: string | null | undefined): boolean {
 export function dueAfter(issuedOn: string, days: number): string {
   const t = Date.parse(`${issuedOn}T00:00:00Z`);
   if (!Number.isFinite(t)) return issuedOn;
+  // utc-day-ok: exactly what the note above claims, and the claim is the whole
+  // design. `issuedOn` is a bare day off a `date` column, it is anchored at UTC
+  // midnight, days are added, and the same kind of bare day comes back — UTC
+  // goes in, UTC comes out, and it cancels. "Thirty days after the 1st" has to
+  // be the 31st for the owner in Auckland and the member in Denver both,
+  // because it is one date printed on one invoice, and reading it back with the
+  // local getters is the arithmetic this function exists to replace.
   return new Date(t + days * 86400000).toISOString().slice(0, 10);
 }
 
@@ -195,25 +220,43 @@ export function dueAfter(issuedOn: string, days: number): string {
  * read with their own copy of it; this is the shared one, and it selects the
  * two columns supabase/parts/180 added that neither of them knew about.
  *
- * Capped through src/lib/rowCap.ts and REFUSING rather than reporting a prefix.
- * The order is `issued_on desc`, so what a truncated read would drop is the
- * OLDEST invoices — precisely the long-unpaid ones the ageing table exists to
- * surface. A truncated read here would not merely make "owed" smaller; it would
- * make the month appear to reconcile.
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole`. Truncating was never an
+ * option and still is not — the order is `issued_on desc`, so what a prefix
+ * drops is the OLDEST invoices, precisely the long-unpaid ones the ageing table
+ * exists to surface, and the month would then appear to reconcile. But refusing
+ * was not the other half of a real choice either: this read is bounded only at
+ * the far end and no gym can make its invoice history shorter, so two hundred
+ * members billed monthly crossed a thousand in five months and the Billed
+ * section of /tax became a failure sentence at every filing, permanently.
+ *
+ * /close and /accounting had each already hit that wall and each written their
+ * own paged reader over the same table rather than fix the shared one. This is
+ * the shared one, so all three now finish the read, and `PAGE_CEILING` refuses
+ * past fifty thousand invoices — a sentence about the size of the read rather
+ * than about the money.
+ *
+ * `issued_on` is a DATE, so a gym that raises its whole book on the first of
+ * the month has hundreds of rows tied on it. `id` is the primary key and gives
+ * `readAll` the total order it requires; without it, pages of a tied ordering
+ * drop and repeat rows silently, which here is an invoice missing from a
+ * quarter somebody files.
  */
 export async function fetchInvoices(
   sb: Queryable, tenantId: string, upToDay: string,
 ): Promise<GymInvoiceRow[]> {
-  const { data, error } = await sb
-    .from('gym_invoices')
-    .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
-    .eq('tenant_id', tenantId)
-    .lte('issued_on', upToDay)
-    .order('issued_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-
-  const rows = assertWhole(data, 'the invoices up to the end of this month');
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_invoices')
+      .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
+      .eq('tenant_id', tenantId)
+      .lte('issued_on', upToDay)
+      .order('issued_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the invoices up to the end of this month',
+  );
   if (!rows.length) return [];
 
   const names = await namesFor(sb, rows.map((r: any) => r.member_id));
@@ -340,12 +383,19 @@ export async function settleInvoice(
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
 
+/** CHUNKED, because `fetchInvoices` above now pages. A bare `.in()` was safe
+ *  only while the read above refused past a thousand rows — a thousand invoices
+ *  carry at most a thousand distinct members, so the lookup could not truncate
+ *  and the refusal was holding it up. See src/lib/idLookup.ts. */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name falls back to the retained billed_name and then to a dash; the invoice it labels is still real
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
-    .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
-    .filter(([, n]: [string, string]) => !!n));
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable name falls back to the retained billed_name and then to a dash; the invoice it labels is still real
+    const { data } = await sb.from('profiles').select('id, full_name').in('id', chunk).limit(capLimit());
+    for (const p of (data ?? []) as any[]) {
+      const n = (p.full_name || '').trim();
+      if (n) out.set(p.id, n);
+    }
+  }
+  return out;
 }

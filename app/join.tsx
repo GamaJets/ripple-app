@@ -13,7 +13,7 @@
 // client — it hands the code to the screen that asks the server about it, and
 // the coach still accepts the request.
 import { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import { useBrand } from '../src/ui/brand';
@@ -21,8 +21,12 @@ import { sp, layout, type as ty } from '../src/theme/scale';
 import { rememberJoinCode } from '../src/ui/pendingJoinCode';
 import { isPlausibleReferralCode, normaliseReferralCode } from '../src/lib/referralLink';
 import { stashPendingReferral } from '../src/lib/referrals';
-import { supabase } from '../src/lib/supabase';
+// Storage-first, and it keeps a dropped connection apart from a sign-out —
+// which on this route is the difference between opening the app and asking
+// somebody to create an account they already have. See src/lib/authReadFate.ts.
+import { sessionUid } from '../src/lib/sessionUid';
 import { USE_SUPABASE } from '../src/lib/config';
+
 
 export default function JoinLanding() {
   const t = useTheme();
@@ -73,29 +77,55 @@ export default function JoinLanding() {
       // the code waits in storage through sign-up and is there afterwards,
       // which is the case this whole route exists for — somebody arriving from
       // a bio has no account yet.
+      //
+      // ── and there is a third answer, which used to be filed under the second ──
+      //
+      // This was `signedIn = !!data?.session` with the error beside it thrown
+      // away, and `catch { signedIn = false }` underneath — so every way of
+      // failing to find out became "signed out". `getSession()` refreshes over
+      // the network when the stored access token has expired, and a refresh
+      // that cannot reach the auth host resolves with `session: null` and an
+      // `AuthRetryableFetchError`. A member with an account, tapping their
+      // coach's link on a bad connection, was sent to /welcome — the sign-up
+      // screen — which is this app telling somebody they have no account while
+      // holding their session in storage.
+      //
+      // The third answer does not guess. It hands the routing decision to
+      // app/index.tsx, which is the screen that owns it: `useAuth()` there
+      // follows `onAuthStateChange` rather than taking one shot at a network
+      // call, and it sends a signed-in member into the app and a signed-out one
+      // to /welcome. Nothing is lost by deferring — `rememberJoinCode` has
+      // already put the code in storage above, and trainer search reads it back
+      // with `peekJoinCode` whenever they get there.
       let signedIn = false;
+      let unknown = false;
       if (USE_SUPABASE) {
-        try {
-          const { data } = await supabase.auth.getSession();
-          signedIn = !!data?.session;
-        } catch { signedIn = false; }
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await sessionUid('join.landing');
+        signedIn = who.fate === null;
+        unknown = who.fate === 'unreadable';
       }
       if (cancelled) return;
+
       // A referral link with no coach code has no business opening trainer
       // search: nothing there is about it, and a signed-in member who tapped a
       // friend's invitation would be dropped into "find a coach" with a
       // prefilled field they never asked for. It sends them home instead, where
       // the stash is already spent or will be at their next sign-in.
       const refOnly = !raw && !!rawRef;
-      router.replace(signedIn ? (refOnly ? '/' : '/(client)/trainers') : '/welcome');
+      router.replace(unknown ? '/' : signedIn ? (refOnly ? '/' : '/(client)/trainers') : '/welcome');
+
     })();
     return () => { cancelled = true; };
   }, [raw, router]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
-      <ActivityIndicator color={t.brand} />
-      <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, textAlign: 'center' }}>
+    /* Night, as the launch screen and the door either side of it are: this
+       is a hand-over between the two and must not flash white between them. */
+    <View style={{ flex: 1, backgroundColor: t.night, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
+      <StatusBar barStyle="light-content" />
+      <ActivityIndicator color={t.brandBright} />
+      <Text style={{ ...ty.body, color: t.nightInk2, marginTop: sp.lg, textAlign: 'center' }}>
         {/* This is the FIRST screen a member sees after tapping their gym's
             invitation link, and it named the supplier rather than the gym. This
             is a white-label build and the app on this phone may not be called
@@ -103,7 +133,7 @@ export default function JoinLanding() {
             screens later, which is how the two came to disagree on the app's
             own name inside one journey. */}
         {badCode
-          ? `That link was missing a usable code — opening ${appName} so you can enter the code yourself.`
+          ? `That link was missing a usable code. Opening ${appName} so you can enter the code yourself.`
           : `Opening ${appName}…`}
       </Text>
     </View>

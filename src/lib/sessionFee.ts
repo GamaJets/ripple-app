@@ -100,8 +100,8 @@ export function sessionFeeNote(f: SessionFee, coachName?: string | null): string
     case 'free':
       return `${who} has set their session fee to nothing, so there is no per-session charge to pay them.`;
     case 'unstated':
-      return `${who} hasn’t stated a session fee. Ask them what they charge before you book — it is a normal thing to ask.`;
+      return `${who} hasn’t stated a session fee. Ask them what they charge before you book. It is a normal thing to ask.`;
     case 'unreadable':
-      return `We couldn’t read ${who === 'This coach' ? 'this coach’s' : who + '’s'} session fee. This is not a statement that they charge nothing — ask them what they charge.`;
+      return `We couldn’t read ${who === 'This coach' ? 'this coach’s' : who + '’s'} session fee. This is not a statement that they charge nothing. Ask them what they charge.`;
   }
 }

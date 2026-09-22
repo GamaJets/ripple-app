@@ -28,9 +28,11 @@
 // supabase/functions/ocr-scan/index.ts for the key that shipped readable in the
 // bundle and is why the rule is absolute.
 import { supabase } from '../lib/supabase';
+import { authNonce } from '../lib/authNonce';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { appLink } from '../lib/deepLink';
+import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import type { UnmatchReason } from '../lib/adMatch';
 import {
@@ -140,7 +142,7 @@ export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
  * credentials and separate approvals, and neither is gated by this one.
  */
 export const APP_REVIEW_NOTE =
-  'Meta has to approve Repple for the ads_read permission before this can read a real ad account. Until it does, connecting works only for Meta accounts that have a role on Repple’s own Meta app — everyone else will sign in successfully and then be refused when we ask for the spend. Entering what you spent by hand works today and always will. This is about Meta only: Google Ads and TikTok are separate approvals and are not waiting on it.';
+  'Meta has to approve Repple for the ads_read permission before this can read a real ad account. Until it does, connecting works only for Meta accounts that have a role on Repple’s own Meta app. Everyone else will sign in successfully and then be refused when we ask for the spend. Entering what you spent by hand works today and always will. This is about Meta only: Google Ads and TikTok are separate approvals and are not waiting on it.';
 
 /** Said once, above all three. Every one of these reads and none of them
  *  writes, and a coach handing over an ad account is entitled to know it. */
@@ -208,7 +210,11 @@ export type UnmatchedRow = {
 export type SpendSource = {
   codeId: string | null;
   source: 'manual' | 'synced';
-  cents: number;
+  /** The figure in use for this code, or null where the row came back without
+   *  a readable one. `cents(s.amount_cents) ?? 0` overruled the reader here and
+   *  made the screen say a coach had entered nothing for a code they had
+   *  entered a budget against. */
+  cents: number | null;
   currency: string;
   updatedAt: string | null;
 };
@@ -230,6 +236,16 @@ export type AdSpendRead = {
   sources: SpendSource[];
   /** The figure across every connected channel, or the reason there is none. */
   combined: Combined;
+  /**
+   * Whether the itemised unmatched ads came back whole.
+   *
+   * False makes `status` 'partial' rather than 'ready', and the screen shows
+   * the rows it has under the run's OWN count and total — which are recorded
+   * per run by record_ad_run() and are therefore facts about all of the ads,
+   * not about the page of them that arrived. The list is a prefix; the figures
+   * above it are not.
+   */
+  unmatchedWhole: boolean;
   reason?: string;
 };
 
@@ -237,6 +253,7 @@ const blank = (c: AdChannel): ChannelState => ({ channel: c, account: null, run:
 const EMPTY = (): Omit<AdSpendRead, 'status' | 'combined'> => ({
   channels: AD_CHANNELS.map(blank),
   sources: [],
+  unmatchedWhole: true,
 });
 
 /** PostgREST hands bigint back as a string; only a finite number is a figure. */
@@ -309,7 +326,9 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
     const shapedSources: SpendSource[] = (sources ?? []).map((s: any) => ({
       codeId: s.code_id ?? null,
       source: s.source === 'synced' ? 'synced' : 'manual',
-      cents: cents(s.amount_cents) ?? 0,
+      // No `?? 0` behind `cents`. A spend figure that did not come back is not
+      // a coach who spent nothing, and the sentence that reads it says which.
+      cents: cents(s.amount_cents),
       currency: String(s.currency || '').toUpperCase(),
       updatedAt: text(s.updated_at),
     }));
@@ -344,24 +363,69 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
 
     // A failed run attributed nothing and listed nothing, by design — asking
     // for its rows would be asking a question it did not answer.
+    //
+    // Not chunked, and the bound is `AD_CHANNELS`. `states` is keyed by channel
+    // and seeded from that tuple, `isAdChannel` drops anything else `my_ad_runs`
+    // names, and each state holds at most one run — so this is at most three
+    // ids however much a coach has spent or how long they have been running
+    // ads. The two `.in('run_id', …)` reads below cannot grow a request line.
     const okRunIds = [...states.values()]
       .filter((s) => s.run?.status === 'ok')
       .map((s) => s.run!.id);
 
+    // Whole until a read says otherwise. With no OK run there are no unmatched
+    // rows to be short of, which is a complete answer rather than an unknown.
+    let unmatchedWhole = true;
+
     if (okRunIds.length) {
+      // ── Both row reads are capped, and the two truncations mean different
+      //    things ──────────────────────────────────────────────────────────
+      //
+      // Neither of these had a `.limit()` or an `.order()`. PostgREST answers
+      // an unbounded request with at most 1000 rows and says nothing about it
+      // (src/lib/rowCap.ts), so both were capable of coming back a prefix, in
+      // whatever order the planner chose, indistinguishable from a whole set.
+      //
+      // A truncated MATCHED read is a wrong TOTAL: `combineChannelSpend` adds
+      // these rows up and the sum would be short by an unknown amount, which is
+      // this screen's one prohibited outcome — every channel looks cheaper than
+      // it is. There is no authoritative per-code figure to fall back on, so the
+      // whole read is refused, exactly as a failed read of the same rows is.
+      //
+      // A truncated UNMATCHED read is NOT a wrong figure. record_ad_run() puts
+      // the count and the sum of every unmatched ad on the run itself, so the
+      // amount and the number of ads are known whatever the list does; only the
+      // itemisation is a prefix. That is 'partial': the rows are shown, and the
+      // screen says the list is not all of them.
+      //
+      // Both are ordered biggest-spend-first with the primary key as the tie —
+      // a prefix has to be a deterministic one, and the ads worth acting on are
+      // the expensive ones.
       const { data: matchedRows, error: matchedErr } = await supabase
         .from('coach_ad_code_spend')
         .select('run_id, code_id, code, amount_cents, currency, ads, applied')
-        .in('run_id', okRunIds);
+        .in('run_id', okRunIds)
+        .order('amount_cents', { ascending: false })
+        .order('run_id', { ascending: true })
+        .order('code', { ascending: true })
+        .limit(capLimit());
       if (matchedErr) {
         reportError('adSpend.matched', matchedErr);
         return failed('We could not read what the last checks matched, so nothing below is a figure.');
+      }
+      const matchedPage = capped((matchedRows ?? []) as any[]);
+      if (matchedPage.truncated) {
+        reportError('adSpend.matched', new Error('coach_ad_code_spend came back at its row limit'));
+        return failed('Your checks matched more spend to your codes than we can read in one go, so any total here would be short by an unknown amount. Nothing is shown rather than a figure that is too small.');
       }
 
       const { data: unmatchedRows, error: unmatchedErr } = await supabase
         .from('coach_ad_unmatched')
         .select('run_id, ad_id, ad_name, destination_url, amount_cents, currency, reason')
-        .in('run_id', okRunIds);
+        .in('run_id', okRunIds)
+        .order('amount_cents', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: true })
+        .limit(capLimit());
       if (unmatchedErr) {
         reportError('adSpend.unmatched', unmatchedErr);
         // Deliberately fails the WHOLE read. Showing the matched spend while the
@@ -370,22 +434,50 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
         return failed('We could not read the ads that could not be matched to a code, so the figures above would not be all of your spend. Nothing is shown rather than part of it.');
       }
 
+      const unmatchedPage = capped((unmatchedRows ?? []) as any[]);
+      unmatchedWhole = !unmatchedPage.truncated;
+
       const byRun = new Map<string, ChannelState>();
       for (const s of states.values()) if (s.run) byRun.set(s.run.id, s);
 
-      for (const m of (matchedRows ?? []) as any[]) {
+      for (const m of matchedPage.rows) {
         const s = byRun.get(String(m.run_id));
         if (!s) continue;
+        /*
+         * Both figures read BEFORE the row is built, and an unreadable one
+         * fails the whole read rather than being settled to nought.
+         *
+         * `cents(m.amount_cents) ?? 0` and `cents(m.ads) ?? 0` were the forms.
+         * The first is money: these rows are summed per code and across
+         * channels by `combineChannelSpend`, which takes `Number(c.cents)` and
+         * keeps anything finite — so a nought was added in silently and every
+         * channel looked cheaper than it is. The second is a count of ads, and
+         * a zero there reads as "Across 0 ads pointing at this code's join
+         * link" beside a cost the same row just reported.
+         *
+         * Failing the read is the answer this file already gives, thirty lines
+         * up, to the same question: a matched page that came back truncated
+         * returns `failed(…)` because the total "would be short by an unknown
+         * amount". A row with no readable amount on it is the same shortfall
+         * arriving a different way, and "nothing is shown rather than a figure
+         * that is too small" is the same sentence.
+         */
+        const spent = cents(m.amount_cents);
+        const adCount = cents(m.ads);
+        if (spent == null || adCount == null) {
+          reportError('adSpend.matched', new Error('a matched spend row came back without a readable amount or ad count'));
+          return failed('One of the ads your last check matched to a code came back without a cost on it, so any figure here would be short by an unknown amount. Nothing is shown rather than a total that is too small. Run the check again.');
+        }
         s.matched.push({
           codeId: m.code_id ?? null,
           code: String(m.code || '').toUpperCase(),
-          cents: cents(m.amount_cents) ?? 0,
+          cents: spent,
           currency: String(m.currency || '').toUpperCase(),
-          ads: cents(m.ads) ?? 0,
+          ads: adCount,
           applied: !!m.applied,
         });
       }
-      for (const u of (unmatchedRows ?? []) as any[]) {
+      for (const u of unmatchedPage.rows) {
         const s = byRun.get(String(u.run_id));
         if (!s) continue;
         s.unmatched.push({
@@ -404,7 +496,13 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
     }
 
     const channels = AD_CHANNELS.map((c) => states.get(c)!);
-    return { status: 'ready', channels, sources: shapedSources, combined: combineChannelSpend(channels.map(asChannelRun)) };
+    return {
+      status: unmatchedWhole ? 'ready' : 'partial',
+      channels,
+      sources: shapedSources,
+      combined: combineChannelSpend(channels.map(asChannelRun)),
+      unmatchedWhole,
+    };
   } catch (e) {
     reportError('adSpend.read', e);
     return failed('Your ad spend could not be read, so nothing here is a figure.');
@@ -530,11 +628,16 @@ export async function connectAdChannel(c: AdChannel): Promise<ConnectResult> {
 
   const WB = webBrowser();
   if (!WB?.openAuthSessionAsync) {
-    return { ok: false, reason: 'This version of the app cannot open a sign-in browser — updating to the latest build adds it. Entering what you spent by hand works now.' };
+    return { ok: false, reason: 'This version of the app cannot open a sign-in browser. Updating to the latest build adds it. Entering what you spent by hand works now.' };
   }
   if (WB.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
-  const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // A CSPRNG where the runtime has one — see src/lib/authNonce.ts for why this
+  // is not the same call the scan ids make, and why it is not expo-crypto.
+  // `strong` is deliberately not a gate: refusing to let somebody connect an
+  // account on an older runtime is a worse trade than a weaker nonce, and a
+  // weak nonce is still far better than none.
+  const nonce = authNonce().value;
   const returnUrl = adReturnUrl();
   const state = adOauthState(nonce, returnUrl);
 
@@ -546,7 +649,7 @@ export async function connectAdChannel(c: AdChannel): Promise<ConnectResult> {
     return { ok: false, reason: `The ${channelLabel(c)} sign-in could not be opened.` };
   }
   if (!result || result.type !== 'success' || !result.url) {
-    if (result?.type === 'dismiss' || result?.type === 'cancel') return { ok: false, reason: 'Sign-in cancelled — nothing was connected.' };
+    if (result?.type === 'dismiss' || result?.type === 'cancel') return { ok: false, reason: 'Sign-in cancelled. Nothing was connected.' };
     return { ok: false, reason: `The ${channelLabel(c)} sign-in did not come back, so nothing was connected.` };
   }
 

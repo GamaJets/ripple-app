@@ -39,8 +39,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Card, Ghost, ListRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Ghost, ListRow, PageHead, HeroCard, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { shareSessionNatively } from '../../src/lib/social';
 
 export default function ShareSessionClip() {
@@ -63,7 +63,7 @@ export default function ShareSessionClip() {
   // happen; there is nothing to explain now, and a confirmation step in front
   // of a confirmation step is just a tap.
   const share = async () => {
-    if (!uri) { Alert.alert('Add a clip', 'Record or choose the session video first.'); return; }
+    if (!uri) { Alert.alert('Add a Clip', 'Record or choose the session video first.'); return; }
     setBusy(true);
     await shareSessionNatively(caption.trim() || 'My training session', uri);
     setBusy(false);
@@ -75,63 +75,58 @@ export default function ShareSessionClip() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share a Session</Text>
-          </View>
+        <PageHead title="Share a Session" subtitle="Marketing" />
+
+        {/* ── the clip: the one thing on this screen you act on ────────────
+            The night hero, because this page has a single state (is there a
+            clip or not) and a single action that follows from it. The state
+            is the headline and the chip; the bright button is the way to
+            change it. Recording is the quiet second way, under the card. */}
+        <HeroCard eyebrow="Your Clip"
+          title={uri ? 'Clip Ready' : 'Choose a Session Video'}
+          meta="Your clip and caption, into whichever app you post from"
+          cta={{ label: uri ? 'Replace Clip' : 'Choose Video', onPress: () => pick(false) }}>
+          {uri ? <View style={{ marginTop: sp.md }}><TonedChip icon="play" label="Ready to Share" /></View> : null}
+        </HeroCard>
+        <View style={{ alignItems: 'center', marginTop: sp.md }}>
+          <Ghost label="Or Record Now" icon="camera" onPress={() => pick(true)} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Your clip and your caption, straight into whichever app you post from.
-        </Text>
 
-        {/* ── the clip: the one thing on this screen you act on ──────────── */}
-        <Section>
-          <Card onPress={() => pick(false)} tone={uri ? t.brand : undefined} style={{ alignItems: 'center', paddingVertical: sp.xxl }}>
-            <Icon name={uri ? 'play' : 'video'} size={26} color={t.brand} />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: sp.sm }}>
-              {uri ? 'Clip ready · tap to replace' : 'Choose session video'}
-            </Text>
-          </Card>
-          <View style={{ alignItems: 'center', marginTop: sp.md }}>
-            <Ghost label="Or Record Now" onPress={() => pick(true)} />
-          </View>
-        </Section>
-
-        <Rule />
 
         {/* ── caption ────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Caption" />
-          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session — 20 min full-body burner 🔥 #Warehouse"
+          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session: 20 min full-body burner 🔥 #Warehouse"
             placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
           {/* Said once, plainly, and not as an apology: the coach is choosing
               where this goes, which is the part of the arrangement that makes
               it work at all. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            The caption travels with the clip. You pick where it goes on the next screen — Repple never posts on your behalf.
+            You pick where it goes next. Repple never posts for you.
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── share ──────────────────────────────────────────────────────── */}
         <Section>
-          <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share this clip"
-            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1, borderWidth: hairline, borderColor: t.brand }}>
-            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Opening…' : 'Share this clip'}</Text>
+          {/* `opacity: 0.7` while the share sheet is being prepared is the
+              whole of what a sighted coach is told, and a screen reader was
+              told nothing at all — so a second tap landed on a control that
+              was already working. */}
+          <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share This Clip"
+            accessibilityState={{ disabled: busy, busy }}
+            style={{ backgroundColor: t.brand, borderRadius: radius.md, minHeight: 56, paddingVertical: sp.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={20} color={t.brandInk} />}
+            <Text style={{ ...ty.button, color: t.brandInk }}>{busy ? 'Opening…' : 'Share This Clip'}</Text>
           </Pressable>
         </Section>
 
-        <Rule />
 
         {/* ── the other half of the marketing story ──────────────────────── */}
         <Section>
-          <SectionHead title="No clip today?" />
-          <ListRow icon="sparkle" title="Make a Share Card"
+          <SectionHead title="No Clip Today?" />
+          <ListRow icon="sparkle" tone="purple" title="Make a Share Card"
             note="Your week's real numbers as a graphic you can post"
             onPress={() => router.push('/(trainer)/share-kit')} />
         </Section>

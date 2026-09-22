@@ -5,11 +5,11 @@
 // secret (server-side only) and stores the refresh token per user. No secret
 // ever touches the app.
 import { supabase } from '../supabase';
-import { vendorFor, isConfigured, OAUTH_REDIRECT } from './oauthConfig';
+import { vendorFor, isConfigured, redirectFor } from './oauthConfig';
 import type { ProviderId } from './types';
 import { reportError } from '../reportError';
 import { classifyRefusal } from '../wearableLink';
-import { accountProvenAlive, noteMetric, noteReauthorised, noteTokenAlive, noteTokenDead } from '../wearableLinkLedger';
+import { accountProvenAlive, noteHardware, noteMetric, noteReauthorised, noteTokenAlive, noteTokenDead } from '../wearableLinkLedger';
 
 function authSession(): any {
   try { return require('expo-auth-session'); } catch { return null; }
@@ -26,12 +26,14 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   if (!isConfigured(id)) throw new Error(`${id} isn't set up yet. ${v.note}`);
 
   const AuthSession = authSession();
-  if (!AuthSession) throw new Error('This build cannot open a sign-in browser yet — a native rebuild adds it. Apple Health works today.');
+  if (!AuthSession) throw new Error('This build cannot open a sign-in browser yet. A native rebuild adds it. Apple Health works today.');
   const WB = webBrowser();
   if (WB?.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
   const discovery = { authorizationEndpoint: v.authorizeUrl, tokenEndpoint: v.tokenUrl };
-  const redirectUri = OAUTH_REDIRECT;
+  // Per-vendor, because Oura's application registers a different path from
+  // the shared default. See redirectFor in ./oauthConfig.
+  const redirectUri = redirectFor(id);
 
   const request = new AuthSession.AuthRequest({
     clientId: v.clientId,
@@ -67,8 +69,28 @@ export async function connectVendor(id: ProviderId): Promise<void> {
       // vendor's own dashboard rather than anywhere in this app: every provider
       // here declares which scopes it may request, and asking for one that is
       // not on that list is refused before the user ever sees a consent screen.
+      //
+      // `invalid_request` gets the same treatment, and it earned it. Oura
+      // returned exactly that and nothing else — the member saw "invalid
+      // request" over a screen about their ring, which reads as their ring
+      // being the problem. It was not, and neither was their account, and
+      // neither was anything in this app.
+      //
+      // Established by asking Oura's authorize endpoint one parameter at a
+      // time. WITHOUT a redirect_uri the client id reaches Oura's real consent
+      // page, so the id is valid and the request is well formed; WITH one —
+      // the custom scheme, an https URL, any value at all — it is 400
+      // invalid_request. That is what a provider does when the redirect URI
+      // being sent is not on the application's registered list, and the only
+      // place it can be added is the vendor's dashboard.
+      //
+      // The URI is named in the message because it is the thing that has to be
+      // pasted there, and a remedy that does not say the exact string is a
+      // remedy somebody has to guess at.
       const hint = /invalid.?scope/i.test(err) || /scope/i.test(desc)
-        ? ` Repple asked ${v.id} for a permission its developer app is not registered for — the scope has to be enabled in the ${v.id} developer dashboard before this can work.`
+        ? ` Repple asked ${v.id} for a permission its developer app is not registered for. The scope has to be enabled in the ${v.id} developer dashboard before this can work.`
+        : /invalid.?request/i.test(err) || /invalid request/i.test(desc)
+        ? ` This is Repple's setup rather than your ${v.id} account or your device: the address Repple sends people back to (${redirectUri}) has to be registered on Repple's ${v.id} developer application, and until it is, ${v.id} refuses the sign-in before you ever see a consent screen.`
         : '';
       throw new Error(`${v.id} refused the sign-in: ${desc || err}.${hint}`);
     }
@@ -76,17 +98,39 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   }
 
   // Hand the code to the server for the secret-bearing token exchange.
-  const { data: auth } = await supabase.auth.getUser();
-  const userId = auth?.user?.id;
+  //
+  // ── the auth read here has been DELETED, not repaired ────────────────────
+  //
+  // There was a `const { data: auth } = await supabase.auth.getUser()` on this
+  // line, discarding its error in the usual way, and its only purpose was to
+  // fill a `user_id` field in the body below. That field is read by nothing.
+  // supabase/functions/wearable-oauth/index.ts takes the caller's id from the
+  // JWT and from nothing else — its header says so at length, and says why:
+  // `body.user_id` used to be the authorisation with the JWT merely overwriting
+  // it, and since the project's anon key is a valid JWT that resolves to no
+  // user and ships in this bundle, anybody could have posted somebody else's
+  // uuid and replaced their vendor token. The function names this app as the
+  // sender that "still sends it and it is simply ignored".
+  //
+  // So there was nothing here to fate-check. A field that decides nothing does
+  // not need a better answer, it needs to stop existing: while the app keeps
+  // sending a `user_id` the server has taken care to ignore, the next reader of
+  // this call has every reason to think it is load-bearing, and reinstating the
+  // fallback is one small edit away. The `getUser()` round trip it cost on the
+  // connect path goes with it.
+  //
+  // The exchange is authorised by the Authorization header `functions.invoke`
+  // attaches from the session, which is the only thing that was ever
+  // authorising it.
   const { data, error } = await supabase.functions.invoke('wearable-oauth', {
     body: {
       provider: id,
       code: result.params.code,
       code_verifier: request.codeVerifier ?? null,
       redirect_uri: redirectUri,
-      user_id: userId,
     },
   });
+
   if (error || (data as any)?.error) {
     const detail = (data as any)?.error || (error as any)?.message || 'unknown';
     reportError('wearables.connect.tokenExchange', detail, { provider: id });
@@ -136,7 +180,37 @@ export async function fetchVendorDay(id: ProviderId): Promise<any | null> {
   // that lets a 403 on one endpoint be read as a scope gap rather than as a
   // disconnected account.
   noteTokenAlive(id);
-  return payload?.metrics ?? null;
+  const metrics = payload?.metrics ?? null;
+  // ── The daily roll-up was the one read that recorded nothing ──────────────
+  //
+  // "Oura ring says that my ring is connected, I have created an account but I
+  // have no ring associated with the Oura account."
+  //
+  // Every word of that was consistent with what the app was told: the OAuth
+  // succeeded, the token refreshes, and Oura answers `{ data: [] }` on every
+  // collection because there is no ring writing to them. The ledger's 'silent'
+  // state exists precisely for this — and it could never fire, because the ONLY
+  // read an Oura member's Watch & Devices row depends on is this one, and this
+  // one wrote no metric proof at all. With an empty ledger `everProduced` is
+  // undefined, which `describeLink` correctly treats as "do not claim silence",
+  // so the row fell through to 'live': "connected and Repple is reading it".
+  //
+  // 'day' rather than a per-figure name: the roll-up is asked for as one
+  // document and a vendor holding nothing returns nothing for all of it. A
+  // single number anywhere in it is a device that is working.
+  if (metrics && typeof metrics === 'object') {
+    const produced = Object.values(metrics as Record<string, unknown>).some((v) => typeof v === 'number' && isFinite(v));
+    noteMetric(id, 'day', produced ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+  }
+  // And when the vendor can say WHY there is nothing, it outranks the inference
+  // above — see `noteHardware`. Absent only on an explicit answer: a payload
+  // from an older deploy carries no `hardware` key, and guessing 'absent' from
+  // its absence would tell somebody with a working ring that they have none.
+  const hw = payload?.hardware;
+  if (hw && typeof hw === 'object' && typeof hw.present === 'boolean') {
+    noteHardware(id, hw.present ? 'present' : 'absent');
+  }
+  return metrics;
 }
 
 /** Recent workouts from a cloud vendor, for importing into the training log. */
@@ -237,8 +311,19 @@ export async function fetchVendorSleep(id: ProviderId, sinceDays = 7): Promise<V
     // connection starts working, which is what "reconnecting must visibly
     // resolve" comes down to.
     noteTokenAlive(id);
-    noteMetric(id, 'sleep', { kind: 'ok', at: Date.now() });
-    return { ok: true, records: Array.isArray(sleep.records) ? sleep.records : [] };
+    const records = Array.isArray(sleep.records) ? sleep.records : [];
+    // 'ok' only when a night actually came back. An answer of "I hold no
+    // records" was being recorded as a reading produced, which is the second
+    // half of the ringless-Oura report: Oura's sleep collection returns
+    // `{ data: [] }` for an account with no ring, that arrives here as
+    // `ok: true` with nothing in it, and one 'ok' in the ledger is enough to
+    // make `everProduced` true and the row read "Repple is reading it".
+    //
+    // The token verdict above is written either way and deliberately so —
+    // answering "nothing" IS the endpoint working, and it is the evidence that
+    // tells a scope gap from a dead account apart.
+    noteMetric(id, 'sleep', records.length ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+    return { ok: true, records };
   }
   // A non-2xx that was NOT 401/403 — the vendor is down, or we sent something
   // it did not like. The token is not implicated either way, so no verdict is
@@ -301,17 +386,18 @@ export async function fetchVendorBody(id: ProviderId): Promise<VendorBodyResult>
   }
   if (body.ok === true) {
     noteTokenAlive(id);
-    noteMetric(id, 'body', { kind: 'ok', at: Date.now() });
     const num = (v: unknown): number | null => {
       const n = Number(v);
       return Number.isFinite(n) && n > 0 ? n : null;
     };
-    return {
-      ok: true,
-      weightKg: num(body.weightKg),
-      heightM: num(body.heightM),
-      maxHeartRate: num(body.maxHeartRate),
-    };
+    const measured = { weightKg: num(body.weightKg), heightM: num(body.heightM), maxHeartRate: num(body.maxHeartRate) };
+    // Same distinction the sleep read above now makes. A vendor that answers
+    // with three nulls — WHOOP does exactly that for a client who has never
+    // entered a weight — has demonstrated that the endpoint works and that it
+    // is holding nothing, and only the first of those is a figure produced.
+    const any = measured.weightKg != null || measured.heightM != null || measured.maxHeartRate != null;
+    noteMetric(id, 'body', any ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+    return { ok: true, ...measured };
   }
   return { ok: false, reason: String(body.reason || 'unknown') };
 }
@@ -320,12 +406,51 @@ export async function fetchVendorBody(id: ProviderId): Promise<VendorBodyResult>
  * Actually drop the stored token. This used to be a no-op with a comment claiming
  * revocation happened server-side; nothing deleted the row, so "disconnect" only
  * cleared a local flag and the dead token lingered forever.
+ *
+ * ── and then it was a no-op again, for a subtler reason ───────────────────
+ *
+ * The delete sat inside a `try/catch` whose entire purpose was to notice the
+ * failure, and the catch could not fire. supabase-js does not reject on a
+ * database error: it RESOLVES, with `error` set, and nothing here was reading
+ * it. So a delete refused by row-level security ran to completion as far as
+ * this function was concerned, `noteTokenDead` recorded the token as gone, the
+ * screen said Disconnected — and the row was still in `wearable_tokens`.
+ *
+ * That is worse than the original no-op, because the app now asks the SERVER
+ * first on launch (see src/ui/wearables.tsx) and the server still had the
+ * token. The member disconnected their watch, watched it say so, closed the
+ * app, and found it connected again the next morning, with no explanation
+ * available to them and nothing recorded anywhere that a write had failed.
+ *
+ * So the error is read, and the failure is thrown rather than swallowed. It
+ * throws rather than returning a flag because `WearableProvider.disconnect`
+ * returns `Promise<void>` and its callers already have `catch` arms wired for
+ * exactly this — what they did not have was anything to catch.
  */
 export async function disconnectVendor(id: ProviderId): Promise<void> {
+  let error: unknown = null;
   try {
-    await supabase.from('wearable_tokens').delete().eq('provider', id);
+    // Counted, not inferred. Zero matched rows is fine and is not an error
+    // here: a member who connected on another handset and disconnects on this
+    // one has no row of their own to delete. What must not pass silently is a
+    // REFUSAL, which is what `error` carries.
+    // no-count-ok: the paragraph above is the reason — a member who connected
+    // on another handset has no row of their own here, so zero matched rows is
+    // the honest answer and only a REFUSAL, which arrives in `error`, may pass
+    // for a disconnection.
+    ({ error } = await supabase.from('wearable_tokens').delete().eq('provider', id));
   } catch (e) {
-    reportError('wearables.disconnect', e, { provider: id });
+    error = e;
+  }
+  if (error) {
+    reportError('wearables.disconnect', error, { provider: id });
+    // Deliberately BEFORE `noteTokenDead`, and the order is the fix. Marking
+    // the token dead is a statement about a row that is still there, and every
+    // screen downstream reads that note as the disconnection having happened.
+    throw new Error(
+      'Repple could not remove this device’s connection from your account, so it is still connected. '
+      + 'This is a connection problem rather than a refusal. Try again in a moment.',
+    );
   }
   // Whatever we knew about that token was about a row that is now gone. Left in
   // place it would outlive its subject and put a "reconnect WHOOP" sentence in

@@ -13,7 +13,8 @@
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { MembershipStatus } from './gymRecord';
-import { WEEK_DAYS, weekIndexOf } from './weekStart';
+import { WEEK_DAYS, dayIndexInWeek, isoDay } from './weekStart';
+import { rotaDay, rotaHour, calendarWeekday } from './rotaClock';
 
 type Queryable = { from: (table: string) => any };
 
@@ -124,21 +125,49 @@ export function duplicateOpenVisits(visits: Visit[]): Visit[] {
   return visits.filter((v) => !v.exitedAt && !kept.has(v.id));
 }
 
-/** ISO date (YYYY-MM-DD) of a visit, in the viewer's timezone. */
-function dayOf(iso: string): string {
-  const d = new Date(iso);
-  // Local, not UTC: a gym's "Tuesday" is its own Tuesday. A 22:00 visit in
-  // Dubai belongs to that evening, not to the next UTC day.
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+/**
+ * ISO date (YYYY-MM-DD) of a visit, on the GYM's clock when it has said what
+ * that is, and on the reader's device when it has not.
+ *
+ * ── What this was, and why it was wrong ───────────────────────────────────
+ *
+ * `d.getFullYear()/getMonth()/getDate()` with a comment claiming "a gym's
+ * Tuesday is its own Tuesday". Those getters answer the READER's Tuesday. Right
+ * at the front desk by accident, and wrong by a whole day for an owner reading
+ * their Dubai gym's footfall from London — which is precisely the reader these
+ * figures were built for, because the person at the desk can see the room.
+ *
+ * `rotaDay` is the one decision, shared with the rota so a busiest-slots strip
+ * and the shift somebody is rostered into cannot disagree about which day they
+ * are talking about. It falls back to the reader's day AND the screen says so —
+ * see `whoseClockNote` in src/lib/gymWhen.ts. Refusing to draw the histogram at
+ * all for every gym that has not filled in a setting takes a working screen
+ * away to make a point.
+ */
+function dayOf(iso: string, zone?: string | null): string | null {
+  return rotaDay(iso, zone ?? null);
+}
+
+/** The weekday index (in `WEEK_DAYS` order) an instant falls on, on the same
+ *  clock `dayOf` uses. Derived from the day rather than from a second call, so
+ *  the column and the date can never name different days. */
+function weekdayOf(iso: string, zone?: string | null): number | null {
+  const day = dayOf(iso, zone);
+  if (day == null) return null;
+  const js = calendarWeekday(day);
+  return js == null ? null : dayIndexInWeek(js);
 }
 
 /** Visit counts per calendar day, oldest first. Days with no visits are absent. */
-export function visitsPerDay(visits: Pick<Visit, 'enteredAt'>[]): { day: string; visits: number }[] {
+export function visitsPerDay(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { day: string; visits: number }[] {
   const byDay = new Map<string, number>();
-  for (const v of visits) byDay.set(dayOf(v.enteredAt), (byDay.get(dayOf(v.enteredAt)) ?? 0) + 1);
+  for (const v of visits) {
+    const day = dayOf(v.enteredAt, zone);
+    if (day == null) continue;
+    byDay.set(day, (byDay.get(day) ?? 0) + 1);
+  }
   return [...byDay.entries()]
     .map(([day, n]) => ({ day, visits: n }))
     .sort((a, b) => a.day.localeCompare(b.day));
@@ -151,11 +180,16 @@ export function visitsPerDay(visits: Pick<Visit, 'enteredAt'>[]): { day: string;
  * a gap at 14:00 is information, and omitting it would let a chart draw a line
  * straight through the quiet hours as though they were busy.
  */
-export function visitsByHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; visits: number }[] {
+export function visitsByHour(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { hour: number; visits: number }[] {
   const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, visits: 0 }));
   for (const v of visits) {
-    const h = new Date(v.enteredAt).getHours();
-    if (h >= 0 && h < 24) hours[h].visits += 1;
+    // The gym's hour, not the reader's. `gymHour`'s own doc names this
+    // histogram as the figure `getHours()` gets wrong by however far the reader
+    // is from the gym, and this was the caller getting it wrong.
+    const h = rotaHour(v.enteredAt, zone ?? null);
+    if (h != null && h >= 0 && h < 24) hours[h].visits += 1;
   }
   return hours;
 }
@@ -166,9 +200,11 @@ export function visitsByHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number
  * Ties go to the earlier hour: told two slots are equally busy, a gym should
  * look at the one it reaches first in the day.
  */
-export function peakHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; visits: number } | null {
+export function peakHour(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { hour: number; visits: number } | null {
   if (visits.length === 0) return null;
-  const byHour = visitsByHour(visits);
+  const byHour = visitsByHour(visits, zone);
   let best = byHour[0];
   for (const h of byHour) if (h.visits > best.visits) best = h;
   return best.visits === 0 ? null : best;
@@ -187,12 +223,14 @@ export const WEEKDAYS: readonly string[] = WEEK_DAYS;
  * Fridays needs to see the gap, and a chart that omits it draws a line straight
  * through.
  */
-export function visitsByWeekday(visits: Pick<Visit, 'enteredAt'>[]): { day: string; visits: number }[] {
+export function visitsByWeekday(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { day: string; visits: number }[] {
   const out = WEEKDAYS.map((day) => ({ day, visits: 0 }));
   for (const v of visits) {
-    const d = new Date(v.enteredAt);
-    if (Number.isNaN(d.getTime())) continue;
-    out[weekIndexOf(d)].visits += 1;
+    const i = weekdayOf(v.enteredAt, zone);
+    if (i == null) continue;
+    out[i].visits += 1;
   }
   return out;
 }
@@ -227,18 +265,23 @@ export interface BusySlot {
 export function busiestSlots(
   visits: Pick<Visit, 'enteredAt'>[],
   limit = 5,
+  zone?: string | null,
 ): BusySlot[] {
   const counts = new Map<string, { weekday: number; hour: number; visits: number; days: Set<string> }>();
   for (const v of visits) {
-    const d = new Date(v.enteredAt);
-    if (Number.isNaN(d.getTime())) continue;
-    const weekday = weekIndexOf(d);
-    const hour = d.getHours();
+    // Weekday, hour and day all off the SAME clock — `rotaDay`'s, the one the
+    // rota itself is bucketed by. A slot named on the reader's clock and a
+    // shift written on the gym's is the disagreement that puts somebody on the
+    // floor an hour, or a day, from where the footfall actually is.
+    const weekday = weekdayOf(v.enteredAt, zone);
+    const hour = rotaHour(v.enteredAt, zone ?? null);
+    const day = dayOf(v.enteredAt, zone);
+    if (weekday == null || hour == null || day == null) continue;
     const key = `${weekday}:${hour}`;
     let cell = counts.get(key);
     if (!cell) { cell = { weekday, hour, visits: 0, days: new Set<string>() }; counts.set(key, cell); }
     cell.visits += 1;
-    cell.days.add(dayOf(v.enteredAt));
+    cell.days.add(day);
   }
   return [...counts.values()]
     .map((c) => ({ weekday: c.weekday, hour: c.hour, visits: c.visits, days: c.days.size }))
@@ -270,7 +313,7 @@ export interface VisitSummary {
 }
 
 /** The door-log picture for a period. */
-export function summariseVisits(visits: Visit[]): VisitSummary {
+export function summariseVisits(visits: Visit[], zone?: string | null): VisitSummary {
   const members = uniqueMembers(visits);
   const anonymous = visits.filter((v) => !v.memberId).length;
   const dwell = averageDwellMinutes(visits);
@@ -282,7 +325,7 @@ export function summariseVisits(visits: Visit[]): VisitSummary {
     visitsPerMember: members === 0 ? null : Math.round(((visits.length - anonymous) / members) * 10) / 10,
     averageDwell: dwell.minutes,
     dwellFrom: dwell.closed,
-    peak: peakHour(visits),
+    peak: peakHour(visits, zone),
     inside: currentlyInside(visits).length,
   };
 }
@@ -393,8 +436,6 @@ export const OPEN_VISIT_HOURS = 12;
  */
 export const RESCAN_MINUTES = 2;
 
-const dayOfIso = (iso: string): string => iso.slice(0, 10);
-
 /**
  * Whether this person may be admitted, and what to say if not.
  *
@@ -448,7 +489,7 @@ export function admissionCheck(input: {
     const mins = Math.max(0, Math.round((now - freshestOpen) / 60000));
     return {
       verdict: 'refuse', code: 'already-inside',
-      reason: `They are already checked in — ${mins} ${mins === 1 ? 'minute' : 'minutes'} ago, with no check-out. A second row would put the same person in the evacuation headcount twice.`,
+      reason: `They are already checked in, ${mins} ${mins === 1 ? 'minute' : 'minutes'} ago, with no check-out. A second row would put the same person in the evacuation headcount twice.`,
     };
   }
 
@@ -462,7 +503,7 @@ export function admissionCheck(input: {
   if (input.memberships === null) {
     return {
       verdict: 'refuse', code: 'unknown',
-      reason: 'Their membership could not be read, so nothing here knows whether it is live. That is a failed query rather than a member who has not paid — record the visit anyway if you can see they are in good standing.',
+      reason: 'Their membership could not be read, so nothing here knows whether it is live. That is a failed query rather than a member who has not paid. Record the visit anyway if you can see they are in good standing.',
     };
   }
 
@@ -486,9 +527,18 @@ export function admissionCheck(input: {
   );
   if (live.length > 0) {
     if (stalestOpen != null) {
+      // `gym_visits.entered_at` is a `timestamptz` and this is a millisecond
+      // parsed from it, so `new Date(ms).toISOString().slice(0, 10)` — which is
+      // what the old `dayOfIso` did, with the slice hidden inside it where the
+      // check-utc-day gate could not see the shape — named GREENWICH's day. A
+      // visit opened at 18:00 on 4 March was reported to the desk as a stale
+      // visit "from 2026-03-05", a day that had not happened yet. `isoDay()`
+      // reads the local parts, which on a desk terminal standing in the gym is
+      // the gym's own day; there is no tenant zone in this function's input to
+      // ask `gymDay()` with.
       return {
         verdict: 'warn', code: 'stale-open',
-        reason: `Their membership is live. They also have a visit from ${dayOfIso(new Date(stalestOpen).toISOString())} that nobody closed — it is not a person in the building and it is counted nowhere.`,
+        reason: `Their membership is live. They also have a visit from ${isoDay(new Date(stalestOpen))} that nobody closed. It is not a person in the building and it is counted nowhere.`,
       };
     }
     return { verdict: 'ok', code: 'active', reason: null };
@@ -576,25 +626,42 @@ export class AdmissionRefused extends Error {
  * `readAll` orders on `id` after `entered_at` because paging needs a TOTAL
  * order and two people scanning in the same second are two rows Postgres may
  * hand back in either order.
+ *
+ * ── `whole`, and the one caller that has to have everything ───────────────
+ *
+ * /export is not computing a figure. Its stated purpose is that leaving with
+ * the record must be possible, and it asked for the door log with no window at
+ * all — so it landed on the branch that refuses, and the bundle came out
+ * carrying a stub file under a banner saying "this bundle is complete".
+ *
+ * Refusing an UNBOUNDED read is still right for every screen: those are the
+ * ones computing a number, and none of them needs the gym's whole history to do
+ * it. So the export says what it is doing instead. `whole: true` is a caller
+ * stating that it wants every row and will wait for them, which is a different
+ * request from "give me the log" and now looks like one in the source.
+ * `PAGE_CEILING` refuses past fifty thousand visits either way.
  */
 export async function fetchVisits(
   sb: Queryable,
   tenantId: string,
-  opts: { sinceIso?: string; limit?: number } = {},
+  opts: { sinceIso?: string; limit?: number; whole?: boolean } = {},
 ): Promise<Visit[]> {
   const columns = 'id, member_id, pass_id, class_id, entered_at, exited_at, source, note, profiles(full_name)';
 
-  if (opts.sinceIso && !opts.limit) {
+  if ((opts.sinceIso || opts.whole) && !opts.limit) {
     const rows = await readAll<any>(
       (from, to) => sb
         .from('gym_visits')
         .select(columns)
         .eq('tenant_id', tenantId)
-        .gte('entered_at', opts.sinceIso)
+        // Applied only where there is one. `.gte(col, undefined)` is not a
+        // no-op in PostgREST — it is a malformed filter — so the whole-log
+        // branch must not send it.
+        .gte('entered_at', opts.sinceIso ?? '1970-01-01T00:00:00.000Z')
         .order('entered_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to),
-      'visits in this period',
+      opts.sinceIso ? 'visits in this period' : "this gym's door log",
     );
     return rows.map(rowToVisit);
   }
@@ -647,6 +714,15 @@ export interface CheckIn {
    * visit, so the row itself carries why it exists.
    */
   overrideReason?: string | null;
+  /**
+   * The GYM's calendar day, `YYYY-MM-DD` — `gymDay(Date.now(), tenants.timezone)`.
+   *
+   * What the admission rules compare a membership's `ends_on` against. Pass it
+   * wherever the zone has been read; without it the check falls back to the
+   * desk machine's own day, which is the same answer only while the machine is
+   * in the same country as the gym.
+   */
+  today?: string | null;
 }
 
 /**
@@ -703,6 +779,70 @@ async function doorFacts(
 }
 
 /**
+ * The calendar day an admission is judged on, when the caller has not said.
+ *
+ * ── The claim this used to make, and could not keep ───────────────────────
+ *
+ * It was documented as "the gym's own calendar day … local, never UTC", and the
+ * body is the READER's local day. Local is the right answer to UTC and the
+ * wrong answer to "whose Tuesday". `memberships.ends_on` is a `date` column
+ * filled in on the gym's calendar, so comparing it against the desk machine's
+ * day gets the boundary wrong by one day whenever the two differ — a browser
+ * an hour or two ahead refuses a member whose membership runs through today,
+ * with somebody standing at the counter, and one behind admits a membership
+ * that ran out yesterday. The Door screen's own preview already compares
+ * against `gymDay(…, zone)`, so the two disagreed about the same member: the
+ * line under the picker said one thing and the write did the other.
+ *
+ * So the day is now the caller's to state — `today` on `doorAdmission` and on
+ * `CheckIn` — and a caller that knows the gym's zone passes the gym's day. This
+ * is only the fallback for one that does not, and it is the reader's day, said
+ * as that rather than dressed up as the gym's.
+ */
+function readerDayOf(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Ask the gym's own record whether this person may come in, without writing
+ * anything.
+ *
+ * `checkIn` asks this and refuses on it. It is exported because the Door screen
+ * has a SECOND way in — the Take-a-visit button on the pass table — which
+ * writes through `redeemPass` and so never reached `checkIn`'s guard at all. A
+ * double scan, somebody already inside, and a rescan seconds apart were caught
+ * on the top form and on nothing else, and the figure they corrupt is the
+ * headcount somebody reads out in an evacuation.
+ *
+ * The read throws rather than defaulting, exactly as it does inside `checkIn`:
+ * `admissionCheck` can only tell "no membership" from "we could not ask" if it
+ * is never handed an empty array for a query that failed.
+ */
+export async function doorAdmission(
+  sb: Queryable,
+  tenantId: string,
+  input: {
+    memberId: string; passId?: string | null; enteredAtIso?: string;
+    /** The GYM's calendar day, `YYYY-MM-DD`, from `gymDay(…, tenants.timezone)`.
+     *  Every caller that has read the zone should pass it: it is what
+     *  `memberships.ends_on` is written on. Omitted, this falls back to the
+     *  reading machine's day, which is right at the desk and wrong by a day for
+     *  anybody else. */
+    today?: string | null;
+  },
+): Promise<Admission> {
+  const facts = await doorFacts(sb, tenantId, input.memberId);
+  return admissionCheck({
+    memberId: input.memberId,
+    passId: input.passId ?? null,
+    memberships: facts.memberships,
+    recent: facts.recent,
+    today: input.today || readerDayOf(input.enteredAtIso),
+  });
+}
+
+/**
  * Record an arrival, having first asked whether this person may come in.
  *
  * ── What this used to be ──────────────────────────────────────────────────
@@ -727,8 +867,6 @@ async function doorFacts(
  */
 export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}): Promise<void> {
   const override = (v.overrideReason ?? '').trim();
-  const today = (v.enteredAtIso ? new Date(v.enteredAtIso) : new Date());
-  const localDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   let admission: Admission = { verdict: 'ok', code: 'anonymous', reason: null };
   if (v.memberId) {
@@ -739,13 +877,11 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
       // on — including one that fails.
       admission = { verdict: 'warn', code: 'unknown', reason: null };
     } else {
-      const facts = await doorFacts(sb, tenantId, v.memberId);
-      admission = admissionCheck({
+      admission = await doorAdmission(sb, tenantId, {
         memberId: v.memberId,
         passId: v.passId ?? null,
-        memberships: facts.memberships,
-        recent: facts.recent,
-        today: localDay,
+        enteredAtIso: v.enteredAtIso,
+        today: v.today ?? null,
       });
       if (admission.verdict === 'refuse') throw new AdmissionRefused(admission);
     }
@@ -798,17 +934,41 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
  * timestamp from the flush would put a 06:02 entry into the log at 06:47, and
  * the busiest-hour figure, the average stay and the class it reconciles against
  * would all be wrong in a way nobody could ever see.
+ *
+ * ── Why departures are in the same queue ──────────────────────────────────
+ *
+ * They were in no queue at all. The Door screen held an arrival that the
+ * network refused and answered the identical failure on a CHECK-OUT with one
+ * line of message text — so the same two-minute wifi drop that was carefully
+ * survived in one direction left the gym believing everybody who left during it
+ * was still in the building. That is the evacuation headcount, over-counting,
+ * with nothing on screen saying so; and the visits stay open, so the average
+ * stay quietly loses them too.
+ *
+ * A departure replays as honestly as an arrival and for the same reason: the
+ * minute is stamped when the person leaves and carried on the row, so writing
+ * it later writes exactly the same fact. `checkOut` only closes a visit that is
+ * still open, so a replay cannot overwrite a departure another desk recorded in
+ * the meantime — it matches nothing and says so.
  */
-export interface PendingCheckIn {
+export interface PendingDoorWrite {
   /** Stable id, so a flush can drop exactly what it wrote. */
   id: string;
   tenantId: string;
+  /**
+   * Which way through the door. 'in' is an arrival with nothing on the record
+   * yet; 'out' is a departure off a visit that IS on the record and is holding
+   * a person in the headcount until this lands.
+   */
+  kind: 'in' | 'out';
   memberId: string | null;
   memberName: string | null;
   passId: string | null;
   classId: string | null;
-  /** The moment the person actually walked in. */
-  enteredAtIso: string;
+  /** The moment it actually happened — walked in, or walked out. */
+  atIso: string;
+  /** The open visit a departure closes. Null on an arrival. */
+  visitId: string | null;
   /** When this was queued, for the age rules below. */
   queuedAt: number;
   /** How many times a flush has tried it. */
@@ -824,7 +984,12 @@ export interface PendingCheckIn {
 
 /** The browser key the desk's queue lives under. One per gym, because a
  *  shared machine can be signed into more than one over its life and one
- *  gym's arrivals must never flush into another's log. */
+ *  gym's arrivals must never flush into another's log.
+ *
+ *  Still v1 after departures joined it: `readPending` fills `kind` in as 'in'
+ *  for a row written by the older build, which is what those rows are. Bumping
+ *  the key would have thrown away the arrivals a desk was holding at the moment
+ *  it reloaded, which is the one thing this queue exists to stop. */
 export const PENDING_PREFIX = 'door-queue:v1:';
 export const pendingKey = (tenantId: string): string => `${PENDING_PREFIX}${tenantId}`;
 
@@ -850,26 +1015,37 @@ export const PENDING_CAP = 200;
 export const PENDING_HOURS = 12;
 
 /** Read a queue back off the browser, without ever throwing at a front desk. */
-export function readPending(raw: string | null | undefined): { items: PendingCheckIn[]; read: boolean } {
+export function readPending(raw: string | null | undefined): { items: PendingDoorWrite[]; read: boolean } {
   if (raw == null) return { items: [], read: true };
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return { items: [], read: false };
-    const items = parsed.filter((x: any) =>
-      x && typeof x.id === 'string' && typeof x.tenantId === 'string'
-      && typeof x.enteredAtIso === 'string' && !Number.isNaN(Date.parse(x.enteredAtIso)),
-    ).map((x: any): PendingCheckIn => ({
-      id: x.id,
-      tenantId: x.tenantId,
-      memberId: x.memberId ?? null,
-      memberName: x.memberName ?? null,
-      passId: x.passId ?? null,
-      classId: x.classId ?? null,
-      enteredAtIso: x.enteredAtIso,
-      queuedAt: Number.isFinite(x.queuedAt) ? x.queuedAt : Date.parse(x.enteredAtIso),
-      tries: Number.isFinite(x.tries) ? x.tries : 0,
-      refusedWhy: typeof x.refusedWhy === 'string' ? x.refusedWhy : null,
-    }));
+    const items = parsed.filter((x: any) => {
+      // `enteredAtIso` is what the build before departures wrote. Read as well
+      // as `atIso` so a desk that reloads mid-outage keeps what it is holding.
+      const at = typeof x?.atIso === 'string' ? x.atIso : x?.enteredAtIso;
+      return x && typeof x.id === 'string' && typeof x.tenantId === 'string'
+        && typeof at === 'string' && !Number.isNaN(Date.parse(at))
+        // A departure with no visit to close is not a departure. It would flush
+        // for ever against nothing, so it is not admitted to the queue at all.
+        && (x.kind !== 'out' || typeof x.visitId === 'string');
+    }).map((x: any): PendingDoorWrite => {
+      const at: string = typeof x.atIso === 'string' ? x.atIso : x.enteredAtIso;
+      return {
+        id: x.id,
+        tenantId: x.tenantId,
+        kind: x.kind === 'out' ? 'out' : 'in',
+        memberId: x.memberId ?? null,
+        memberName: x.memberName ?? null,
+        passId: x.passId ?? null,
+        classId: x.classId ?? null,
+        atIso: at,
+        visitId: typeof x.visitId === 'string' ? x.visitId : null,
+        queuedAt: Number.isFinite(x.queuedAt) ? x.queuedAt : Date.parse(at),
+        tries: Number.isFinite(x.tries) ? x.tries : 0,
+        refusedWhy: typeof x.refusedWhy === 'string' ? x.refusedWhy : null,
+      };
+    });
     return { items, read: true };
   } catch {
     // `read: false` rather than an empty queue, for the same reason every read
@@ -881,38 +1057,49 @@ export function readPending(raw: string | null | undefined): { items: PendingChe
 }
 
 /** Add one, oldest first, dropping the oldest if the queue is at its cap. */
-export function addPending(list: PendingCheckIn[], item: PendingCheckIn): PendingCheckIn[] {
+export function addPending(list: PendingDoorWrite[], item: PendingDoorWrite): PendingDoorWrite[] {
   const next = [...list.filter((i) => i.id !== item.id), item]
-    .sort((a, b) => Date.parse(a.enteredAtIso) - Date.parse(b.enteredAtIso) || a.id.localeCompare(b.id));
+    .sort((a, b) => Date.parse(a.atIso) - Date.parse(b.atIso) || a.id.localeCompare(b.id));
   // From the FRONT: at the cap the oldest arrival is the one least likely still
   // to be worth writing, and dropping the newest would lose the person standing
   // at the desk right now.
   return next.length > PENDING_CAP ? next.slice(next.length - PENDING_CAP) : next;
 }
 
-export const dropPending = (list: PendingCheckIn[], id: string): PendingCheckIn[] =>
+export const dropPending = (list: PendingDoorWrite[], id: string): PendingDoorWrite[] =>
   list.filter((i) => i.id !== id);
 
 /** Split into what is still worth writing and what has gone stale. */
 export function partitionPending(
-  list: PendingCheckIn[], now: number = Date.now(),
-): { live: PendingCheckIn[]; lapsed: PendingCheckIn[] } {
+  list: PendingDoorWrite[], now: number = Date.now(),
+): { live: PendingDoorWrite[]; lapsed: PendingDoorWrite[] } {
   const cutoff = now - PENDING_HOURS * 3600_000;
-  const live: PendingCheckIn[] = [];
-  const lapsed: PendingCheckIn[] = [];
-  for (const i of list) (Date.parse(i.enteredAtIso) >= cutoff ? live : lapsed).push(i);
+  const live: PendingDoorWrite[] = [];
+  const lapsed: PendingDoorWrite[] = [];
+  for (const i of list) (Date.parse(i.atIso) >= cutoff ? live : lapsed).push(i);
   return { live, lapsed };
 }
 
-/** The sentence the desk reads while arrivals are waiting. Null when none are. */
-export function pendingNote(list: PendingCheckIn[]): string | null {
+/** The sentence the desk reads while writes are waiting. Null when none are. */
+export function pendingNote(list: PendingDoorWrite[]): string | null {
   if (list.length === 0) return null;
   const stuck = list.filter((i) => i.refusedWhy !== null).length;
-  const waiting = list.length - stuck;
+  const held = list.filter((i) => i.refusedWhy === null);
+  const waiting = held.filter((i) => i.kind === 'in').length;
+  const leaving = held.filter((i) => i.kind === 'out').length;
   const parts: string[] = [];
   if (waiting > 0) {
     parts.push(
-      `${waiting} ${waiting === 1 ? 'arrival is' : 'arrivals are'} held on this machine and not yet on the record — they go up on their own as soon as the connection is back, stamped with the minute the person actually came in.`,
+      `${waiting} ${waiting === 1 ? 'arrival is' : 'arrivals are'} held on this machine and not yet on the record. They go up on their own as soon as the connection is back, stamped with the minute the person actually came in.`,
+    );
+  }
+  // Said separately from the arrivals, because the cost is the other way round
+  // and it is the one on this screen somebody could be hurt by: until a held
+  // departure lands, the gym believes that person is still in the building and
+  // Inside now counts them.
+  if (leaving > 0) {
+    parts.push(
+      `${leaving} ${leaving === 1 ? 'check-out is' : 'check-outs are'} held here too, with the minute they left on ${leaving === 1 ? 'it' : 'them'}. Until ${leaving === 1 ? 'it lands' : 'they land'} the gym still has ${leaving === 1 ? 'that person' : 'those people'} inside, so Inside now is over-counting by ${leaving}.`,
     );
   }
   if (stuck > 0) {

@@ -26,8 +26,15 @@
 //    phone, and a coach who is teaching does not always press it. Printing
 //    "missed" over that is the app inventing an absence and handing it to the
 //    member and — because their coach reads the same record — to the person
-//    having the retention conversation with them. The word for it is `unmarked`
-//    and there is no code path in this file that turns it into `missed`.
+//    having the retention conversation with them. The word for it is `unmarked`.
+//
+//    Part 3060 added the one column that can separate the two, and this file
+//    now reads it: `gym_classes.register_taken_at`. There is exactly ONE path
+//    to `missed`, and it requires that column to be set — a booked seat, no
+//    tick, no door record, the class has run, and somebody recorded that they
+//    took the register. With the column null, this file still says `unmarked`
+//    and still has no way to say anything else. A build that guessed would be
+//    manufacturing the absence, and a gym may charge on one.
 //
 // 2. ONE TURNING-UP IS ONE ROW ON SCREEN. `gym_visits.class_id` is set "when the
 //    visit was attendance at a booked class, so the two records reconcile
@@ -52,6 +59,7 @@
 //    weeks that had not happened yet, and it is exactly what this codebase means
 //    by inventing a figure.
 import { capLimit, capped } from './rowCap';
+import { readByIds } from './idLookup';
 import { dayIndexInWeek } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
@@ -59,8 +67,68 @@ type Queryable = { from: (table: string) => any };
 /** As on gym_visits.source. */
 export type VisitSource = 'desk' | 'qr' | 'door' | 'app' | 'manual';
 
-/** As on class_bookings.status. */
-export type BookingStatus = 'booked' | 'waitlist';
+/**
+ * As on class_bookings.status — the FOUR words part 3060 widened the CHECK to,
+ * plus one word this file adds for a value it cannot name.
+ *
+ * 'cancelled' and 'late_cancelled' are spelled exactly as `sessions.outcome`
+ * spells them (part 33) and exactly as src/lib/classRegister.ts and
+ * src/lib/classSeat.ts spell them. Part 3060's own header: "A second spelling
+ * of the same fact is its own defect". They are not near-misses to be
+ * normalised — nothing here accepts 'canceled', 'late-cancelled' or
+ * 'cancelled_late', because a build that quietly repaired a misspelling would
+ * hide a database writing past its own constraint.
+ *
+ * 'unknown' is NOT a column value. It is this module's reading of a status word
+ * this build has never heard of — a row written by a part that postdates it —
+ * and it exists for the reason `seatStanding` has the same member and
+ * `countRegister` has `unknownStanding`: a value nobody anticipated must not be
+ * silently classified as one of the four. Before part 3060 that is exactly what
+ * happened here, and it is the defect this lane exists for.
+ */
+export type BookingStatus =
+  | 'booked'
+  | 'waitlist'
+  | 'cancelled'
+  | 'late_cancelled'
+  | 'unknown';
+
+/** The four words the column may hold, spelled once. */
+const BOOKED = 'booked';
+const WAITLIST = 'waitlist';
+const CANCELLED = 'cancelled';
+const LATE_CANCELLED = 'late_cancelled';
+
+/**
+ * One `class_bookings.status` value → what this module will call it.
+ *
+ * Exported because it is the line this whole lane is about. Until part 3060 the
+ * read said
+ *
+ *     status: r.status === 'waitlist' ? 'waitlist' : 'booked'
+ *
+ * which was correct for a two-value column and became a false statement the
+ * moment the CHECK admitted two more: every cancellation arrived here as a
+ * booking, and `classOutcome` then told the member their cancelled class was
+ * either "still to come" or "not recorded either way". A late cancellation is
+ * BILLABLE at a gym with a notice window (part 2615), so that second sentence
+ * was the app losing the member's own evidence of a charge.
+ *
+ * Null, undefined and a blank string are 'unknown' and NOT 'booked'. The column
+ * is `not null default 'booked'` so none of them should arrive — and a read
+ * that produced one anyway is a read this module cannot interpret, which is not
+ * the same fact as a member holding a seat.
+ */
+export function bookingStatus(raw: unknown): BookingStatus {
+  if (typeof raw !== 'string') return 'unknown';
+  switch (raw.trim()) {
+    case BOOKED: return 'booked';
+    case WAITLIST: return 'waitlist';
+    case CANCELLED: return 'cancelled';
+    case LATE_CANCELLED: return 'late_cancelled';
+    default: return 'unknown';
+  }
+}
 
 /** The readable half of a gym_classes row. Null on an event means the row did
  *  not come back — never that the class does not exist. */
@@ -75,6 +143,24 @@ export interface ClassDetail {
   startsAt: string;
   durationMin: number | null;
   tenantId: string | null;
+  /**
+   * `gym_classes.register_taken_at` (part 3060). NULL MEANS NOBODY TOOK THE
+   * REGISTER — it does not mean nobody attended, and it is the column that
+   * stops `attended_at is null` meaning two things at once.
+   *
+   * Nothing on the member's side read this before now: `classOutcome` had no
+   * way to tell a no-show from a class whose register was never opened, so it
+   * called both of them `unmarked`. That was the honest answer while the column
+   * was unreadable and it is an under-statement now.
+   *
+   * OPTIONAL, and it means the same thing absent as it does null: nobody took
+   * the register, or we did not find out — the two collapse here because both
+   * produce `unmarked` and neither may produce `missed`. Optional rather than
+   * required so that a `ClassDetail` assembled by something that predates part
+   * 3060 keeps compiling and keeps the safe answer; the one construction site
+   * that matters, `readAttendance` below, sets it explicitly from the column.
+   */
+  registerTakenAt?: string | null;
 }
 
 export interface MyBooking {
@@ -160,8 +246,27 @@ export function weekStart(day: string): string | null {
 export type ClassOutcome =
   /** They were there. `register` and `door` say which record proves it. */
   | { kind: 'attended'; register: boolean; door: boolean }
-  /** The class has run and nothing was recorded either way. NOT an absence. */
+  /** The class has run and nothing was recorded either way. NOT an absence.
+   *  Reached when the register was never taken, when this build could not find
+   *  out whether it was, and when the booking's standing is a word this build
+   *  cannot read — every case in which the honest answer is that a human has to
+   *  look. */
   | { kind: 'unmarked' }
+  /**
+   * The class ran, they held the seat, nobody ticked them in, AND SOMEBODY TOOK
+   * THE REGISTER. Only then.
+   *
+   * 'missed' is `PastState`'s word for a no-show (src/lib/sessionHistory.ts,
+   * where `pastVerdict` maps `sessions.outcome = 'no_show'` onto it) and
+   * `bookingVerdict`'s answer for the same row on the coach's side. A third
+   * spelling here would be the defect part 3060's header names.
+   */
+  | { kind: 'missed' }
+  /** They gave the seat up outside the gym's notice period. */
+  | { kind: 'cancelled' }
+  /** They gave it up inside it. The one a gym may charge a fee for, and the one
+   *  that did not exist as a recordable fact until part 3060. */
+  | { kind: 'late_cancelled' }
   /** Still to come. */
   | { kind: 'upcoming' }
   /** Never got a seat, so there was nothing to turn up to. */
@@ -169,22 +274,80 @@ export type ClassOutcome =
   /** We cannot read when the class was, so we cannot say whether it has run. */
   | { kind: 'unknown' };
 
+/**
+ * Whether somebody took the register for this class.
+ *
+ * The FACT is the column being set, not the timestamp being parseable: a
+ * `timestamptz` that arrived as a string this module cannot parse is still a
+ * register somebody took, and reading it as "not taken" would throw away the
+ * evidence. Trimmed, because the empty string is PostgREST rendering nothing
+ * and is not a time.
+ */
+function registerWasTaken(registerTakenAt: string | null | undefined): boolean {
+  return typeof registerTakenAt === 'string' && registerTakenAt.trim() !== '';
+}
+
+/**
+ * `registerTakenAt` defaults to null, and that default is load-bearing.
+ *
+ * A caller that has not been taught to read `gym_classes.register_taken_at`
+ * gets exactly the behaviour this function has always had — everything
+ * un-ticked reported as `unmarked`, never as `missed`. The same tri-state
+ * discipline `countRegister` and `bookingVerdict` keep in
+ * src/lib/classRegister.ts, and for the same reason: a build that guessed "the
+ * register was taken" when it did not know would manufacture a no-show, and a
+ * no-show is a thing gyms bill for.
+ */
 export function classOutcome(
   b: Pick<MyBooking, 'status' | 'attendedAt'>,
   startsAt: string | null,
   hasDoorRecord: boolean,
   now: Date,
+  registerTakenAt: string | null = null,
 ): ClassOutcome {
   const register = !!b.attendedAt;
   // Evidence first: a member marked present, or logged through the door, was
   // there — whatever the class row says about the time, and whether or not the
   // seat was ever converted off the waitlist.
+  //
+  // This stays ahead of the cancellation test, and the two modules DIVERGE
+  // here: `bookingVerdict` reads a cancelled booking that is also ticked in as
+  // 'unmarked', because a coach may bill on its answer and two recorded facts
+  // that disagree must not have a winner picked for them. This function feeds
+  // `attendedDays`, and a member who cancelled their 6pm class, came to the gym
+  // anyway and was logged through the door DID come that day — dropping the
+  // event would delete a day of their own record on the strength of a status
+  // word. Different questions, and the divergence is stated rather than left to
+  // be discovered.
   if (register || hasDoorRecord) return { kind: 'attended', register, door: hasDoorRecord };
+
+  // The cancellation outranks the clock, both ways round. A cancelled class
+  // that has not run yet is NOT "still to come" — that sentence tells a member
+  // they hold a seat they gave up, which is how somebody arranges their evening
+  // around a class the gym is not expecting them at. One that HAS run is not
+  // "nobody marked it either way": the member marked it themselves, and on a
+  // late cancellation that record is the evidence behind a fee.
+  if (b.status === 'cancelled') return { kind: 'cancelled' };
+  if (b.status === 'late_cancelled') return { kind: 'late_cancelled' };
+
   if (b.status === 'waitlist') return { kind: 'waitlisted' };
+  // A standing this build cannot name. `bookingVerdict` answers 'unmarked' for
+  // the same row and says why: a vocabulary this file extends on its own is a
+  // vocabulary the rest of the product cannot read. `unmarked` is the state
+  // that asks a human to look, which is the correct answer to a word nobody
+  // here can interpret — and, unlike every other branch below, it is reached
+  // without consulting the clock, because "we cannot read your standing" is
+  // true whether or not the class has run.
+  if (b.status === 'unknown') return { kind: 'unmarked' };
   if (!startsAt) return { kind: 'unknown' };
   const t = Date.parse(startsAt);
   if (Number.isNaN(t)) return { kind: 'unknown' };
-  return t > now.getTime() ? { kind: 'upcoming' } : { kind: 'unmarked' };
+  if (t > now.getTime()) return { kind: 'upcoming' };
+  // The class has run, the seat was held, and nobody ticked them off. Rule 1
+  // says which of the two this is, and part 3060 added the column that decides:
+  // with a register taken, an un-ticked booked member is a NO-SHOW; without
+  // one, nobody has said anything and the only honest word is `unmarked`.
+  return registerWasTaken(registerTakenAt) ? { kind: 'missed' } : { kind: 'unmarked' };
 }
 
 /** One occasion this member was at the gym, however it came to be recorded. */
@@ -266,7 +429,10 @@ export function mergeAttendance(
       tenantId: klass?.tenantId ?? visit?.tenantId ?? null,
       klass,
       booking,
-      outcome: classOutcome(b, klass?.startsAt ?? null, !!visit, now),
+      // `?? null` and not `klass?.registerTakenAt`: a class row we could not
+      // read has no register fact, and `undefined` must reach `classOutcome` as
+      // the same "we do not know" that null is rather than as a third thing.
+      outcome: classOutcome(b, klass?.startsAt ?? null, !!visit, now, klass?.registerTakenAt ?? null),
       visit,
     };
   };
@@ -404,11 +570,68 @@ export function rhythm(
   return { weeks: out, firstDay, countedWeeks: counted.length, perWeek };
 }
 
+/**
+ * One bar of the rhythm strip, said in words.
+ *
+ * ── Why this is a function and not a `title` on the bar ───────────────────
+ *
+ * The strip draws four different facts and draws every one of them as a shape:
+ * a filled bar is a week with days in it, a flat grey bar is a covered week
+ * with none, a dashed outline is a week this app knows nothing about, and
+ * reduced opacity is the current week, which is not over. The number underneath
+ * is printed as `w.days || ''`, so a covered week with ZERO days and an
+ * uncovered week are both blank — the two are told apart by a border style and
+ * nothing else.
+ *
+ * That distinction is not decorative. This screen's own header refuses to
+ * compute an absence, and says the strip "marks the weeks it knows nothing
+ * about as exactly that". A dashed border is not "exactly that" to somebody
+ * using a screen reader, in bright sun, or with any of the colour vision the
+ * rest of this file's palette is contrast-tested for — and "you did not come
+ * that week" is the one sentence this screen was written not to say by
+ * accident.
+ *
+ * `weekOf` is the week's start already formatted by the caller, for the reason
+ * every prose module here takes its dates that way: a bare `getDate()` is
+ * "9/12", which is 9 December in London and 12 September in New York, and there
+ * is no locale in a pure module (scripts/check-hand-dates.mjs).
+ */
+export function rhythmWeekLabel(w: RhythmWeek, weekOf: string): string {
+  const when = weekOf.trim();
+  const head = when ? `Week of ${when}` : 'That week';
+  // Checked before the count, and that order is the whole of it: `days` is 0
+  // for an uncovered week too, and reading the zero first is exactly how "we
+  // have no record" becomes "you did not come".
+  if (!w.covered) {
+    return `${head}: nothing on record. Your gym's record of you starts later than this, so this is not a week you stayed away.`;
+  }
+  const n = w.days;
+  const dayWord = n === 1 ? '1 day' : `${n} days`;
+  if (!w.complete) {
+    // The current week. Never phrased as a total: four days by Thursday is not
+    // four days in a week, and the caption under the strip already says the
+    // last bar is unfinished.
+    return n === 0
+      ? `${head}: nothing recorded yet. This week is not over.`
+      : `${head}: ${dayWord} so far. This week is not over.`;
+  }
+  return n === 0
+    ? `${head}: no days recorded.`
+    : `${head}: ${dayWord} recorded.`;
+}
+
 /* ── the reads ────────────────────────────────────────────────────────────── */
 
 const BOOKING_COLUMNS = 'id, class_id, status, attended_at, created_at';
 const VISIT_COLUMNS = 'id, tenant_id, class_id, entered_at, exited_at, source';
-const CLASS_COLUMNS = 'id, tenant_id, title, kind, instructor, branch, room, starts_at, duration_min';
+// `register_taken_at` is part 3060's column and is APPLIED — verified in that
+// part's header against the live project on 13 Sep 2026. Naming it here means
+// this build requires 3060: against a database without the column PostgREST
+// answers 42703 and the class read fails, which lands on `classesComplete:
+// false` and the sentence the screen already has for unlabelled rows. That is
+// the correct failure. Leaving the column out instead would have been a build
+// that reads every no-show as unmarked with nothing anywhere saying so.
+const CLASS_COLUMNS = 'id, tenant_id, title, kind, instructor, branch, room, starts_at, duration_min, register_taken_at';
 
 // `gym_visits.note` is in neither list, deliberately. It is free text the DESK
 // writes, in a row the member can read, and RLS cannot help — staff authenticate
@@ -485,7 +708,7 @@ async function readAttendance(sb: Queryable, uid: string): Promise<Read<Attendan
     const bookings: MyBooking[] = bookingPage.rows.map((r) => ({
       id: String(r.id),
       classId: String(r.class_id),
-      status: r.status === 'waitlist' ? 'waitlist' : 'booked',
+      status: bookingStatus(r.status),
       attendedAt: r.attended_at ?? null,
       bookedAt: r.created_at,
     }));
@@ -506,11 +729,28 @@ async function readAttendance(sb: Queryable, uid: string): Promise<Read<Attendan
     const classes = new Map<string, ClassDetail>();
     let classesComplete = true;
     if (classIds.length) {
-      const { data: rows, error } = await sb.from('gym_classes')
-        .select(CLASS_COLUMNS).in('id', classIds).limit(capLimit());
-      if (error) classesComplete = false;
-      else {
-        for (const r of capped((rows as any[]) ?? []).rows) {
+      // CHUNKED, about the REQUEST LINE and not the row ceiling. `classIds` is
+      // the union of two `capLimit()` reads, so up to two thousand uuids; at
+      // ~39 bytes each inside a PostgREST `in.("…","…")` list that is a ~78KB
+      // query string against the 8KB request line nginx and most CDNs enforce.
+      // Refused past roughly two hundred with a **414**, which supabase-js does
+      // not reject on and which arrives as `data: null`.
+      //
+      // Two hundred distinct classes is not a stress case: a member doing four
+      // classes a week crosses it inside a year, and this read is unwindowed.
+      // The consequence is a member's whole attendance history rendered as
+      // untitled, undated, uninstructed rows — `classesComplete` would not even
+      // have said so, because a 414 sets `error` to null.
+      try {
+        const rows = await readByIds<any>(
+          classIds,
+          // `.order('id')` on a primary-key lookup is total, which is the
+          // contract `readAll` requires of every page it is handed.
+          (chunk, from, to) => sb.from('gym_classes').select(CLASS_COLUMNS)
+            .in('id', chunk).order('id', { ascending: true }).range(from, to),
+          'the classes behind this attendance history',
+        );
+        for (const r of rows) {
           classes.set(String(r.id), {
             id: String(r.id),
             title: typeof r.title === 'string' ? r.title : '',
@@ -521,12 +761,26 @@ async function readAttendance(sb: Queryable, uid: string): Promise<Read<Attendan
             startsAt: r.starts_at,
             durationMin: Number.isFinite(Number(r.duration_min)) ? Number(r.duration_min) : null,
             tenantId: r.tenant_id ?? null,
+            // Read as a string or as nothing. Not coerced, not dated, not
+            // defaulted — an absent column on a row from a database that has
+            // not had part 3060 applied arrives as `undefined`, and the one
+            // thing it must never become is a timestamp, because that would
+            // turn every un-ticked booked member into a recorded no-show.
+            registerTakenAt: typeof r.register_taken_at === 'string' ? r.register_taken_at : null,
           });
         }
         // Not an error and not a silence: a class id with no row came back is a
         // class this member is no longer allowed to read, and the screen has a
         // sentence for it.
         if (classes.size < classIds.length) classesComplete = false;
+      } catch {
+        // `readByIds` throws a refused chunk rather than returning a short set,
+        // which is the point of it — a history assembled from the chunks that
+        // happened to work is one whose gaps are invisible. Caught here rather
+        // than allowed out, because the bookings and visits themselves READ
+        // fine and are worth showing; `classesComplete: false` is the sentence
+        // the screen already has for "these rows are real but unlabelled".
+        classesComplete = false;
       }
     }
 
@@ -599,7 +853,7 @@ export function staffScopeNote(hasGym: boolean | null): string | null {
   }
   if (!hasGym) {
     return 'Your account is not attached to a gym, so this app can read neither a class register nor '
-      + 'a door log for anybody. Nothing below is a record of them staying away — there is no record '
+      + 'a door log for anybody. Nothing below is a record of them staying away. There is no record '
       + 'here to read.';
   }
   return null;

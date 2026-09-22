@@ -62,6 +62,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 // One summing function for the whole app: currencies never merge, and an amount
 // with no unit is counted rather than dropped.
 import { sumTaken, type Taken, type TakenRow } from './coachMoney';
+import { localDate } from './localDate';
 // The typed-amount reader the invoice sheet and the receipt sheet already use,
 // rather than a third one. A coach typing "12.500" into two money fields in
 // this app must not get two different amounts out, and it is the reader that
@@ -102,7 +103,7 @@ export const COST_CATEGORIES: ReadonlyArray<{ id: CostCategory; label: string; n
   { id: 'education', label: 'Courses and CPD', note: 'A qualification, a course, a workshop, a book' },
   { id: 'equipment', label: 'Equipment', note: 'Weights, bands, a bench, anything you train people with' },
   { id: 'kit', label: 'Kit', note: 'Clothing you train in, shoes, a bag' },
-  { id: 'travel', label: 'Travel', note: 'Getting to clients — fuel, fares, parking' },
+  { id: 'travel', label: 'Travel', note: 'Getting to clients: fuel, fares, parking' },
   { id: 'professional', label: 'Professional Fees', note: 'An accountant, a solicitor, a registration body' },
   { id: 'other', label: 'Something Else', note: 'Anything the seven above do not cover' },
 ];
@@ -170,7 +171,7 @@ export function costBlockers(d: CostDraft): string[] {
   // problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
   } else {
@@ -206,12 +207,44 @@ export function costBlockers(d: CostDraft): string[] {
  * money went out, never the day the row was written. A quarter of receipts
  * written up in one evening must not all land in that evening's month, and
  * `since()` and `splitByPeriod()` both read this field.
+ *
+ * It goes through `localDate`, which is the whole of why `receiptTakenRows`
+ * exists next door in src/lib/coachReceipts.ts. `paid_on` is a `date` column
+ * and arrives as a bare `YYYY-MM-DD`; `Date.parse` reads that as UTC midnight,
+ * so for every coach west of Greenwich a cost paid on the 1st falls into the
+ * PREVIOUS month — silently, because `sumTaken` never sees the row, it lands
+ * in no `unlabelled` and no `unpriced` count, and the status beside the figure
+ * still says 'ready'. That is the rent, which is the largest line this feature
+ * was built for. Neither caller windows costs today, so nothing is wrong on any
+ * screen; the bare string was still a rule kept in one of two places that are
+ * supposed to be one, which is exactly how `receiptTakenRows` came to be hoisted
+ * out of a screen in the first place.
+ *
+ * ── What this function does NOT know, and who has to ───────────────────────
+ *
+ * It takes rows and nothing else, so `costsTaken([])` is a `Taken` with no pots
+ * whether the coach has recorded nothing or the read was refused, still in
+ * flight, or cut off at the row ceiling. Those are four different sentences and
+ * this cannot tell them apart. That is deliberate — the summing has to stay a
+ * pure fold over `sumTaken`, or the outgoing side grows a second opinion about
+ * how money is added up — but it means the protection lives in the CALLER, and
+ * a caller that renders `pots` without first asking about the read prints a
+ * subtotal, or a confident nought, as a fact about the coach's business.
+ *
+ * The paired export is `costsEmptyLine(status)` at the foot of this file: it
+ * exists so no screen has to invent the four sentences, and using it is how a
+ * screen is made to look at the status at all. Both callers do, and neither
+ * does it by accident — app/(trainer)/costs.tsx draws the figure only under
+ * `status === 'ready'`, and app/(trainer)/money.tsx splits 'error' and
+ * 'partial' out above it, the second into a `PartialRead` that offers a reload.
+ * A third caller that reaches for `costsTaken` and not for `costsEmptyLine` is
+ * the shape to stop in review.
  */
 export function costsTaken(rows: readonly CoachCost[]): Taken {
   return sumTaken(rows.map((c): TakenRow => ({
     amount_cents: c.amountCents,
     currency: c.currency,
-    created_at: c.paidOn,
+    created_at: localDate(c.paidOn)?.toISOString() ?? 'unknown',
   })));
 }
 
@@ -295,7 +328,7 @@ export const COSTS_ARE_NOT_TAX_ADVICE =
  * answer: nothing can detect it, so the screen says it.
  */
 export const COSTS_NOT_TWICE =
-  'Leave out your Repple plan and your ad spend. Both are already counted under what is going out — your plan from your own billing, your ad spend from what you record against a join code — and writing either down here would count it twice. Nothing can tell that two rows are the same money.';
+  'Leave out your Repple plan and your ad spend. Both are already counted under what is going out (your plan from your own billing, your ad spend from what you record against a join code), and writing either down here would count it twice. Nothing can tell that two rows are the same money.';
 
 /**
  * The sentence under an empty list, which depends entirely on the read.

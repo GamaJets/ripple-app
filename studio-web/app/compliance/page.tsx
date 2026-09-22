@@ -17,11 +17,19 @@
 //      a sixteen-year-old is signed up and nothing records that a guardian ever
 //      agreed.
 //
-//   2. NOWHERE TO PUT A DOCUMENT. The six storage buckets in this project are
-//      photos, exercise-videos, exercise-demos, message-media, coach-docs and
-//      injury-docs. Not one is the gym's, so a signed contract, an insurance
-//      certificate, a service report or a photograph of a broken machine had no
-//      home in the product at all.
+//   2. NOWHERE TO PUT A DOCUMENT. The six storage buckets in the project AT
+//      THAT POINT were photos, exercise-videos, exercise-demos, message-media,
+//      coach-docs and injury-docs. Not one was the gym's, so a signed contract,
+//      an insurance certificate, a service report or a photograph of a broken
+//      machine had no home in the product at all.
+//
+//      That sentence was written in the present tense and is left here in the
+//      past, because both halves of it have moved: `gym-docs` (part 185) is
+//      that home and is what this screen files into, and `storage.buckets`
+//      holds ELEVEN today — the six above plus gym-docs, avatars (961),
+//      coach-logos (330), share-cards (400) and scans (empty and unused, part
+//      1122). Counted live on 3 Sep 2026. Anyone reaching for the number six
+//      from this paragraph is reading a fact about a day that has passed.
 //
 //   3. NO AUDIT OF WHO DID WHAT. `gym_events` carried five trigger-written
 //      kinds, all of them things that HAPPENED TO the gym — member joined,
@@ -54,16 +62,28 @@
 // "Given by the member" column and the How These Were Given panel show the
 // split, and the member's own path is app/(client)/agreements.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, type Read, reading } from '@/lib/read';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
+// The reader's locale, the GYM's zone. A signature date and a document's filing
+// date are evidence; the day they fall on is a fact about the gym, and this page
+// was drawing both on whichever laptop was open.
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchAgreements, fetchSignatures, publishAgreement, recordSignature,
   agreementBlocker, signatureBlocker, nextVersion, outstandingFor,
   fetchDocuments, recordDocument, deleteDocument, documentBlocker, documentPath, expiring,
   openDocument, discardUnfiledObject, documentAudience, AUDIENCE_LABEL,
+  // The other half of `recordDocumentRead`: the gate has been writing this
+  // table since part 390 and nothing has ever opened it. See `DocumentReads`.
+  fetchDocumentReads, readsFor, readSummary, readerLine,
+  type DocumentRead, type DocumentReadLog,
   AGREEMENT_KINDS, AGREEMENT_LABEL, AGREEMENT_NOTE, DOCUMENT_KINDS, DOCUMENT_LABEL,
   type Agreement, type AgreementKind, type Signature, type GymDocument, type DocumentKind,
 } from '@lib/gymDocs';
@@ -72,7 +92,16 @@ import {
   type AttributionTally,
 } from '@lib/gymSigning';
 import { capLimit, readAll } from '@lib/rowCap';
+// The actor ids behind the filing feed are not bounded by the row cap — see
+// the note in `fetchFeed`. One chunk size, in src/lib/idLookup.ts.
+import { chunkIds, uniqueIds } from '@lib/idLookup';
 import { isoDate } from '@lib/format';
+// The gym's calendar day. A certificate's `expires_on` is a bare day somebody
+// entered on the gym's clock, so the "today" it is compared against is that
+// clock and not whichever laptop is open.
+import { gymDay } from '@lib/gymZone';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
+import { num } from '@/lib/num';
 
 /**
  * What a read is when it holds no rows: still in flight, or refused.
@@ -82,10 +111,7 @@ import { isoDate } from '@lib/format';
  * unless something separates them — and the first is a reason to stop trading
  * until people sign, while the second is a reason to reload.
  */
-type Unread = 'loading' | 'failed' | null;
 
-interface Read<T> { rows: T[] | null; state: Unread; why: string | null }
-const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading', why: null });
 const landed = <T,>(res: PromiseSettledResult<T[]>, what: string): Read<T> =>
   res.status === 'fulfilled'
     ? { rows: res.value, state: null, why: null }
@@ -109,9 +135,15 @@ const DAY = 86400000;
 
 export default function Compliance() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymErr, setGymErr] = useState<string | null>(null);
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   /**
    * How long this gym keeps a financial record, per its own jurisdiction.
@@ -136,24 +168,48 @@ export default function Compliance() {
   const [documents, setDocuments] = useState<Read<GymDocument>>(reading);
   const [members, setMembers] = useState<Read<Membership>>(reading);
   const [feed, setFeed] = useState<Read<Activity>>(reading);
+  /**
+   * Who has been handed a link to a member's file.
+   *
+   * Its own state rather than a `Read<DocumentRead>`, because the two things a
+   * screen has to know before it says "never opened" — whether the page reaches
+   * the beginning, and whether the readers' NAMES came back — are not facts
+   * about rows and have nowhere to live in that shape. Null with no error is
+   * still in flight.
+   */
+  const [docReads, setDocReads] = useState<DocumentReadLog | null>(null);
+  const [docReadsErr, setDocReadsErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // allSettled, never all. A refused documents read must not empty the
     // signatures beside it — a gym would then be shown as having nobody signed
     // up to anything because a different table failed, which on this screen is
     // an instruction to stop letting people train.
-    const [aRes, sRes, dRes, mRes, fRes] = await Promise.allSettled([
+    const [aRes, sRes, dRes, mRes, fRes, rRes] = await Promise.allSettled([
       fetchAgreements(supabase, tenantId),
       fetchSignatures(supabase, tenantId),
       fetchDocuments(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
       fetchActivity(tenantId),
+      fetchDocumentReads(supabase, tenantId),
     ]);
     setAgreements(landed(aRes, 'the agreements this gym publishes'));
     setSignatures(landed(sRes, 'the signatures it holds'));
     setDocuments(landed(dRes, 'the documents on file'));
     setMembers(landed(mRes, 'the member roster'));
     setFeed(landed(fRes, 'the activity log'));
+    // Null and a sentence, never an empty log. "Nobody has opened this member's
+    // file" over a refused read is the exact claim this screen exists to be
+    // able to make truthfully.
+    setDocReads(rRes.status === 'fulfilled' ? rRes.value : null);
+    setDocReadsErr(rRes.status === 'fulfilled' ? null
+      : ((rRes.reason as any)?.message ?? 'the read was refused'));
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read
+    // — and on the one screen in this console whose subject is what the gym can
+    // PRODUCE when an insurer asks, a figure with no date on it is not evidence
+    // of anything.
+    return settledLanded([aRes, sRes, dRes, mRes, fRes, rRes]);
   }, []);
 
   /**
@@ -182,19 +238,50 @@ export default function Compliance() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) return;
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
-      setGymName(t.name); setCcy(t.currency); setGymErr(t.error);
+      setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymErr(t.error);
       await readRetention(who.tenantId);
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load, readRetention]);
+    // Identity, the gym record and the retention period. The five reads below
+    // are the effect after next's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * Somebody signs a waiver at the desk while the owner has this open, and the
+   * screen that says who has agreed to what goes on saying what it said an hour
+   * ago. That is the wrong direction for this page in particular: the reading
+   * an owner takes off it is "these members may train".
+   */
+  // `reading` is taken here by `Read`'s constructor from lib/read.
+  const { at: readAt, busy: refetching, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
+
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -223,7 +310,7 @@ export default function Compliance() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   return (
     <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/compliance">
@@ -233,6 +320,9 @@ export default function Compliance() {
         the log of what has been done to its record. Everything here is what the gym has to be able
         to produce when somebody asks — an insurer, a regulator, or the member themselves.
       </p>
+
+      <Fetched at={readAt} busy={refetching} onRefresh={refresh}
+               what="this record" style={{ margin: '2px 0 14px' }} />
 
       <Retention
         years={retentionYears} why={retentionErr} tenantId={tenantId}
@@ -245,11 +335,14 @@ export default function Compliance() {
       />
 
       <Documents
-        documents={documents} members={members} ccy={ccy}
+        documents={documents} members={members} ccy={ccy} zone={zone}
         tenantId={tenantId} me={me} onChange={refresh}
+        docReads={docReads} docReadsErr={docReadsErr}
       />
 
-      <Feed feed={feed} />
+      <DocumentReads log={docReads} why={docReadsErr} zone={zone} me={me} />
+
+      <Feed feed={feed} zone={zone} />
     </Shell>
   );
 }
@@ -288,10 +381,26 @@ function Retention({ years, why, tenantId, onChange }: {
     // src/lib/wroteRows.ts. `tenants_owner_rw` is the only write policy on this
     // table, so a trainer who reached this form changes nothing and would
     // otherwise be told the period was saved.
-    const { error, count } = await supabase
-      .from('tenants')
-      .update({ record_retention_years: value }, { count: 'exact' })
-      .eq('id', tenantId);
+    // In a try, because the ceiling in lib/supabase.ts made a throw possible
+    // here for the first time: a request nobody answers now rejects at thirty
+    // seconds, and this `await` had nothing around it — so the form simply sat
+    // with its spinner on and an unhandled rejection in the console.
+    let error: { message?: string | null } | null = null;
+    let count: number | null = null;
+    try {
+      ({ error, count } = await supabase
+        .from('tenants')
+        .update({ record_retention_years: value }, { count: 'exact' })
+        .eq('id', tenantId));
+    } catch (e) {
+      setBusy(false);
+      setMsg(writeFailedText(e, {
+        what: 'That retention period',
+        unchanged: 'the period is unchanged',
+        howToCheck: 'Reload this page: the period shown above is whatever is actually stored.',
+      }));
+      return;
+    }
     setBusy(false);
     if (error) {
       setMsg(`That was NOT saved: ${error.message}. The period is unchanged.`);
@@ -361,7 +470,7 @@ function Retention({ years, why, tenantId, onChange }: {
                       style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
             ) : null}
             {blocker && draft.trim() ? (
-              <span style={{ fontSize: 12.5, color: '#f0c04e', maxWidth: '60ch' }}>{blocker}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--warn)', maxWidth: '60ch' }}>{blocker}</span>
             ) : null}
           </>
         ) : (
@@ -441,7 +550,11 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
       setTitle(''); setBody('');
       onChange();
     } catch (e: any) {
-      setErr(`That was NOT published: ${e?.message ?? 'the write was refused'}. Whatever was in force before still is.`);
+      setErr(writeFailedText(e, {
+        what: 'That agreement',
+        unchanged: 'whatever was in force before still is',
+        howToCheck: 'Reload this page and read the version numbers in the list below before publishing it again — two rows for one wording is two things for a member to sign.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -520,7 +633,7 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
         </span>
       </form>
       {blocker && (title || body) ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
       {signing ? (
@@ -532,12 +645,18 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
         />
       ) : null}
 
-      {agreements.state === 'loading' ? <Loading /> : (
-        <DataTable
-          rows={live} columns={cols} rowKey={(a) => a.id}
-          empty="This gym publishes nothing for anybody to sign. Nothing on this screen can then say who has agreed to what, because there is nothing to agree to."
-        />
-      )}
+      {agreements.state === 'loading' ? <Loading />
+        : agreements.state === 'failed' ? (
+          <Unread
+            why={agreements.why} what="what this gym publishes for signing"
+            cost="an owner asked for their waiver must not be told the gym publishes nothing over a query that errored"
+          />
+        ) : (
+          <DataTable noun="agreements"
+            rows={live} columns={cols} rowKey={(a) => a.id}
+            empty="This gym publishes nothing for anybody to sign. Nothing on this screen can then say who has agreed to what, because there is nothing to agree to."
+          />
+        )}
 
       {retired.length ? (
         <div style={{ padding: '11px 14px', borderTop: '1px solid var(--ring)' }}>
@@ -695,7 +814,11 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
       // this console is holding wording the gym has since replaced.
       const why = memberId === me.id
         ? 'You cannot record your own signature from the desk — that would file a staff entry as though you had signed it yourself. Sign it in the app, from your own account.'
-        : `That signature was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing is on file and this person has still signed nothing.`;
+        : writeFailedText(e, {
+          what: 'That signature',
+          unchanged: 'nothing is on file and this person has still signed nothing',
+          howToCheck: 'Reload this page and check the signature count against this agreement before recording it again.',
+        });
       onErr(why);
     } finally { setBusy(false); }
   };
@@ -748,16 +871,22 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
         </button>
         <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
       </div>
-      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '70ch' }}>{blocker}</p> : null}
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '70ch' }}>{blocker}</p> : null}
     </div>
   );
 }
 
 /* ── the filing cabinet ────────────────────────────────────────────────────── */
 
-function Documents({ documents, members, ccy, tenantId, me, onChange }: {
+function Documents({ documents, members, ccy, zone, tenantId, me, onChange, docReads, docReadsErr }: {
   documents: Read<GymDocument>; members: Read<Membership>; ccy: TenantCurrency;
+  /** `tenants.timezone` — a filing date is a fact about the gym's day. */
+  zone: string | null;
   tenantId: string; me: Me; onChange: () => void;
+  /** Null while it is in flight or when `docReadsErr` says it was refused. The
+   *  Opened column below never reads a null as "nobody". */
+  docReads: DocumentReadLog | null;
+  docReadsErr: string | null;
 }) {
   const [kind, setKind] = useState<DocumentKind>('insurance');
   const [title, setTitle] = useState('');
@@ -783,7 +912,17 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
    */
   const [removing, setRemoving] = useState<GymDocument | null>(null);
 
-  const today = isoDate(new Date());
+  // The GYM's calendar day, not the reader's. It was `isoDate(new Date())`, and
+  // `expiring` in src/lib/gymDocs.ts is explicit that this is the caller's
+  // decision — "whose day `today` is remains the caller's decision, which is
+  // why it is a parameter" — because it is compared with `<=` against
+  // `expires_on`, a `date` column holding a bare gym day. Two calendars either
+  // side of that comparison is a public liability certificate drawn in red as
+  // expired on the morning of the day it is still valid, or left in black on
+  // the day it lapsed. `zone` is already a prop on this component for the
+  // filing dates below. The reader's day remains the fallback for a gym that
+  // has set no zone, which is what this line has always been.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
   const soon = documents.rows ? expiring(documents.rows, today) : null;
   const blocker = documentBlocker(title, file);
 
@@ -821,7 +960,14 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
       setTitle(''); setFile(null); setExpiresOn('');
       onChange();
     } catch (e: any) {
-      setErr(`That file was NOT filed: ${e?.message ?? 'the upload was refused'}. Nothing has been added to the record.`);
+      // The object is taken back out above when the ROW fails, so "nothing has
+      // been added" holds for a refusal. It does not hold for a row nobody
+      // answered about — the delete is best-effort and the row may be there.
+      setErr(writeFailedText(e, {
+        what: 'That file',
+        unchanged: 'nothing has been added to the record',
+        howToCheck: 'Reload this page and look for it in the document list below before filing it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -849,7 +995,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         ? <span className="dash">no expiry recorded</span>
         : <span style={{ color: d.expiresOn <= today ? 'var(--crit)' : undefined }}>{d.expiresOn}</span> },
     { key: 'size', header: 'Size', value: (d) => d.sizeBytes, numeric: true,
-      render: (d) => d.sizeBytes == null ? <span className="dash">—</span> : `${(d.sizeBytes / 1024).toFixed(0)} KB` },
+      render: (d) => d.sizeBytes == null ? <span className="dash">—</span> : `${num(d.sizeBytes / 1024)} KB` },
     // Who the DATABASE will let read this, not who this screen chooses to show
     // it to. The rule is `gym_doc_readable()` in supabase/parts/390 and this
     // column only reports it.
@@ -857,9 +1003,25 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
       render: (d) => documentAudience(d) === 'owner'
         ? <span style={{ color: 'var(--ink2)' }}>Owner only</span>
         : <span style={{ color: 'var(--ink3)' }}>Staff</span> },
+    // Who has been given a key to this file, from the table that gates the
+    // opening rather than from the best-effort event feed below. A document
+    // nobody may open through this console — the building's certificates — has
+    // no access log to show, and says so rather than showing an empty one.
+    { key: 'opened', header: 'Opened', value: (d) => (d.memberAttached ? readsFor(docReads, d).length : -1),
+      render: (d) => {
+        if (!d.memberAttached) return <span className="dash">not logged — not about a member</span>;
+        const summary = readSummary(docReads, readsFor(docReads, d));
+        // The whole reason this is not a count. A refused read has to render as
+        // unknown: "Never opened" over a failed query is the sentence that
+        // stops an owner asking who has seen somebody's medical note.
+        if (summary == null) {
+          return <span style={{ color: 'var(--warn)' }}>not read</span>;
+        }
+        return <span style={{ color: summary.startsWith('Never') ? 'var(--ink3)' : 'var(--ink2)' }}>{summary}</span>;
+      } },
     { key: 'who', header: 'Filed by', value: (d) => d.uploadedByName },
     { key: 'when', header: 'Filed', value: (d) => d.uploadedAt,
-      render: (d) => new Date(d.uploadedAt).toLocaleDateString() },
+      render: (d) => gymDateText(d.uploadedAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'act', header: '', value: () => 0, align: 'right',
       render: (d) => removing?.id === d.id ? (
         <span style={{ display: 'inline-flex', gap: 9, alignItems: 'baseline' }}>
@@ -873,7 +1035,32 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
               setRemoving(null);
               deleteDocument(supabase, d)
                 .then(() => { setErr(null); onChange(); })
-                .catch((e: any) => { setErr(e?.message ?? 'That document was not removed.'); onChange(); });
+                .catch((e: any) => {
+                  // `unchanged` is about the ENTRY, not the file, and that is
+                  // the whole repair. It read "it is still on file" — a claim
+                  // this write cannot make, and one that contradicts the very
+                  // message printed two clauses to its left. `deleteDocument`
+                  // removes the storage object FIRST and only then the row, so
+                  // the failure it throws most often says, verbatim, "The file
+                  // itself HAS been deleted from storage, so what is left is an
+                  // entry pointing at nothing" — and `failedWriteSentence` then
+                  // appended "Nothing was written, so it is still on file." to
+                  // it. One banner, two opposite facts, and the reassuring half
+                  // was the false one. The comment three lines above the button
+                  // already said the document "might not be" on file.
+                  //
+                  // The entry surviving is true in both halves — a refused
+                  // object removal leaves both, a refused row delete leaves the
+                  // row — so this is the one clause that holds whatever
+                  // happened, and the reason above it says what became of the
+                  // file.
+                  setErr(writeFailedText(e, {
+                    what: 'That document',
+                    unchanged: 'its entry is still in the register',
+                    howToCheck: 'The list below has been re-read — it shows whether the entry is actually gone. If the reason above says the file itself was already deleted, press Delete it again to clear what is left.',
+                  }));
+                  onChange();
+                });
             }}
           >
             Delete it
@@ -949,14 +1136,114 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         nothing here invents a date. {ccy ? null : `This gym has not set its currency, so a cost cannot be recorded against a service report — ${NO_CURRENCY_NOTE}.`}
       </p>
       {blocker && (title || file) ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
-      {documents.state === 'loading' ? <Loading /> : (
-        <DataTable
-          rows={documents.rows ?? []} columns={cols} rowKey={(d) => d.id}
-          empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
-        />
+      {docReadsErr ? (
+        <Banner tone="crit">
+          The record of who has opened these documents could not be read: {docReadsErr}. The Opened
+          column is <strong style={{ color: 'var(--ink)' }}>unknown</strong> rather than empty — do
+          not read it as nobody having opened anything.
+        </Banner>
+      ) : null}
+
+      {documents.state === 'loading' ? <Loading />
+        : documents.state === 'failed' ? (
+          <Unread
+            why={documents.why} what="the filing cabinet"
+            cost="&ldquo;nothing is on file&rdquo; over a failed read is the sentence that stops somebody looking for the insurance certificate they need"
+          />
+        ) : (
+          <DataTable noun="documents"
+            rows={documents.rows ?? []} columns={cols} rowKey={(d) => d.id}
+            empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
+          />
+        )}
+    </Section>
+  );
+}
+
+/* ── who was handed a key ──────────────────────────────────────────────────── */
+
+/**
+ * Every link this gym has cut to a member's file, most recent first.
+ *
+ * ── Why this is not the activity feed below ───────────────────────────────
+ *
+ * Part 390 files a `document-opened` event on every insert into
+ * `gym_document_reads`, so the feed looks like it already answers this. It does
+ * not, for two reasons that both matter here.
+ *
+ * `log_gym_event` swallows its own failures on purpose — part 187: a log that
+ * can fail a payment is worse than a gap in the log — so `gym_events` is
+ * best-effort, while the row this table holds is the GATE: the link is not
+ * minted unless it writes. A link issued while the event write failed is in
+ * this table and in no feed. When the question is who has been given access to
+ * somebody's medical note, the record that cannot be missing rows is the one to
+ * answer from.
+ *
+ * And the feed is one stream of nineteen event kinds ninety days deep. This is
+ * bounded by ROWS instead, and says so: `readSummary` in src/lib/gymDocs.ts
+ * refuses to say "never opened" about a page that does not reach the beginning.
+ */
+function DocumentReads({ log, why, zone, me }: {
+  log: DocumentReadLog | null; why: string | null; zone: string | null; me: Me;
+}) {
+  const cols: Column<DocumentRead>[] = [
+    { key: 'at', header: 'When', value: (r) => r.linkIssuedAt,
+      render: (r) => gymDateTimeText(r.linkIssuedAt, zone) ?? <span className="dash">not stated</span> },
+    { key: 'doc', header: 'Document', value: (r) => r.docTitle,
+      // The title as it was AT THE TIME, denormalised onto the row by part 390
+      // so the entry stays legible after the document is deleted. A renamed or
+      // removed document does not rewrite what this log says was opened.
+      render: (r) => <>
+        {r.docTitle}
+        {r.documentId ? null : (
+          <span style={{ color: 'var(--ink3)' }}> · no longer on file</span>
+        )}
+      </> },
+    { key: 'kind', header: 'Kind', value: (r) => r.docKind.replace(/_/g, ' ') },
+    { key: 'by', header: 'Opened by', value: (r) => r.readByName ?? r.readBy ?? '',
+      render: (r) => {
+        const who = readerLine(r, { meId: me.id, namesError: log?.namesError ?? null });
+        // Three silences, three inks. A removed account and a name that could
+        // not be looked up are different facts, and the second is the one a
+        // person should reload the page over.
+        const tone = !r.readBy ? 'var(--ink3)' : log?.namesError ? 'var(--warn)' : 'var(--ink)';
+        return <span style={{ color: tone }}>{who}</span>;
+      } },
+  ];
+
+  return (
+    <Section
+      title="Who opened a member’s file"
+      sub="One row per link cut for a document filed against a member. Written before the link is issued, so a read that could not be recorded never happened — and nothing here can be edited or removed. The building’s own certificates are not logged: a trainer opening the fire certificate is not an event."
+    >
+      {why ? (
+        <Banner tone="crit">
+          This log could not be read: {why}. That is not an empty log — whether anybody has been
+          given a link to a member&rsquo;s file is{' '}
+          <strong style={{ color: 'var(--ink)' }}>unknown</strong> while this line is showing.
+          Reload the page.
+        </Banner>
+      ) : null}
+      {log?.namesError ? (
+        <Banner>
+          The names of the people who opened these documents could not be looked up:{' '}
+          {log.namesError}. Every row still records WHO, by account; only the name is missing, which
+          is a different thing from an account that has been removed.
+        </Banner>
+      ) : null}
+      {log?.truncated ? (
+        <Banner>
+          The {log.rows.length} most recent openings. There are older ones, and they are not on this
+          screen — so a document showing nothing here has not necessarily never been opened.
+        </Banner>
+      ) : null}
+
+      {why ? null : log === null ? <Loading /> : (
+        <DataTable noun="openings" rows={log.rows} columns={cols} rowKey={(r) => r.id}
+          empty="No link has been cut for a member’s document. Nothing has been opened, rather than nothing having been recorded — this table is the gate, so an opening that could not be written down did not happen." />
       )}
     </Section>
   );
@@ -976,7 +1263,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
  * there is no MFA anywhere in this repo and no re-auth in front of the money
  * screens, so this records who was SIGNED IN, not who was at the keyboard.
  */
-function Feed({ feed }: { feed: Read<Activity> }) {
+function Feed({ feed, zone }: { feed: Read<Activity>; zone: string | null }) {
   const [kind, setKind] = useState('');
   const rows = (feed.rows ?? []).filter((e) => !kind || e.kind === kind);
   const kinds = useMemo(
@@ -986,7 +1273,7 @@ function Feed({ feed }: { feed: Read<Activity> }) {
 
   const cols: Column<Activity>[] = [
     { key: 'at', header: 'When', value: (e) => e.at,
-      render: (e) => new Date(e.at).toLocaleString() },
+      render: (e) => gymDateTimeText(e.at, zone) ?? <span className="dash">not stated</span> },
     { key: 'kind', header: 'What', value: (e) => e.kind,
       render: (e) => <span className="mono" style={{ fontSize: 11.5 }}>{e.kind}</span> },
     { key: 'summary', header: 'Detail', value: (e) => e.summary },
@@ -1018,8 +1305,13 @@ function Feed({ feed }: { feed: Read<Activity> }) {
           </select>
         </div>
       ) : null}
-      {feed.state === 'loading' ? <Loading /> : (
-        <DataTable
+      {feed.state === 'failed' ? (
+        <Unread
+          why={feed.why} what="the activity log"
+          cost="telling an owner nothing has been recorded, and to go and check their database triggers, over a query that errored sends them to fix something that is not broken"
+        />
+      ) : feed.state === 'loading' ? <Loading /> : (
+        <DataTable noun="filing-record entries"
           rows={rows} columns={cols} rowKey={(e) => e.id}
           empty={`Nothing has been recorded in ${FEED_DAYS} days. On a gym that is being used, that is a database whose triggers have not been applied rather than a quiet quarter.`}
         />
@@ -1067,11 +1359,19 @@ async function fetchActivity(tenantId: string): Promise<Activity[]> {
   );
   if (!rows.length) return [];
 
-  const ids = [...new Set(rows.map((r: any) => r.actor_id).filter((x: any): x is string => !!x))];
+  /*
+   * CHUNKED, for the reason `fetchEvents` on /activity gives at length: the
+   * `gym_events` read above it PAGES, so the distinct actors behind it are no
+   * longer bounded by a row cap, and a couple of hundred uuids in one
+   * `in.("…","…")` is past the 8KB request line. The 414 arrives as a null
+   * `data`, the `no-error-ok` below swallows it, and every entry in the filing
+   * record loses its actor at once — on the screen an owner opens to show
+   * somebody who did what.
+   */
   const names = new Map<string, string>();
-  if (ids.length) {
+  for (const chunk of chunkIds(uniqueIds(rows.map((r: any) => r.actor_id)))) {
     // eslint-disable-next-line -- no-error-ok: an unreadable name renders as its own sentence beside the entry; the entry is still legible
-    const { data: ps } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
+    const { data: ps } = await supabase.from('profiles').select('id, full_name').in('id', chunk).limit(capLimit());
     for (const p of (ps ?? []) as any[]) {
       const n = (p.full_name || '').trim();
       if (n) names.set(p.id, n);
@@ -1122,16 +1422,37 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px', padding: '11px 14px', borderRadius: 0, background: 'var(--surface2)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '84ch',
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's inset, surface and 84ch measure, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ margin: '14px', background: 'var(--surface2)', maxWidth: '84ch' }}>{children}</SharedBanner>;
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+
+/**
+ * A read that has not landed, said as which of the two it is.
+ *
+ * Three sections on this screen were a two-state ternary — `state === 'loading'
+ * ? <Loading /> : <DataTable rows={rows ?? []} empty="…" />` — so a FAILED read
+ * arrived as zero rows and printed the confident empty sentence. On the screen
+ * that decides whether a gym can produce an insurance schedule or a signed
+ * contract, "we hold nothing" and "we could not look" were drawn identically,
+ * and one of them is reassuring.
+ */
+function Unread({ why, what, cost }: { why: string | null; what: string; cost: string }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: 14, borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13, maxWidth: '78ch',
+    }}>
+      Could not read {what}. This section is <strong style={{ color: 'var(--ink)' }}>unknown</strong>,
+      not empty &mdash; {cost}.{why ? <> The read said: {why}</> : null}
+    </div>
+  );
 }

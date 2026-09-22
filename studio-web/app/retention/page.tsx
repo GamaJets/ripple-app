@@ -59,20 +59,32 @@
 //     A gym that stops seeing somebody who is still leaving has swapped a
 //     nuisance for a blind spot.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { sliceLanded, slicesLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships } from '@lib/gymRecord';
+import { gymDateText } from '@lib/gymWhen';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchClasses } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { gymLink, noGymNote } from '@lib/gymLink';
+import { parseGymZone, gymWallValue, instantAtGym } from '@lib/gymZone';
+import { gymTodayWindow } from '@lib/gymToday';
+import { calendarDateText } from '@lib/gymWhen';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { fetchSessions } from '@lib/gymSessions';
-import { buildDossiers, sliceLoading, sliceReady, sliceFailed, type Slice, type MemberBooking } from '@lib/memberView';
+import { buildDossiers, sliceLoading, sliceReady, sliceFailed, slicePartial, type Slice, type MemberBooking } from '@lib/memberView';
 import { bandTitle, bandNote, DRIFT_LABEL, type ActivityEvent, type Drift } from '@lib/clientDrift';
+import { Banner } from '@/components/Banner';
+import { num as groupNum } from '@/lib/num';
 import {
   buildGymRetention, headline, suppressionNote, activityFor,
+  termHeadline, termLine, compareByTermEnd,
   type RetentionRecord, type RetentionRow, type Cohort, type GymRetention,
 } from '@lib/gymRetention';
 import {
@@ -132,19 +144,42 @@ const EMPTY: RetentionRecord = {
 
 export default function RetentionPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   /** The 150-day reads. Narrowed to WINDOW_DAYS before anything reads them as
    *  a RetentionRecord — see ACTIVITY_DAYS. */
   const [wide, setWide] = useState<RetentionRecord>(EMPTY);
   const [contacts, setContacts] = useState<Slice<Contact>>(sliceLoading());
 
-  const loadContacts = useCallback(async (tenantId: string) => {
+  const loadContacts = useCallback(async (tenantId: string): Promise<boolean> => {
     setContacts(sliceLoading());
     const sinceIso = new Date(Date.now() - INTERVENTION_DAYS * DAY).toISOString();
-    setContacts(await slice(() => fetchContacts(tenantId, sinceIso)));
+    const got = await slice(() => fetchContacts(tenantId, sinceIso));
+    setContacts(got);
+    // Returned rather than only stored: the read stamp below covers the contact
+    // log as well as the roster, and this read's answer was previously
+    // destructured off the end of a `Promise.all` and dropped on the floor.
+    return sliceLanded(got);
   }, []);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setWide(EMPTY);
     const sinceIso = new Date(Date.now() - ACTIVITY_DAYS * DAY).toISOString();
 
@@ -153,7 +188,7 @@ export default function RetentionPage() {
     // page is allowed to be partial, but only if it says which part and what
     // that part was carrying. The interventions read is the same: a broken
     // `member_interventions` must leave the retention half standing.
-    const [memberships, visits, bookings, sessions] = await Promise.all([
+    const [memberships, visits, bookings, sessions, contactsLanded] = await Promise.all([
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId, { sinceIso })),
       slice(() => fetchBookings(tenantId, sinceIso)),
@@ -161,6 +196,12 @@ export default function RetentionPage() {
       loadContacts(tenantId),
     ]);
     setWide({ memberships, visits, bookings, sessions });
+
+    // Whole means all five answered. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the door log leaves the stamp where it was — and
+    // on this screen the door log is the whole of the one finding a gym cannot
+    // get anywhere else: who is still training but no longer booking.
+    return contactsLanded && slicesLanded([memberships, visits, bookings, sessions]);
   }, [loadContacts]);
 
   useEffect(() => {
@@ -168,38 +209,74 @@ export default function RetentionPage() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setWide({
-          memberships: sliceReady([]), visits: sliceReady([]),
-          bookings: sliceReady([]), sessions: sliceReady([]),
-        });
-        setContacts(sliceReady([]));
-        return;
-      }
+      // `sliceReady([])` is a read that landed whole and returned nothing, and
+      // five of them turn this screen into a gym that is keeping everybody: no
+      // memberships means no lapsed members, no visits means nobody drifting,
+      // and `bandTitle` prints those bands as empty rather than as unknown. A
+      // clean retention board is the one thing an owner would never chase. It
+      // was made out of a fact about the reader's profile — nothing was asked.
+      // See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'memberships, visits or bookings');
+      if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name, timezone').eq('id', link.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
-      if (live) setGymName(tErr ? null : t?.name ?? null);
-      await load(who.tenantId);
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
+        // The gym's own wall clock. The contact log is how a gym decides
+        // whether calling lapsed members works, and the interval between the
+        // call and the visit is the measurement — two members of staff in two
+        // countries logging into one gym's history produce a timeline that
+        // cannot be read as one.
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
+      }
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the five reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * Every figure here is a list of people somebody is about to ring, and the
+   * contact log records whether they already did. Two members of staff working
+   * the list from two tabs is the ordinary case, and a tab that answered about
+   * the moment it was opened had them ringing the same member twice with
+   * nothing on screen saying the list was old.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // `now` is pinned per render of the record rather than read inside each
   // helper, so the cohort spine, the drift windows, every cooldown and every
   // follow-up window cannot land either side of a month boundary — or either
   // side of midnight — and disagree with each other on the same screen.
-  const view = useMemo(() => buildView(wide, contacts), [wide, contacts]);
+  const view = useMemo(() => buildView(wide, contacts, zone), [wide, contacts, zone]);
   const { rec, g, surfaced, followUps, tally } = view;
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/retention">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -212,10 +289,24 @@ export default function RetentionPage() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/retention">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Retention reads the whole roster and every member&rsquo;s attendance, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before the bands, because an empty band is a finding here. This screen
+  // exists to say who to ring, and a board with nobody on it reads as a gym
+  // with nothing to chase — the one answer nobody follows up.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
+        <h1>Retention</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('memberships, visits or bookings')}
         </p>
       </Shell>
     );
@@ -232,13 +323,16 @@ export default function RetentionPage() {
     : surfaced.filter((s) => s.row.drift?.status === 'at_risk' && s.contactCount === 0).length;
 
   return (
-    <Shell me={me} gymName={gymName} current="/retention">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
       <h1>Retention</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         How many members the gym is keeping, how many are breaking their own
         pattern, how many have gone quiet — and the one only a gym with a door
         log can see: how many are still training but no longer on the timetable.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this roster" style={{ margin: '2px 0 14px' }} />
 
       {g.warning ? <Banner tone="crit">{g.warning}</Banner> : null}
       {g.caveat ? <Banner>{g.caveat}</Banner> : null}
@@ -320,10 +414,16 @@ export default function RetentionPage() {
       ) : null}
 
       <Bands g={g} loading={loading} />
+      {/* Immediately under the bands and deliberately NOT inside them. The
+          bands are what attendance suggests; this is what the record states,
+          and the two are never added together — see the section header in
+          src/lib/gymRetention.ts above ENDING_SOON_DAYS. */}
+      <Ending g={g} rec={rec} loading={loading} />
       <Cohorts g={g} loading={loading} />
       <Loop
         g={g}
         me={me}
+        zone={zone}
         contacts={contacts}
         followUps={followUps}
         tally={tally}
@@ -350,9 +450,21 @@ interface View {
   tally: FollowUpTally | null;
 }
 
-function buildView(wide: RetentionRecord, contacts: Slice<Contact>): View {
+function buildView(wide: RetentionRecord, contacts: Slice<Contact>, zone: string | null): View {
   const now = Date.now();
   const cut = now - WINDOW_DAYS * DAY;
+
+  // The console's "today" is the GYM's day, and this is the one place it comes
+  // from. `tenants.timezone` set and usable gives `basis: 'gym'`; unset, in
+  // flight, or a zone this browser's IANA database cannot resolve all give the
+  // READER's day with `NO_ZONE_NOTE` attached — which the section below prints,
+  // because a contract-end band drawn on a bookkeeper's laptop in Lisbon for a
+  // gym in Dubai is a day out for four hours of every day and nothing on the
+  // screen would otherwise say so.
+  //
+  // Taken from the same `now` as everything else on this page, so the fortnight
+  // and the drift windows cannot land either side of midnight and disagree.
+  const today = gymTodayWindow(zone, now);
 
   // Narrow the wide reads back to the retention window. A row whose timestamp
   // will not parse is KEPT, exactly as it was before this filter existed — the
@@ -365,7 +477,7 @@ function buildView(wide: RetentionRecord, contacts: Slice<Contact>): View {
     sessions: narrow(wide.sessions, (s) => !(Date.parse(s.startsAt) < cut)),
   };
 
-  const g = buildGymRetention(rec, { now });
+  const g = buildGymRetention(rec, { now, today });
 
   // Activity for the follow-up windows, from the WIDE reads — the point of
   // reading 150 days. `buildDossiers` and `activityFor` are the same two
@@ -407,8 +519,18 @@ function buildView(wide: RetentionRecord, contacts: Slice<Contact>): View {
   };
 }
 
+/**
+ * The same slice with only the rows that pass `keep`.
+ *
+ * A truncated read stays truncated. Filtering it and handing back `sliceReady`
+ * would launder a prefix into a whole set — the filter reduces the rows, it
+ * does not go and fetch the ones that never arrived — and every figure gated on
+ * 'ready' downstream would then be computed over part of the gym.
+ */
 function narrow<T>(s: Slice<T>, keep: (row: T) => boolean): Slice<T> {
-  return s.state === 'ready' ? sliceReady(s.rows.filter(keep)) : s;
+  if (s.state === 'ready') return sliceReady(s.rows.filter(keep));
+  if (s.state === 'partial') return slicePartial(s.rows.filter(keep), s.cap);
+  return s;
 }
 
 /* ── reads ─────────────────────────────────────────────────────────────────── */
@@ -637,6 +759,173 @@ function Bands({ g, loading }: { g: GymRetention; loading: boolean }) {
   );
 }
 
+/* ── memberships that end ──────────────────────────────────────────────────── */
+
+/**
+ * The other evidence stream, in its own section, on purpose.
+ *
+ * This page ranked departure risk purely on behavioural drift and never read
+ * `memberships.ends_on` at all, though `Membership` has always carried it and
+ * /members has always shown it as a column. A membership ending in twelve days
+ * is the most certain departure a gym has, and the screen built to predict
+ * departures could not see it.
+ *
+ * ── Why it is not a column in the band table and not a term in the score ────
+ *
+ * Because they are different kinds of claim. A member who trains four times a
+ * week and whose contract ends on Friday is not "medium risk"; she is a
+ * near-certain departure with good attendance, and a blended figure would rank
+ * her below somebody who has merely gone a bit quiet — the one of the two the
+ * gym does not need to ring this week. So the two stand side by side: the
+ * pattern column in the roster below shows her band, this section shows her
+ * date, and the person reading does the combining. Nothing on this page
+ * averages them.
+ *
+ * Expired is its own group inside the section rather than the top of the
+ * ending list, because an end date that has already passed while the status
+ * still says Active is not a forecast at all — it is the state
+ * `datesNotes` warns an owner about in so many words, a member training on a
+ * contract the record says has run out, and it is acted on by a different
+ * person on a different day.
+ */
+function Ending({ g, rec, loading }: {
+  g: GymRetention; rec: RetentionRecord; loading: boolean;
+}) {
+  const t = g.term;
+  // Null only when no day was supplied, which cannot happen from this page —
+  // `gymTodayWindow` always returns one. Rendered rather than crashed on, so a
+  // future caller that drops the option gets a sentence instead of a blank.
+  if (!t) {
+    return (
+      <Section title="Memberships that end" sub="What the record states, not what attendance suggests.">
+        <p style={{ margin: 0, padding: '22px 16px', color: 'var(--ink2)', fontSize: 13.5 }}>
+          No day was supplied to measure end dates against, so none are judged.
+          This is not a gym with nothing ending; it is a question nobody asked.
+        </p>
+      </Section>
+    );
+  }
+
+  const rows = g.rows == null
+    ? null
+    : [...g.rows].filter((r) => r.term?.state === 'ending' || r.term?.state === 'expired')
+      .sort(compareByTermEnd);
+
+  const cols: Column<RetentionRow>[] = [
+    {
+      key: 'name', header: 'Member', value: (r) => r.name ?? '￿',
+      render: (r) => (
+        <a href={`/members?member=${encodeURIComponent(r.memberId)}`}>
+          {r.name ?? <span className="dash">unnamed account</span>}
+        </a>
+      ),
+    },
+    {
+      key: 'ends', header: 'Ends', value: (r) => r.term?.endsOn ?? null,
+      // `calendarDateText`: a calendar day in the reader's locale and NO zone,
+      // because `ends_on` is already a day and asking which day it falls on is
+      // a question with no content. The gym's zone belongs to the "today" this
+      // was compared against, and that is disclosed once at the foot.
+      render: (r) => <span>{calendarDateText(r.term?.endsOn) ?? <span className="dash">—</span>}</span>,
+    },
+    {
+      key: 'when', header: 'How far off', value: (r) => r.term?.days ?? null, numeric: true,
+      render: (r) => (
+        <span style={{
+          whiteSpace: 'normal',
+          color: r.term?.state === 'expired' ? 'var(--crit)' : 'var(--ink2)',
+        }}>{termLine(r.term)}</span>
+      ),
+    },
+    {
+      // The column that proves the two are not averaged: her band is printed
+      // beside her date, unchanged, and neither has moved the other.
+      key: 'band', header: 'Pattern', value: (r) => r.drift ? -bandOrder(r.drift) : null,
+      render: (r) => r.drift
+        ? <span style={{ color: driftColour(r.drift) }}>{DRIFT_LABEL[r.drift.status]}</span>
+        : <span className="dash">not judged</span>,
+    },
+    {
+      key: 'status', header: 'Membership', value: (r) => r.status,
+      render: (r) => r.status
+        ? <span style={{ textTransform: 'capitalize' }}>{r.status}</span>
+        : <span className="dash">—</span>,
+    },
+  ];
+
+  const line = termHeadline(g);
+
+  return (
+    <Section
+      title="Memberships that end"
+      sub="What the record states rather than what attendance suggests — so a member can be training four times a week and still be certain to leave. These two kinds of evidence are never added together."
+    >
+      {loading ? <Loading /> : null}
+      {!loading && rec.memberships.state === 'failed' ? (
+        <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
+      ) : null}
+      {/* A list over a prefix of the gym is not the gym's list. Every count is
+          withheld and the reason is on the screen rather than in the module. */}
+      {!loading && !t.whole && rec.memberships.state !== 'failed' ? (
+        <Banner tone="crit">
+          The roster did not come back whole, so nothing here is counted. A figure such as
+          &ldquo;six memberships end this fortnight&rdquo; over part of the gym reads as complete and is
+          a fraction — and the members past the ceiling are exactly the ones nobody would think to
+          look for.
+        </Banner>
+      ) : null}
+
+      {!loading && t.whole ? (
+        <div style={{ padding: '16px 16px 0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+            <Legend colour="var(--crit)" n={t.ending ?? 0} title={`Ends within ${t.soonDays} days`}
+                    note="The most certain departure a gym has. Ring about the renewal, whatever their attendance says." />
+            <Legend colour="var(--warn)" n={t.expired ?? 0} title="Already ran out"
+                    note="The end date has passed and the status still says live. An end date does not close a membership by itself — this is a row to fix, not a forecast." />
+            <Legend colour="var(--good)" n={t.openEnded ?? 0} title="Open-ended"
+                    note="No end date recorded, which is a fact and not a gap: nothing is due to run out. It says nothing about whether they are still training." />
+            <Legend colour="var(--ink3)" n={t.unreadable ?? 0} title="End date unreadable"
+                    note="A date is recorded and this build cannot read it, which is not the same as no date. Nobody can say when their access runs out." />
+          </div>
+          {line ? (
+            <p style={{ margin: '16px 0 0', fontSize: 13, color: 'var(--ink2)', maxWidth: '72ch' }}>{line}</p>
+          ) : null}
+          {/* Never optional. A gym on rolling monthly plans will see most of its
+              roster stand in this list across a month, and without this sentence
+              that reads as a crisis. */}
+          <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>{t.rollingNote}</p>
+        </div>
+      ) : null}
+
+      {rows && rows.length ? (
+        <div style={{ marginTop: 14 }}>
+          <DataTable noun="memberships"
+            rows={rows} columns={cols} rowKey={(r) => r.memberId}
+            empty="Nothing ends in this window."
+          />
+        </div>
+      ) : null}
+      {!loading && rows && rows.length === 0 && t.whole ? (
+        <p style={{ margin: 0, padding: '16px', color: 'var(--ink3)', fontSize: 13 }}>
+          Nothing ends in the next {t.soonDays} days and nothing has already run out. That is a
+          statement about contracts only — the bands above are where a member who has quietly
+          stopped coming shows up.
+        </p>
+      ) : null}
+
+      {/* Whose Friday this was. Printed here, once, under the figures it
+          describes, because a gym with no timezone set is drawing this on the
+          reader's laptop and two colleagues in two countries would otherwise
+          disagree about which memberships have run out. */}
+      <p style={{ margin: 0, padding: '12px 16px 16px', fontSize: 12, color: 'var(--ink3)' }}>
+        {t.basis === 'gym'
+          ? <>Measured against {calendarDateText(t.today)}, the gym&rsquo;s own day.</>
+          : <>Measured against {calendarDateText(t.today)} — {t.note}</>}
+      </p>
+    </Section>
+  );
+}
+
 function sourceWord(s: 'visits' | 'bookings' | 'sessions'): string {
   return s === 'visits' ? 'the door log' : s === 'bookings' ? 'class attendance' : 'one-to-ones';
 }
@@ -651,8 +940,8 @@ function BandBar({ total, parts }: {
   parts: { key: string; label: string; n: number; colour: string }[];
 }) {
   const W = 600, H = 26;
-  const label = `The roster in four bands, ${total} members in total: `
-    + parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(', ') + '.';
+  const label = `The roster in four bands, ${groupNum(total)} members in total: `
+    + parts.map((p) => `${groupNum(p.n)} ${p.label.toLowerCase()}`).join(', ') + '.';
 
   let x = 0;
   const rects = parts.map((p) => {
@@ -740,7 +1029,7 @@ function Cohorts({ g, loading }: { g: GymRetention; loading: boolean }) {
               <div style={{ padding: '16px 16px 6px' }}>
                 <CohortChart spine={spine.cohorts} earlier={spine.earlier} minCohort={g.minCohort} />
               </div>
-              <DataTable
+              <DataTable noun="joining cohorts"
                 rows={spine.earlier ? [spine.earlier, ...spine.cohorts] : spine.cohorts}
                 columns={cols}
                 rowKey={(c) => c.month}
@@ -867,9 +1156,11 @@ const VERDICT_COLOUR: Record<string, string> = {
   'kept-falling': 'var(--crit)',
 };
 
-function Loop({ g, me, contacts, followUps, tally, onLogged }: {
+function Loop({ g, me, zone, contacts, followUps, tally, onLogged }: {
   g: GymRetention;
   me: Me;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
   contacts: Slice<Contact>;
   followUps: FollowUpRead[] | null;
   tally: FollowUpTally | null;
@@ -903,7 +1194,7 @@ function Loop({ g, me, contacts, followUps, tally, onLogged }: {
         );
       },
     },
-    { key: 'at', header: 'Contacted', value: (c) => c.at, render: (c) => shortWhen(c.at) },
+    { key: 'at', header: 'Contacted', value: (c) => c.at, render: (c) => shortWhen(c.at, zone) },
     { key: 'how', header: 'How', value: (c) => CHANNEL_LABEL[c.channel] },
     {
       key: 'by', header: 'By', value: (c) => contactBy(c),
@@ -952,11 +1243,22 @@ function Loop({ g, me, contacts, followUps, tally, onLogged }: {
       title="What was tried, and what followed"
       sub="Recording a contact does not change anybody's verdict above — a call is not a training session, and the bands would be identical with this table empty."
     >
-      <LogForm g={g} me={me} onLogged={onLogged} />
+      <LogForm g={g} me={me} zone={zone} onLogged={onLogged} />
 
       {contacts.state === 'loading' ? <Loading /> : null}
       {contacts.state === 'failed' ? (
         <Failed reason={(contacts as { reason: string }).reason} what="what has already been tried" />
+      ) : null}
+      {contacts.state === 'partial' ? (
+        <div style={{
+          padding: '16px 14px', margin: '14px', borderRadius: 0,
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+          background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+        }}>
+          Read the first {contacts.cap} contact rows, and there are more. What follows is a{' '}
+          <strong>prefix</strong> of what has been tried — an empty &ldquo;Already tried&rdquo; cell
+          below means the call may be older than these rows, not that nobody made it.
+        </div>
       ) : null}
 
       {rows ? (
@@ -979,7 +1281,7 @@ function Loop({ g, me, contacts, followUps, tally, onLogged }: {
             </div>
           ) : null}
 
-          <DataTable
+          <DataTable noun="members that cannot be judged"
             rows={rows} columns={cols} rowKey={(c) => c.id}
             empty="Nothing has been recorded yet. Log the first call above and this table starts answering whether any of it lands."
           />
@@ -1006,12 +1308,21 @@ function blockWord(f: FollowUpRead): string {
   }
 }
 
-function LogForm({ g, me, onLogged }: { g: GymRetention; me: Me; onLogged: () => void }) {
+function LogForm({ g, me, zone, onLogged }: {
+  g: GymRetention; me: Me; zone: string | null; onLogged: () => void;
+}) {
   const [memberId, setMemberId] = useState('');
   const [channel, setChannel] = useState<Channel>('call');
   const [outcome, setOutcome] = useState<ContactOutcome>('unknown');
   const [note, setNote] = useState('');
-  const [when, setWhen] = useState(() => localNow());
+  // The GYM's wall clock in the box, and the gym's wall clock read back out of
+  // it — not the browser's.
+  //
+  // This built the value from `d.getFullYear()`, `d.getMonth()`, `d.getDate()`,
+  // `d.getHours()`, `d.getMinutes()`: the reader's local parts, written into a
+  // field the rest of this console reads back as the gym's. The same shape the
+  // last roadmap found on the rota's add-a-shift form.
+  const [when, setWhen] = useState(() => gymWallValue(Date.now(), zone) ?? localNow());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -1031,8 +1342,15 @@ function LogForm({ g, me, onLogged }: { g: GymRetention; me: Me; onLogged: () =>
     setError(null); setDone(null);
     if (!memberId) { setError('Choose the member this contact was with.'); return; }
     if (!me.tenantId) { setError('Your profile carries no gym, so there is nothing to file this against.'); return; }
-    const at = new Date(when);
-    if (Number.isNaN(at.getTime())) { setError('That is not a time this can be filed under.'); return; }
+    // Read back in the same clock it was written in. `new Date(when)` on a
+    // `datetime-local` value is the BROWSER's zone, so a receptionist in London
+    // logging a call for a Dubai gym filed it four hours late.
+    const iso = instantAtGym(when, zone) ?? (() => {
+      const d = new Date(when);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    })();
+    if (!iso) { setError('That is not a time this can be filed under.'); return; }
+    const at = new Date(iso);
     // The database refuses a future contact too; catching it here means the
     // person is told why rather than shown a constraint violation.
     if (at.getTime() > Date.now() + 5 * 60_000) {
@@ -1042,14 +1360,14 @@ function LogForm({ g, me, onLogged }: { g: GymRetention; me: Me; onLogged: () =>
 
     setBusy(true);
     const failed = await logContact(me.tenantId, me, {
-      memberId, at: at.toISOString(), channel, outcome, note,
+      memberId, at: iso, channel, outcome, note,
     });
     setBusy(false);
 
     if (failed) { setError(failed); return; }
     setDone(`Logged against ${chosen?.name ?? 'that member'}.`);
     setNote('');
-    setWhen(localNow());
+    setWhen(gymWallValue(Date.now(), zone) ?? localNow());
     onLogged();
   };
 
@@ -1100,8 +1418,13 @@ function LogForm({ g, me, onLogged }: { g: GymRetention; me: Me; onLogged: () =>
         <button onClick={() => void submit()} disabled={busy} style={buttonStyle}>
           {busy ? 'Saving…' : 'Record this contact'}
         </button>
-        {error ? <span style={{ color: 'var(--crit)', fontSize: 12.5 }}>{error}</span> : null}
-        {done ? <span style={{ color: 'var(--good)', fontSize: 12.5 }}>{done}</span> : null}
+        {/* Both announced. This page imports Banner and uses it at the top;
+            the contact log — the one control on it that WRITES — was left
+            saying "not recorded" in colour alone. */}
+        {error ? <span role="alert" aria-live="assertive" aria-atomic="true"
+                       style={{ color: 'var(--crit)', fontSize: 12.5 }}>{error}</span> : null}
+        {done ? <span role="status" aria-live="polite" aria-atomic="true"
+                      style={{ color: 'var(--good)', fontSize: 12.5 }}>{done}</span> : null}
       </div>
     </div>
   );
@@ -1126,18 +1449,28 @@ const buttonStyle: React.CSSProperties = {
   border: '1px solid var(--ring)', background: 'var(--surface2)', color: 'var(--ink)',
 };
 
-/** A `datetime-local` value for right now, in the browser's own clock — which
- *  is the gym's clock, and the one the person at the desk is reading. */
+/** A `datetime-local` value for right now in the BROWSER's clock.
+ *
+ *  The fallback, and only the fallback: used when the gym has not set a
+ *  timezone, because then the reader's clock is the only clock there is. When
+ *  the gym has set one, `gymWallValue` is what fills this field — the comment
+ *  that used to sit here said the browser's clock "is the gym's clock", and it
+ *  is not: this console is opened from two desks, an office and, routinely,
+ *  another country. */
 function localNow(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function shortWhen(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '—';
-  return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+/** A contact date, in the reader's locale and the GYM's zone.
+ *
+ *  It was the reader's zone, which is the wrong clock for "when did somebody
+ *  last ring this member": a call logged at 22:30 in Dubai reads as the day
+ *  before to a manager checking from London, and the pacing rule that keeps a
+ *  member from being rung twice is counted in days. */
+function shortWhen(iso: string, zone: string | null): string {
+  return gymDateText(iso, zone, { day: 'numeric', month: 'short', year: 'numeric' }) ?? '—';
 }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
@@ -1217,6 +1550,9 @@ function Roster({ g, rec, contacts, surfaced }: {
       render: (s) => {
         if (contacts.state === 'loading') return <span className="dash">…</span>;
         if (contacts.state === 'failed') return <span className="dash">not read</span>;
+        // A prefix of the contact log cannot say nobody has called — the call
+        // may simply be past the rows that came back.
+        if (contacts.state === 'partial') return <span className="dash">part read</span>;
         if (!s.contact) return <span className="dash">nobody has</span>;
         return (
           <span style={{ whiteSpace: 'normal', color: s.quietened ? 'var(--ink3)' : 'var(--ink2)' }} title={s.label ?? undefined}>
@@ -1242,10 +1578,41 @@ function Roster({ g, rec, contacts, surfaced }: {
       key: 'seen', header: 'Last at the door', value: (s) => s.row.lastSeenDays, numeric: true,
       render: (s) => rec.visits.state === 'loading' ? <span className="dash">…</span>
         : rec.visits.state === 'failed' ? <span className="dash">not read</span>
+        // 'never' over a prefix of the door log is the sentence that gets a
+        // member phoned who was in the building yesterday.
+        : rec.visits.state === 'partial' ? <span className="dash">part read</span>
         : s.row.lastSeenDays == null ? <span className="dash">never</span>
         : s.row.lastSeenDays === 0 ? 'today' : `${s.row.lastSeenDays}d ago`,
     },
     { key: 'joined', header: 'Joined', value: (s) => s.row.joinedOn },
+    {
+      // SHOWN here, never ranked on. The surfacing order above is drift, and
+      // the coach's client book uses the same rule — folding a contract date
+      // into it would move members in both lists for a reason the coach's book
+      // knows nothing about. So the date appears beside the band and the
+      // reader combines them; the list that IS ordered by date is its own
+      // section, above.
+      //
+      // `value` is still the date, so a reader who clicks this header gets a
+      // second view of the same rows rather than a second opinion about them.
+      key: 'ends', header: 'Contract ends', value: (s) => s.row.term?.endsOn ?? null,
+      render: (s) => {
+        const t = s.row.term;
+        if (!t) return <span className="dash">not judged</span>;
+        // Each of the three absences gets its own words. A shared dash here is
+        // exactly what let "open-ended" and "we could not read the date" look
+        // like the same empty cell.
+        if (t.state === 'open-ended') return <span className="dash">open-ended</span>;
+        if (t.state === 'unreadable') return <span style={{ color: 'var(--warn)' }}>unreadable</span>;
+        if (t.state === 'not-on-books') return <span className="dash">none live</span>;
+        return (
+          <span
+            style={{ color: t.state === 'expired' ? 'var(--crit)' : t.state === 'ending' ? 'var(--warn)' : 'var(--ink2)' }}
+            title={termLine(t) ?? undefined}
+          >{calendarDateText(t.endsOn)}</span>
+        );
+      },
+    },
     {
       key: 'status', header: 'Membership', value: (s) => s.row.status,
       render: (s) => s.row.status
@@ -1293,6 +1660,16 @@ function Roster({ g, rec, contacts, surfaced }: {
       {rec.memberships.state === 'failed' ? (
         <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
       ) : null}
+      {/* The fourth state. A truncated roster is not a failure and is not the
+          whole gym: the members past the ceiling are missing from this board,
+          and a drifting member who is not on it reads as a member who is fine. */}
+      {rec.memberships.state === 'partial' ? (
+        <Banner tone="crit">
+          Only the first {rec.memberships.cap} members were read, and there are more. This board is a
+          PREFIX of the gym, not the gym — somebody absent from it has not been judged and found
+          well, they have not been looked at.
+        </Banner>
+      ) : null}
       {contacts.state === 'failed' ? (
         <Banner tone="crit">
           What has already been tried could not be read, so this list is in its plain order and the
@@ -1301,7 +1678,7 @@ function Roster({ g, rec, contacts, surfaced }: {
         </Banner>
       ) : null}
       {rows ? (
-        <DataTable
+        <DataTable noun="members"
           rows={shown} columns={cols} rowKey={(s) => s.row.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
@@ -1340,9 +1717,29 @@ function driftColour(d: Drift): string {
 
 /* ── shared bits (same shapes as the Members and Money screens) ────────────── */
 
-/** A count, or null so the KPI draws a dash. Never String(0) for an unknown. */
+/**
+ * A count, or null so the KPI draws a dash. Never String(0) for an unknown.
+ *
+ * The null contract is this function's whole reason to exist and is kept:
+ * `Kpi` documents `text` as "an ALREADY-FORMATTED figure, and null means 'not
+ * recorded'", so a dash has to arrive as null and not as the string "—".
+ *
+ * What changed is the spelling. This was `String(n)`, which groups nothing —
+ * so a gym with 1,204 members read "1204" on the Roster KPI, four lines above
+ * a DataTable footer that counts its rows with `toLocaleString`. Kpi's own
+ * fallback for a bare `value` is `toLocaleString()`; this shadow was the one
+ * path into it that skipped that, and it was reached by seven figures on this
+ * screen.
+ *
+ * It is worth noting how it survived: check-numbers.mjs treats any line with
+ * `num(` on it as formatted, and this local has the same NAME as the console's
+ * real formatter in lib/num.ts. A same-named shadow that does less is
+ * invisible to that gate by construction, which is a hole in the gate and not
+ * a licence — the honest fix is for the name to mean one thing, so this now
+ * delegates rather than reimplementing.
+ */
 function num(n: number | null): string | null {
-  return n == null ? null : String(n);
+  return n == null ? null : groupNum(n);
 }
 
 function pct(r: number): string {
@@ -1361,36 +1758,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note, tone }: {
-  label: string; text: string | null; note?: string; tone?: 'good' | 'crit' | 'brand';
-}) {
-  const colour = text == null ? 'var(--ink3)'
-    : tone === 'good' ? 'var(--good)'
-    : tone === 'crit' ? 'var(--crit)'
-    : tone === 'brand' ? 'var(--brand)'
-    : 'var(--ink)';
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: colour }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' | 'warn' }) {
-  const edge = tone === 'crit' ? 'var(--crit)' : tone === 'warn' ? 'var(--warn)' : 'var(--brand)';
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${edge}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
 function Failed({ reason, what }: { reason: string; what: string }) {
   return (
     <div style={{
@@ -1404,6 +1771,3 @@ function Failed({ reason, what }: { reason: string; what: string }) {
   );
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

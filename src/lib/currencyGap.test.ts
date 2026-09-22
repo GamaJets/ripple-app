@@ -23,7 +23,7 @@ eq(currencyGapOfStatus({ currency: 'AED', status: 'partial' }), null, 'a code fr
 eq(currencyGapOf({ currency: null, error: null, loading: true }), 'reading', 'in flight is not an answer');
 eq(currencyGapOf({ currency: null, error: null, loading: false }), 'unset', 'read, and nobody has set one');
 
-// THE bug. `myTenantCurrency` returns `{ currency: null, error }` on a refused
+// THE bug. The gym read returns `{ currency: null, error }` on a refused
 // profiles or tenants read, and the caller that looks at the currency first
 // cannot tell this from the line above it.
 eq(currencyGapOf({ currency: null, error: 'permission denied for table profiles', loading: false }), 'unreadable',
@@ -49,7 +49,7 @@ for (const [gap, line] of lines) {
   ok(line.trim().endsWith('.'), `${gap} is a finished sentence`);
   const blamesOwner = /gym settings/.test(line);
   eq(blamesOwner, gap === 'unset', `${gap} names the gym owner only when it is their setting`);
-  const saysRetry = /try again/.test(line);
+  const saysRetry = /try again/i.test(line);
   eq(saysRetry, gap === 'unreadable' || gap === 'incomplete', `${gap} says to try again only when that would help`);
 }
 

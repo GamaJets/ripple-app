@@ -37,7 +37,7 @@ const series = (...vals: number[]): Point[] =>
   eq(r!.target, 80, 'the target is stated');
   eq(r!.remaining, 5, 'and the distance still to go');
   eq(r!.reached, false, 'which is not a reached goal');
-  ok(/5 kg to go/.test(r!.note), 'the sentence leads with the distance, which is the thing being asked');
+  ok(/5 kg to go/i.test(r!.note), 'the sentence leads with the distance, which is the thing being asked');
   ok(!r!.note.endsWith('.'), 'no trailing full stop — the caller punctuates');
 }
 
@@ -100,8 +100,8 @@ const series = (...vals: number[]): Point[] =>
   const r = goalOnBody(goal({ targetValue: 80 }), series(90, 80.02), { weight: true, unit: 'kg', wu: 'kg' });
   eq(r!.remaining, null, 'a gap under the printing grain is not a distance');
   eq(r!.reached, false, 'AND IT IS NOT A REACHED GOAL EITHER — claiming that is claiming something progressOf did not');
-  ok(!/0 kg to go|0\.0/.test(r!.note), `and the sentence never prints the artefact — got "${r!.note}"`);
-  ok(/all but there/.test(r!.note), 'it says what is actually true instead');
+  ok(!/0 kg to go|0\.0/i.test(r!.note), `and the sentence never prints the artefact — got "${r!.note}"`);
+  ok(/all but there/i.test(r!.note), 'it says what is actually true instead');
 }
 
 // ── the four refusals ────────────────────────────────────────────────────

@@ -222,7 +222,7 @@ export const PHOTO_KEEPS_THE_SHARE_SHEET =
 /** The line under the Instagram button on a card with no photograph, so the
  *  rule is visible before it is ever hit. */
 export const WHY_NO_PHOTOGRAPHS =
-  'Instagram fetches the image from a web address rather than accepting it from the app, so a card posted this way is briefly public. Cards with a client’s photo on them are never posted this way — they go through your share sheet instead.';
+  'Instagram fetches the image from a web address rather than accepting it from the app, so a card posted this way is briefly public. Cards with a client’s photo on them are never posted this way. They go through your share sheet instead.';
 
 /* ── the shape ────────────────────────────────────────────────────────────── */
 
@@ -427,6 +427,16 @@ export type ConnectionState = 'unconfigured' | 'unknown' | 'connected' | 'not-co
 
 export function connectionState(configured: boolean, status: ReadStatus, hasAccount: boolean): ConnectionState {
   if (!configured) return 'unconfigured';
+  // whole-ok: `hasAccount` is not a count over a set, it is one boolean off ONE
+  // row — the coach's own linked account, read by `useInstagram` in
+  // src/ui/instagram.ts, which asks for a single row and therefore never
+  // truncates and never answers 'partial'. It is admitted anyway rather than
+  // being refused, because if it ever did arrive the honest answer is the one
+  // below: a read that came back at a ceiling still returned the row that proves
+  // a connection, and 'connected' off a proven row is right. The reverse
+  // direction is unreachable in the same breath — a truncated read is a FULL
+  // page, so an account row came back, so `hasAccount` is not false because of
+  // the truncation. Pinned by the 'partial' case in instagramPublish.test.ts.
   if (status === 'loading' || status === 'error') return 'unknown';
   return hasAccount ? 'connected' : 'not-connected';
 }
@@ -438,7 +448,7 @@ export function connectionNote(state: ConnectionState): string | null {
     case 'connected':
       return null;
     case 'not-connected':
-      return 'Connect the Instagram account you post from and Repple can put a card on your feed. It has to be a Business or Creator account with a Facebook Page linked to it — Instagram’s publishing API does not accept personal accounts at all.';
+      return 'Connect the Instagram account you post from and Repple can put a card on your feed. It has to be a Business or Creator account with a Facebook Page linked to it. Instagram’s publishing API does not accept personal accounts at all.';
     case 'unknown':
       return 'Repple could not check whether your Instagram account is connected, so it is not offering to post. This is not a connection that failed, and nothing has been posted. Your share sheet works either way.';
     case 'unconfigured':

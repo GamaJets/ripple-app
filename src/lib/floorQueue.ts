@@ -14,7 +14,7 @@
 //   app/(trainer)/class-checkin.tsx  `setAttendance`  — the tick a trainer is
 //                                    PAID on, and the one the gym's payroll is
 //                                    built from.
-//   app/(trainer)/sessions.tsx       `markMyOutcome`  — the same money, one
+//   app/(trainer)/sessions.tsx       one session's outcome — the same money, one
 //                                    session at a time.
 //
 // And app/(trainer)/classes.tsx already apologises for classes that "are on
@@ -24,11 +24,11 @@
 // somebody and loses the record of it does not type it again — they remember it
 // wrong a week later, or they stop using the screen.
 //
-// ── The two rules the reference implementation is built on ─────────────────
+// ── The three rules the reference implementation is built on ───────────────
 //
 // src/ui/workoutLog.tsx was brought onto this queue earlier and its header
-// states both. They are restated here because every function below exists to
-// hold one of them:
+// states the first two. They are restated here because every function below
+// exists to hold one of them:
 //
 // 1. A QUEUED WRITE IS NEVER REPORTED AS SAVED. `classifyWrite` in
 //    offlineQueue.ts already separates "the server said no" from "nobody
@@ -42,6 +42,11 @@
 //    unread queue with one entry and every session already on the phone is
 //    gone. This is the same distinction `serverRows` holds for a read and
 //    `QueueRead` holds in src/lib/workoutQueue.ts.
+//
+// 3. A QUEUE IS BOUNDED. `FLOOR_CAP` is the number and `enqueueAct` refuses
+//    past it rather than evicting somebody's Monday — this was the only queue
+//    in the app without one, and it holds the largest payloads. See the
+//    constant for what an unbounded AsyncStorage key actually does to a coach.
 //
 // ── One queue and not three ────────────────────────────────────────────────
 //
@@ -63,15 +68,42 @@ export type FloorAct =
   /** An hour of training typed into a client's own record. The entries are the
    *  same shape the client's log writes; `coachId` is NOT stored, because the
    *  insert policy requires `logged_by = auth.uid()` and the queue is read back
-   *  by whoever is signed in when it flushes. */
-  | { kind: 'session-log'; clientId: string; clientName: string | null; entries: unknown[] }
+   *  by whoever is signed in when it flushes.
+   *
+   *  `sessionId` is the booked session this hour was, when the coach came here
+   *  from one (supabase/parts/890). Optional and usually absent: a client's own
+   *  workout and a coach's own training have no session, and neither does an
+   *  hour typed up from the coach's directory rather than from the queue. It is
+   *  stored on the act rather than resolved at flush time because the coach
+   *  said which session this was when they pressed Save, and re-deciding that
+   *  three hours later against whatever is nearest in the diary would file an
+   *  hour of training under the wrong booking. */
+  | { kind: 'session-log'; clientId: string; clientName: string | null; entries: unknown[]; sessionId?: string | null }
   /** A member ticked present or absent for a class. */
   | { kind: 'class-attendance'; classId: string; userId: string; memberName: string | null; present: boolean }
   /** What became of a PT session, and what it was worth at the moment of
    *  marking. `rateCents` is `undefined` for "do not touch the rate" and null
-   *  for "clear it" — the distinction `markMyOutcome` already draws, and
-   *  flattening it here would write a zero that reads as a free session. */
-  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string; rateCents?: number | null };
+   *  for "clear it" — the distinction the sender in src/ui/floorQueue.ts draws, and
+   *  flattening it here would write a zero that reads as a free session.
+   *
+   *  ── `outcome: null` is the coach taking it back ──────────────────────────
+   *
+   *  Marking a session went through this queue and the UNDO beside it went
+   *  straight to the server. Offline — which is the condition this queue exists
+   *  for, so the two halves were guaranteed to meet there — the undo threw, the
+   *  screen said so honestly, and then the queue flushed the "no show" the coach
+   *  had visibly retracted in front of the client. It landed on their record and
+   *  on payroll an hour later, and the only evidence it was ever undone was an
+   *  alert nobody kept.
+   *
+   *  So a retraction is an act like any other. It carries the same
+   *  `supersedeKey` as the mark it takes back, so offline it REPLACES the queued
+   *  mark in place and nothing false is ever sent; and when the mark had already
+   *  reached the server it is sent in its own right, which is the clear that was
+   *  always meant to happen. `rateCents` is left `undefined` on a retraction:
+   *  `clearMyOutcome` does not touch the snapshot either, and a rate is not
+   *  what the coach took back. */
+  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string | null; rateCents?: number | null };
 
 /** A queued act with the two things every queue entry needs: an id that says it
  *  has not been sent, and the instant it happened. Deliberately the same shape
@@ -97,38 +129,136 @@ export const floorQueueKey = (uid: string): string => `repple.floorQueue:${uid}`
  * no use for, with the final answer depending on the order they happen to land
  * in. Same for a session outcome: the last thing the coach chose is the answer.
  *
- * A session LOG is an event and is never collapsed. Two logs for one client are
- * two sessions, and merging them would delete an hour of somebody's training on
- * the grounds that it looked similar. Its key is therefore unique per entry,
- * which is what the queue id gives.
+ * ── And the third, which used to return null ──────────────────────────────
+ *
+ * A session LOG is an event, and the note here used to stop at that: two logs
+ * for one client are two sessions, so it was given no key at all and every
+ * offer of one appended.
+ *
+ * That is right about two SESSIONS and wrong about one session offered twice.
+ * app/(trainer)/log-session.tsx writes through the server first and falls back
+ * to this queue, and a flush re-offers whatever it could not send — so the same
+ * hour of training could be queued behind a copy of itself, and what a client
+ * ends up with is the session in their history twice, on a day they trained
+ * once. Nobody can tell which of the two to delete, and the client cannot
+ * delete either: their coach typed them.
+ *
+ * So the key is the act's CONTENTS — the client, and every entry exactly as it
+ * will be written. That keeps the promise the old note was making, because two
+ * real sessions cannot agree on it: `logStamp` in src/lib/sessionWhen.ts carries
+ * the second and millisecond of saving into every entry's timestamp, so two
+ * sessions typed on the same evening differ even when the exercises and the
+ * sets are identical. What DOES agree on it is the one thing that should: the
+ * same array of entries, offered again because the first offer was not
+ * answered.
+ *
+ * Contents rather than a hash of them. A hash is shorter and a collision here
+ * deletes an hour of somebody's training, which is the exact harm this is
+ * being added to prevent — so there is no hash.
  */
 export function supersedeKey(a: FloorAct): string | null {
   switch (a.kind) {
     case 'class-attendance': return `class:${a.classId}:${a.userId}`;
     case 'session-outcome': return `session:${a.sessionId}`;
-    case 'session-log': return null;
+    case 'session-log': {
+      const body = logBody(a.entries);
+      // Entries that will not serialise cannot reach the device either, so
+      // there is nothing to key on. Falls back to the old behaviour — never
+      // collapsed — which is the safe direction: a duplicate can be deleted,
+      // and a session collapsed into another one cannot be got back.
+      //
+      // The SESSION is part of the identity. Two offers of the same entries
+      // filed under two different bookings are two different writes and must
+      // not supersede each other — the empty segment is what an act with no
+      // session keys on, so an act queued by a build before supabase/parts/890
+      // keys exactly as it always did.
+      return body == null ? null : `log:${a.clientId}:${a.sessionId ?? ''}:${body}`;
+    }
   }
 }
 
+/** The entries as one comparable string, or null when they will not serialise.
+ *
+ *  `JSON.stringify` and not a field-by-field walk, because the entries are
+ *  `unknown[]` here on purpose — this module does not own the shape of a
+ *  workout entry and must not start deciding which of its fields count. The
+ *  same bytes go to the device, so an act read back off disk keys the same as
+ *  the one that was written. */
+function logBody(entries: readonly unknown[]): string | null {
+  try { return JSON.stringify(entries) ?? null; } catch { return null; }
+}
+
 /**
- * The queue after adding one act.
+ * How many acts one device will hold.
+ *
+ * ── Why there is a number here at all ─────────────────────────────────────
+ *
+ * There was not, and this was the only queue in the app without one.
+ * `src/lib/outbox.ts` states the reason for its two hundred and it applies here
+ * with more force, not less: "AsyncStorage on Android is one SQLite row per key
+ * and a runaway queue is a write that starts failing, which would take the whole
+ * outbox with it."
+ *
+ * More force because of what this queue holds. Two of the three acts are bounded
+ * by their own supersede keys — a class tick is one per (class, member) however
+ * many times a trainer changes their mind, and an outcome is one per session. A
+ * SESSION LOG is not: it is an event, it appends, and its payload is an entire
+ * hour of training, every set of every exercise, as `unknown[]`. It is by a wide
+ * margin the biggest thing any queue in this app stores, and a coach working a
+ * gym floor with no signal writes one after another all day.
+ *
+ * And the failure is silent in the worst way. `persist` catches, reports and
+ * carries on with a correct in-memory queue, so the coach's afternoon looks
+ * fine; the next launch reads back the last write that actually succeeded, and
+ * everything since is gone with only an `app_errors` row to say so. That is
+ * precisely the promise this module exists to keep, broken by a missing
+ * constant.
+ *
+ * A hundred, not the outbox's two hundred, because the unit is bigger: a
+ * hundred acts is more than a full working week of sessions and registers for
+ * one coach with no signal at all, and it is small enough that the whole thing
+ * stays one cheap read.
+ *
+ * REFUSES past the cap rather than evicting. Evicting the oldest is the obvious
+ * implementation and it is silent data loss chosen by a constant — the same
+ * argument `addItem` makes, and here the oldest act is somebody's session from
+ * Monday. A refusal is a thing a coach can be told before they walk away from
+ * the screen.
+ */
+export const FLOOR_CAP = 100;
+
+/**
+ * The queue after adding one act, and whether it was kept.
  *
  * An act with a supersede key replaces any earlier queued act carrying the same
  * one, IN PLACE — not appended to the end. Position is when the decision was
  * first made and the timestamp is refreshed to when it was last changed, so a
  * trainer working down a class list does not watch rows jump around while they
  * correct one.
+ *
+ * A supersede is always allowed, cap or no cap, and that is the load-bearing
+ * half of the bound. Replacing a queued tick is not growth — the queue is the
+ * same length afterwards — and refusing one at the cap would mean a trainer
+ * correcting a mark they had already made watched the WRONG one go up, which is
+ * the failure `supersedeKey` was written to prevent. Only an act that would make
+ * the queue longer can be refused.
+ *
+ * `added: false` leaves the queue exactly as it was, so the caller can say that
+ * nothing was kept rather than either of the two convenient lies.
  */
-export function enqueueAct(queue: readonly QueuedAct[], entry: QueuedAct): QueuedAct[] {
+export function enqueueAct(queue: readonly QueuedAct[], entry: QueuedAct): { queue: QueuedAct[]; added: boolean } {
   const key = supersedeKey(entry.act);
-  if (key === null) return [...queue, entry];
-  let replaced = false;
-  const next = queue.map((q) => {
-    if (replaced || supersedeKey(q.act) !== key) return q;
-    replaced = true;
-    return entry;
-  });
-  return replaced ? next : [...next, entry];
+  if (key !== null) {
+    let replaced = false;
+    const next = queue.map((q) => {
+      if (replaced || supersedeKey(q.act) !== key) return q;
+      replaced = true;
+      return entry;
+    });
+    if (replaced) return { queue: next, added: true };
+  }
+  if (queue.length >= FLOOR_CAP) return { queue: [...queue], added: false };
+  return { queue: [...queue, entry], added: true };
 }
 
 /** The queue after one act has reached the server. Matched on the queue id
@@ -159,14 +289,24 @@ function usableAct(v: unknown): v is FloorAct {
   const a = v as Record<string, unknown>;
   switch (a.kind) {
     case 'session-log':
-      return typeof a.clientId === 'string' && !!a.clientId && Array.isArray(a.entries) && a.entries.length > 0;
+      // `sessionId` is optional, so absent is fine — but a value of the wrong
+      // SHAPE is not silently carried: it would reach the insert as a
+      // `session_id` PostgREST refuses, and take a whole hour of somebody's
+      // training down with it. Anything that is not a string is treated as an
+      // act this build cannot send, which is what this function is for.
+      return typeof a.clientId === 'string' && !!a.clientId
+        && Array.isArray(a.entries) && a.entries.length > 0
+        && (a.sessionId == null || (typeof a.sessionId === 'string' && !!a.sessionId));
     case 'class-attendance':
       return typeof a.classId === 'string' && !!a.classId
         && typeof a.userId === 'string' && !!a.userId
         && typeof a.present === 'boolean';
     case 'session-outcome':
+      // `outcome: null` is a RETRACTION and is as sendable as a mark — see the
+      // arm's docstring. Only `undefined`, or a value of some other shape, is
+      // an act this build cannot send.
       return typeof a.sessionId === 'string' && !!a.sessionId
-        && typeof a.outcome === 'string' && !!a.outcome;
+        && (a.outcome === null || (typeof a.outcome === 'string' && !!a.outcome));
     default:
       return false;
   }
@@ -223,7 +363,12 @@ export function actLine(a: FloorAct): string {
     }
     case 'session-outcome': {
       const who = a.clientName?.trim();
-      return `${who ? `${who}’s session` : 'A session'} marked ${a.outcome.replace(/_/g, ' ')}`;
+      const whose = who ? `${who}’s session` : 'A session';
+      // A retraction is its own sentence. "marked null" is what a shared branch
+      // would have produced, on the list a coach reads to see what this phone
+      // is still carrying.
+      if (a.outcome == null) return `${whose}: outcome taken back`;
+      return `${whose} marked ${a.outcome.replace(/_/g, ' ')}`;
     }
   }
 }
@@ -253,6 +398,54 @@ export function keptOfflineLine(what: string): string {
 }
 
 /**
+ * The footnote under a class register: who can see the ticks that have just
+ * been made.
+ *
+ * app/(trainer)/class-checkin.tsx printed one sentence unconditionally —
+ * "Check-ins are saved as you tap. Your gym owner sees attendance per class for
+ * payroll and class analytics." — including while this queue was holding every
+ * tick on the phone. That is rule 1 in the header of this file broken on the
+ * one screen it was written for: a trainer who believes the gym has the
+ * attendance does not check it, and they are paid on it. The banner above the
+ * roster said the opposite at the same moment, and the footnote is the calmer
+ * of the two sentences, which is the one a person believes.
+ *
+ * Three answers and they are three different facts:
+ *
+ *   · the queue could not be read — whether anything is waiting is UNKNOWN, so
+ *     neither "the gym has it" nor "the gym does not" may be said.
+ *   · something is waiting — the gym has the ticks that went up and not the
+ *     ones on this phone, and the coach is told which state they are in.
+ *   · nothing is waiting — the ordinary sentence, and now it is true.
+ */
+export function registerVisibilityLine(unsent: number, queueRead: boolean): string {
+  if (!queueRead) {
+    return 'What this phone is still carrying could not be read, so whether your gym owner has today’s check-ins is not known. Open this class again once you have signal before payroll is settled.';
+  }
+  if (unsent > 0) {
+    return `${unsent} check-in${unsent === 1 ? '' : 's'} ${unsent === 1 ? 'is' : 'are'} still on this phone and your gym owner cannot see ${unsent === 1 ? 'it' : 'them'} yet. Everything that has reached the server is on their payroll and class analytics; the rest goes up next time this app has signal.`;
+  }
+  return 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.';
+}
+
+/**
+ * What to say when this phone is already holding as much as it will hold.
+ *
+ * A fourth answer and deliberately not folded into `refusedLine`, because that
+ * sentence says "the server read it and declined" and no server has seen this.
+ * They also lead to different actions: a refusal is something about the act
+ * itself and doing it again changes nothing, while this one clears the moment
+ * the coach has signal, and saying so is the only useful thing to tell them.
+ *
+ * It states plainly that nothing was kept — which is what separates it from
+ * `keptOfflineLine`, and the whole reason `enqueueAct` refuses rather than
+ * evicting somebody's Monday.
+ */
+export function floorFullLine(what: string): string {
+  return `${what} was not saved and is not waiting to send. This phone is already holding as much unsent work as it will hold. Get some signal so what is waiting can go up, then do this again.`;
+}
+
+/**
  * And what to say when the server ANSWERED and refused.
  *
  * Not queued, because the same bytes will be refused every time they are
@@ -262,7 +455,7 @@ export function keptOfflineLine(what: string): string {
  */
 export function refusedLine(what: string, why: string | null): string {
   const tail = why && why.trim() ? ` ${why.trim().replace(/\s*$/, '')}` : '';
-  return `${what} was not saved and is not waiting to send — the server read it and declined.${tail}`;
+  return `${what} was not saved and is not waiting to send. The server read it and declined.${tail}`;
 }
 
 /**
@@ -289,4 +482,85 @@ export function flushResultLine(r: { sent: number; refused: number; kept: number
   }
   if (parts.length === 0) return null;
   return parts.join(' ');
+}
+
+/* ── one drain at a time ───────────────────────────────────────────────── */
+
+/**
+ * A gate that lets one pass run at a time and joins every other caller to it.
+ *
+ * ── The doubled session this closes ───────────────────────────────────────
+ *
+ * `flushAll` in src/ui/floorQueue.ts has four ways in and no latch between
+ * them: the app's own flush registry (src/lib/offlineQueue.ts), `FloorQueueSync`
+ * in app/(trainer)/_layout.tsx, the `useEffect` inside `useFloorQueue` on each
+ * of the four screens that own this queue, and the `flush` a coach can press.
+ * Two of those fire in the SAME commit on an ordinary cold launch — the trainer
+ * layout mounts `FloorQueueSync` and the screen under it mounts `useFloorQueue`
+ * — so both read the device, both take `[...acts]` as their batch, and both
+ * send every act in it, because nothing is dropped from `acts` until after the
+ * first `await`.
+ *
+ * Two of the three acts survive that: a class tick is an RPC that SETS a state,
+ * and a session outcome is an UPDATE matched on the session. A SESSION LOG does
+ * not. It is an INSERT of rows the server keys itself, with no client-minted id
+ * and nothing to conflict on, so the second pass files a second copy of an hour
+ * of somebody's training on a day they trained once — and `supersedeKey` above
+ * already says what that costs: "what a client ends up with is the session in
+ * their history twice … and the client cannot delete either: their coach typed
+ * them."
+ *
+ * ── Why joining, and not booking another pass ─────────────────────────────
+ *
+ * The same argument `flushAllOrJoin` makes in src/lib/offlineQueue.ts. These
+ * callers are not carrying news — they are four subscribers to one event, or a
+ * screen sequencing itself behind the queue — and the pass in flight has not
+ * finished, so it has not yet reported that anything is unsent. An act appended
+ * DURING a pass is not lost either: `attempt` only queues after its own direct
+ * write came back 'unsent', which means the running pass is about to meet the
+ * same silence and stop, and the next reconnect or foreground takes it.
+ *
+ * Keyed, because the account is what a floor queue belongs to. A pass running
+ * for one coach must never be handed back to a different one as though it were
+ * theirs — a shared gym phone signs in and out all day.
+ */
+export interface Flight<T> {
+  /** Run `job`, or join the pass already in flight for this key. */
+  run: (key: string, job: () => Promise<T>) => Promise<T>;
+  /** The key of the pass in flight, or null. For assertions. */
+  busy: () => string | null;
+}
+
+export function singleFlight<T>(): Flight<T> {
+  // Keyed, so two accounts cannot be conflated. In practice only one is ever
+  // in flight — src/ui/floorQueue.ts turns away any uid that is not the queue's
+  // current owner before it gets here — but a map is what makes that a fact
+  // about this file rather than an assumption about its caller.
+  const running = new Map<string, Promise<T>>();
+
+  const run = (key: string, job: () => Promise<T>): Promise<T> => {
+    const already = running.get(key);
+    if (already) return already;
+    // The latch is taken BEFORE the job starts, not after. An async function
+    // body runs synchronously only up to its first await, so assigning from the
+    // result of the call would leave a window in which a second caller starts a
+    // second pass over the same queue — which is the whole of what this exists
+    // to prevent.
+    let settle: (v: T) => void = () => { /* replaced below, before any await */ };
+    let fail: (e: unknown) => void = () => { /* as above */ };
+    const pass = new Promise<T>((res, rej) => { settle = res; fail = rej; });
+    running.set(key, pass);
+    // Released before the promise settles, so a caller that chains another pass
+    // onto this one gets a fresh one rather than this same settled promise
+    // handed straight back. Released on the failure path too: a latch held by a
+    // throw is a queue that never drains again until the app is killed.
+    const done = () => { if (running.get(key) === pass) running.delete(key); };
+    void (async () => {
+      try { const v = await job(); done(); settle(v); }
+      catch (e) { done(); fail(e); }
+    })();
+    return pass;
+  };
+
+  return { run, busy: () => (running.size ? [...running.keys()][0] : null) };
 }

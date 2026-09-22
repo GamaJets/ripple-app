@@ -3,12 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Confirm your email — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/confirmed">
   <meta name="description" content="Your email address is confirmed. Open the Repple app and sign in.">
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:title" content="Email confirmed — Repple">
+<meta property="og:description" content="Your email address is confirmed. Sign in to the app that matches your role.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="auth-support.css?v=846c119af7">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -18,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -35,7 +77,46 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="flow-page auth-page">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
+    </a>
+    <nav class="site" aria-label="Primary navigation">
+      <div class="nav-links" id="site-menu">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
+      <a href="/support">Support</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
+      </div>
+      <a class="cta" href="/signup">Create account</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+        <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
 
 <!--
   WHERE A CONFIRMATION LINK LANDS.
@@ -52,33 +133,108 @@ addEventListener('DOMContentLoaded', function () {
   here with no token at all.
 -->
 
-<main>
-  <div class="wrap page" style="max-width:620px">
-    <p class="eyebrow">Repple</p>
-    <h1 class="display" id="head">Confirming your email…</h1>
+<main id="main" tabindex="-1" class="wrap page auth-card flow-panel">
+  <p class="eyebrow">Repple</p>
+  <!-- The heading and the lede are the whole content of this page: which of
+       the six outcomes happened. Both were rewritten by script with nothing
+       announcing it, so a screen reader read "Confirming your email… One
+       moment." on load and was never told the answer arrived. Wrapping the
+       pair in a polite status region means every one of the six — expired,
+       already confirmed, failed, press-to-confirm, confirmed, nothing to
+       confirm — is spoken when it is written. `aria-atomic` because the
+       heading and the sentence under it are one message; announcing the
+       changed half alone would say "That link has expired" without the
+       remedy, or the remedy without what went wrong. -->
+  <div id="report" role="status" aria-live="polite" aria-atomic="true">
+    <h1 class="display" id="head" tabindex="-1">Confirming your email…</h1>
     <p class="lede" id="body">One moment.</p>
+  </div>
 
-    <div id="actions" hidden>
-      <p class="btn-row">
-        <a class="btn primary" href="/download">Get the app</a>
-        <a class="btn" href="/">Back to the site</a>
-      </p>
-    </div>
+  <div id="actions" hidden>
+    <p class="btn-row">
+      <a class="btn primary" href="/download">Get the app</a>
+      <a class="btn" href="/">Back to the site</a>
+    </p>
+  </div>
 
-    <div id="retry" hidden>
-      <p class="btn-row">
-        <a class="btn primary" href="/signup">Try signing up again</a>
-        <a class="btn" href="mailto:support@repplefitness.com?subject=Confirmation%20link">Email support</a>
-      </p>
-    </div>
+  <div id="retry" hidden>
+    <p class="btn-row">
+      <a class="btn primary" href="/signup">Try signing up again</a>
+      <a class="btn" href="mailto:support@repplefitness.com?subject=Confirmation%20link">Email support</a>
+    </p>
+  </div>
 
-    <div id="confirm" hidden>
-      <p class="btn-row">
-        <button class="btn primary" type="button" id="go">Confirm my email</button>
-      </p>
-    </div>
+  <div id="confirm" hidden>
+    <p class="btn-row">
+      <button class="btn primary" type="button" id="go">Confirm my email</button>
+    </p>
   </div>
 </main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          One connected fitness platform for members, coaches and gyms.
+        </p>
+      </div>
+      <div>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/support">Support</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
+  </div>
+</footer>
 
 <script type="module">
   import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
@@ -98,9 +254,18 @@ addEventListener('DOMContentLoaded', function () {
   const panels = { actions: $('actions'), retry: $('retry'), confirm: $('confirm') };
   const go = $('go');
 
-  const say = (h, b, panel) => {
+  /* `focus` is passed only when say() is answering something the reader just
+     did. Pressing "Confirm my email" HIDES the panel that button lives in, so
+     without this focus falls to <body> at the exact moment the page finally
+     has something to say, and the two links that replace the button are only
+     reachable by tabbing from the top of the document. Focus moves to the
+     heading BEFORE the panel is hidden, so it is never taken off an element
+     that is being removed. On first load nothing is passed: focus stays where
+     the browser put it and the status region above does the talking. */
+  const say = (h, b, panel, focus) => {
     head.textContent = h;
     body.innerHTML = b;
+    if (focus) head.focus();
     for (const [k, el] of Object.entries(panels)) el.hidden = k !== panel;
   };
 
@@ -145,19 +310,28 @@ addEventListener('DOMContentLoaded', function () {
     say('Confirm your email',
         'One press and your Repple account is ready to sign in to.', 'confirm');
 
+    /* `disabled` rather than aria-disabled would drop focus to <body> the
+       instant it is set, for the whole length of a network call, and then
+       hand it back to an element the reader is no longer standing on. The
+       button stays focusable and says it is busy; `busy` is what actually
+       stops a second press. */
+    let busy = false;
     go.addEventListener('click', async () => {
-      go.disabled = true;
+      if (busy) return;
+      busy = true;
+      go.setAttribute('aria-disabled', 'true');
       go.textContent = 'Confirming\u2026';
       const { error } = await sb.auth.verifyOtp({ type: linkType, token_hash: tokenHash });
       if (error) {
-        go.disabled = false;
+        busy = false;
+        go.removeAttribute('aria-disabled');
         go.textContent = 'Confirm my email';
         say('That link did not work',
-            `${error.message}. Confirmation links can be used once and they expire, so this one has most likely already been used or has run out &mdash; sign up again with the same address for a fresh one.`, 'retry');
+            `${error.message}. Confirmation links can be used once and they expire, so this one has most likely already been used or has run out &mdash; sign up again with the same address for a fresh one.`, 'retry', true);
         return;
       }
       say('Email confirmed',
-          'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions');
+          'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions', true);
     });
 
   } else if (hash.get('access_token')) {

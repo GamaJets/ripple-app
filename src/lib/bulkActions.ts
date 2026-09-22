@@ -21,9 +21,9 @@
 // they are. `overwriteBrief` writes that sentence.
 //
 // Naming them is the part that matters and the part that is easy to drop. A
-// coach reading "9 of these 12 are on a programme now" still has to go and work
+// coach reading "9 of these 12 are on a program now" still has to go and work
 // out which nine; a coach reading "including Ana, Ben and Cara" recognises the
-// name of the person they spent an hour writing a programme for on Tuesday, and
+// name of the person they spent an hour writing a program for on Tuesday, and
 // stops. The count is the alarm; the names are what makes it actionable.
 //
 // ── 2 · PARTIAL FAILURE IS THE NORMAL CASE ─────────────────────────────────
@@ -93,7 +93,7 @@ export interface AssignTarget {
    *  the rest of the coach app uses in a sentence. */
   name: string;
   /**
-   * True when this client is on a coach-assigned programme right now.
+   * True when this client is on a coach-assigned program right now.
    *
    * A BOOLEAN and not a tri-state on purpose. There is no honest third value
    * here: "we could not tell" is not a property of one client, it is a property
@@ -102,7 +102,7 @@ export interface AssignTarget {
    * control rather than letting a screen mark some rows and shrug at others.
    * A caller that has not passed that guard must not be building these at all.
    */
-  onProgramme: boolean;
+  onProgram: boolean;
 }
 
 export interface OverwriteBrief {
@@ -145,7 +145,7 @@ export function namesWithRest(names: readonly string[], limit = NAMES_IN_BRIEF):
 /**
  * What the coach must read before a bulk assign writes anything.
  *
- * `templateName` is the programme going out, quoted back so the dialog is about
+ * `templateName` is the program going out, quoted back so the dialog is about
  * a specific thing rather than about the button that opened it.
  *
  * The two cases are genuinely different sentences and are not one sentence with
@@ -157,16 +157,16 @@ export function overwriteBrief(
   targets: readonly AssignTarget[],
   templateName: string,
 ): OverwriteBrief {
-  const replacing = targets.filter((x) => x.onProgramme);
-  const fresh = targets.filter((x) => !x.onProgramme);
+  const replacing = targets.filter((x) => x.onProgram);
+  const fresh = targets.filter((x) => !x.onProgram);
   const n = targets.length;
   const r = replacing.length;
 
   if (r === 0) {
     return {
-      title: n === 1 ? 'Assign This Programme?' : `Assign to ${num(n)} Clients?`,
+      title: n === 1 ? 'Assign This Program?' : `Assign to ${num(n)} Clients?`,
       body:
-        `${n === 1 ? 'This client is' : `None of these ${num(n)} are`} on a coach-assigned programme, so nothing is being replaced. `
+        `${n === 1 ? 'This client is' : `None of these ${num(n)} are`} on a coach-assigned program, so nothing is being replaced. `
         + `“${templateName}” will be waiting on ${n === 1 ? 'their Train tab' : 'each of their Train tabs'}.`,
       confirmLabel: n === 1 ? 'Assign' : `Assign to ${num(n)}`,
       replacing,
@@ -176,13 +176,13 @@ export function overwriteBrief(
   const who = namesWithRest(replacing.map((x) => x.name));
   const heading = r === n
     ? (n === 1 ? 'Replace What They Are Training?' : `Replace What All ${num(n)} Are Training?`)
-    : `Replace ${num(r)} Current Programmes?`;
+    : `Replace ${num(r)} Current Programs?`;
 
   const lead = r === n
     ? (n === 1
-      ? `${who} is on a programme now. Assigning “${templateName}” replaces it.`
-      : `All ${num(n)} of these are on a programme now — ${who}. Assigning “${templateName}” replaces every one of them.`)
-    : `${num(r)} of these ${num(n)} are on a programme now, including ${who}. Assigning “${templateName}” replaces what they are training.`;
+      ? `${who} is on a program now. Assigning “${templateName}” replaces it.`
+      : `All ${num(n)} of these are on a program now: ${who}. Assigning “${templateName}” replaces every one of them.`)
+    : `${num(r)} of these ${num(n)} are on a program now, including ${who}. Assigning “${templateName}” replaces what they are training.`;
 
   // Said every time, and not softened. This is the whole of why the dialog
   // exists: the write is silent from the client's side, so the coach is the
@@ -190,7 +190,7 @@ export function overwriteBrief(
   const cost = 'There is no undo, no record of what was there before, and nothing tells them their next session changed.';
 
   const rest = fresh.length
-    ? `\n\nThe other ${num(fresh.length)} — ${namesWithRest(fresh.map((x) => x.name))} — ${fresh.length === 1 ? 'is' : 'are'} on no coach-assigned programme, so for them this is new work rather than a replacement.`
+    ? `\n\nThe other ${num(fresh.length)} (${namesWithRest(fresh.map((x) => x.name))}) ${fresh.length === 1 ? 'is' : 'are'} on no coach-assigned program, so for them this is new work rather than a replacement.`
     : '';
 
   return {
@@ -200,14 +200,14 @@ export function overwriteBrief(
     // "1 exercises" for exactly this reason, and this one sits on the button
     // that replaces somebody's training.
     confirmLabel: r === n
-      ? (n === 1 ? 'Replace Their Programme' : `Replace All ${num(n)}`)
+      ? (n === 1 ? 'Replace Their Program' : `Replace All ${num(n)}`)
       : `Replace ${num(r)} and Assign ${num(n)}`,
     replacing,
   };
 }
 
 /**
- * What the coach must read before taking clients OFF their programmes.
+ * What the coach must read before taking clients OFF their programs.
  *
  * ── Why this is not `overwriteBrief` with a different verb ────────────────
  *
@@ -227,30 +227,30 @@ export function overwriteBrief(
  * nothing can cascade from either. Re-assigning the template later therefore
  * needs nothing special to "add it back" — the history was never gone.
  *
- * The clients passed here are only the ones ON a programme. Somebody who is
+ * The clients passed here are only the ones ON a program. Somebody who is
  * already on their auto plan has nothing to be taken off, and including them
  * would make the count wrong in the direction that raises a false alarm.
  */
 export function unassignBrief(targets: readonly AssignTarget[]): OverwriteBrief {
-  const on = targets.filter((x) => x.onProgramme);
+  const on = targets.filter((x) => x.onProgram);
   const n = on.length;
   const who = namesWithRest(on.map((x) => x.name));
 
   if (n === 0) {
     return {
       title: 'Nobody To Take Off',
-      body: 'None of the clients you have ticked is on a coach-assigned programme, so there is nothing to remove. They are already on an auto-generated plan.',
+      body: 'None of the clients you have ticked is on a coach-assigned program, so there is nothing to remove. They are already on an auto-generated plan.',
       confirmLabel: 'OK',
       replacing: [],
     };
   }
 
   return {
-    title: n === 1 ? 'Take Them Off This Programme?' : `Take ${num(n)} Clients Off Their Programmes?`,
+    title: n === 1 ? 'Take Them Off This Program?' : `Take ${num(n)} Clients Off Their Programs?`,
     body:
       `${who} ${n === 1 ? 'goes' : 'go'} back to an auto-generated plan built from ${n === 1 ? 'their' : 'their own'} goal. `
-      + `Every session ${n === 1 ? 'they have' : 'they have'} already logged stays exactly where it is — a programme is a plan, and the sets somebody did are their record, not the plan's. `
-      + `Put the same programme back later and that history is still underneath it.`,
+      + `Every session ${n === 1 ? 'they have' : 'they have'} already logged stays exactly where it is. A program is a plan, and the sets somebody did are their record, not the plan's. `
+      + `Put the same program back later and that history is still underneath it.`,
     confirmLabel: n === 1 ? 'Take Them Off' : `Take ${num(n)} Off`,
     replacing: on,
   };
@@ -353,18 +353,18 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   }
 
   const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : kind === 'end' ? 'Removed' : kind === 'checklist' ? 'Copied' : 'Sent';
-  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : kind === 'end' ? 'Removed' : kind === 'checklist' ? 'Copied to' : 'Sent to';
+  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the program off' : kind === 'end' ? 'Removed' : kind === 'checklist' ? 'Copied to' : 'Sent to';
 
   if (!bad.length) {
     return {
       title: verbTitle,
-      body: `${verbBody} ${num(n)} ${n === 1 ? 'client' : 'clients'} — ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
+      body: `${verbBody} ${num(n)} ${n === 1 ? 'client' : 'clients'}: ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
       retry: [],
     };
   }
 
   const failureLines = bad.length <= REASONS_IN_REPORT
-    ? bad.map((r) => `· ${r.name} — ${r.why ?? 'the server did not say why.'}`).join('\n')
+    ? bad.map((r) => `· ${r.name}: ${r.why ?? 'the server did not say why.'}`).join('\n')
     : `${listNames(bad.map((r) => r.name))}.\n\n${distinctReasons(bad)}`;
 
   if (!ok.length) {
@@ -381,7 +381,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   return {
     title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : kind === 'end' ? 'Partly Removed' : kind === 'checklist' ? 'Partly Copied' : 'Partly Sent',
     body:
-      `${num(ok.length)} of ${num(n)} landed — ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
+      `${num(ok.length)} of ${num(n)} landed: ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
       + `${num(bad.length)} did not, and ${bad.length === 1 ? 'is' : 'are'} still selected so you can try again:\n\n`
       + failureLines,
     retry,
@@ -506,7 +506,7 @@ export function guardRecipients(
       return {
         allowed: false,
         label: 'Reading Who That Is…',
-        reason: `Still reading who is in ${segment}. Sending now would reach whoever has loaded so far — this takes a moment.`,
+        reason: `Still reading who is in ${segment}. Sending now would reach whoever has loaded so far. This takes a moment.`,
       };
     case 'partial':
       return {
@@ -565,7 +565,7 @@ export function guardRecipients(
 export function bulkThreadNote(count: number): string | null {
   if (count < 2) return null;
   return `Each of these ${num(count)} people gets this as an ordinary message from you, in their own thread. `
-    + 'Nothing marks it as having gone to anybody else, so it will read as though you wrote it to them — if you want it to say it went to everyone, say so in the message.';
+    + 'Nothing marks it as having gone to anybody else, so it will read as though you wrote it to them. If you want it to say it went to everyone, say so in the message.';
 }
 
 /* ── ending the coaching for many people at once ───────────────────────────── */
@@ -600,7 +600,7 @@ export interface EndTarget {
  *
  * ── Why this is not `unassignBrief` with a different verb ─────────────────
  *
- * Un-assigning a programme is recoverable in every respect and the brief spends
+ * Un-assigning a program is recoverable in every respect and the brief spends
  * its words saying so. This is the opposite: it is many irreversible acts
  * behind one tap, and the brief's whole job is to make the SIZE of that visible
  * before it happens. So the count is in the heading, in the body and on the
@@ -638,7 +638,7 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
 
   const lead = n === 1
     ? `${who} comes off your roster.`
-    : `All ${num(n)} of these come off your roster — ${who}.`;
+    : `All ${num(n)} of these come off your roster: ${who}.`;
 
   // Said for the linked half only, because it is the only half it is true of,
   // and said in full: the photo grant is the one part of this that re-joining
@@ -647,12 +647,12 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
   const linkedCost = linked.length
     ? `${linked.length === n ? (n === 1 ? 'They keep' : 'They all keep') : `${num(linked.length)} of them keep`} their account and everything logged in it, and ${linked.length === 1 ? 'they are' : 'they are each'} told the coaching has ended. `
       + `You stop seeing ${linked.length === 1 ? 'their' : 'their'} workouts, measurements, check-ins and food logs, and your thread ${linked.length === 1 ? 'with them closes' : 'with each of them closes'}. `
-      + `Every progress photo ${linked.length === 1 ? 'they' : 'they'} shared is un-shared straight away and that part cannot be undone — joining you again later does not hand the photos back.`
+      + `Every progress photo ${linked.length === 1 ? 'they' : 'they'} shared is un-shared straight away and that part cannot be undone. Joining you again later does not hand the photos back.`
     : '';
 
   // And for the hand-added half, which is a delete rather than an ending.
   const handCost = hand.length
-    ? `${hand.length === n ? (n === 1 ? 'This one is' : `All ${num(n)} are`) : `${num(hand.length)} of them — ${namesWithRest(hand.map((x) => x.name))} — are`} clients you added by hand, with no account behind them. `
+    ? `${hand.length === n ? (n === 1 ? 'This one is' : `All ${num(n)} are`) : `${num(hand.length)} of them (${namesWithRest(hand.map((x) => x.name))}) are`} clients you added by hand, with no account behind them. `
       + `Removing ${hand.length === 1 ? 'that row deletes it' : 'those rows deletes them'}, along with the name and goal you typed. There is no undo and nothing to re-join.`
     : '';
 
@@ -667,6 +667,6 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
     confirmLabel: n === 1 ? 'Remove Them' : `Remove All ${num(n)}`,
     // Everybody, because every one of them loses something. `replacing` is what
     // the caller styles the button destructive on.
-    replacing: targets.map((x) => ({ clientId: x.clientId, name: x.name, onProgramme: false })),
+    replacing: targets.map((x) => ({ clientId: x.clientId, name: x.name, onProgram: false })),
   };
 }

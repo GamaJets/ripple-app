@@ -1,5 +1,5 @@
 // The load this client's own history supports, offered where the coach writes
-// the programme.
+// the program.
 //
 // ── What was already built, and where it was not ───────────────────────────
 //
@@ -11,7 +11,7 @@
 // app/(trainer)/ imported a line of it.
 //
 // So the client's phone would tell them "you hit 12 reps at 60 kg, add 2.5 kg",
-// and the coach writing next week's programme for that same person had the
+// and the coach writing next week's program for that same person had the
 // weight box and nothing else. The one number that changes week to week was the
 // one the person deciding it had no help with, while the arithmetic sat
 // finished in the repository.
@@ -20,7 +20,7 @@
 //
 // app/(trainer)/builder.tsx has held `reviewLog` — the client's own `workouts`
 // rows, same columns and same cap as app/(trainer)/client-training.tsx — since
-// the programme checks were added. Nothing new is read here and nothing new is
+// the program checks were added. Nothing new is read here and nothing new is
 // asked of the database.
 //
 // ── The three answers a coach must be able to tell apart ───────────────────
@@ -41,7 +41,7 @@
 // It is worth being explicit, because the same screen's volume check declines
 // on 'partial' and a reader will reasonably ask why this one does not.
 //
-// The volume check compares a written programme against the client's HEAVIEST
+// The volume check compares a written program against the client's HEAVIEST
 // ever session, and the cap drops the OLDEST rows — so a prefix can be missing
 // exactly the sessions that would have refuted "more than she has ever done".
 // A finding from half a record is a finding about the read.
@@ -67,7 +67,7 @@ export interface ProgressionInput {
    *  has logged nothing. */
   log: WorkoutEntry[] | null;
   status: LoadStatus;
-  /** The movement as written in the programme. Matched against the log by name,
+  /** The movement as written in the program. Matched against the log by name,
    *  which is how `lastSetsFor` matches and is the same string the client's own
    *  Train tab logs under. */
   exercise: string;
@@ -107,7 +107,7 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
     // who has been pressing 80 for a year.
     return {
       kind: 'gap',
-      note: 'Their training could not be read, so there is nothing here to base a load on. That is a read that failed rather than a client with no history — reopen the screen once you have signal.',
+      note: 'Their training could not be read, so there is nothing here to base a load on. That is a read that failed rather than a client with no history. Reopen the screen once you have signal.',
     };
   }
   // No read was issued at all — a hand-added client with no account, or a build
@@ -116,6 +116,42 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
 
   const s = suggestForExercise(i.log, i.exercise, i.reps, 2.5, i.unit);
   if (s) return { kind: 'suggestion', weightKg: s.weight, reason: s.reason, up: s.up };
+
+  // ── logged, with nothing on the bar ───────────────────────────────────
+  //
+  // `suggestNextWeight` returns null in exactly two situations: the movement
+  // has no logged sets at all, and its last session's heaviest set carried no
+  // load. The second is every bodyweight movement in the catalogue — press-ups,
+  // pull-ups, dips, a plank — and both fell through to the sentence at the
+  // bottom of this function, which told the coach the client had not logged the
+  // movement. They had. A coach writing next week's program was reading an
+  // accusation of absence about somebody who did the work on Tuesday.
+  //
+  // ── and it came to disagree anyway ───────────────────────────────────────
+  //
+  // This used to read `lastSetsFor`, on the stated grounds that it is the same
+  // reader `suggestNextWeight` is given its sets by, "so the two cannot come to
+  // disagree about whether anything was logged". That stopped being true when
+  // `lastSetsFor` gained a `liftedSets` filter so a session of planks would not
+  // recommend a heavier plank — a correct change, which made it return
+  // undefined for exactly the sessions THIS branch exists to recognise.
+  //
+  // The result was the original defect, restored: a client who did press-ups on
+  // Tuesday was reported to their coach as never having logged the movement.
+  //
+  // So the question is asked directly, and it is a different question from the
+  // one `suggestNextWeight` asks. That one wants sets it can read a LOAD from;
+  // this one wants to know whether the person did the movement at all. Sharing
+  // a reader between two different questions is what broke it.
+  const loggedAtAll = i.log.some(
+    (e) => e.exercise === i.exercise && Array.isArray(e.sets) && e.sets.length > 0,
+  );
+  if (loggedAtAll) {
+    return {
+      kind: 'gap',
+      note: 'They have logged this movement with no weight on it, so there is no load of theirs to build from. That is bodyweight work they did, not a movement they have never done.',
+    };
+  }
 
   if (i.status === 'partial') {
     // THE distinction. The cap drops the oldest sessions, so a movement whose

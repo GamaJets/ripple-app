@@ -34,20 +34,28 @@
 // would quietly shrink the forecast by exactly the amount nobody can see,
 // which is the one error on this screen an owner would never catch.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchPlans, fetchMemberships, money, sharedCurrency,
   type MembershipPlan, type Membership, type PlanInterval, type PaymentKind,
 } from '@lib/gymRecord';
-import { assertWhole, capLimit } from '@lib/rowCap';
+import { assertWhole, capLimit, readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 // The PT ledger is added up by the same code the coach's own earnings screen
 // uses. Two implementations of "what has this coach been paid" is how the gym
 // and the coach come to disagree about the same money, and `sumTaken` already
 // holds the rule that an amount with no currency on it is a hole in the total
 // rather than a zero.
 import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
+import { Banner } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { gymLink, noGymNote } from '@lib/gymLink';
+import { num1 } from '@/lib/num';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
  *  odd week does not read as a trend, short enough to still be this year's gym. */
@@ -62,14 +70,7 @@ const DAY = 86400000;
  * "No payments taken in the last 90 days" are both lies about a query that
  * errored, and the second one tells an owner their gym has stopped selling.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 /* ── the rows this screen reads for itself ─────────────────────────────────── */
 
@@ -172,7 +173,23 @@ interface Promo {
 
 export default function Revenue() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
 
   // A read that failed stays null, never []. [] is the gym saying it has none;
   // null is nobody knowing. On this screen those two answers differ by the
@@ -189,8 +206,6 @@ export default function Revenue() {
   const [packsErr, setPacksErr] = useState<string | null>(null);
   const [promosErr, setPromosErr] = useState<string | null>(null);
 
-  const since = useMemo(() => new Date(Date.now() - DAYS * DAY).toISOString(), []);
-
   /**
    * Five independent reads.
    *
@@ -199,8 +214,29 @@ export default function Revenue() {
    * price book, the memberships and the till alongside it, and the screen would
    * report a gym with no plans, no members and no income. One failed read may
    * cost its own section and nothing else.
+   *
+   * ── `since` is computed HERE, per read, and not held at mount ────────────
+   *
+   * It was `useMemo(() => new Date(Date.now() - DAYS * DAY).toISOString(), [])`
+   * with `load` depending on it. An empty dependency array does not fix a value
+   * for a render, it fixes it for the life of the MOUNT — and this is the one
+   * console in the building that is left open. It runs on a front-desk tablet
+   * that nobody reloads for days, and the page now refreshes itself (below), so
+   * the frozen bound was about to become live: three days open and every one of
+   * the five reads still asks for the ninety days ending on the day the tab was
+   * opened, while the heading under them says "the last 90 days". The figures
+   * are wrong by three days of takings at one end and by three days that have
+   * happened at the other, and each refresh returns the same wrong window,
+   * which is what makes it look confirmed rather than stale.
+   *
+   * A window bound belongs to the READ, not to the component. Computed inside
+   * `load` there is no value to go stale, no dependency for `useCallback` to
+   * carry, and no window in which state and query can disagree — every reader
+   * of this page, the mount, the tab coming back, the poll and the button, gets
+   * a bound relative to the moment it actually asked.
    */
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
+    const since = new Date(Date.now() - DAYS * DAY).toISOString();
     const [plRes, mRes, tRes, pkRes, prRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
@@ -220,29 +256,69 @@ export default function Revenue() {
     setTakingsErr(failure(tRes, 'the payments taken'));
     setPacksErr(failure(pkRes, 'the PT packs'));
     setPromosErr(failure(prRes, 'the promo codes'));
-  }, [since]);
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the promo codes leaves the stamp where it was and
+    // the section's own banner is what says which read is missing — counting
+    // what the server confirmed rather than that a request was sent.
+    return [plRes, mRes, tRes, pkRes, prRes].every((r) => r.status === 'fulfilled');
+  }, []);
+
+  /*
+   * Kept current, and it says when it was last read.
+   *
+   * No poll. Nothing on this page is written while somebody stands at the desk
+   * the way /orders and /passes are — it is the price book, the memberships and
+   * the till — so the two triggers that matter are coming back to the tab and
+   * asking. The stamp is the part that was missing either way: "what actually
+   * arrived in the last 90 days" is a sentence about a window, and until now
+   * the page did not say which 90 days it meant or when it had asked.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setPlans([]); setMembers([]); setTakings([]); setPacks({ packs: [], renewals: [] }); setPromos([]);
-        return;
-      }
+      // Five reads filled with `[]` for an account carrying no gym, which is a
+      // query that RAN and found nothing to everything below: an empty price
+      // book, no memberships, a till that took nothing in ninety days and a
+      // forecast of zero — a full month's trading reported as flat, assembled
+      // out of a fact about the reader's profile. See src/lib/gymLink.ts; the
+      // slices stay unread and the branch below the role gate says why.
+      const link = gymLink(who?.tenantId, 'plans, memberships or payments');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } on a database error rather
       // than rejecting, so the error is read off the result, not caught. The
       // name is cosmetic here and the failure is reported by the sidebar's own
       // dash; nothing on this page is computed from it.
       const { data: t, error } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name').eq('id', link.tenantId).single();
       if (live) setGymName(error ? null : ((t as any)?.name ?? null));
-      await load(who.tenantId);
+      if (live) setGymNameUnread(!!error);
     })();
     return () => { live = false; };
-  }, [load]);
+  }, []);
+
+  // The first read goes through `refresh` so that it stamps exactly like every
+  // later one, and it is keyed on the tenant id rather than fired at the end of
+  // the effect above. `useFetched` holds the reader in a ref that is assigned
+  // during RENDER, so calling `refresh()` in the same tick as `setMe(who)`
+  // would run the closure from the previous render — the one where `me` is
+  // still undefined — and the reader would answer `false` without reading
+  // anything. Waiting for the id to arrive in state is what makes the reader
+  // and the identity it needs the same generation.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+  }, [me?.tenantId, refresh]);
 
   const unread = (rows: unknown[] | null, e: string | null): Unread =>
     rows !== null ? null : e ? 'failed' : 'loading';
@@ -267,12 +343,15 @@ export default function Revenue() {
 
   const packSummary = useMemo(() => (packs ? buildPacks(packs) : null), [packs]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/revenue">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/revenue">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -285,11 +364,27 @@ export default function Revenue() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/revenue">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/revenue">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           This screen carries every price the gym charges and everything it has
           been paid, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before the figures, because there are none: nothing below this line was
+  // asked for. The tiles read a dash for an unread slice, which is right, but
+  // the tables under them print "no priced membership" and "nothing taken",
+  // and an owner who reads those goes looking for their money rather than for
+  // whoever can put the gym back on their account.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/revenue">
+        <h1>Revenue</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('plans, memberships or payments')}
         </p>
       </Shell>
     );
@@ -313,13 +408,16 @@ export default function Revenue() {
       : recurring?.reason;
 
   return (
-    <Shell me={me} gymName={gymName} current="/revenue">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/revenue">
       <h1>Revenue</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What the price book says the gym is contracted to bill each month, what
         the till says actually arrived in the last {DAYS} days, and which plans
         are carrying it. Recorded in /money — only read here.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym’s money" style={{ margin: '2px 0 18px' }} />
 
       <Banner>
         <strong>Recurring is a forecast of billing, not money received.</strong>{' '}
@@ -343,18 +441,38 @@ export default function Revenue() {
           // contributing plans DISAGREE, so the tile was printing a sum across
           // two currencies and labelling the result dirhams. money() withholds
           // it now and the note says which of the reasons it is.
-          text={recurring ? money(recurring.mrrCents, recurring.currency) : null}
-          note={recurring?.mrrCents == null ? forecastNote
-            : !recurring.currency ? 'these plans are priced in more than one currency, so there is no one total'
-            : `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`}
+          // Two pots are stated as two pots rather than as nothing. `potLine`
+          // joins them with a `+` that is deliberately not an addition — it is
+          // the same shape the PT sold tile beside this one has always used —
+          // and the note underneath says outright that they are not added.
+          text={recurring
+            ? (money(recurring.mrrCents, recurring.currency)
+                ?? (recurring.pots.length > 1
+                      ? recurring.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')
+                      : null))
+            : null}
+          note={!recurring ? forecastNote
+            : recurring.mrrCents != null
+              ? `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`
+            : recurring.pots.length > 1
+              ? `${recurring.pots.length} currencies, not added — ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`
+              : forecastNote}
         />
         <Kpi
           label={`Taken (${DAYS} days)`}
-          text={cash ? money(cash.totalCents, cash.currency) : null}
-          note={cash?.totalCents == null
-            ? (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : cash?.reason)
-            : !cash.currency ? 'these payments are in more than one currency, so there is no one total'
-            : `${cash.count} payment${cash.count === 1 ? '' : 's'}`}
+          text={cash
+            ? (money(cash.totalCents, cash.currency)
+                ?? (cash.pots.length > 1
+                      ? cash.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')
+                      : null))
+            : null}
+          note={!cash
+            ? (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : undefined)
+            : cash.totalCents != null
+              ? `${cash.count} payment${cash.count === 1 ? '' : 's'}`
+            : cash.pots.length > 1
+              ? `${cash.pots.length} currencies, not added — ${cash.count} payment${cash.count === 1 ? '' : 's'}`
+              : (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : cash.reason)}
         />
         <Kpi
           label="Active memberships"
@@ -422,8 +540,30 @@ interface RecurringView {
   lines: PlanLine[];
   mrrCents: number | null;
   /** The single currency the forecast is in, or null when the contributing
-   *  plans disagree — in which case there is no total to state. */
+   *  plans disagree — in which case there is no ONE total to state. */
   currency: string | null;
+  /**
+   * The forecast per currency — one pot for each money the contributing plans
+   * are priced in, largest first.
+   *
+   * `mrrCents` above is the single-pot answer and stays exactly as it was: it
+   * is the denominator every per-plan share on this page is taken against, and
+   * a share of a figure spanning two currencies is not a share. This is the
+   * separate thing — what there is to SAY when there is more than one pot.
+   *
+   * It exists because withholding was doing more work than it should. A gym
+   * priced in AED and GBP had `mrrCents` come back null with "the contributing
+   * plans are priced in more than one currency" beside a dash, and that is a
+   * true sentence attached to no figure at all: the owner of a gym taking AED
+   * 6,000 and GBP 400 a month was shown neither number. Refusing to ADD them is
+   * right and is kept — this app holds no rate between any two monies and never
+   * will. Refusing to say them is a different decision and it was the wrong one.
+   *
+   * The tile two sections down already knew this: PT sold renders
+   * `potLine(packSummary.total)` and prints both pots side by side. This is the
+   * same answer given by the two tiles beside it.
+   */
+  pots: Array<{ currency: string; cents: number }>;
   /** Why mrrCents is null, in words, when it is. */
   reason: string | undefined;
   activeMembers: number;
@@ -500,11 +640,25 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
       ? null
       : contributing.reduce((a, l) => a + (l.contributionCents ?? 0), 0);
 
+  // One pot per currency, over the same `contributing` set the single total is
+  // taken over — so the pots and `mrrCents` can never be answers to two
+  // different questions. Folded the way sharedCurrency folds, so ' gbp ' and
+  // 'GBP' are one pot.
+  const byCurrency = new Map<string, number>();
+  for (const l of contributing) {
+    const c = (l.currency ?? '').trim().toUpperCase();
+    if (!c || l.contributionCents == null) continue;
+    byCurrency.set(c, (byCurrency.get(c) ?? 0) + l.contributionCents);
+  }
+  const pots = [...byCurrency.entries()]
+    .map(([c, cents]) => ({ currency: c, cents }))
+    .sort((a, b) => b.cents - a.cents || a.currency.localeCompare(b.currency));
+
   const reason =
     contributing.length === 0
       ? 'no active membership sits on a priced, recurring plan'
       : currency == null
-        ? 'the contributing plans are priced in more than one currency'
+        ? 'the contributing plans are priced in more than one currency, and this app holds no rate between them'
         : undefined;
 
   const pricedMembers = contributing.reduce((a, l) => a + l.members, 0);
@@ -517,6 +671,7 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
     lines,
     mrrCents,
     currency,
+    pots,
     reason,
     activeMembers: active.length,
     pricedMembers,
@@ -578,7 +733,19 @@ function Recurring({ r, state }: { r: RecurringView | null; state: Unread }) {
       {r ? (
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {r.mrrCents == null ? (
+            {r.mrrCents == null && r.pots.length > 1 ? (
+              // Two currencies is not an unknown. It is two knowns, and they
+              // are both stated. What is refused is the single number over
+              // them, and the sentence says so rather than leaving a reader to
+              // add the two figures themselves.
+              <>
+                <strong>{r.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')}</strong>{' '}
+                per month across {r.pricedMembers} active membership{r.pricedMembers === 1 ? '' : 's'}.
+                These are separate amounts of money in separate currencies and they are deliberately
+                not added: {r.reason}. A yearly plan is shown at a twelfth of its price so it can sit
+                in the same column as a monthly one; nobody is billed that amount in any given month.
+              </>
+            ) : r.mrrCents == null ? (
               <>
                 No monthly figure is stated: {r.reason}. That is an unknown, not a
                 nil — the memberships below are real whether or not they can be priced.
@@ -624,7 +791,7 @@ function Recurring({ r, state }: { r: RecurringView | null; state: Unread }) {
             </div>
           ) : null}
 
-          <DataTable
+          <DataTable noun="recurring plans"
             rows={r.lines} columns={cols} rowKey={(l) => l.id}
             empty="The price book is empty. Until a gym prices something, there is no recurring revenue to forecast — which is different from a forecast of nothing."
           />
@@ -669,6 +836,19 @@ interface CashView {
   /** How many rows were corrections rather than sales. */
   refunds: number;
   currency: string | null;
+  /**
+   * What the gym holds, one pot per currency — the same net figure as
+   * `totalCents`, said for a till that took two monies instead of withheld.
+   *
+   * `totalCents` above stays the single-pot answer and is still the only thing
+   * this page calls the total: every `share()` on this screen is taken against
+   * it, and a share of a figure spanning two currencies is not a share. This is
+   * only what there is to SAY when there is more than one pot, and it is the
+   * same repair the Recurring tile carries — a gym that took AED 6,000 and GBP
+   * 400 in the window was shown neither figure, on the tile that answers "what
+   * came in". Not adding them is right; not saying them was not.
+   */
+  pots: Array<{ currency: string; cents: number }>;
   /** Sales, not rows. A refund is not a payment and used to be counted as one. */
   count: number;
   unpriced: number;
@@ -709,9 +889,24 @@ function buildCash(rows: Taking[]): CashView {
     currency: oneCurrency(rs.filter((r) => r.amountCents != null)),
   }));
 
+  // Net, per currency: sales less refunds inside each money, over the same
+  // rows `totalCents` is taken over, so the two can never disagree about what
+  // is counted. A row with no amount is left out of every pot rather than
+  // counted as nothing — `unpriced` above is where it is reported.
+  const netByCurrency = new Map<string, number>();
+  for (const r of rows) {
+    const c = (r.currency ?? '').trim().toUpperCase();
+    if (!c || r.amountCents == null) continue;
+    netByCurrency.set(c, (netByCurrency.get(c) ?? 0) + r.amountCents);
+  }
+  const pots = [...netByCurrency.entries()]
+    .map(([c, cents]) => ({ currency: c, cents }))
+    .sort((a, b) => b.cents - a.cents || a.currency.localeCompare(b.currency));
+
   return {
     byMethod,
     totalCents,
+    pots,
     grossCents: totalOf(sales),
     // Positive, because it is read as an amount handed back rather than as a
     // negative amount taken. The sign lives in the ledger, not in the sentence.
@@ -774,7 +969,19 @@ function Cash({ c, state }: { c: CashView | null; state: Unread }) {
       {c ? (
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {c.totalCents == null ? (
+            {c.totalCents == null && c.pots.length > 1 ? (
+              // Two tills' worth of money, both stated. The only thing withheld
+              // is the single number over them, and the sentence names that as
+              // the choice it is rather than leaving a dash to be read as a
+              // quarter in which nothing came in.
+              <>
+                <strong>{c.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')}</strong>{' '}
+                across {c.count} payment{c.count === 1 ? '' : 's'}. This is money the gym holds.
+                These are separate amounts in separate currencies and they are deliberately not
+                added: {c.reason}, and this app holds no rate between them.
+                {c.unpriced ? ` ${c.unpriced} payment${c.unpriced === 1 ? ' carries' : 's carry'} no amount and ${c.unpriced === 1 ? 'is' : 'are'} left out of them rather than added as nothing.` : ''}
+              </>
+            ) : c.totalCents == null ? (
               <>No total is stated: {c.reason}.</>
             ) : (
               <>
@@ -797,7 +1004,7 @@ function Cash({ c, state }: { c: CashView | null; state: Unread }) {
               </>
             )}
           </p>
-          <DataTable
+          <DataTable noun="payment methods"
             rows={c.byMethod} columns={cols} rowKey={(b) => b.key}
             empty={`No payment was recorded in the last ${DAYS} days. That is not the same as no income — it is the same as nobody having entered one.`}
           />
@@ -971,7 +1178,7 @@ function Split({ s, state, packs, packsState }: {
             name on it is counted in the till and left unattributed rather than pushed
             into whichever bucket looks tidier.
           </p>
-          <DataTable
+          <DataTable noun="revenue purposes"
             rows={s.buckets} columns={cols} rowKey={(b) => b.key}
             empty={`No payment was recorded in the last ${DAYS} days, so there is nothing to attribute.`}
           />
@@ -1065,7 +1272,7 @@ function Promos({ rows, state }: { rows: Promo[] | null; state: Unread }) {
             not an amount — multiplying the two would produce a confident-looking
             figure for money the record cannot account for.
           </p>
-          <DataTable
+          <DataTable noun="promo codes"
             rows={rows} columns={cols} rowKey={(p) => p.id}
             empty="No promo code has been created. Nothing is discounting the price book."
           />
@@ -1086,25 +1293,35 @@ function Promos({ rows, state }: { rows: Promo[] | null; state: Unread }) {
  * printing a confident forecast beside it.
  */
 async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[]> {
-  const { data, error } = await supabase
-    .from('gym_payments')
-    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, kind, reverses_payment_id')
-    .eq('tenant_id', tenantId)
-    .gte('taken_at', sinceIso)
-    .order('taken_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  // Capped and REFUSING, which these three reads were not. They were the only
-  // uncapped money reads left in the console: no `capLimit()` and no
-  // `assertWhole`, so PostgREST's silent 1000-row ceiling applied to the
-  // quarter's till. A busy gym taking twelve payments a day crosses it inside
-  // three months, and what falls away is the OLDEST — so the trend on this
-  // screen would have flattened from the left, every figure would still have
-  // rendered confidently, and nothing anywhere would have said the set was a
-  // prefix. src/lib/rowCap.ts exists because that "succeeds, quietly, with the
-  // wrong number".
-  assertWhole(data, 'the payments in this window');
-  return (data ?? []).map((r: any) => ({
+  // Paged, having been capped-and-refusing, having before that been uncapped.
+  //
+  // The comment this replaces did the arithmetic on itself: "a busy gym taking
+  // twelve payments a day crosses it inside three months", over a window that
+  // is ninety days. So `assertWhole` turned the till, the method split and the
+  // whole attribution table into a permanent error at exactly the gym size that
+  // has revenue worth looking at — on the screen whose only job is to show it.
+  //
+  // Refusing was right when the alternative was a silent prefix; it is not
+  // right when the alternative is finishing the read. This window is bounded by
+  // construction, /analytics reads the same table with `readAll` and
+  // `gymRecord.fetchPayments` pages too, so this was the strictest of three
+  // readers sitting on the shortest window. `PAGE_CEILING` still refuses past
+  // fifty thousand payments in ninety days.
+  //
+  // `taken_at` ties on a batch recorded in one sitting at the desk, so `id`
+  // closes the total order `readAll` requires.
+  const data = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_payments')
+      .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, kind, reverses_payment_id')
+      .eq('tenant_id', tenantId)
+      .gte('taken_at', sinceIso)
+      .order('taken_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the payments in this window',
+  );
+  return data.map((r: any) => ({
     id: r.id,
     memberId: r.member_id ?? null,
     membershipId: r.membership_id ?? null,
@@ -1136,12 +1353,15 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
  * revenue while the other is a query nobody may draw a conclusion from.
  */
 async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger> {
-  const { data: trs, error: trErr } = await supabase
-    .from('trainers').select('id').eq('tenant_id', tenantId).limit(capLimit());
-  if (trErr) throw trErr;
-  assertWhole(trs, "this gym's trainers");
+  const trs = await readAll<any>(
+    (from, to) => supabase
+      .from('trainers').select('id').eq('tenant_id', tenantId)
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's trainers",
+  );
 
-  const ids: string[] = (trs ?? []).map((r: any) => r.id);
+  const ids: string[] = trs.map((r: any) => r.id);
   if (!ids.length) return { packs: [], renewals: [] };
 
   // Two reads, not one, and they can never be one query: `client_purchases` is
@@ -1155,34 +1375,44 @@ async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger>
   // was missing from what this page reports as PT income. A client paying AED
   // 600 a month for a year appeared once, as the first purchase, and eleven
   // renewals were invisible.
-  const [pkRes, subRes] = await Promise.all([
-    supabase
-      .from('client_purchases')
-      // `currency` was added by supabase/parts/132 and this select did not name
-      // it, so the screen printed "the purchase record carries no currency"
-      // about a column that has existed since. The amount was rendered as bare
-      // minor units — a figure read in whatever money the reader is thinking in.
-      .select('id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
-      .in('trainer_id', ids)
-      .gte('created_at', sinceIso)
-      .order('created_at', { ascending: false })
-      .limit(capLimit()),
-    supabase
-      .from('client_subscription_payments')
-      .select('id, amount_cents, currency, paid_at')
-      .in('trainer_id', ids)
-      .gte('paid_at', sinceIso)
-      .order('paid_at', { ascending: false })
-      .limit(capLimit()),
+  // `readByIds` rather than one `.in()`: the roster above pages now, so the id
+  // list is no longer held under a thousand by a refusal, and `trainer_id` is a
+  // FOREIGN key — one coach answers with many purchases, so a chunk of 150 ids
+  // legitimately returns far more than 150 rows and each chunk has to be
+  // finished rather than assumed to fit.
+  const [packRows, renewalRows] = await Promise.all([
+    readByIds<any>(
+      ids,
+      (chunk, from, to) => supabase
+        .from('client_purchases')
+        // `currency` was added by supabase/parts/132 and this select did not name
+        // it, so the screen printed "the purchase record carries no currency"
+        // about a column that has existed since. The amount was rendered as bare
+        // minor units — a figure read in whatever money the reader is thinking in.
+        .select('id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
+        .in('trainer_id', chunk)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+      'the PT packs bought in this window',
+    ),
+    readByIds<any>(
+      ids,
+      (chunk, from, to) => supabase
+        .from('client_subscription_payments')
+        .select('id, amount_cents, currency, paid_at')
+        .in('trainer_id', chunk)
+        .gte('paid_at', sinceIso)
+        .order('paid_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+      'the PT renewals paid in this window',
+    ),
   ]);
-  if (pkRes.error) throw pkRes.error;
-  if (subRes.error) throw subRes.error;
-
-  assertWhole(pkRes.data, 'the PT packs bought in this window');
-  assertWhole(subRes.data, 'the PT renewals paid in this window');
 
   return {
-    packs: (pkRes.data ?? []).map((r: any) => ({
+    packs: packRows.map((r: any) => ({
       id: r.id,
       amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
       // Null where Stripe stated none and the package it was sold from is gone
@@ -1195,7 +1425,7 @@ async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger>
       status: r.status ?? 'paid',
       createdAt: r.created_at,
     })),
-    renewals: (subRes.data ?? []).map((r: any) => ({
+    renewals: renewalRows.map((r: any) => ({
       id: r.id,
       amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
       currency: r.currency ?? null,
@@ -1260,7 +1490,7 @@ function totalOf(rows: { amountCents: number | null; currency: string | null }[]
  */
 function share(part: number | null, whole: number | null): string | null {
   if (part == null || whole == null || whole === 0) return null;
-  return `${((part / whole) * 100).toFixed(1)}%`;
+  return `${num1((part / whole) * 100)}%`;
 }
 
 /** Did this membership cover the day the money arrived? Plain ISO date strings,
@@ -1282,7 +1512,10 @@ function Unresolved({ state, what, cost }: {
 }) {
   if (state === 'loading') return <Loading />;
   return (
-    <div style={{
+    // Announced. `Loading` above carries `role="status"` and this is the node
+    // that replaces it, so without one the transition from "still reading" to
+    // "this section is unknown" produced no event at all.
+    <div role="status" aria-live="polite" aria-atomic="true" style={{
       padding: '16px 14px', margin: '14px', borderRadius: 0,
       border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
       background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
@@ -1305,28 +1538,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

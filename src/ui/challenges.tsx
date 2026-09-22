@@ -35,13 +35,18 @@
 // that nobody is playing (src/ui/loadStatus.ts).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. A `getSession()`
+// that could not reach the auth server answers `session: null`, exactly as a
+// signed-out device does — see src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import {
-  shapeBoard, shapeChallenges, type BoardRow, type ChallengeRow,
+  boardTruncated, shapeBoard, shapeChallenges, type BoardRow, type ChallengeRow,
   type RawBoardRow, type RawChallenge,
 } from '../lib/challenges';
+import { useRecoverRead } from './readRefresh';
 
 export type { BoardRow, ChallengeRow } from '../lib/challenges';
 
@@ -88,16 +93,24 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
     // is the true answer, not an error.
     if (!USE_SUPABASE) { setChallenges([]); setStatus('ready'); return; }
 
-    let signedIn = false;
-    try {
-      // getSession, not getUser: getUser REJECTS with no session, and reading
-      // that as a failure is how sibling providers used to latch into 'error'
-      // before anybody had signed in.
-      const { data: sess } = await supabase.auth.getSession();
-      signedIn = !!sess?.session?.user?.id;
-    } catch { /* no local session; treated as signed out below */ }
+    // getSession, not getUser: it answers from device storage and therefore
+    // answers offline, and reading "nobody is signed in" as a failure is how
+    // sibling providers used to latch into 'error' before anybody had signed
+    // in.
+    //
+    // `signedIn` was a boolean, and that was the defect: the two ways to not
+    // be signed in collapsed into one `false`. An unreachable auth server
+    // resolves `getSession()` with `session: null` (src/lib/authReadFate.ts),
+    // so it took this branch and cleared the list under 'ready' — which is
+    // precisely what the `if (error)` arm eight lines below refuses to do, in
+    // its own words, because "clearing it here would tell a client their gym
+    // is running nothing". Same false sentence, reached one call earlier.
+    const who = await sessionUid('challenges.read');
     if (run !== runRef.current) return;
-    if (!signedIn) { setChallenges([]); setStatus('ready'); return; }
+    if (who.fate === 'signed-out') { setChallenges([]); setStatus('ready'); return; }
+    // Could not ask. The list stays exactly as it was and the status says it
+    // was not checked — the treatment the RPC failure already gets.
+    if (who.fate !== null) { setStatus('error'); return; }
 
     try {
       const { data, error } = await supabase.rpc('my_challenges');
@@ -119,9 +132,15 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
   const join = useCallback(async (id: string): Promise<boolean> => {
     if (!USE_SUPABASE || !id) return false;
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id;
-      if (!uid) return false;
+      // A WRITE, and the uid is the row's own `user_id` — so a false sign-out
+      // here does not merely skip the insert, it decides who a leaderboard
+      // entry belongs to. It is refused rather than attempted on either fate:
+      // `false` is this function's "you are not on the challenge", the screen
+      // says so, and the client taps Join again. The alternative was an insert
+      // built on an id nobody established.
+      const who = await sessionUid('challenges.join');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // `.select('challenge_id')` so a row RLS refused cannot arrive looking
       // like a success: a zero-row write is not an error in PostgREST, and the
       // insert that was quietly refused is exactly the one this must catch.
@@ -138,9 +157,16 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
   const leave = useCallback(async (id: string): Promise<boolean> => {
     if (!USE_SUPABASE || !id) return false;
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id;
-      if (!uid) return false;
+      // The same refusal on the way out, and it matters more: this uid is the
+      // `.eq('user_id', …)` that SCOPES a delete. An unclassified auth failure
+      // could only ever have produced `undefined` here and stopped at the
+      // guard — but the guard is the only thing that stood between a dropped
+      // connection and a delete whose scope had not been established, and a
+      // guard that cannot say which failure it caught is one edit away from
+      // being loosened by somebody who thinks it only means "signed out".
+      const who = await sessionUid('challenges.leave');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       const { data, error } = await supabase
         .from('challenge_participants')
         .delete().eq('challenge_id', id).eq('user_id', uid)
@@ -162,7 +188,19 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
       // board" from "this board is empty". The message is the server's and is
       // shown as-is for the one case the client can do something about.
       if (error) return { rows: [], status: 'error', message: error.message || null };
-      return { rows: shapeBoard(data as RawBoardRow[] | null), status: 'ready', message: null };
+      const raw = (data as RawBoardRow[] | null) ?? [];
+      // 'partial' when the board came back at `challenge_board()`'s own
+      // `limit 200`. The rows are real and the screen shows them; what it may
+      // no longer do is count them, because "of 200" on a board of four hundred
+      // is a figure over a page presented as a figure over a set — and
+      // `my_challenges()` was printing the true head count two lines above it.
+      // See BOARD_CAP in src/lib/challenges.ts for why the probe row this
+      // codebase normally uses is not available through this door.
+      return {
+        rows: shapeBoard(raw),
+        status: boardTruncated(raw.length) ? 'partial' : 'ready',
+        message: null,
+      };
     } catch {
       return { rows: [], status: 'error', message: null };
     }
@@ -173,6 +211,9 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
     [challenges, status, reload, join, leave, board],
   );
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('challenges', status, reload);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

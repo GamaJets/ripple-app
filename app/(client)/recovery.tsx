@@ -13,16 +13,20 @@
 // 1–5 selector was invisible and untappable. Quality is now shown as marks.
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { useWellness } from '../../src/ui/wellness';
+import { useWellness, sleepRefusal } from '../../src/ui/wellness';
+import { useToday } from '../../src/ui/today';
 // Hydration comes from the same place the home screen's water counter does.
 // These were two separate stores and adding a glass on one never reached the
 // other — reported twice, from both directions.
 import { useHabits } from '../../src/ui/habits';
 import { useClientData } from '../../src/ui/clientData';
+// Loading, failed and empty are three different sentences, and this hero had
+// two of the three.
+import { hydrationNote } from '../../src/lib/hydrationHero';
 import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
@@ -33,8 +37,9 @@ import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ring, TonedChip, Cta, Ghost, Flag, fig, HERO_FIT } from '../../src/ui/kit';
+import { useDeviceHrv } from '../../src/ui/deviceHrv';
+import { sp, layout, radius, hairline, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -54,11 +59,13 @@ import { formatSleepHours, markNightsUnread, type MergedNight, type SleepRead } 
 import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
+import { num1 } from '../../src/lib/format';
+import { END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const MOBILITY = [
- { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
- { name: 'Hip & lower-body', dur: '5 min', moves: ['90/90 hip switch ×8', 'Couch stretch 45s/side', 'Ankle rocks ×12/side', 'Glute bridge ×15'] },
- { name: 'Shoulders & upper', dur: '5 min', moves: ['Wall slides ×12', 'Thread the needle ×6/side', 'Doorway pec stretch 30s', 'Scapular push-ups ×12'] },
+ { name: 'Full-Body Warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
+ { name: 'Hip & Lower-Body', dur: '5 min', moves: ['90/90 hip switch ×8', 'Couch stretch 45s/side', 'Ankle rocks ×12/side', 'Glute bridge ×15'] },
+ { name: 'Shoulders & Upper', dur: '5 min', moves: ['Wall slides ×12', 'Thread the needle ×6/side', 'Doorway pec stretch 30s', 'Scapular push-ups ×12'] },
 ];
 
 /** How many nights of device sleep the screen asks for and lists. */
@@ -73,18 +80,18 @@ const MOBILITY = [
  * quietly dropped or split down the middle.
  */
 function attribution(n: MergedNight): string {
-  if (n.outcome === 'unknown') return 'We couldn’t read your devices for this night, so it is unknown — that is not the same as no sleep.';
+  if (n.outcome === 'unknown') return 'We couldn’t read your devices for this night, so it is unknown. That is not the same as no sleep.';
   if (n.outcome === 'no-record') return 'No device recorded this night.';
   const src = n.source;
   if (!src) return 'No device recorded this night.';
-  const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed, which runs longer than time asleep' : ''}`;
+  const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' (time in bed, which runs longer than time asleep)' : ''}`;
   // A night Repple kept from an earlier read. The figure is real and the device
   // named it, but that device has not answered today — so this says so rather
   // than letting a stored reading pass for a live one. See part 153.
-  if (n.kept) return `${head}, kept from an earlier read — your devices didn’t answer for this night today.`;
+  if (n.kept) return `${head}, kept from an earlier read. Your devices didn’t answer for this night today.`;
   const other = n.others[0];
   if (n.agreement === 'conflicting' && other) {
-    return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)} — ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;
+    return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)}, ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;
   }
   if (n.agreement === 'corroborated' && other) {
     return `${head}, and your ${other.sourceName} agrees to within ${n.spreadMin} min.`;
@@ -123,15 +130,19 @@ export default function Recovery() {
  // the app is used in gyms with no reception — so what they hold can now be
  // either a server-confirmed answer or this device's cached copy, and the
  // screen has to say which. See src/ui/loadStatus.ts.
- const { sleep, addSleep, status: sleepStatus, unsent: unsentNights } = useWellness();
- const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup } = useHabits();
+ // `removeSleep` is taken now. It has existed in the provider, implemented and
+ // argued for, with no caller anywhere: a night typed as 12 when the member
+ // meant 1.2 went on being a twelve-hour night in their average and in the
+ // readiness score on their home screen for as long as the account existed.
+ const { sleep, addSleep, removeSleep, status: sleepStatus, unsent: unsentNights, reload: reloadSleep } = useWellness();
+ const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup, reload: reloadHabits } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
  // Bumped whenever the server proves something new about a device — including
  // by a reconnect started on the other screen. It is both a re-render trigger
  // and an effect key below.
  const linkRev = useLinkRevision();
- const { log: workoutLog, status: logStatus } = useWorkoutLog();
+ const { log: workoutLog, status: logStatus, reload: reloadLog } = useWorkoutLog();
  // Sauna, cold plunge and the rest are logged on Train like every other
  // session. They belong on this screen too — a member who logs a sauna looks
  // for it under Recovery, and finding nothing here while a screen called
@@ -154,6 +165,17 @@ export default function Recovery() {
  const [hr, setHr] = useState<{ samples: HrSample[]; source: 'apple' | null; read: 'loading' | 'ready' | 'error' | 'unavailable' }>(
   { samples: [], source: null, read: 'loading' }
  );
+ // Two things this read needs and did not have: a way to be asked AGAIN, and a
+ // "today" that is today. Its dependency list was `[age]` alone, so the window
+ // was fixed at the midnight of whenever the screen was opened — a phone left
+ // on a recovery screen overnight, which is what a recovery screen is for, went
+ // on charting yesterday's samples under the word Today. And its own failure
+ // sentence ("this is our end, not your watch") invited a gesture that could
+ // not reach it: the pull-to-refresh was widened to six other reads and never
+ // to this one, so `read === 'error'` was a dead end for the life of the mount.
+ const hrDay = useToday();
+ const [hrTick, setHrTick] = useState(0);
+ const reloadHr = useCallback(() => setHrTick((n) => n + 1), []);
  useEffect(() => {
    let cancelled = false;
    (async () => {
@@ -180,7 +202,9 @@ export default function Recovery() {
      }
    })();
    return () => { cancelled = true; };
- }, [age]);
+   // `hrDay` rolls at the next local midnight and whenever the app comes back
+   // to the foreground; `hrTick` is the pull-to-refresh.
+ }, [age, hrDay, hrTick]);
 
  // WHOOP zone totals, straight off the wearables context (no extra round trip).
  const whoopMetrics = wear.metrics?.whoop ?? null;
@@ -202,6 +226,9 @@ export default function Recovery() {
  const deviceSleep = useDeviceSleep();
  // The home screen's own readiness, not a second opinion about it.
  const rv = useReadiness();
+ // One named device's HRV and the nights kept behind it — the Devices screen's
+ // own hook, so this page prints the figure that one does.
+ const hrv = useDeviceHrv();
  const sleepReads: { reads: SleepRead[]; status: LoadStatus } = { reads: deviceSleep.reads, status: deviceSleep.status };
  const loadDeviceSleep = deviceSleep.refresh;
  // The read, its key, and the merge all live in DeviceSleepProvider now —
@@ -290,19 +317,61 @@ export default function Recovery() {
  // typeface as a confirmed one. Both render as a dash, which is the standing
  // rule for a number the record cannot stand behind.
  const sleepWhole = isWhole(sleepStatus);
- const avgSleep = sleepWhole && sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
+ const avgSleep = sleepWhole && sleep.length ? num1(sleep.reduce((a, s) => a + s.hours, 0) / sleep.length) : '—';
  // Null when the client has not set a goal, because there is no percentage of
  // a goal that does not exist. Left as it was, `cups / goalCups` coerces the
  // null to 0: any glass logged divides by zero and gives Infinity, which
  // Math.min clamps to a confident 100% — a full ring and "Goal met today —
  // nice." to somebody who has never set a goal — and zero glasses gives NaN,
  // which the arc draws from.
- const pct = goalCups != null ? Math.min(100, Math.round((cups / goalCups) * 100)) : null;
+ // Two reads, and the goal is not the one `waterStatus` is about: the count
+ // comes from `habits`, the goal is `clients.water_goal_glasses` and rides on
+ // `cd.profileStatus`. Both start at their empty value, so the first frame said
+ // the member had drunk nothing and had never set a target — and offered them a
+ // shortcut to set the goal they already had. See src/lib/hydrationHero.ts.
+ const hydration = hydrationNote(waterStatus, cd.profileStatus, cups, goalCups);
+ const pct = hydration.showRing && goalCups != null
+   ? Math.min(100, Math.round((cups / goalCups) * 100))
+   : null;
  // "Pull down to try again" is a sentence this screen has printed under its own
  // sleep list for as long as it has existed, over a ScrollView that had no
  // refresh control on it. Both reads it names are here: the watch data and the
  // nights the device holds.
- const pull = usePullToRefresh(useCallback(() => { deviceSleep.refresh(); wear.syncAll(); }, [deviceSleep, wear]));
+ // It asked for the WATCH and nothing else. This screen also prints the typed
+ // sleep log, the water count, the recovery sessions off the training log and
+ // the profile behind readiness — five more reads, none of which the gesture
+ // touched, on the screen whose own copy says "pull down to try again".
+ const pull = usePullToRefresh(useCallback(() => {
+   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload(); reloadHr(); void hrv.reload();
+ }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload, reloadHr, hrv.reload]));
+ /**
+  * Take one night back out of the log.
+  *
+  * Asked first: a night is a measurement about the member's own body and there
+  * is nothing on the other side of this to undo it with. Reported on the
+  * delete's OWN answer — `removeSleep` resolves false both for a refusal and
+  * for a delete that matched no rows, and it puts the night back on screen
+  * itself, so the only thing left to do here is not claim it went.
+  */
+ const confirmRemoveNight = (id: string, hours: number, at: string) => {
+  const nightLabel = new Date(at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  Alert.alert(
+   'Remove This Night?',
+   `${hours} hours on ${nightLabel} would come off your sleep log, and out of your average and your readiness score with it. This cannot be undone.`,
+   [
+    { text: 'Keep It', style: 'cancel' },
+    {
+     text: 'Remove',
+     style: 'destructive',
+     onPress: async () => {
+      const gone = await removeSleep(id);
+      if (!gone) Alert.alert('It Is Still There', 'That night could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+     },
+    },
+   ],
+  );
+ };
+
  const G = layout.gutter;
 
  return (
@@ -310,13 +379,9 @@ export default function Recovery() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Heart rate, hydration, sleep &amp; mobility</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Recovery</Text>
-   </View>
-   <Ghost icon="back" onPress={() => router.back()} />
-  </View>
+  {/* The board's pushed-page head. What the page covers is the one quiet
+      line under the title rather than an eyebrow over it. */}
+  <PageHead title="Recovery" subtitle="Heart rate, hydration, sleep & mobility" />
 
   {/* ── readiness: the number the home screen leads with, taken apart ─
 
@@ -333,21 +398,31 @@ export default function Recovery() {
       could not be read" arrive at the same null inside readinessScore and mean
       opposite things to the person reading it. */}
   <Section>
-   <SectionHead title="Readiness" note={rv.readiness != null ? rv.readiness.label : undefined} />
-   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-    <Text style={{ ...value(30), ...numeric, color: rv.readiness != null ? t.ink : t.ink3 }}>
-     {rv.readiness != null ? String(rv.readiness.score) : fig(null)}
-    </Text>
-    <Text style={{ ...ty.caption, color: t.ink3 }}>out of 100</Text>
+   <SectionHead title="Readiness" />
+   {/* The score as a ring, where a 44pt number was: it is a figure out of a
+       hundred, and an arc says "out of" before anybody reads the caption. The
+       ring takes `null` when there is no score — a track, no arc and a dash,
+       never an empty ring that reads as a score of nothing. The label is a
+       chip beside it and the words stay the verdict; the ring's green is the
+       accent and carries none. */}
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+    <Ring size={116}
+     value={rv.readiness != null ? rv.readiness.score / 100 : null}
+     figure={rv.readiness != null ? String(rv.readiness.score) : null}
+     sub="of 100"
+     spoken={rv.readiness != null ? `Readiness ${rv.readiness.score} out of 100, ${rv.readiness.label}` : 'Readiness, no score yet'} />
+    <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
+     {rv.readiness != null ? <TonedChip label={rv.readiness.label} tone="neutral" /> : null}
+     {/* The tip and what the tip was computed from, together. A tip standing
+         on its own is advice with no stated basis, which is the thing a member
+         cannot argue with and therefore cannot trust. */}
+     <Text style={{ ...ty.label, color: t.ink2 }}>
+      {rv.readiness != null
+        ? `${rv.readiness.tip} ${readinessMadeOf(rv.readiness)}.`
+        : rv.breakdown.absence}
+     </Text>
+    </View>
    </View>
-   {/* The tip and what the tip was computed from, together. A tip standing on
-       its own is advice with no stated basis, which is the thing a member
-       cannot argue with and therefore cannot trust. */}
-   <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>
-    {rv.readiness != null
-      ? `${rv.readiness.tip} ${readinessMadeOf(rv.readiness)}.`
-      : rv.breakdown.absence}
-   </Text>
 
    {rv.breakdown.lines.map((l) => (
     // "Sleep" and "7h 30m a night over 2 of the last 3 nights" are one fact
@@ -356,7 +431,7 @@ export default function Recovery() {
      style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
       gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
      <Text style={{ ...ty.caption, color: t.ink2 }}>{l.title}</Text>
-     <Text style={{ ...ty.caption, color: l.state === 'scored' ? t.ink2 : t.ink3, flex: 1, textAlign: 'right' }}>
+     <Text style={{ ...ty.caption, color: l.state === 'scored' ? t.ink2 : t.ink3, flex: 1, textAlign: END_ALIGN }}>
       {l.detail}
      </Text>
     </View>
@@ -369,36 +444,83 @@ export default function Recovery() {
    ))}
   </Section>
 
-  <Rule />
+  {/* ── what the devices and the log say, as three tiles ────────────────
+      On the ground under the score they feed. Each is one source's own
+      figure and is never blended with another's: last night is what a DEVICE
+      measured, the average is what the member TYPED (and only over a whole
+      read — see `avgSleep`), and HRV is one named device's reading through
+      the same `useDeviceHrv` the Devices screen prints, so the two screens
+      cannot state two of them. A trend is that figure's own kept history and
+      is held back under a read that was not whole. */}
+  <KpiRow tiles
+   onPress={(k) => { if (k.route) router.push(k.route as any); }}
+   items={[
+    { label: 'Last Night', tone: 'purple', route: '/(client)/devices',
+      value: lastNight?.outcome === 'measured' ? formatSleepHours(lastNight.minutesAsleep) : fig(null),
+      delta: lastNight?.outcome === 'measured' ? lastNight.source?.sourceName : undefined,
+      trend: isWhole(deviceSleep.status) ? [...deviceNights].reverse().map((n) => (n.outcome === 'measured' ? n.minutesAsleep : null)) : [] },
+    { label: 'Logged Average', tone: 'blue', value: avgSleep, unit: avgSleep === '—' ? undefined : 'h',
+      trend: sleepWhole ? [...sleep].reverse().map((n) => n.hours) : [] },
+    { label: hrv.tonight ? `HRV · ${hrv.tonight.sourceName}` : 'HRV', tone: 'pink', route: '/(client)/devices',
+      value: hrv.tonight ? num1(hrv.tonight.ms) : fig(null), unit: hrv.tonight ? 'ms' : undefined,
+      trend: isWhole(hrv.status) ? [...hrv.nights].reverse().map((n) => n.ms) : [] },
+   ]} />
 
-  {/* ── the hero: today's hydration ─────────────────────────────────── */}
-  <Hero
-   label="Hydration"
-   figure={fig(cups)}
-   unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
-   arc={pct == null ? undefined : pct / 100}
-   // The ring is glasses drunk against the water goal, so that is what it is
-   // announced as. It said "recovered", and Hero renders arcLabel as
-   // `${pct}% ${arcLabel}` — so a VoiceOver user on the Recovery screen was
-   // told "75% recovered", a recovery score this app does not compute, read
-   // out of a water count, on the one screen where they would believe it.
-   arcLabel="of today's water goal"
-   // "Goal met today — nice." is a congratulation, and a filled ring is the
-   // same congratulation without words. Both were drawn from a count the
-   // caveat underneath admits may be missing glasses logged on another device
-   // — so under a failed water read the qualification arrived after the claim
-   // it qualifies. It now leads.
-   note={waterStatus === 'error'
-    ? 'Counted on this phone only — we couldn’t check it against your account.'
-    : goalCups == null
-    ? 'No daily goal set — set one on Daily habits and this fills against it.'
-    : cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
-   onPress={goalCups == null ? () => router.push('/(client)/habits') : undefined}
-  />
-  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
-   <Ghost icon="minus" onPress={removeCup} />
-   <View style={{ flex: 1 }}><Cta label="Add a Glass" wide onPress={addCup} /></View>
-  </View>
+  {/* ── today's hydration, as a figure card ─────────────────────────── */}
+  {/* The board's figure card where the Hero was: Hydration as the head,
+      the count as the figure with "of N glasses" beside it, a thin bar for
+      the fraction the ring used to draw, the sentence under it, and the two
+      controls inside the same card. */}
+  <Section>
+   {/* Only when we KNOW there is no goal. A head that links to the goal
+       editor because the goal read had not landed sends somebody to change a
+       target on the strength of a number that had not arrived. */}
+   <SectionHead title="Hydration" note={hydration.offerGoal ? 'Set a Water Goal' : undefined}
+    onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined} />
+   <View accessible accessibilityLabel={['Hydration', [fig(hydration.showCount ? cups : null), hydration.showRing && goalCups != null ? `of ${goalCups} glasses` : !hydration.showCount ? 'glasses today' : cups === 1 ? 'glass today' : 'glasses today'].join(' '), hydration.text].join(', ')}>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+      style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(hydration.showCount ? cups : null)}</Text>
+     <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>
+      {hydration.showRing && goalCups != null ? `of ${goalCups} glasses`
+       : !hydration.showCount ? 'glasses today'
+       : cups === 1 ? 'glass today' : 'glasses today'}
+     </Text>
+    </View>
+    {/* "Goal met today — nice." is a congratulation, and a filled bar is the
+        same congratulation without words. Both are drawn from a count the
+        caveat underneath admits may be missing glasses logged on another
+        device — so under a failed water read the qualification leads. */}
+    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{hydration.text}</Text>
+   </View>
+   {/* The bar is glasses drunk against the water goal, so that is what it is
+       announced as. The ring it replaces once said "recovered" — so a
+       VoiceOver user on the Recovery screen was told "75% recovered", a
+       recovery score this app does not compute, read out of a water count,
+       on the one screen where they would believe it. */}
+   {pct != null ? (
+    <View accessible accessibilityRole="progressbar"
+     accessibilityLabel={`${Math.round(Math.max(0, Math.min(100, pct)))}% of today's water goal`}
+     accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.max(0, Math.min(100, pct))) }}
+     style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+     {/* Teal, because water is teal on every screen that draws it. */}
+     <View style={{ height: 8, borderRadius: 4, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.data.teal }} />
+    </View>
+   ) : null}
+   {/* Dead until the count has arrived, which is the same fact `hydration`
+       already withholds the figure on. `pushWater` in src/ui/habits.tsx upserts
+       an ABSOLUTE count for the day and `addWater` computes it from a ref that
+       is 0 until the read lands — so a member who logged five glasses on another
+       device this morning and taps here too early writes 1 over their 5. The
+       figure above already says "Reading today's glasses…"; a live Add beside
+       it invited exactly the tap that does the damage. */}
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
+    <Ghost icon="minus" a11yLabel="Remove a glass" onPress={removeCup} disabled={!hydration.showCount} />
+    <View style={{ flex: 1 }}>
+     <Cta label={hydration.showCount ? 'Add a Glass' : 'Reading today’s glasses…'}
+      disabled={!hydration.showCount} wide onPress={addCup} />
+    </View>
+   </View>
   {/* Which copy of the count is on screen.
       The figure above is REAL either way — it is this phone's tally, and a
       client who drank six glasses drank them whether or not the server heard.
@@ -407,12 +529,12 @@ export default function Recovery() {
       is cheaper than a silently divergent number, and it is the same thing
       availability.ts learnt to say about a coach's cached week. */}
   {waterStatus === 'error' ? (
-   <Text style={{ ...ty.label, color: t.ink3, paddingBottom: layout.section }}>
+   <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
     Counted on this phone. We couldn’t check it against your account just now, so if you have logged water on another device today this may not be the whole picture.
    </Text>
   ) : null}
+  </Section>
 
-  <Rule />
 
   {/* ── heart-rate zones ────────────────────────────────────────────── */}
   <Section>
@@ -422,7 +544,7 @@ export default function Recovery() {
     avgBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateAvg ?? null : null}
     maxBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateMax ?? null : null}
     age={age}
-    title="Heart-rate Zones"
+    title="Heart-Rate Zones"
     subtitle={
       hrSource === 'apple' ? 'Today, from your Apple Watch'
       : hrSource === 'whoop' ? "Today's workouts, from WHOOP"
@@ -430,21 +552,20 @@ export default function Recovery() {
       // the four reasons it is. Only the last one is a thing the client can act
       // on, and it used to be shown for all four.
       : hr.read === 'loading' ? 'Reading today’s heart rate…'
-      : hr.read === 'error' ? 'We couldn’t read today’s heart rate — this is our end, not your watch.'
-      : hr.read === 'ready' ? 'Your Apple Watch is connected — no heart rate recorded today yet.'
+      : hr.read === 'error' ? 'We couldn’t read today’s heart rate. This is our end, not your watch.'
+      : hr.read === 'ready' ? 'Your Apple Watch is connected. No heart rate recorded today yet.'
       : 'Connect a device in Watch & Devices to see your zones'
     } />
   </Section>
 
-  <Rule />
 
   {/* ── sleep ───────────────────────────────────────────────────────── */}
   <Section>
    <SectionHead
     title="Sleep"
-    note={sleepWhole && sleep.length ? `avg ${avgSleep} h logged`
-      : sleepStatus === 'error' ? 'not confirmed — showing this device’s copy'
-      : sleepStatus === 'partial' ? 'more nights than are shown here'
+    note={sleepWhole && sleep.length ? `Avg ${avgSleep} h Logged`
+      : sleepStatus === 'error' ? 'Not Confirmed, Showing This Device’s Copy'
+      : sleepStatus === 'partial' ? 'More Nights Than Are Shown Here'
       : undefined} />
 
    {/* ── what the devices recorded ──────────────────────────────────
@@ -452,7 +573,7 @@ export default function Recovery() {
        averaged into it: a number somebody remembered in the morning and a
        number a ring measured are not the same kind of fact, and blending
        them would make both unfalsifiable. */}
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From your devices</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From Your Devices</Text>
    {connectedKey === '' ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>
      No device connected. Connect a watch or a ring in Watch &amp; Devices and your nights appear here, each one labelled with which device recorded it.
@@ -473,7 +594,7 @@ export default function Recovery() {
        gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{nightLabel(n.night)}</Text>
       <View style={{ alignItems: 'flex-end', flex: 1 }}>
-       <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: n.outcome === 'measured' ? t.ink2 : t.ink3 }}>
+       <Text style={{ ...ty.caption, ...numeric, ...font('500'), color: n.outcome === 'measured' ? t.ink2 : t.ink3 }}>
         {formatSleepHours(n.minutesAsleep)}
        </Text>
        {/* Every row says where it came from, or why there is nothing —
@@ -496,7 +617,7 @@ export default function Recovery() {
         with nothing on the screen to doubt it. */}
     {sleepReads.status === 'error' ? (
      <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-      {BRAND.label} couldn’t reach your devices just now, so the nights above are unknown rather than empty — this is our end, not your watch. Pull down to try again.
+      {BRAND.label} couldn’t reach your devices just now, so the nights above are unknown rather than empty. This is our end, not your watch. Pull down to try again.
      </Flag>
     ) : null}
 
@@ -523,7 +644,7 @@ export default function Recovery() {
     {appleSilent ? (
      <View style={{ marginTop: sp.md }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>
-       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for {BRAND.label} — Health ▸ Sharing ▸ Apps ▸ {BRAND.label}.
+       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for {BRAND.label}: Health ▸ Sharing ▸ Apps ▸ {BRAND.label}.
       </Text>
       <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
        {/* Title Case, like every other button on this screen — "Fix in Watch &
@@ -535,7 +656,7 @@ export default function Recovery() {
    </>)}
 
    <View style={{ height: sp.xl }} />
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by you</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by You</Text>
    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
     <TextInput value={hrs} onChangeText={setHrs} keyboardType="decimal-pad" accessibilityLabel="Hours slept"
      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, width: 78, textAlign: 'center' }} />
@@ -551,7 +672,29 @@ export default function Recovery() {
        the box is a decimal pad and the reader has to take the decimal comma
        a European keyboard puts on it. `parseFloat('7,5')` is 7, and half an
        hour a night is the whole of what this screen is being asked. */}
-   <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => { addSleep(readNumber(hrs) ?? 0, q); setHrs(''); setQ(0); }} />
+   {/* The answer is read, and the boxes are cleared only when there is
+       something to have cleared them for. They used to be emptied whatever
+       happened — which is the universal sign that a figure was accepted — over
+       a provider that had already refused the night and filed nothing. */}
+   <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => {
+    const h = readNumber(hrs) ?? 0;
+    const why = sleepRefusal(h, q);
+    if (why) { Alert.alert('That Night Was Not Logged', why); return; }
+    void (async () => {
+     const out = await addSleep(h, q);
+     if (out === 'refused') {
+      // The provider refused it after the check above passed, which the two
+      // agreeing about the range makes very unlikely — and "unlikely" is not
+      // "cannot", and a member whose night vanished is owed the sentence.
+      Alert.alert('That Night Was Not Logged', sleepRefusal(h, q) ?? 'That night could not be stored, so nothing has been logged.');
+      return;
+     }
+     setHrs(''); setQ(0);
+     if (out === 'unsent') {
+      Alert.alert('Saved on This Phone', 'That night has not reached your account yet. There is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
+     }
+    })();
+   }} />
    {/* An empty list is three different sentences, and it used to be one.
        "No nights logged yet" is a claim about the client's own history, and
        under a failed read it is a claim nobody can make — the nights may be
@@ -561,10 +704,10 @@ export default function Recovery() {
    {sleep.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
      {sleepStatus === 'error'
-      ? 'We couldn’t read your sleep log just now, so this is blank rather than empty — any nights you have already logged are not shown here.'
+      ? 'We couldn’t read your sleep log just now, so this is blank rather than empty. Any nights you have already logged are not shown here.'
       : sleepStatus === 'loading'
       ? 'Reading your sleep log…'
-      : 'No nights logged yet — log one above and your average appears here.'}
+      : 'No nights logged yet. Log one above and your average appears here.'}
     </Text>
    ) : null}
    {/* A night logged with no signal. It is on screen, it is on this phone, and
@@ -572,25 +715,30 @@ export default function Recovery() {
        why it has not reached their coach's view of the week. */}
    {unsentNights > 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-     {unsentNights === 1 ? 'One night is saved on this phone only' : `${unsentNights} nights are saved on this phone only`} — they’ll be sent the next time you’re online. Nothing to re-enter.
+     {unsentNights === 1 ? 'One night is saved on this phone only' : `${unsentNights} nights are saved on this phone only`}. They’ll be sent the next time you’re online. Nothing to re-enter.
     </Text>
    ) : null}
    {sleep.slice(0, 4).map((sx) => (
     <View key={sx.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
      <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(sx.at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-      <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{sx.hours} h</Text>
+      <Text style={{ ...ty.caption, ...numeric, ...font('500'), color: t.ink2 }}>{sx.hours} h</Text>
       <Quality n={sx.quality} color={t.brand} dim={t.surface3} />
+      {/* A visible control, not a gesture: a way out that nothing announces is
+          not a way out. `Ghost icon="minus"` speaks as "Remove", and the label
+          names the night so four of these do not all say the same thing. */}
+      <Ghost icon="minus"
+       a11yLabel={`Remove the ${sx.hours} hour night of ${new Date(sx.at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`}
+       onPress={() => confirmRemoveNight(sx.id, sx.hours, sx.at)} />
      </View>
     </View>
    ))}
   </Section>
 
-  <Rule />
 
   {/* ── logged recovery sessions ─────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Recovery Sessions" note={isWhole(logStatus) && recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
+   <SectionHead title="Recovery Sessions" note={isWhole(logStatus) && recoverySessions.length ? `${recoverySessions.length} Recent` : undefined} />
    {logStatus === 'error' ? (
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Your sessions could not be read, so none are shown. That is not the same as having logged none.
@@ -611,13 +759,13 @@ export default function Recovery() {
          here rather than in recoveryActs.ts, because the same names ARE
          buttons everywhere else and are correctly capitalised there. */}
      Nothing logged yet. Sauna, steam, cold plunge, contrast therapy, massage and breathwork all belong
-     here — duration and heart rate are kept; there is no calorie figure, because heating up is not work.
+     here. Duration and heart rate are kept; there is no calorie figure, because heating up is not work.
     </Text>
    ) : (
     recoverySessions.map((l, i) => (
      <View key={(l.id ?? '') + i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
        gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{l.exercise}</Text>
+      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{l.exercise}</Text>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
        {[l.cardio?.mins ? `${l.cardio.mins} min` : null,
          new Date(l.t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })]
@@ -637,23 +785,28 @@ export default function Recovery() {
    </View>
   </Section>
 
-  <Rule />
 
   {/* ── mobility routines ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Mobility & Warm-ups" note={`${MOBILITY.length} routines`} />
+   <SectionHead title="Mobility & Warm-ups" note={`${MOBILITY.length} Routines`} />
    {MOBILITY.map((r, i) => {
     const open = openRoutine === i;
     return (
      <View key={r.name} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-      <Pressable onPress={() => setOpenRoutine(open ? null : i)} accessibilityRole="button" accessibilityLabel={r.name}
+      <Pressable onPress={() => setOpenRoutine(open ? null : i)} accessibilityRole="button"
+       // The length of the routine, and whether tapping opens or closes it.
+       // Both were drawn — the duration as a caption, the state as a rotated
+       // chevron — and a label on a Pressable replaces the first while the
+       // second was never in the tree at all.
+       accessibilityLabel={`${r.name}, ${r.dur}`}
+       accessibilityState={{ expanded: open }}
        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{r.name}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.dur}</Text>
        </View>
-       <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
-        <Icon name="chevron" size={16} color={t.ink3} />
+       <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+        <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
        </View>
       </Pressable>
       {open ? (
@@ -671,11 +824,10 @@ export default function Recovery() {
    })}
   </Section>
 
-  <Rule />
 
   {/* ── rest-day guidance ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Rest-day Guidance" />
+   <SectionHead title="Rest-Day Guidance" />
    <Text style={{ ...ty.body, color: t.ink2 }}>Aim for 1–2 rest days a week. Deload every 4–6 weeks (drop ~40% volume) to let strength catch up. Light walking, mobility, and 7–9 h sleep beat total inactivity for recovery.</Text>
   </Section>
  </ScrollView>

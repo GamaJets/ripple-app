@@ -7,6 +7,10 @@ import type { TrainingSession, CancellationResult } from './types';
 // units, and the `* 100` that bridged them was a hundred-times error waiting
 // for the first gym that charges in yen.
 import { wholeMoney } from './coachMoney';
+import { plainExact } from './units';
+// `openSlotWindow` has to be able to say "the availability read has not landed
+// yet", and `isWhole` is the codebase's one answer to "is this all of it".
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 
 export const CANCEL_WINDOW_HOURS = 24;
 
@@ -180,8 +184,23 @@ export function lateCancelFee(
  * and nothing here has to know which currencies are which.
  */
 export function feeAmountLine(amount: number, currency: string | null | undefined): string {
-  if (!currency) return String(amount);
-  return wholeMoney(amount, currency) ?? String(amount);
+  // `plainExact` and not `String` on the two no-currency arms.
+  //
+  // Those arms are deliberate and stay: an amount whose currency nobody set is
+  // printed BARE, never with a symbol somebody guessed, and `unstatedCurrency`
+  // below is the clause that says so. What was not deliberate is the DECIMAL
+  // POINT in it. A coach charging 27.50 for a late cancellation read "27.5"
+  // with an English full stop, on a handset that writes 27,5 everywhere else —
+  // and the branch two lines up, where the currency IS known, has always gone
+  // through `wholeMoney` and so has always written the reader's own separator.
+  // One figure, two spellings, decided by whether a gym had filled in a field.
+  //
+  // `plainExact` changes the separator and nothing else: it does not round, so
+  // no subdivision is invented for a currency that has none — which is the
+  // whole subject of the note above — and it does not group, so the digits are
+  // the ones this function has always printed.
+  if (!currency) return plainExact(amount);
+  return wholeMoney(amount, currency) ?? plainExact(amount);
 }
 
 /**
@@ -195,6 +214,22 @@ export function feeAmountLine(amount: number, currency: string | null | undefine
  */
 export function unstatedCurrency(currency: string | null | undefined): string {
   return currency ? '' : ' Your coach hasn’t set a currency, so ask them what that amount is in.';
+}
+
+/**
+ * The same clause, said to the COACH.
+ *
+ * `unstatedCurrency` above addresses the client and tells them to ask their
+ * coach, which is exactly the wrong instruction on the coach's own screen. The
+ * three waive and reinstate confirmations in app/(trainer)/calendar.tsx printed
+ * the bare figure with no clause at all — so a coach confirmed forgiving "25"
+ * with nothing on the screen saying 25 of what, on the one list in the app that
+ * says what their clients owe them. It is also the screen a coach with no
+ * currency set is most likely to be on, because that is the state in which the
+ * figure comes through bare.
+ */
+export function unstatedCurrencyCoach(currency: string | null | undefined): string {
+  return currency ? '' : ' You have not set a currency, so that figure has no unit on it. Set one in Settings and it will be priced everywhere.';
 }
 
 /** How the notice period reads in a sentence: "24 hours", "1 hour", "48 hours". */
@@ -216,11 +251,11 @@ export function cancelWarningLine(v: FeeVerdict, noticeHours: number): string {
     case 'no-policy':
       return `This is inside ${w}, but your coach doesn't charge for a late cancellation.`;
     case 'unknown':
-      return `This is inside ${w}. We couldn't read your coach's cancellation policy, so we can't say whether a fee applies — check with them.`;
+      return `This is inside ${w}. We couldn't read your coach's cancellation policy, so we can't say whether a fee applies. Check with them.`;
     case 'unpriced':
-      return `This is inside ${w}, so your coach's late-cancellation policy applies. They haven't set an amount here, so ask them what it is — Repple doesn't charge it.`;
+      return `This is inside ${w}, so your coach's late-cancellation policy applies. They haven't set an amount here, so ask them what it is. Repple doesn't charge it.`;
     case 'fee':
-      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment — it's recorded for you and your coach to settle.${unstatedCurrency(v.currency)}`;
+      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment. It's recorded for you and your coach to settle.${unstatedCurrency(v.currency)}`;
   }
 }
 
@@ -238,8 +273,8 @@ export function feeRecordedLine(
   if (!charged) return null;
   const sum = amount != null && Number.isFinite(amount) ? feeAmountLine(amount, currency) : null;
   return sum
-    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment — settle it with your coach.${unstatedCurrency(currency)}`
-    : 'A late-cancellation fee has been recorded on your account. Repple doesn’t take this payment — settle it with your coach.';
+    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment, so settle it with your coach.${unstatedCurrency(currency)}`
+    : 'A late-cancellation fee has been recorded on your account. Repple doesn’t take this payment, so settle it with your coach.';
 }
 
 /* ── The waitlist, as an order ────────────────────────────────────────────── */
@@ -316,8 +351,8 @@ export function waitlistLine(position: number, waiting: number): string {
   }
   if (position === 1) {
     return waiting > 1
-      ? `You're next in line — if it frees up it's yours, ahead of ${waiting - 1} other${waiting - 1 === 1 ? '' : 's'}.`
-      : `You're next in line — if it frees up it's yours.`;
+      ? `You're next in line. If it frees up it's yours, ahead of ${waiting - 1} other${waiting - 1 === 1 ? '' : 's'}.`
+      : `You're next in line. If it frees up it's yours.`;
   }
   return `You're ${ordinal(position)} in line of ${waiting}. The slot goes to whoever is in front of you.`;
 }
@@ -372,7 +407,29 @@ export function overlaps(
  * relying on generated slots, so nothing here is news to them and nothing is
  * said.
  */
-export type SlotWindowState = 'unknown' | 'idle' | 'empty' | 'ending' | 'healthy';
+export type SlotWindowState =
+  /**
+   * Nothing may be said. Two ways in, and the second was missing until a coach
+   * with a full week was told their clients could not book them:
+   *
+   *   · the diary itself is unread (`known` false), or
+   *   · the weekly availability is unread (`hasWeekly` null) and there are no
+   *     open slots to settle it either way — in which case "you have never set
+   *     your hours" and "your hours are set and the generated slots have run
+   *     out" are both live, and they are opposite sentences.
+   */
+  | 'unknown'
+  /** No weekly availability, and nobody on the book yet. Nothing to say. */
+  | 'idle'
+  /**
+   * No weekly availability, and clients ARE on the book. The one state every
+   * coach on this platform has actually been in, and the one it used to say
+   * nothing about — see the note on `openSlotWindow`.
+   */
+  | 'never-set'
+  | 'empty'
+  | 'ending'
+  | 'healthy';
 
 export interface SlotWindow {
   state: SlotWindowState;
@@ -390,14 +447,75 @@ export interface SlotWindow {
  *  that it is not on screen for most of a month and stops being read. */
 export const SLOT_WARN_DAYS = 7;
 
+/**
+ * Does this coach have weekly hours set, as far as anybody can tell?
+ *
+ * True, false, and NOT YET KNOWN, from the availability read's own status and
+ * the slots it returned. Exported because collapsing those three into a
+ * boolean is the mistake this exists to stop, and the collapse is a one-liner
+ * that reads as care: `isWhole(status) && slots.length > 0` looks like somebody
+ * who thought about truncation, and it answers `false` — "they have none" —
+ * for every read that has not landed and every read that failed.
+ *
+ * Any slot at all proves the hours exist, whatever the status: a 'partial'
+ * availability read holds real rows, and a coach with more weekly slots than
+ * fit in one read is not a coach with none. Zero slots means none ONLY when the
+ * read was whole. Everything else is null.
+ */
+export function weeklyFromSlots(status: LoadStatus, slotCount: number): boolean | null {
+  if (slotCount > 0) return true;
+  return isWhole(status) ? false : null;
+}
+
 export function openSlotWindow(
   sessions: readonly { startsAt: string; status?: string | null }[],
-  opts: { known: boolean; hasWeekly: boolean; now?: number; warnDays?: number },
+  opts: {
+    known: boolean;
+    /**
+     * Whether weekly availability is set — or null when that read has not
+     * landed, which is a third state and not a quiet `false`.
+     *
+     * ── What the boolean cost ──────────────────────────────────────────
+     *
+     * The roster read is small and the availability read is not, so the roster
+     * lands first. With `hasWeekly` a bare boolean, `clientsOnBook = 12` and an
+     * availability read still in flight, this function reached 'never-set' and
+     * the calendar drew "Your 12 clients cannot book you. You have no weekly
+     * hours set" — with a call to action — to a coach with Tuesday-to-Saturday
+     * hours and four weeks of open slots. `known` and `clientsOnBook` were both
+     * already three-state, for this exact reason; this field was the one that
+     * was not, and it is the one the sentence is about.
+     *
+     * `weeklyFromSlots` above is how a screen produces it.
+     */
+    hasWeekly: boolean | null;
+    clientsOnBook?: number | null;
+    now?: number;
+    warnDays?: number;
+  },
 ): SlotWindow {
   const now = opts.now ?? Date.now();
   const warnDays = opts.warnDays ?? SLOT_WARN_DAYS;
-  // Order matters. An unread diary is unknown whatever else is true, and a
-  // coach with no weekly slots is told nothing even when the read succeeded.
+  // Order matters. An unread diary is unknown whatever else is true.
+  //
+  // ── The state this screen used to be silent in ──────────────────────────
+  //
+  // Until now `!hasWeekly` returned 'idle' and `slotWindowLine` said nothing
+  // about it, on the reasoning that a coach who does not take one-to-ones
+  // should not be nagged. That reasoning is sound and the outcome was not: a
+  // coach who INTENDS to take bookings and has simply never found the step is
+  // in exactly the same state, and was told nothing either. Their clients open
+  // the booking screen, see an empty week, and are given no reason — which is
+  // indistinguishable, from the client's side, from a coach with no free time.
+  //
+  // The two are separated by whether anybody is waiting. A coach with nobody on
+  // their book may genuinely not do this; a coach with clients on their book and
+  // no weekly hours has a booking screen that is dead to every one of them, and
+  // that is worth one sentence.
+  //
+  // An unknown client count is NOT treated as zero. It stays 'idle' — silence —
+  // because the alternative is telling a coach their book is unbookable on the
+  // strength of a number we could not read.
   if (!opts.known) return { state: 'unknown', open: 0, lastAt: null, daysLeft: null };
   const future = sessions
     .filter((s) => s.status === 'available')
@@ -408,9 +526,25 @@ export function openSlotWindow(
   const lastMs = open > 0 ? future[future.length - 1] : null;
   const lastAt = lastMs === null ? null : new Date(lastMs).toISOString();
   const daysLeft = lastMs === null ? null : Math.floor((lastMs - now) / 86_400_000);
-  if (!opts.hasWeekly) return { state: 'idle', open, lastAt, daysLeft };
-  if (open === 0) return { state: 'empty', open, lastAt, daysLeft };
-  return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
+  // `=== false` and not `!hasWeekly`. Null is "we have not read it", and the
+  // two sentences below — one of which tells a coach their book is dead —
+  // are only available once somebody has actually looked.
+  if (opts.hasWeekly === false) {
+    const waiting = opts.clientsOnBook != null && opts.clientsOnBook > 0;
+    return { state: waiting ? 'never-set' : 'idle', open, lastAt, daysLeft };
+  }
+  if (open > 0) {
+    // Open slots settle it without needing the availability read at all: the
+    // clients CAN book, which is what both of the silent states above are
+    // about, and neither of the two sentences below mentions weekly hours.
+    return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
+  }
+  // No open slots and no answer about the weekly hours. 'never-set' and 'empty'
+  // are the two live readings, they say opposite things about what the coach
+  // has done, and picking one on the strength of a read that has not come back
+  // is how the wrong one gets printed. Silence until it does.
+  if (opts.hasWeekly == null) return { state: 'unknown', open, lastAt, daysLeft };
+  return { state: 'empty', open, lastAt, daysLeft };
 }
 
 /**
@@ -421,7 +555,18 @@ export function openSlotWindow(
  * already tells the coach their calendar could not be read; a second sentence
  * about a slot count nobody knows would be inventing one.
  */
-export function slotWindowLine(w: SlotWindow): string | null {
+export function slotWindowLine(w: SlotWindow, clientsOnBook?: number | null): string | null {
+  if (w.state === 'never-set') {
+    // Deliberately says what the CLIENT sees, not what the coach has not done.
+    // "You have not set your availability" is a reprimand about a form; "your
+    // clients cannot book you" is the consequence, and it is the consequence
+    // that makes anybody open the sheet.
+    const n = clientsOnBook ?? 0;
+    const who = n === 1 ? 'Your client cannot book you' : `Your ${n} clients cannot book you`;
+    return `${who}. You have no weekly hours set, so there is nothing for them to take: `
+      + 'their booking screen is empty and nothing on it says why. '
+      + 'Set the times you offer, then open the next four weeks.';
+  }
   if (w.state === 'empty') {
     return 'You have weekly availability set and no open slots left, so nobody can book you. Clients see an empty booking screen and nothing tells them why.';
   }

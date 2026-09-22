@@ -1,6 +1,6 @@
 import {
   CHECKS, HEAVY_REPS, HIGH_REPS, MIN_GOAL_SETS, NOT_CHECKED, RECENT_OUTINGS,
-  SHORT_REST_SEC, VOLUME_JUMP, checksLine, reviewProgram,
+  SHORT_REST_SEC, VOLUME_JUMP, checksLine, coverageLine, reviewProgram,
   type Finding, type ReviewInput,
 } from './programReview';
 import type { Program, ProgramExercise } from './programs';
@@ -54,13 +54,14 @@ ok(NOT_CHECKED.length > 0, 'the questions deliberately not asked are named');
 /* ── nothing to review ────────────────────────────────────────────────────── */
 
 const empty = reviewProgram(base({ title: '', focus: [], note: '', days: [] }));
-eq(empty.findings, [], 'an empty programme has nothing to find');
-eq(empty.counted, { days: 0, exercises: 0, sets: 0 }, 'and nothing to count');
-eq(empty.status, 'ready', 'an empty programme is not a failed read');
-eq(reviewProgram(base(null as unknown as Program)).findings, [], 'a missing programme is not a crash');
+eq(empty.findings, [], 'an empty program has nothing to find');
+eq(empty.counted, { weeks: 1, days: 0, exercises: 0, sets: 0 }, 'and nothing to count — one week of no days, because a program with no `weeks` IS one week');
+eq(empty.status, 'ready', 'an empty program is not a failed read');
+eq(reviewProgram(base(null as unknown as Program)).findings, [], 'a missing program is not a crash');
 
 const counted = reviewProgram(base(prog(ex('Bench Press', 'Chest'), ex('Row', 'Back', { sets: 4 })))).counted;
-eq(counted, { days: 1, exercises: 2, sets: 7 }, 'days, exercises and sets are counted off the programme');
+const oneWeekCount = counted;
+eq(counted, { weeks: 1, days: 1, exercises: 2, sets: 7 }, 'days, exercises and sets are counted off the program');
 
 /* ── injury ───────────────────────────────────────────────────────────────── */
 
@@ -70,6 +71,10 @@ ok(shoulder.findings[0].detail.includes('Bench Press'), 'and the finding names t
 ok(shoulder.findings[0].detail.includes('shoulder'), 'and the area');
 ok(shoulder.findings[0].detail.includes('moderate'), 'and the severity as disclosed');
 eq(shoulder.findings[0].day, 'Mon', 'and the day it is on');
+eq(shoulder.findings[0].week, null,
+  'and no week number, because a one-week program has no week two to be distinguished from');
+ok(!/week/i.test(shoulder.findings[0].detail),
+  'and the sentence names no week either — a program written before blocks existed reads exactly as it did');
 
 eq(only(reviewProgram(base(prog(ex('Leg Curl', 'Hamstrings')), { injuries: [injury('shoulder')] })).findings, 'injury'),
    [], 'a movement that does not load the area is not reported');
@@ -82,7 +87,7 @@ eq(only(reviewProgram(base(prog(ex('Bench Press', 'Chest')), {
 
 // No client attached is a third answer here too. An empty list under a whole
 // read is "they have disclosed nothing"; null is "there is nobody", and the
-// check stands down rather than reporting a programme it never looked at.
+// check stands down rather than reporting a program it never looked at.
 const noOne = reviewProgram(base(prog(ex('Bench Press', 'Chest')), { injuries: null }));
 eq(only(noOne.findings, 'injury'), [], 'a draft with no client is not checked against disclosures');
 eq(noOne.skipped.filter((s) => s.id === 'injury').map((s) => s.kind), ['absent'],
@@ -358,13 +363,50 @@ ok((only(tied.findings, 'volume-jump')[0].volume!.bestDay ?? '') > '2026-08-15',
 // No client attached is a THIRD answer, and not a client who has logged
 // nothing. An empty array runs the check and finds nothing, which reads as a
 // check that ran and passed; null stands it down and says so.
-const noClient = reviewProgram(base(squats, { log: null }));
+// `injuries: null` is what says no client is attached — both callers pass it as
+// `clientId ? theirDisclosures : null` — so it goes with the null log here.
+const noClient = reviewProgram(base(squats, { log: null, injuries: null }));
 eq(only(noClient.findings, 'volume-jump'), [], 'a draft with no client attached is not compared with a history');
 eq(noClient.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['absent'],
    'and that is an absent skip, not a failed read');
 eq(noClient.status, 'ready', 'and a draft with no client is not a partial review');
-eq(reviewProgram(base(squats, { log: null, logStatus: 'error' })).status, 'ready',
+ok(noClient.skipped.find((s) => s.id === 'volume-jump')!.why.includes('no client attached'),
+   'and it says there is nobody attached, which is the fact');
+eq(reviewProgram(base(squats, { log: null, injuries: null, logStatus: 'error' })).status, 'ready',
    'and no client to compare against beats whatever the status says');
+
+/* ── the client who IS attached and has no account ───────────────────────────
+ *
+ * A hand-added client: a `coach_clients` row, a name showing in the picker, and
+ * no `clients` row for `is_my_client()` to find, so the caller passes a null log
+ * under a read that did not fail. The check still stands down — that part was
+ * always right — but "There is no client attached to this draft" said about
+ * somebody whose name is on the screen reads as a broken picker.
+ */
+const noAccount = reviewProgram(base(squats, { log: null }));
+eq(only(noAccount.findings, 'volume-jump'), [], 'a client with no account is not compared with a history');
+eq(noAccount.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['absent'],
+   'and that is an absent skip, not a failed read');
+eq(noAccount.status, 'ready', 'and it does not make the review partial');
+const noAccountWhy = noAccount.skipped.find((s) => s.id === 'volume-jump')!.why;
+ok(!noAccountWhy.includes('no client attached'),
+   'and it does not contradict the name the screen is showing');
+ok(noAccountWhy.includes('no account'), 'it says what is actually missing');
+ok(!/logged nothing|never|no training/i.test(noAccountWhy),
+   'and it does not turn an absent account into a claim that they have not trained');
+
+// A failed read that arrives as a null log — which is how
+// app/(trainer)/client-training.tsx passes one — is a read that did not land
+// and not an absent client. It was reported as 'absent' under a 'ready' review.
+const failedNull = reviewProgram(base(squats, { log: null, logStatus: 'error' }));
+eq(failedNull.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['unread'],
+   'a failed log read is unread even when it arrives as a null');
+eq(failedNull.status, 'partial', 'and the review says it is not whole');
+ok(failedNull.skipped.find((s) => s.id === 'volume-jump')!.why.includes('could not be read'),
+   'and it names the read rather than the client');
+eq(reviewProgram(base(squats, { log: null, logStatus: 'loading' })).skipped
+  .filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['unread'],
+   'and one still in flight is the same');
 
 // And the log read that did not land.
 for (const status of ['loading', 'partial', 'error'] as const) {
@@ -390,7 +432,7 @@ const highRep = (n: number) => prog(
 const gr = only(reviewProgram(base(highRep(MIN_GOAL_SETS), { goal: 'muscle' })).findings, 'goal-reps');
 eq(gr.length, 1, 'a muscle goal against mostly high-rep work is reported');
 ok(gr[0].detail.includes(`${MIN_GOAL_SETS} of the ${MIN_GOAL_SETS} working sets`), 'and it is a count, not a verdict');
-eq(gr[0].day, null, 'the finding is about the programme, not a day');
+eq(gr[0].day, null, 'the finding is about the program, not a day');
 
 eq(only(reviewProgram(base(highRep(MIN_GOAL_SETS - 1), { goal: 'muscle' })).findings, 'goal-reps'),
    [], 'fewer than the minimum is a finisher, not a pattern');
@@ -457,7 +499,7 @@ const all = reviewProgram(base({
 }, { injuries: [injury('shoulder')], log: [logged('10', 'Back Squat', [[5, 100], [5, 100]])] }));
 eq(ids(all.findings), ['injury', 'injury', 'set-count', 'group-muscle', 'heavy-rest', 'warmup-volume', 'volume-jump'],
    'findings come out in the catalogue order, injuries first');
-eq(all.status, 'ready', 'and a programme where every read landed is ready');
+eq(all.status, 'ready', 'and a program where every read landed is ready');
 eq(all.skipped.map((s) => s.id), ['goal-reps'], 'with only the goal check standing down');
 
 // Every finding is traceable. This is the rule the module exists to keep: a
@@ -470,6 +512,76 @@ for (const f of all.findings) {
   ok(!/\bAI\b/.test(f.detail), `${f.id} does not claim to be an AI`);
   ok(/^[A-Z]/.test(f.detail) && f.detail.trim().endsWith('.'), `${f.id} reads as a sentence`);
 }
+
+/* ── every week of a block, not week one ──────────────────────────────────
+ *
+ * THE defect this section is here for. `days` is week one by construction (see
+ * `ProgramWeek` in ./programs), and reading it alone meant a coach writing a
+ * twelve-week block was told seven checks had run over their draft while
+ * eleven twelfths of it had never been looked at. Silence from a check reads
+ * as a pass, so an injury conflict in week four was reported as a clean
+ * program.
+ */
+
+/** A block: week one is `days` and `weeks[0]`, and the rest follow. Built the
+ *  way `withWeeks` builds one, so the invariant the resolver relies on holds. */
+const block = (...weeks: ProgramExercise[][]): Program => ({
+  title: 'Block', focus: [], note: '',
+  days: [{ day: 'Mon', focus: 'Push', exercises: weeks[0] }],
+  weeks: weeks.map((exs) => ({ days: [{ day: 'Mon', focus: 'Push', exercises: exs }] })),
+});
+
+const late = reviewProgram(base(
+  block(
+    [ex('Leg Curl', 'Hamstrings')],
+    [ex('Leg Curl', 'Hamstrings')],
+    [ex('Bench Press', 'Chest')],
+  ),
+  { injuries: [injury('shoulder')] },
+));
+eq(only(late.findings, 'injury').length, 1,
+   'a movement that loads a disclosed area in week THREE is found — this used to be silence, and silence reads as a pass');
+eq(late.findings[0].week, 3, 'and the finding carries the week it is in');
+ok(late.findings[0].detail.includes('week 3'),
+   'and says so in the sentence, because "on Mon" over twelve Mondays tells a coach nothing about which one to open');
+eq(late.counted, { weeks: 3, days: 3, exercises: 3, sets: 9 },
+   'and the counts are the whole block, so the coverage line cannot understate what was read');
+ok((coverageLine(late.counted) ?? '').includes('3 weeks'),
+   'and the coverage line says how many weeks were read, because "7 checks run over this draft" was true of week one and read as true of twelve');
+eq(coverageLine(oneWeekCount), null,
+   'a one-week program says nothing about weeks at all');
+
+// One movement written into three weeks is three findings, not one. They are
+// three separate things the coach may want to change, in three different weeks,
+// and folding them into one would leave two of them unmentioned.
+const everyWeek = reviewProgram(base(
+  block([ex('Bench Press', 'Chest')], [ex('Bench Press', 'Chest')]),
+  { injuries: [injury('shoulder')] },
+));
+eq(only(everyWeek.findings, 'injury').length, 2, 'the same conflict in two weeks is two findings');
+eq(only(everyWeek.findings, 'injury').map((f) => f.week), [1, 2], 'each naming its own week');
+
+// The goal check counts across the block and belongs to no week, because the
+// share it reports is a fact about the whole draft.
+const goalBlock = reviewProgram(base(
+  block(
+    [ex('Curl', 'Biceps', { sets: 2, reps: '15-20' })],
+    [ex('Curl', 'Biceps', { sets: 2, reps: '15-20' })],
+  ),
+  { goal: 'muscle' },
+));
+eq(only(goalBlock.findings, 'goal-reps').length, 1,
+   'the goal check reports once for the block rather than once per week');
+eq(only(goalBlock.findings, 'goal-reps')[0].week, null, 'and names no week');
+ok(only(goalBlock.findings, 'goal-reps')[0].detail.includes('of the 4 working sets'),
+   'and counts the block\'s sets, not week one\'s');
+
+// A one-week program is untouched in every particular. This is the guarantee
+// that makes the change safe: every program in every one of the three homes
+// `ProgramWeek` names is a one-week program today.
+const oneWeek = reviewProgram(base(prog(ex('Bench Press', 'Chest')), { injuries: [injury('shoulder')] }));
+eq(oneWeek.findings.map((f) => f.week), [null], 'a one-week program carries no week number on any finding');
+ok(oneWeek.findings.every((f) => !/week/i.test(f.detail)), 'and no week appears in any sentence');
 
 // A blank name and a blank day are real states, and neither may leave a hole
 // at the front of a sentence — scripts/check-prose.mjs.

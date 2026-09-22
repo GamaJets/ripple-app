@@ -26,6 +26,14 @@
 // one to change.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -40,17 +48,67 @@ Deno.serve(async (req) => {
 
   let body: any = {};
   try { body = await req.json(); } catch { /* optional */ }
-  const returnUrl = String(body.return_url || 'repple://billing');
+  // The return addresses, checked rather than passed straight through. Each
+  // used to be `String(body.x || 'default')` with nothing between a request
+  // body and a payments API. src/lib/redirectTarget.ts holds the rule and
+  // says what it is and is not: an unset REDIRECT_ALLOW still refuses the
+  // four schemes that are never a redirect target, and setting it makes the
+  // list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  const back = checkRedirect(body.return_url, 'repple://billing', redirectAllow);
+  if (!back.ok) return json({ error: back.reason }, 400);
+  const returnUrl = back.url;
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
+      + 'Nothing has been changed. Try opening your billing again in a moment.' }, 503);
+  }
   const userId = auth?.user?.id;
   if (!userId) return json({ error: 'no user' }, 401);
 
-  const { data: cust } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  const { data: cust, error: custErr } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  // A refused READ is not "no subscription yet", and the error used to be
+  // discarded here. supabase-js resolves with `{ error }` and a null `data`, so
+  // a transient PostgREST fault told a coach whose card is being charged every
+  // month that they have no subscription — the exact consequence
+  // supabase/functions/stripe-checkout's own note names, one table across:
+  // "answers 'no subscription yet' (404) to somebody whose card is being
+  // charged every month, so they cannot cancel, cannot update the card and
+  // cannot reach an invoice."
+  //
+  // "We could not look" and "there is nothing there" are different sentences
+  // and the second one is the one a coach acts on by emailing support about a
+  // charge they cannot see.
+  if (custErr) return json({ error: 'could not check your billing account: ' + custErr.message }, 500);
   if (!cust?.stripe_customer_id) return json({ error: 'no subscription yet' }, 404);
 
-  const portal = await stripe.billingPortal.sessions.create({ customer: cust.stripe_customer_id, return_url: returnUrl });
-  return json({ url: portal.url });
+  // Stripe's own refusal, in the response, rather than an uncaught throw — the
+  // same reasoning as connect-onboard's and gym-onboard's. This call was bare,
+  // so a rejected portal session escaped the handler as a 500 with no body and
+  // the coach read it as a shrug. The causes are specific and actionable: the
+  // Customer has been deleted at Stripe, or the Billing Portal has no default
+  // configuration on this account, and neither is guessable from "something
+  // went wrong".
+  try {
+    const portal = await stripe.billingPortal.sessions.create({ customer: cust.stripe_customer_id, return_url: returnUrl });
+    return json({ url: portal.url });
+  } catch (e) {
+    const msg = (e as { message?: string })?.message || String(e);
+    console.error('stripe-portal: billing portal refused by Stripe for ' + userId + ':', msg);
+    return json({ error: msg }, 502);
+  }
 });

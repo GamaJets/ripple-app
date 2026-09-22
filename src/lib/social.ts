@@ -134,10 +134,10 @@ export function imageShareAvailable(): boolean {
  */
 export function imageShareBlocker(): string | null {
   if (!Sharing?.shareAsync) {
-    return 'This version of the app can’t attach an image to the share sheet. Update to the next release and the graphic itself will send — the caption goes as text in the meantime.';
+    return 'This version of the app can’t attach an image to the share sheet. Update to the next release and the graphic itself will send. The caption goes as text in the meantime.';
   }
   if (!imageShareAvailable()) {
-    return 'This version of the app can’t save the image to your phone before sending it. Update to the next release and the graphic itself will send — the caption goes as text in the meantime.';
+    return 'This version of the app can’t save the image to your phone before sending it. Update to the next release and the graphic itself will send. The caption goes as text in the meantime.';
   }
   return null;
 }

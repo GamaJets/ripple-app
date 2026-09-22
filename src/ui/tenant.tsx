@@ -18,7 +18,7 @@
 // down the happy path. Every owner screen then told a gym owner they do not
 // belong to a gym, and `role` came back null so some of them offered to set one
 // up. `status` distinguishes the two.
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -27,6 +27,14 @@ import { wholeMoney } from '../lib/coachMoney';
 import type { LoadStatus } from './loadStatus';
 import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
+// `supabase.auth.*` does not reject on a dropped connection — it RESOLVES with
+// `{ data: { user: null }, error }`, and offline, DNS, a captive portal and a
+// 5xx are all branded as one AuthError. src/lib/authReadFate.ts holds the
+// discrimination against the installed library; src/lib/authedUid.ts joins it
+// to a uid. Imported, never restated.
+import { uidFromAuth } from '../lib/authedUid';
+import { useRecoverRead } from './readRefresh';
+import { readMyProfileRow, forgetMyRows } from './myProfile';
 
 /**
  * What the EXISTING rows in the gym operating record were recorded as — and
@@ -146,6 +154,11 @@ export interface Tenant {
    * somebody had. Ops now offers the control the copy has always pointed at.
    */
   sessionFee: number | null;
+  /** Hours of notice before a class inside which the gym may charge, and what
+   *  they charge. Both null until the owner states them — null is "not said",
+   *  never a zero-hour window or a free cancellation. supabase/parts/2615. */
+  classCancelHours: number | null;
+  classCancelFee: number | null;
   /**
    * ISO 4217, from `tenants.currency` (part 99). Null means the gym has not
    * told us: render a dash and say so. Do NOT fall back to GYM_CURRENCY —
@@ -188,7 +201,7 @@ interface TenantValue {
   brandMismatch: string | null;
   refresh: () => void;
   /** Owner-only; RLS enforces it. Returns false when the write is rejected. */
-  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency'>>) => Promise<boolean>;
+  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency' | 'classCancelHours' | 'classCancelFee'>>) => Promise<boolean>;
   /**
    * The OTHER way a currency gets set, and the only one a coach has.
    *
@@ -224,7 +237,37 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [brandMismatch, setBrandMismatch] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [tick, setTick] = useState(0);
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  // Forgets the shared profile read before re-running, so a refresh is a real
+  // re-read rather than the answer the launch already had. A person pulling
+  // down is asking the server, not asking us again.
+  const refresh = useCallback(() => { forgetMyRows(); setTick((t) => t + 1); }, []);
+  // ── Whose gym is in state ─────────────────────────────────────────────────
+  //
+  // A ref, because the effect below is keyed on `tick` and `authRev` and would
+  // otherwise compare against the uid from the render that started it.
+  //
+  // This provider is mounted at the root and outlives every sign-out, so
+  // `tenant` and `role` are React state that survives an account change unless
+  // something clears them. `tenant` is the gym's NAME, its session fee and its
+  // CURRENCY, and `role` is what a screen decides somebody may do.
+  const whoRef = useRef<string | null>(null);
+  /**
+   * Nobody is signed in, or somebody else is.
+   *
+   * All three fields together, because they are three halves of one answer and
+   * the two exits below each used to clear a different two of them: the
+   * no-session branch cleared `tenant` and `brandMismatch` and left `role`
+   * standing, so the next person to sign in on the handset was 'owner' until
+   * their own read landed; the no-uid branch cleared `tenant` and `role` and
+   * left `brandMismatch`, so a confirmed mismatch outlived the account it was
+   * about. One function, so they cannot disagree again.
+   */
+  const forgetTenant = () => {
+    setTenant(null);
+    setRole(null);
+    setBrandMismatch(null);
+    whoRef.current = null;
+  };
 
   useEffect(() => {
     if (!USE_SUPABASE) { setLoading(false); setStatus('ready'); return; }
@@ -233,25 +276,77 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       setStatus('loading');
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        const sessRes = await supabase.auth.getSession();
         if (cancelled) return;
-        // Signed out is not a failed read of the tenant — there is simply no
-        // user to have one. getUser() rejects with no session, which latched
-        // this at 'error' on the first tick and it never ran again.
-        if (!sess?.session) { setTenant(null); setBrandMismatch(null); setStatus('ready'); setLoading(false); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        // ── the session read's own error, which was being dropped ──────────
+        //
+        // This was `const { data: sess } = await supabase.auth.getSession()`,
+        // and a null session is NOT always a sign-out: auth-js emits one
+        // whenever `getSession()` errors — an access token that expired where
+        // there was no signal to refresh it. The branch underneath then set the
+        // tenant to null and published 'ready', and this file's own type
+        // documentation says what 'ready' with a null tenant means: the user
+        // has no gym. Owner screens act on that by offering to set one up. So a
+        // gym owner on a basement wifi was shown a product with no gym in it
+        // and invited to create the one they already own.
+        //
+        // Signed out is still a true answer rather than a failure — that half
+        // of the old comment stands — but it now has to be ESTABLISHED.
+        // Narrowed on `fate`, never on `!uid`: UidRead's members are told apart
+        // by fate, and `string` includes ''.
+        const sessRead = uidFromAuth({ data: { user: sessRes.data?.session?.user }, error: sessRes.error });
+        if (sessRead.fate !== null) {
+          if (sessRead.fate === 'unreadable') {
+            // Nothing established, so nothing is cleared and nothing is
+            // claimed: an owner keeps the gym on screen, with the status
+            // saying it is not confirmed.
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+            reportError('tenant.load.session', new Error('auth read unreadable — who is signed in could not be established'));
+            setStatus('error'); setLoading(false); return;
+          }
+          forgetTenant(); setStatus('ready'); setLoading(false); return;
+        }
+        const whoRes = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { reportError('tenant.load.auth', authErr); setStatus('error'); setLoading(false); return; }
-        const uid = auth?.user?.id;
-        // Signed out: no tenant, and that is a fact rather than a failure.
-        if (!uid) { setTenant(null); setRole(null); setStatus('ready'); setLoading(false); return; }
+        const who = uidFromAuth(whoRes);
+        if (who.fate !== null) {
+          if (who.fate === 'unreadable') {
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
+            reportError('tenant.load.auth', new Error('auth read unreadable — who is signed in could not be established'));
+            setStatus('error'); setLoading(false); return;
+          }
+          // Signed out: no tenant, and that is a fact rather than a failure.
+          forgetTenant(); setStatus('ready'); setLoading(false); return;
+        }
+        const uid = who.uid;
+        // ── A DIFFERENT ACCOUNT IS NOT A RE-READ ───────────────────────────
+        //
+        // Dropped on the way IN, before the reads below land and whatever they
+        // decide — the rule src/lib/accountScopedState.ts states, applied to
+        // React state. Without it, an owner switching accounts whose profile
+        // or tenant read then failed kept the PREVIOUS gym on screen: its name,
+        // its session fee and its currency, under a status that only says the
+        // answer is unconfirmed. `updateTenant` writes to `tenant.id`, so that
+        // stale row is also the row a Save would have aimed at — refused by
+        // `tenants_owner_rw`, and refused is not the same as never sent.
+        //
+        // The same account refreshing keeps what is on screen, so a pull-down
+        // does not blank the gym for a frame.
+        if (whoRef.current && whoRef.current !== uid) forgetTenant();
+        whoRef.current = uid;
 
-        const { data: prof, error: profErr } = await supabase
-          .from('profiles').select('role, tenant_id').eq('id', uid).maybeSingle();
+        // ONE read of this row per launch, shared with the three other
+        // providers that were each reading it for their own columns — and it is
+        // still this provider that decides what a failure here means. See
+        // src/ui/myProfile.ts; the outcome carries the error rather than a null
+        // row, which is what keeps the check below able to tell "refused" from
+        // "this user has no gym".
+        const profOut = await readMyProfileRow(uid);
         if (cancelled) return;
         // Without this check a refused read fell through as prof = null, which
         // the tid line below reads as "this user has no gym".
-        if (profErr) { reportError('tenant.load.profile', profErr); setStatus('error'); setLoading(false); return; }
+        if (!profOut.ok) { reportError('tenant.load.profile', profOut.error); setStatus('error'); setLoading(false); return; }
+        const prof = profOut.value;
         setRole(prof?.role ?? null);
 
         // Whose gym is this, and is it ours to be showing? Asked through an
@@ -271,7 +366,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         if (!tid) { setTenant(null); setStatus('ready'); setLoading(false); return; }
 
         const { data: t, error: tErr } = await supabase
-          .from('tenants').select('id, name, brand_color, plan, session_fee, currency').eq('id', tid).maybeSingle();
+          .from('tenants').select('id, name, brand_color, plan, session_fee, currency, class_cancel_hours, class_cancel_fee').eq('id', tid).maybeSingle();
         if (cancelled) return;
         if (tErr) { reportError('tenant.load.tenant', tErr); setStatus('error'); setLoading(false); return; }
         setTenant(t ? {
@@ -280,12 +375,24 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           brandColor: t.brand_color ?? null,
           plan: t.plan ?? null,
           sessionFee: t.session_fee == null ? null : Number(t.session_fee),
+          // NaN becomes null rather than a figure a sentence would quote.
+          classCancelHours: t.class_cancel_hours == null || !Number.isFinite(Number(t.class_cancel_hours))
+            ? null : Number(t.class_cancel_hours),
+          classCancelFee: t.class_cancel_fee == null || !Number.isFinite(Number(t.class_cancel_fee))
+            ? null : Number(t.class_cancel_fee),
           currency: t.currency ?? null,
         } : null);
         setStatus('ready');
       } catch (e) {
+        // The tenant on screen is LEFT, which is what the other two failure
+        // exits above already do (`!profOut.ok`, `tErr`). This one alone blanked
+        // it, so one thrown request took the gym's name, session fee and
+        // currency off every owner screen at once — for a failure that
+        // established nothing about whether the gym is there. 'error' is what
+        // says the answer is unconfirmed; emptying the fields as well says it
+        // twice and loses the last good one doing it.
         reportError('tenant.load', e);
-        if (!cancelled) { setTenant(null); setStatus('error'); }
+        if (!cancelled) setStatus('error');
       }
       if (!cancelled) setLoading(false);
     })();
@@ -313,6 +420,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
     if (patch.sessionFee !== undefined) row.session_fee = patch.sessionFee;
+    // Null is a deliberate clear — an owner withdrawing a policy they had
+    // stated — and must reach the column as null rather than being skipped.
+    if (patch.classCancelHours !== undefined) row.class_cancel_hours = patch.classCancelHours;
+    if (patch.classCancelFee !== undefined) row.class_cancel_fee = patch.classCancelFee;
     // Currency was excluded from this type, and `updateTenant` is the ONLY
     // write to `tenants` in the repository — so nothing anywhere could set a
     // gym's currency. `provision_profile` inserts none and part 99 added no
@@ -365,8 +476,21 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     }
   }, [refresh]);
 
+  // Re-run this read when the signal comes back. Everything white-label hangs
+  // off this one — the gym's name, its logo, its CURRENCY — so a failure here
+  // is felt on every screen at once. src/lib/readRefresh.ts.
+  useRecoverRead('tenant', status, () => { void refresh(); });
+
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<TenantValue>(() => ({ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }), [tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency]);
   return (
-    <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

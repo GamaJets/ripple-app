@@ -230,9 +230,22 @@ ok(dayOf(new Date(2026, 7, 27, 23, 30).toISOString()) === '2026-08-27',
   'a late-evening timestamp belongs to the day it was local evening on, not to tomorrow in UTC');
 ok(dayOf(null) === null && dayOf('nonsense') === null, 'an unreadable date is null, not today');
 
-// ── the heading date is the day it says, in every zone ─────────────────────
-ok(dayLabel('2026-08-29') === '29 Aug', `a window's end reads as its own date, got ${dayLabel('2026-08-29')}`);
-ok(dayLabel('2026-08-01') === '1 Aug', `the first of the month must not read as the 31st of July, got ${dayLabel('2026-08-01')}`);
+// ── the heading date is the day it says, in every zone and every language ──
+//
+// The expectation is DERIVED, not typed. '29 Aug' was the old assertion and it
+// was asserting the implementation — a hardcoded English month array — rather
+// than the contract, which is "the 29th of August as this reader writes it".
+// Built here from a LOCALLY constructed 29 August through the same two fields
+// the heading asks for, so the day itself is pinned in all six zones
+// test:zones runs and the words stay the runner's own.
+{
+  const AUG29 = new Date(2026, 7, 29).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const AUG1 = new Date(2026, 7, 1).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const JUL31 = new Date(2026, 6, 31).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  ok(dayLabel('2026-08-29') === AUG29, `a window's end reads as its own date, got ${dayLabel('2026-08-29')}`);
+  ok(dayLabel('2026-08-01') === AUG1, `the first of the month reads as the first, got ${dayLabel('2026-08-01')}`);
+  ok(dayLabel('2026-08-01') !== JUL31, 'and never as the 31st of July, which is what UTC midnight would make it');
+}
 ok(dayLabel('') === '—', 'and an unreadable one is a dash rather than an invented day');
 
 if (errors.length) {

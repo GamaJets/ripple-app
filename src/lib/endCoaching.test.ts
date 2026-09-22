@@ -15,15 +15,18 @@
 // package.json, and a header claiming a suite does not run tells the next reader
 // that nothing is watching this file.
 import {
-  coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage,
+  coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage, replaceCoachNote,
   departureTally, departureLine, END_REASON_LABEL,
   END_REASONS, CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE,
   CLIENT_END_EXPLAINER, clientEndConfirmBody, clientEndOutcomeLine,
-  type EndCoachingResult, type EndedRelationship,
+  endReasonPrompt, END_RECORD_UNREADABLE, END_REASON_NOTE, endNoteLine,
+  type EndCoachingResult, type EndedRelationship, type EndRecord,
 } from './endCoaching';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+const eq = (a: unknown, b: unknown, msg: string) =>
+  ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 // ── the coach's name is never invented, and never rendered as a bug ──
 //
@@ -228,6 +231,94 @@ const lost = clientEndOutcomeLine(true, true, false);
 ok(/could not be recorded/i.test(lost), 'a reason that did not save says so');
 ok(/ending itself did happen/i.test(lost), 'and does not leave the member wondering whether they left');
 ok(!/passed on to them/i.test(lost), 'and never claims the coach was told');
+
+/* ── asking a second coach ───────────────────────────────────────────────── */
+//
+// `link_coaching` ends every other active relationship, so a member browsing
+// the directory while already coached is one accept away from losing the coach
+// they have. The screen offered three buttons and said none of this.
+
+{
+  const note = replaceCoachNote('Dana Ruiz', 'Sam Okafor');
+  ok(note.includes('Dana Ruiz') && note.includes('Sam Okafor'), 'both coaches are named');
+  ok(/stops coaching you/.test(note), 'and what happens to the first one is stated, not implied');
+  ok(/not cancelled/.test(note), 'a booked session is not claimed to be cancelled by this');
+  ok(/Nothing changes until/.test(note), 'and nothing is described as having happened yet');
+  ok(!/refund|charged|fee/i.test(note), 'no claim is made about money this app does not move');
+
+  const anon = replaceCoachNote(null, '   ');
+  ok(!/null|undefined/.test(anon), 'an unread name leaves no hole');
+  ok((anon.match(/your coach/g) || []).length >= 2, 'both fall back to a description rather than a blank');
+}
+
+/* ── "we could not read it" is not "there is nothing to read" ────────────────
+ *
+ * `fetchEndRecord` answered `null` for both — a refused read, a database with
+ * no `end_reason` column, an empty id, AND `maybeSingle()` finding no ended
+ * relationship because the coaching is still running. `endReasonPrompt` is the
+ * only thing that consumes that value, and it read every one of them as a
+ * failure. Harmless while nothing calls it; wrong the first time something
+ * does, and wrong in the direction that sends a coach looking for a fault in a
+ * relationship that is perfectly intact.
+ */
+{
+  const unread = endReasonPrompt(END_RECORD_UNREADABLE);
+  ok(/could not be read/.test(unread), 'a read that failed says so');
+  ok(/not "nothing was recorded"/.test(unread),
+    'and says out loud that it is not the same claim as an empty record');
+
+  const noEnding = endReasonPrompt(null);
+  ok(!/could not be read/.test(noEnding),
+    'a read that worked and found no ended relationship is not reported as a failure');
+  ok(/has ended/.test(noEnding), 'it says what it actually found');
+  ok(noEnding !== unread, 'the two nulls that used to share a sentence no longer do');
+
+  const rec: EndRecord = {
+    reason: null, note: null, recordedByMe: null, endedByMe: null, endedAt: null,
+  };
+  const unrecorded = endReasonPrompt(rec);
+  ok(/Nothing was recorded about why/.test(unrecorded),
+    'an ending nobody explained is the one the coach can still go and ask about');
+  ok(unrecorded !== noEnding && unrecorded !== unread,
+    'and is a third sentence, because it is a third fact');
+
+  eq(endReasonPrompt({ ...rec, reason: 'cost' }), END_REASON_NOTE.cost,
+    'a recorded reason gets its own line and none of the three silences');
+}
+
+/* ── the words, as opposed to the bucket ──────────────────────────────────── */
+
+// The whole point of the feature: a coach reading a tally has the category and
+// not the sentence. This is the sentence, and it is quoted because it is
+// somebody else's writing.
+{
+  const rec = { reason: 'cost', note: 'The 6am slot stopped working when I changed jobs.', recordedByMe: false, endedByMe: false, endedAt: null } as const;
+  const line = endNoteLine(rec);
+  ok(line.includes('6am slot'), 'the note is returned');
+  ok(/^\u201c/.test(line) && /\u201d$/.test(line), 'and is quoted, so it never reads as our own summary');
+  ok(line !== END_REASON_NOTE.cost, 'it is not the category blurb wearing the note\u2019s place');
+}
+
+// A reason with nothing typed beside it is its own answer, not a blank.
+{
+  const line = endNoteLine({ reason: 'cost', note: null, recordedByMe: false, endedByMe: null, endedAt: null });
+  ok(/wrote nothing/.test(line), 'an absent note is stated rather than left empty');
+  ok(!/\u201c/.test(line), 'and nothing is quoted, because nothing was said');
+}
+
+// 'unsaid' is the one category where an empty note is the MEANING rather than
+// an omission, and saying "they wrote nothing" over it would be redundant and
+// slightly accusatory.
+{
+  const line = endNoteLine({ reason: 'unsaid', note: null, recordedByMe: false, endedByMe: null, endedAt: null });
+  ok(/chose not to say/.test(line), 'declining to say is reported as a choice');
+  ok(!/wrote nothing beside/.test(line), 'and not as a missing note');
+}
+
+// A note on 'unsaid' still wins: somebody who declined a category and then
+// typed a sentence has said the thing that matters.
+ok(endNoteLine({ reason: 'unsaid', note: 'I would rather not go into it, sorry.', recordedByMe: false, endedByMe: null, endedAt: null }).includes('rather not go into it'),
+  'a written note always outranks the category sentence');
 
 if (errors.length) {
   console.error(`endCoaching: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

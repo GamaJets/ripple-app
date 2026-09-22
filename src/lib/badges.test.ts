@@ -24,6 +24,14 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 const day = (n: number) => `2026-03-${String(n).padStart(2, '0')}T10:00:00.000Z`;
+/** The nth DISTINCT calendar day, counting on past the end of a month — the
+ *  fixtures below need more than twenty-eight of them and `day()` cannot make
+ *  one. Midday local, so no zone can shift a fixture onto its neighbour. */
+const dayN = (n: number) => {
+  const d = new Date(2026, 0, 1, 12, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d.toISOString();
+};
 const entry = (over: Partial<WorkoutEntry> & { t: string }): WorkoutEntry => ({
   id: over.t + (over.exercise ?? ''),
   exercise: 'Bench Press',
@@ -66,10 +74,42 @@ const zero = badgeFigures([]);
     'AN INCOMPLETE READ IS NOT — "locked" there revokes a badge somebody already has');
   // Earned survives both, because every threshold under-counts and never over-
   // counts: fifty sessions found in a truncated read really are fifty sessions.
-  const many = badgeFigures(Array.from({ length: 50 }, (_, i) => entry({ t: day((i % 28) + 1) + `#${i}` })));
-  eq(badgeState('fifty-club', many, true), 'earned', 'fifty sessions is fifty sessions');
+  const many = badgeFigures(Array.from({ length: 50 }, (_, i) => entry({ t: dayN(i) })));
+  eq(badgeState('fifty-club', many, true), 'earned', 'fifty training days is fifty training days');
   eq(badgeState('fifty-club', many, false), 'earned',
     'and it stays earned on a partial read, because the count can only be short');
+}
+
+// ── the unit these two badges count in, which is DAYS and not rows ────────
+//
+// This app writes one `workouts` row per EXERCISE. src/lib/streaks.ts holds the
+// production case: one member's 17 August is seven rows with seven distinct
+// timestamps — one visit, saved as they went. So `log.length` said "Ten
+// Sessions" after two gym visits and "Fifty sessions logged." after about
+// eight, in a notification, to somebody who had done neither.
+{
+  // Fifty movements in ONE day. Under the old row count this was Fifty Club.
+  const oneBigDay = badgeFigures(
+    Array.from({ length: 50 }, (_, i) => entry({ t: day(1), exercise: `Lift ${i}` })),
+  );
+  eq(oneBigDay.trainingDays, 1, 'fifty exercises on one day is one day of training, not fifty');
+  eq(badgeMet('ten-sessions', oneBigDay), false,
+    'so Ten Sessions is not met by one long session — the badge would have said "Ten sessions logged."');
+  eq(badgeMet('fifty-club', oneBigDay), false, 'and neither is Fifty Club');
+  eq(badgeMet('first-rep', oneBigDay), true, 'while First Rep, which really is about one, still is');
+
+  // Ten separate days, one movement each.
+  const tenDays = badgeFigures(Array.from({ length: 10 }, (_, i) => entry({ t: dayN(i) })));
+  eq(tenDays.trainingDays, 10, 'ten days is ten');
+  eq(badgeMet('ten-sessions', tenDays), true, 'ten days of training earns Ten Sessions — it is a floor on the sessions behind them');
+  eq(badgeMet('fifty-club', tenDays), false, 'and does not earn Fifty Club');
+
+  // Monotone, which is what lets 'earned' survive a truncated read.
+  const more = badgeFigures([
+    ...Array.from({ length: 10 }, (_, i) => entry({ t: dayN(i) })),
+    entry({ t: dayN(10) }),
+  ]);
+  ok(more.trainingDays >= tenDays.trainingDays, 'adding entries can only add days, never remove one');
 }
 
 // ── the bodyweight gap, which is assertion 2 ─────────────────────────────
@@ -168,9 +208,56 @@ const zero = badgeFigures([]);
   eq(badgeAnnouncement('nope' as BadgeKey, 0), null, 'an unknown badge announces nothing rather than an empty banner');
 }
 
+/* ── a plank is not four and a half thousand repetitions ──────────────────
+ *
+ * This file's own loop resolved a load and multiplied it by whatever was in the
+ * reps column. For a hold that column is SECONDS, so one 45-second plank by an
+ * 80 kg member scored 3,600 kg and unlocked One Tonne on its own. A few of them
+ * unlocked Ten Tonnes. Badges meant to mark a year of lifting were handed out
+ * in a week.
+ */
+{
+  const at = '2026-03-02T10:00:00.000Z';
+  const weighed = [{ t: '2026-03-01T00:00:00.000Z', v: 80 }];
+  const plank = badgeFigures(
+    [{ t: at, exercise: 'Plank', sets: [[45, 0]], timed: [true], bw: [true] } as any],
+    weighed,
+  );
+  eq(plank.totalVolumeKg, 0, 'one plank is not 3,600 kg of lifting');
+  ok(!earnedKeys(plank).includes('one-tonne'), 'so a first plank does not unlock One Tonne');
+  ok(!earnedKeys(plank).includes('ten-tonnes'), 'and three of them do not unlock Ten Tonnes');
+  eq(plank.unpricedBodyweightSets, 0,
+    'nor is a hold reported as work we could not price — it is work this total is not about');
+
+  // A weighted hold is the same answer: 45 seconds under a 10 kg plate is not
+  // 450 kg either.
+  const weighted = badgeFigures(
+    [{ t: at, exercise: 'Plank', sets: [[45, 10]], timed: [true] } as any],
+    weighed,
+  );
+  eq(weighted.totalVolumeKg, 0, 'a weighted hold prices at nothing here too');
+
+  // And a real lift beside it still counts for exactly what it is.
+  const both = badgeFigures(
+    [
+      { t: at, exercise: 'Plank', sets: [[60, 20]], timed: [true] } as any,
+      { t: at, exercise: 'Squat', sets: [[5, 100]] } as any,
+    ],
+    weighed,
+  );
+  eq(both.totalVolumeKg, 500, 'the hold takes nothing from the squat and adds nothing to it');
+}
+
+
+// The exit-on-failure epilogue belongs LAST. It used to sit further up this
+// file, and everything appended below it ran with its failures collected into
+// `errors` and never read — the suite printed "ok" and exited 0 while real
+// assertions were failing. Found in sessionCredits.test.ts and swept for; this
+// file was one of three. Append new sections ABOVE this block.
 if (errors.length) {
   console.error(`badges.test.ts — ${errors.length} failures:`);
   for (const e of errors) console.error('  · ' + e);
   process.exit(1);
 }
+
 console.log('badges.test.ts — ok');

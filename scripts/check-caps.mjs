@@ -36,12 +36,16 @@
 //
 // ── the trap: half of this codebase's labels have no visible case ──────────
 //
-// `ty.micro` in src/theme/scale.ts carries `textTransform: 'uppercase'`. Every
-// string under it renders in capitals whichever way it is typed, so its source
-// casing is invisible and correcting it is churn with no user-visible effect.
-// That covers a LOT of ground: <SectionHead title>, <Hero label>, <Field label>,
-// <Notice kicker>, <ActionCard ringLabel/ringNote>, <QuickRow> — six of the
-// kit's slots. The naive version of this check flagged 122 of these and 17 real
+// `ty.micro` in src/theme/scale.ts carried `textTransform: 'uppercase'` until
+// 19 Sep 2026 — every string under it rendered in capitals whichever way it was
+// typed, so its source casing was invisible and correcting it was churn. It is a
+// bold title-case label now (the approved board has no tracked uppercase), and
+// its strings are left to their authors here for the same practical reason: the
+// slots it fills are kickers and section titles written as short phrases.
+// That covers a LOT of ground: <Hero label>, <Field label>, <Notice kicker>,
+// <ActionCard ringLabel/ringNote>, <QuickRow> — five of the kit's slots, and
+// until round 4 a sixth, <SectionHead title>, which is ty.head now (see the note
+// under MICRO for where that leaves it). The naive version of this check flagged 122 of these and 17 real
 // ones; the 122 are why nobody would have run it twice.
 //
 // The console has the same trap pointing the other way. The rail in
@@ -110,6 +114,7 @@
 // Nothing here is a spell-checker for prose, and it must not become one.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
 // Rules 1 and 3 are about src/ui/kit.tsx's slots and the faces they render in,
@@ -126,10 +131,46 @@ const ALL_ROOTS = [...APP_ROOTS, 'studio-web/app', 'studio-web/components'];
  * Adding a component here is a claim that its text renders as typed.
  */
 const VISIBLE = new Map([
-  ['Cta', ['label']],            // ty.label — kit.tsx:427
-  ['Ghost', ['label']],          // ty.label — kit.tsx:526
-  ['ListRow', ['title']],        // ty.body  — kit.tsx:401
+  ['Cta', ['label']],            // ty.button when wide, ty.label inline
+  ['Ghost', ['label']],          // ty.label
+  ['ListRow', ['title']],        // ty.head
+  ['PageHead', ['title']],       // ty.page — the centred page head
+  // The approved mockups' parts. Each is a LABEL — a button, a chip, the name
+  // under a ring or over a bar, a tile's caption — in a face that draws what
+  // was typed, so each is held to Title Case from its first call site. Two
+  // things this cannot see, as with ActionBlock below: `cta={{ label }}` on
+  // HeroCard is an object literal, and a DayBars/Donut/Legend label lives in
+  // an array. <HeroCard eyebrow> is deliberately absent: it is the one slot
+  // set in tracked capitals, its caller types the capitals ("TODAY · WEEK 1 OF
+  // 12"), and Title Case is the wrong rule for it.
+  ['CtaBright', ['label']],      // ty.button
+  ['HeroCard', ['title']],       // ty.display
+  ['TonedChip', ['label']],      // ty.micro at 700
+  ['KpiTile', ['label']],        // ty.micro
+  ['MiniRing', ['label']],       // ty.micro
+  ['Meter', ['label']],          // ty.caption at 700
   ['ActionCard', ['title', 'cta']], // ty.body kit.tsx:380, and cta is a <Cta>
+  // The data-layout shapes (round 4). Each of these is a HEADING over a card —
+  // ty.head, the face SectionHead's title now uses — and every call site that
+  // exists was written Title Case, so they start held to it rather than being
+  // swept later. What this cannot see: `cta={{ label: '…' }}` on ActionBlock,
+  // `action={{ label }}` on AttentionRow and the `options` of Segmented are
+  // object literals, not attributes, and ATTR below reads attributes. Those
+  // labels reach the screen through <Cta>, <Ghost> and a tab, all Title Case
+  // by the same house rule, and nothing here checks that they are.
+  // <SyncBadge label> is deliberately NOT here. The badge's own four words are
+  // Title Case ("Waiting to Send", "Not Sent"), but `label` is the slot for a
+  // row that can say more, and the first two callers both wrote a sentence in
+  // it — "Marked on this phone · waiting to send" — which is the right thing to
+  // write there. Same standing as <Notice title>: case-visible, and prose.
+  ['FigureCard', ['title']],     // ty.section, through SectionHead
+  ['ActionBlock', ['title']],    // ty.section
+  ['Expandable', ['title']],     // ty.head
+  // Swept 21 Sep 2026 on the owner's word ("a global capitalization as well as
+  // a title capitalization for everything"): every heading and its side note,
+  // "last 7 days" included. A title or note that is a whole sentence (it ends
+  // in a full stop, a ? or a !) is prose and not judged; see notTitleCase.
+  ['SectionHead', ['title', 'note']],
 ]);
 
 /**
@@ -138,13 +179,27 @@ const VISIBLE = new Map([
  * their absence above.
  */
 const MICRO = new Map([
-  ['SectionHead', ['title']],    // kit.tsx:87
-  ['Hero', ['label']],           // kit.tsx:143
   ['Field', ['label']],          // kit.tsx:491
   ['Notice', ['kicker']],        // kit.tsx:850
   ['ActionCard', ['ringLabel', 'ringNote']], // kit.tsx:369, 373
 ]);
 
+// <SectionHead title> WAS in MICRO and is in neither list now. Round 4 raised it
+// from ty.micro to ty.head in t.ink — a tester could not find the subheadings —
+// so it is case-visible at 17pt bold and MICRO would be a false statement about
+// it. It is not in VISIBLE either, and the reason is a count: tried there, rule 1
+// flags 30 of the 718 call sites, and they are not 30 typos. About half are
+// sentences standing where a heading goes, the way <Notice title> does below —
+// "Could not read your history", "Have a code from your coach?", "Sign in to
+// see this" — and Title Casing those is the over-correction this file exists
+// not to make. The other half are real headings in sentence case ("Your ad
+// accounts", "6-month forecast", "Spent, by code") and DO want the edit; they
+// sit in screens that were mid-change when this was written. The honest state
+// is therefore "unread", said here, rather than a rule that cannot tell the two
+// halves apart. The way back in is the sweep: capitalise the real headings,
+// move the sentences to a <Notice> or a body line, then add
+// ['SectionHead', ['title']] to VISIBLE. <FigureCard title> is already held.
+//
 // <Notice title> is ty.head and IS case-visible, but it is deliberately a
 // sentence everywhere it is used — "Your clients could not be read" x12, "We
 // couldn't read your training log" x7 — so it is prose and rule 1 leaves it
@@ -223,6 +278,18 @@ function walk(dir, out = []) {
 const appFiles = APP_ROOTS.flatMap((r) => walk(join(ROOT, r)));
 const allFiles = [...new Set(ALL_ROOTS.flatMap((r) => walk(join(ROOT, r))))];
 
+/* ── the empty-set guard ──────────────────────────────────────────────────
+ *
+ * There was none. `scripts/check-text.mjs:85` calls this "the empty-set guard
+ * every gate here has" — this was one of the two that did not have one, and it
+ * would have printed `caps ok — 0 files; 0 case-visible labels, no sibling run
+ * disagrees with itself` and exited 0 over a tree with the roots renamed.
+ * Counted per root; see scripts/gate-floor.mjs.
+ */
+assertRootFloors('check:caps', Object.fromEntries(
+  ALL_ROOTS.map((r) => [r, walk(join(ROOT, r)).length]),
+));
+
 /* ── the casing test ──────────────────────────────────────────────────────── */
 
 /** The bare word: quotes, brackets and trailing punctuation stripped off. */
@@ -247,6 +314,7 @@ function judged(text) {
 /** Every word of `text` that breaks Title Case, or [] if it holds. */
 function notTitleCase(text) {
   const bad = [];
+  if (/[.!?…]$/.test(text.trim())) return bad; // a sentence, which is prose
   for (const { i, w } of judged(text)) {
     if (fixedCase(w)) continue;
     if (!/^[a-z]/.test(w)) continue;

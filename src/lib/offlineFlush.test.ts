@@ -21,7 +21,15 @@
 //      register from an effect that re-runs on every auth revision. Registering
 //      by key has to REPLACE, and an unregister from a later unmount must not
 //      delete a registration that has already been taken over.
-import { flushAll, flusherCount, isFlushing, registerFlush, resetFlushers } from './offlineQueue';
+import {
+  MAX_FLUSH_PASSES, flushAll, flushAllOrJoin, flusherCount, isFlushing, registerFlush, resetFlushers,
+} from './offlineQueue';
+
+// Failed until it is proved otherwise. Every assertion here is about a promise
+// that may never settle, and a suite that starts at 0 reports a hang as a pass:
+// node exits quietly the moment the loop drains, with nothing printed and
+// nothing checked. Cleared on the last line of `run`.
+process.exitCode = 1;
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -97,6 +105,68 @@ async function run() {
     eq(passes, 2, 'three overlapping triggers collapse to one follow-up pass, not three');
   }
 
+  /* ── 5 · the pass that asks for itself ───────────────────────────────── *
+   *
+   * `askedAgain` had no ceiling, and there is a path from inside a flusher
+   * straight back into `flushAll`: a provider's write SUCCEEDS, `noteReached`
+   * flips the app from offline to online, the reconnect edge fires, and
+   * src/ui/offlineFlush.tsx's subscriber flushes. On a connection that keeps
+   * flipping — a stairwell out of a basement — that is a loop with no exit,
+   * re-offering every unsent write on every turn of it. Each re-offer of a
+   * write that timed out is a chance at a second copy of somebody's session.  */
+  {
+    resetFlushers();
+    let passes = 0;
+    registerFlush('workouts', () => {
+      passes += 1;
+      // The reconnect edge, raised by this flusher's own successful write.
+      if (passes < 50) void flushAll();
+    });
+    await flushAll();
+    eq(passes, MAX_FLUSH_PASSES, 'a flusher that re-enters the flush cannot make it run for ever');
+    ok(!isFlushing(), 'and the flight ends rather than holding the latch open');
+  }
+
+  /* ── 6 · two subscribers to one event are one flush ──────────────────── *
+   *
+   * src/ui/offlineFlush.tsx and src/lib/readRefresh.ts are BOTH wired to the
+   * reconnect edge and both to AppState, and `refreshStale` flushes before it
+   * re-reads. With `flushAll` on both sides every one of those events ran every
+   * provider's queue twice, back to back, on the connection least able to
+   * afford it — and offering an ambiguous write twice is how one logged session
+   * becomes two rows nobody can tell apart. The second caller is not news; it
+   * is the same event, and it joins.                                          */
+  {
+    resetFlushers();
+    let passes = 0;
+    let release: () => void = () => {};
+    registerFlush('workouts', () => {
+      passes += 1;
+      return new Promise<void>((res) => { release = res; });
+    });
+
+    const fromOfflineFlush = flushAll();          // the root component's subscriber
+    await tick();
+    const fromRefreshStale = flushAllOrJoin();    // refreshStale, on the same edge
+    ok(fromOfflineFlush === fromRefreshStale, 'the second subscriber joins the pass in flight');
+    release();
+    // Driven with ticks rather than by awaiting the flight, so that a build in
+    // which the join books a second pass FAILS here rather than hanging: the
+    // second pass would replace `release` with a promise nobody resolves.
+    await tick(); await tick(); await tick();
+    eq(passes, 1, 'one reconnect edge offers each queue once, not twice');
+    release();
+    await fromOfflineFlush;
+  }
+
+  {
+    resetFlushers();
+    let passes = 0;
+    registerFlush('workouts', () => { passes += 1; });
+    await flushAllOrJoin();
+    eq(passes, 1, 'and with nothing in flight it is an ordinary flush');
+  }
+
   /* ── a flush with nothing registered is not an error ─────────────────── */
   {
     resetFlushers();
@@ -110,6 +180,7 @@ async function run() {
     process.exit(1);
   }
   console.log('offlineFlush: ok');
+  process.exitCode = 0;
 }
 
 void run().catch((e) => { console.error(e); process.exit(1); });

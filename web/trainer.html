@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: light)">
 <title>Repple Coach — your whole book in one place</title>
   <link rel="canonical" href="https://www.repplefitness.com/trainer">
-<meta name="description" content="Clients, programmes, schedule, videos and the numbers behind them, in the place you already look. Repple Coach is the working record for personal trainers.">
+<meta name="description" content="Clients, programs, schedule, videos and the numbers behind them, in the place you already look. Repple Coach is the working record for personal trainers.">
 <meta property="og:title" content="Repple Coach — your whole book in one place">
-<meta property="og:description" content="Every client, programme, session and check-in in one book — instead of four apps and a notes file.">
+<meta property="og:description" content="Every client, program, session and check-in in one book — instead of four apps and a notes file.">
 <meta property="og:url" content="https://www.repplefitness.com/trainer">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og-coach.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple Coach app icon beside the words “Repple Coach — clients, programs, schedule and check-ins in one book instead of four apps.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="audience-redesign.css?v=82df941359">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,20 +77,30 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body class="tone-coach">
+<body class="tone-coach audience-page audience-coach">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#0d0a26" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#0d0a26"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer" aria-current="page">Coaches</a>
@@ -67,7 +117,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <section class="hero" id="repple-coach-for-the-trainer">
   <div class="wrap">
@@ -77,30 +127,33 @@ addEventListener('DOMContentLoaded', function () {
         <h1 class="display">Your whole book,<br>in one <em>place</em>.</h1>
         <p class="lede after-sm">
           Most coaches run on a spreadsheet, a calendar, a chat app and a memory. Repple Coach
-          puts the clients, the programmes, the schedule and the sessions in one book — and puts
+          puts the clients, the programs, the schedule and the sessions in one book — and puts
           the handful of people who need you this week at the top of it, rather than all of them
           at once.
         </p>
 
+    <!-- Present for the document outline, not for the eye: this page went h1 → h3
+         and a screen reader was told a level was missing at the top of it. -->
+    <h2 class="vh">Get Repple Coach</h2>
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Coach app icon" focusable="false">
-          <defs><linearGradient id="tile-coach-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#4338ca"/></linearGradient></defs>
-          <rect width="1024" height="1024" rx="220" fill="url(#tile-coach-top)"/>
-          <g stroke="#fff" fill="#fff">
-            <circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/>
-            <circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/>
-            <circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/>
-            <circle cx="512" cy="512" r="52"/>
-          </g>
-        </svg>
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><rect width="1024" height="1024" rx="220" fill="#0c1210"/><g transform="translate(182 374.5) scale(2.75)"><path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12" fill="none" stroke="#fff" stroke-width="24" stroke-linejoin="round"/><path fill="#fff" d="M38 62H70L112 100H78Z"/><g fill="#665fe8" transform="translate(124 0)"><path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/></g></g></svg>
         <div class="who">
           <h3>Repple Coach</h3>
           <p class="role">For personal trainers and coaches</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
           </div>
+          <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
+            Not on the stores yet &mdash; each button is that app&rsquo;s permanent address and opens the
+            moment its listing publishes. <a href="/signup">Create your account</a> today and sign in when it lands.
+          </p>
         </div>
       </div>
     </div>
@@ -108,6 +161,7 @@ addEventListener('DOMContentLoaded', function () {
         <div class="btn-row">
           <a class="btn primary" href="/signup">Create an account</a>
           <a class="btn" href="#tabs">What the app does</a>
+          <a class="btn" href="/coach-setup">Setting up, step by step</a>
         </div>
       </div>
 
@@ -138,11 +192,11 @@ addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
     </div>
-      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#tabs">The app</a></li>
       <li><a href="#the-roster">The roster</a></li>
       <li><a href="#one-client">One client</a></li>
-      <li><a href="#programmes">Programmes</a></li>
+      <li><a href="#programs">Programs</a></li>
       <li><a href="#the-week">The week</a></li>
       <li><a href="#what-happened">What happened</a></li>
       <li><a href="#straight-about-limits">Straight about limits</a></li>
@@ -163,39 +217,40 @@ addEventListener('DOMContentLoaded', function () {
         longer way of getting it wrong.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-ctabs">
       <table class="data">
+        <caption class="vh" id="tbl-ctabs">The six tabs in Repple Coach, and what each one is for</caption>
         <thead>
-          <tr><th>Tab</th><th>What it is for</th><th>What you do there</th></tr>
+          <tr><th scope="col">Tab</th><th scope="col">What it is for</th><th scope="col">What you do there</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Clients</strong></td>
+            <th scope="row"><strong>Clients</strong></th>
             <td>Your roster, and who needs you today.</td>
             <td>Add client enters someone by hand. Invite by email records an invitation they pick up when they sign in. Segments split the roster by at-risk, online, in-person and any tag you have made. Suggested check-ins surfaces the clients who have gone quiet.</td>
           </tr>
           <tr>
-            <td><strong>Programs</strong></td>
+            <th scope="row"><strong>Programs</strong></th>
             <td>Build a week of training and assign it.</td>
-            <td>Start from a template, or add training days and build from scratch. Assign to client pushes the programme into that client's Train tab. Save any programme you like as a template to reuse — and revert a client to their auto-generated plan whenever you want.</td>
+            <td>Start from a template, or add training days and build from scratch. Assign to client pushes the program into that client's Train tab. Save any program you like as a template to reuse — and revert a client to their auto-generated plan whenever you want.</td>
           </tr>
           <tr>
-            <td><strong>Schedule</strong></td>
+            <th scope="row"><strong>Schedule</strong></th>
             <td>Your coaching week.</td>
             <td>Add a session books a client, or opens a slot they can book themselves. Weekly availability sets the times you offer and generates open slots four weeks ahead. Group classes schedules classes across your branches and checks members in.</td>
           </tr>
           <tr>
-            <td><strong>Videos</strong></td>
-            <td>The clips your clients see inside their programme.</td>
+            <th scope="row"><strong>Videos</strong></th>
+            <td>The clips your clients see inside their program.</td>
             <td>Record a clip on the phone, upload one, or paste a hosted link. Each clip carries an exercise name, and it plays against that movement for every client who has it — in the session, not in a folder somewhere.</td>
           </tr>
           <tr>
-            <td><strong>Analytics</strong></td>
+            <th scope="row"><strong>Analytics</strong></th>
             <td>How the coaching business is actually going.</td>
             <td>Sessions run this month, valued at the rate on your profile. Roster health split into on track, watch and at risk. Your own revenue and client targets. Figures stay empty until there is real activity behind them.</td>
           </tr>
           <tr>
-            <td><strong>Profile</strong></td>
+            <th scope="row"><strong>Profile</strong></th>
             <td>How clients see you.</td>
             <td>Photo, tagline, bio, specialties, what you offer and your session rate, with a live preview of the card a client reads. One switch lists you in Find a Trainer; it is off until you turn it on.</td>
           </tr>
@@ -222,7 +277,7 @@ addEventListener('DOMContentLoaded', function () {
           adherence drops below 80 per cent, or when nothing at all has been logged for two days —
           and it says which of the two it is, so you open the conversation knowing what to ask.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Adherence, from their own check-in</strong> — the weekly rating they gave, turned into a percentage. A client who has never checked in has no adherence at all, and is not quietly counted as perfect.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -230,7 +285,7 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Segments you make yourself</strong> — at-risk, online and in-person are built in; add your own tags and each becomes a filter, with a count.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Act on a whole segment</strong> — message everyone in it, or assign one programme template to all of them, without opening eighteen records.</span></li>
+            <span><strong>Act on a whole segment</strong> — message everyone in it, or assign one program template to all of them, without opening eighteen records.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Requests from people looking for a coach</strong> — if you have listed yourself, requests arrive as a card with accept and decline on it. Accepting is what adds them to the roster.</span></li>
         </ul>
@@ -266,7 +321,7 @@ addEventListener('DOMContentLoaded', function () {
             <text class="cx-lab" x="0" y="210">No check-ins yet</text>
             <text class="cx-ax" x="560" y="210" text-anchor="end">in none of the three</text>
           </svg>
-          <ul class="legend">
+          <ul class="legend" role="list">
             <li><span class="sw f-hi"></span>On track <span class="n">9</span></li>
             <li><span class="sw f-mid"></span>Watch <span class="n">4</span></li>
             <li><span class="sw f-lo"></span>At risk <span class="n">3</span></li>
@@ -296,13 +351,13 @@ addEventListener('DOMContentLoaded', function () {
           logged sessions, their loads, their scans, their measurements, their meals if they share
           them — and the notes and feedback you have already given them, on the same timeline.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Body composition, segment by segment</strong> — fat and lean mass, body water, protein and minerals, and lean mass in each arm, the trunk and each leg, read from their InBody scans.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Left–right imbalance, called out</strong> — when one side is a tenth behind the other, the screen names it and tells you to cue the weaker side, instead of leaving you to spot it in a column of numbers.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Injuries they disclosed</strong> — held with the client, and the plan flags and swaps movements that load those areas until they mark it recovered. Guidance, not medical advice.</span></li>
+            <span><strong>Injuries they disclosed</strong> — held with the client, and the plan flags and swaps movements that load those areas until they mark it recovered. You get the area and the severity; the note they wrote and any document they uploaded stay with them and are not yours to read. Guidance, not medical advice.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Two kinds of note</strong> — feedback the client reads, and private notes only you can see. Both land on the same timeline, newest first, so the history of a relationship is one list.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -365,11 +420,11 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </section>
 
-<!-- ── programmes, videos, nutrition ──────────────────────────────────── -->
-<section class="band tint" id="programmes">
+<!-- ── programs, videos, nutrition ──────────────────────────────────── -->
+<section class="band tint" id="programs">
   <div class="wrap">
     <div class="lead-in">
-      <div class="eyebrow">Programmes</div>
+      <div class="eyebrow">Programs</div>
       <h2 class="hd">Write it once.<br><span class="serif">Assign it many times.</span></h2>
       <p class="lede">
         Rebuilding the same block in a new document for every client is the largest unpaid job in
@@ -381,21 +436,22 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">Build</div>
         <h3>Days, exercises, sets and reps</h3>
-        <p>Add a training day, pick from a catalogue of 604 movements &mdash; searchable, filtered
-        by muscle group, each one illustrated &mdash; or type your own, which is added to the
+        <!-- site-claim: catalogue-figures -->
+        <p>Add a training day, pick from a catalogue of 608 movements &mdash; searchable, filtered
+        by muscle group, 601 of them illustrated &mdash; or type your own, which is added to the
         library rather than left as loose text. Set the sessions and the rep range. It is a
         structure you edit, not a document you retype.</p>
       </div>
       <div class="tile">
         <div class="cap">Assign</div>
         <h3>Straight into their Train tab</h3>
-        <p>Assigning pushes the programme into the app the client already opens. No export, no
+        <p>Assigning pushes the program into the app the client already opens. No export, no
         PDF, and no version of it that only you can see.</p>
       </div>
       <div class="tile">
         <div class="cap">Reuse</div>
         <h3>Save it as a template</h3>
-        <p>Any programme you like becomes a template, and a template can go to a whole segment at
+        <p>Any program you like becomes a template, and a template can go to a whole segment at
         once. The block you have refined over two years stops living in your head.</p>
       </div>
       <div class="tile">
@@ -411,6 +467,30 @@ addEventListener('DOMContentLoaded', function () {
         an exercise name and plays against that movement for every client who has it &mdash; and
         where you have not filmed one, the catalogue's own animation plays instead, so nobody is
         ever left reading a name and guessing.</p>
+      </div>
+      <!-- The twelve methods and their rest behaviour are SET_METHODS in
+           src/lib/setMethods.ts; the picker is imported at
+           app/(trainer)/builder.tsx and the runner at app/(client)/workouts.tsx.
+           Warm-up and Cool-down carry countsToVolume: false; Drop set carries
+           restsAfter: false; Rest-pause and Cluster carry restsAfter: 15. -->
+      <div class="tile">
+        <div class="cap">Prescribe</div>
+        <h3>Twelve ways to run a set</h3>
+        <p>Normal, warm-up, to failure, drop set, AMRAP, rest-pause, cluster, tempo, eccentric,
+        isometric hold, back-off and cool-down. Each one is a real instruction and not a label:
+        a warm-up and a cool-down do not count towards training volume, a drop set gets no rest
+        after it, and rest-pause and cluster sets get fifteen seconds &mdash; the client's timer
+        obeys what you picked.</p>
+      </div>
+      <!-- groupLabel() in src/lib/setGroups.ts: >=4 "Giant set", 3 "Tri-set",
+           otherwise "Superset". The badge text is "Superset · 2 of 2". -->
+      <div class="tile">
+        <div class="cap">Pair</div>
+        <h3>The name follows the count</h3>
+        <p>Mark the exercises that run back to back and the app names the group itself: two is a
+        superset, three a tri-set, four or more a giant set. You never pick the word, so a
+        &ldquo;superset&rdquo; on a client's screen can never turn out to hold four movements.
+        Drag one out of a tri-set and it relabels itself on the way.</p>
       </div>
       <div class="tile">
         <div class="cap">Adjust</div>
@@ -438,7 +518,7 @@ addEventListener('DOMContentLoaded', function () {
           One-to-ones and group classes on a single timetable, with the month in view and the day
           you tapped underneath it. Tap a booking and you are already in that client's record.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Book them, or let them book you</strong> — add a session against a client, or open a slot they can take. Weekly availability generates those open slots four weeks ahead in one go.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -500,11 +580,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Twelve weeks</span>
-          <h3>Booked against marked as gone ahead</h3>
+          <h3 id="chart-booked-against-marked-as-gone">Booked against marked as gone ahead</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-booked-against-marked-as-gone">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Grouped bar chart comparing sessions booked with sessions marked as gone ahead across twelve weeks. Booked runs between seventeen and twenty-six a week, and the marked bar trails it by two or three every week. Across the twelve weeks 261 sessions were booked and 231 were marked as gone ahead.">
           <line class="cx-base" x1="56" y1="232" x2="716" y2="232"/>
           <line class="cx-grid" x1="56" y1="180" x2="716" y2="180"/>
@@ -556,7 +636,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="70" y="285">261 booked · 231 marked as gone ahead · 30 no-shows, cancellations and sessions nobody has marked</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw s-book"></span>Booked <span class="n">261</span></li>
         <li><span class="sw s-att"></span>Marked as gone ahead <span class="n">231</span></li>
       </ul>
@@ -567,7 +647,7 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -627,10 +707,21 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div class="tile">
         <div class="cap">Hand-added clients</div>
-        <h3>They have no Train tab yet</h3>
-        <p>A client you typed in is on your roster and in your schedule, but a programme assigned
-        to them is saved on your device only and a message cannot reach them until they join. Bulk
-        actions report how many actually landed.</p>
+        <h3>They have no Train tab at all</h3>
+        <p>A client you typed in is on your roster and in your schedule, and a program assigned
+        to them is <strong>refused</strong> &mdash; not queued, not held on your phone until they
+        join. There is no Train tab for it to land in, so the write is turned down and the app
+        names the reason. A message has nowhere to go either. Bulk actions name the clients they
+        could not reach rather than reporting a count that includes them.
+        <a href="/coach-setup#clients">What works and what does not.</a></p>
+      </div>
+      <div class="tile">
+        <div class="cap">Open slots</div>
+        <h3>Four weeks, on a button</h3>
+        <p>Generating bookable slots from your weekly hours fills the next four weeks, and nothing
+        in the app extends that window on its own. What it does instead is watch the end of it and
+        tell you when your last open slot is close, rather than letting you find out from a client
+        who could not book.</p>
       </div>
       <div class="tile">
         <div class="cap">Messages</div>
@@ -665,7 +756,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow">One account, whatever you are</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">One account, whatever you are</h2>
+        <div class="eyebrow" aria-hidden="true">One account, whatever you are</div>
         <p class="q">Coach at a gym on Tuesday,<br>train on your own on Thursday.</p>
         <p class="lede after-sm">
           The same login opens Repple Coach for your client book and Repple for your own training.
@@ -728,7 +826,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="rail">
         <div class="who">Before</div>
         <h3>Rewriting the same block</h3>
-        <p>Rebuilding a programme per client in a new document each time. Now: write it once, save it as a template, assign it to a whole segment, adjust per person.</p>
+        <p>Rebuilding a program per client in a new document each time. Now: write it once, save it as a template, assign it to a whole segment, adjust per person.</p>
       </div>
       <div class="rail">
         <div class="who">Before</div>
@@ -749,7 +847,7 @@ addEventListener('DOMContentLoaded', function () {
     <div class="faq">
       <details>
         <summary>Do I need to work at a gym?</summary>
-        <div class="a"><p>No. Bring your own clients and Repple Coach is simply your book — roster, programmes, schedule, videos and analytics all work without a gym anywhere near them. If you do coach inside a gym running Repple Studio, the outcomes you mark are what its payroll pays on, and the rest of your book stays yours.</p></div>
+        <div class="a"><p>No. Bring your own clients and Repple Coach is simply your book — roster, programs, schedule, videos and analytics all work without a gym anywhere near them. If you do coach inside a gym running Repple Studio, the outcomes you mark are what its payroll pays on, and the rest of your book stays yours.</p></div>
       </details>
       <details>
         <summary>How do clients actually get connected to me?</summary>
@@ -757,7 +855,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>What if a client never installs the app?</summary>
-        <div class="a"><p>They still sit on your roster and in your schedule, and you can keep notes and a programme against them. What does not work until they join is the part that needs their phone: a programme you assign is held on your device rather than in their Train tab, and messages cannot reach them. The app tells you that at the moment it happens rather than reporting a success it did not have.</p></div>
+        <div class="a"><p>They still sit on your roster and in your schedule, and you can keep notes and a program against them. What does not work until they join is the part that needs their phone: a program you assign is held on your device rather than in their Train tab, and messages cannot reach them. The app tells you that at the moment it happens rather than reporting a success it did not have.</p></div>
       </details>
       <details>
         <summary>What can I see of a client's data?</summary>
@@ -773,7 +871,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>What does it cost?</summary>
-        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how people actually use them than guess in advance. Creating an account costs nothing today. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that nothing is charged today.</p></div>
+        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how people actually use them than guess in advance. Creating an account costs nothing today. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that no subscription is charged today — the one live charge being 10% of anything sold through Repple’s own checkout.</p></div>
       </details>
     </div>
   </div>
@@ -787,12 +885,39 @@ addEventListener('DOMContentLoaded', function () {
     </p>
     <div class="btn-row">
       <a class="btn primary" href="/signup">Create an account</a>
+      <a class="btn" href="/coach-setup">What setting up involves</a>
       <a class="btn" href="mailto:support@repplefitness.com?subject=Repple%20Coach">Ask a question</a>
     
-        <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+        <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
+        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
         <a class="btn" href="/download">All three apps</a>
       </div>
+      <!-- The same caveat as the one under the badges at the top of this page, and
+           it is here because it was NOT. The 3 Sep 2026 sweep added it to the hero
+           and missed the closing call to action, so the last thing a reader saw on
+           this page was an "App Store" badge with nothing beside it — and on
+           13 Sep 2026 `itunes.apple.com/lookup` still answered `resultCount 0` for
+           all three ids and all three Play pages still returned 404. A badge reading
+           "Download on the App Store" over a link that 404s is a claim this site
+           cannot support; the sentence is what makes it one it can.
+
+           It says "not on the stores yet" and nothing about a release being under
+           way, which is the second thing 13 Sep changed. App Store Connect reports
+           the only version of each of the three apps as iOS 1.0 in appStoreState
+           PREPARE_FOR_SUBMISSION — nothing in review, nothing approved — so the
+           previous wording ("being released now", "still going live") was a claim
+           about motion that did not exist.
+
+           The href itself stays. It is the permanent address and starts working by
+           itself the moment the listing publishes — see docs/LAUNCH-CHECKLIST.md
+           section 2, which is also where the instruction to DELETE this caveat on
+           that day lives. Check N in scripts/check-site-claims.mjs refuses a store
+           badge on any page that has no caveat near it, so this cannot go missing
+           again by being forgotten in one place out of two. -->
+      <p class="tiny" style="margin:14px auto 0;max-width:58ch">
+        Not on the stores yet &mdash; each button is that app&rsquo;s permanent address and opens the
+        moment its listing publishes. <a href="/signup">Create your account</a> today and sign in when it lands.
+      </p>
   </div>
 </section>
 
@@ -803,30 +928,37 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#0d0a26" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#0d0a26"/>
-            </svg>
-          </span>
-          Repple
-        </a>
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+    </a>
         <p class="tiny">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
+        <h2 class="fh">Apps</h2>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Getting started</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>
@@ -834,17 +966,24 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

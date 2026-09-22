@@ -10,22 +10,45 @@
 // `src/lib/restaurant.ts` is a reference table of typical restaurant servings —
 // a lookup vocabulary, not a record of anything the client ate — so it stays.
 // Nothing is logged until they pick a dish, a portion, and tap Add.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
+import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useFoodLog } from '../../src/ui/foodLog';
+// The gesture DISH_MARK_UNKNOWN promises. That sentence — the one an allergic
+// member reads when their exclusions could not be read — ends "pull down to try
+// again", and this screen had no refreshControl, no `usePullToRefresh` and no
+// call to `cd.reload()` anywhere in it. So the instruction was dead: a member
+// pulled, nothing happened, and the reasonable conclusion from a dead gesture is
+// "I retried and it still cannot see my exclusions" rather than "the app never
+// asked". app/(client)/foodlog.tsx shows the same sentence over a ScrollView that
+// does have one, so this was an omission and not a house style.
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+// The exclusions the member set. This screen had no client-data surface at
+// all — `useFoodLog()` was the whole of it — so an app-wide "no shellfish"
+// governed the meal planner and nothing else, and this screen offered prawns
+// with a plus button beside them.
+import { useClientData } from '../../src/ui/clientData';
+// `dishMarkNotice`, not `cd.avoid.length`. An empty exclusion list and an
+// exclusion list that could not be read are the same value on this provider,
+// and drawing them the same way took the marks AND the caveat off the screen
+// together — which is the picture of a checked, clear menu.
+import { dishAllergens, dishAllergenMark, dishMarkNotice } from '../../src/lib/foodAllergens';
+import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, fig, IconPlate, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 
 export default function Restaurant() {
   const t = useTheme();
-  const router = useRouter();
   const fl = useFoodLog();
+  const cd = useClientData();
+  // `cd.reload()` alone: the exclusions are the only thing on this screen that a
+  // failed read can leave unstated, and the dish table is a local constant.
+  const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
   const [q, setQ] = useState('');
   const [cuisine, setCuisine] = useState<string | null>(null);
   const [sel, setSel] = useState<Dish | null>(null);
@@ -36,18 +59,24 @@ export default function Restaurant() {
     return cuisine ? base.filter((d) => d.cuisine === cuisine) : base;
   }, [q, cuisine]);
 
+  // Whether this screen knows the member's exclusions, and what it must say
+  // when it does not. `cd.profileStatus` is the read that fills `cd.avoid`.
+  const marks = dishMarkNotice(cd.profileStatus, cd.avoid.length);
+
   const est = sel ? estimateDish(sel, portion) : null;
+  const send = useSubmitOnce('restaurant.logIt');
+
   const logIt = async () => {
     if (!est) return;
     // Awaited and branched. This announced "added to today" whatever the
     // server said, including when it refused the row outright.
     const out = await fl.logFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
     if (out === 'refused') {
-      Alert.alert('Not logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here — try again in a moment.`);
+      Alert.alert('Not Logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here. Try again in a moment.`);
       return;
     }
     setSel(null); setPortion(1);
-    Alert.alert(out === 'unsent' ? 'Logged — waiting to send' : 'Logged',
+    Alert.alert(out === 'unsent' ? 'Logged, Waiting to Send' : 'Logged',
       `${est.name} · ${num(est.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
   };
 
@@ -55,24 +84,23 @@ export default function Restaurant() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Eating Out</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Eating Out" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-          Pick a dish for a macro estimate, set the portion, and log it. These are typical restaurant servings, not label data.
+        {/* The how-to came off the page — a search field over a list of dishes
+            explains itself. What stays is the caveat on every figure below,
+            which is data: an estimate, not a label. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
+          Typical restaurant servings, not label data.
         </Text>
 
         {/* ── the field is the screen ────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.lg, minHeight: 46, marginTop: sp.md }}>
           <Icon name="search" size={16} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Burrito, ramen, latte…" placeholderTextColor={t.ink3}
+            accessibilityLabel="Search dishes"
             style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
           {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
         </View>
@@ -80,35 +108,58 @@ export default function Restaurant() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
           <Pressable onPress={() => setCuisine(null)} accessibilityRole="button" accessibilityState={{ selected: cuisine === null }}
             style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: cuisine === null ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: cuisine === null ? '600' : '500', color: cuisine === null ? t.brandInk : t.ink2 }}>All</Text>
+            <Text style={{ ...ty.label, ...font(cuisine === null ? '600' : '500'), color: cuisine === null ? t.brandInk : t.ink2 }}>All</Text>
           </Pressable>
           {CUISINES.map((cz) => {
             const on = cuisine === cz;
             return (
               <Pressable key={cz} onPress={() => setCuisine(cz === cuisine ? null : cz)} accessibilityRole="button" accessibilityState={{ selected: on }}
                 style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{cz}</Text>
+                <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{cz}</Text>
               </Pressable>
             );
           })}
         </ScrollView>
 
         <Section>
-          <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} dish${results.length === 1 ? '' : 'es'}`} />
-          {results.map((d, i) => (
+          <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} Dish${results.length === 1 ? '' : 'es'}`} />
+          {/* The standing sentence, above the rows. Marks with no caveat read
+              the wrong way round: an allergic member takes an unmarked row as
+              cleared, and nothing here has cleared anything. */}
+          {marks.text ? (
+            <Flag tone={marks.state === 'unknown' ? t.crit : marks.state === 'checking' ? t.ink3 : t.warn}
+              style={{ marginBottom: sp.md }}>{marks.text}</Flag>
+          ) : null}
+          {results.map((d, i) => {
+            // Only when the exclusions were actually read. Marking against a
+            // list that is empty because nothing came back would put a mark on
+            // nothing and leave every other row looking cleared.
+            const inIt = marks.marked ? dishAllergens(d.name, cd.avoid) : [];
+            const mark = dishAllergenMark(inIt);
+            return (
             <View key={d.id}>
               {i > 0 ? <Rule /> : null}
-              <Pressable onPress={() => { setSel(d); setPortion(1); }} accessibilityRole="button" accessibilityLabel={d.name}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.name}</Text>
+              <Pressable onPress={() => { setSel(d); setPortion(1); }} accessibilityRole="button"
+                accessibilityLabel={mark ? `${d.name}. ${mark}` : d.name}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: sp.sm }}>
+                <IconPlate icon="meals" tone="amber" />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{d.name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{d.cuisine} · P{d.protein} C{d.carbs} F{d.fat}</Text>
+                  {/* The mark carries the tone; the words carry the meaning. */}
+                  {mark ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>{mark}</Text>
+                    </View>
+                  ) : null}
                 </View>
-                <Text style={{ ...value(18), color: t.ink }}>{num(d.kcal)}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+                {/* Calories are orange across the app, beside the word. */}
+                <TonedChip tone="orange" label={`${num(d.kcal)} kcal`} />
               </Pressable>
             </View>
-          ))}
+            );
+          })}
           {results.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <Icon name="search" size={26} color={t.ink3} />
@@ -121,18 +172,34 @@ export default function Restaurant() {
 
       {/* ── portion sheet ──────────────────────────────────────────────── */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
           {sel && est ? (
             <>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.cuisine} · portion estimate</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{sel.cuisine} · portion estimate</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 4, marginBottom: sp.lg }}>{sel.name}</Text>
+              {/* On the sheet with the Add button on it, not only in the list.
+                  This is the moment the dish goes into the member's day. */}
+              {marks.marked && dishAllergenMark(dishAllergens(sel.name, cd.avoid)) ? (
+                <Flag tone={t.crit} style={{ marginBottom: sp.lg }}>
+                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))}: one of the things you asked to avoid. {marks.text}
+                </Flag>
+              ) : !marks.marked ? (
+                /* The sheet is the moment the dish goes into the member's day,
+                   so the absence of a mark here is the absence that matters
+                   most. Under an unread exclusion list it says so rather than
+                   showing a sheet with nothing on it. */
+                <Flag tone={marks.state === 'unknown' ? t.crit : t.ink3} style={{ marginBottom: sp.lg }}>
+                  {marks.text}
+                </Flag>
+              ) : null}
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
                 {PORTIONS.map((p) => { const on = portion === p.mult; return (
                   <Pressable key={p.id} onPress={() => setPortion(p.mult)} accessibilityRole="button" accessibilityState={{ selected: on }}
                     style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{p.label}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{p.label}</Text>
                   </Pressable>); })}
               </View>
               <KpiRow items={[
@@ -146,7 +213,13 @@ export default function Restaurant() {
                 { label: 'Fat', value: fig(est.fat), unit: 'g' },
               ]} />
               <View style={{ height: sp.xl }} />
-              <Cta label="Add to Today" wide onPress={logIt} />
+              {/* Guarded. `logFood` writes a new row per call, so two taps
+                  in the wait put the same dish on today's record twice — and
+                  the member then eats the rest of their day around a calorie
+                  figure that is double what they had. See
+                  src/lib/submitOnce.ts. */}
+              <Cta label={send.busy ? 'Adding…' : 'Add to Today'} disabled={send.busy}
+                wide onPress={() => send.run(logIt)} />
               <View style={{ height: sp.sm }} />
               <Ghost label="Cancel" onPress={() => setSel(null)} />
             </>

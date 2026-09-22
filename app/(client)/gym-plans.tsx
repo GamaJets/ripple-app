@@ -23,7 +23,19 @@
 //                                          so in as many words.
 //   the price                              printed only in the currency the row
 //                                          itself carries. Never the gym's
-//                                          current setting, never a default.
+//                                          current setting, never a default —
+//                                          and never a figure at all when the
+//                                          row cannot be priced. A price that
+//                                          could not be read is UNKNOWN: it is
+//                                          not zero and it is not free, so the
+//                                          row keeps its place in the list, the
+//                                          amount is a dash with a sentence
+//                                          under it, and the Buy button is
+//                                          withheld. Nothing here sends a price
+//                                          to Stripe — the server quotes it —
+//                                          so a button on an unpriced row would
+//                                          put a member in front of a figure
+//                                          this screen never showed them.
 //
 // ── What buying does, and what it deliberately does not ───────────────────
 //
@@ -44,33 +56,49 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig, PageHead } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { worstStatus } from '../../src/ui/loadStatus';
+import { withDeadline } from '../../src/lib/readDeadline';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { appLink } from '../../src/lib/deepLink';
 import {
-  fetchMyMemberships, primaryMembership, standingOf, standingLabel, todayIso,
+  fetchMyMemberships, primaryMembership, standingOf, standingLabel,
   type MemberMembership,
 } from '../../src/lib/memberRecord';
+import { useToday } from '../../src/ui/today';
 import {
-  fetchGymPaymentFacts, fetchGymPlans, fetchGymPassOffers, fetchMyGymOrders, startGymCheckout,
-  gymCanSell, offerFor, passNote, offerMoney, orderNote, orderIsLive, dayLabel,
+  fetchGymPaymentFacts, fetchGymPlans, fetchGymPassOffers, fetchMyGymOrders, startGymCheckout, MY_ORDERS_CAP,
+  gymCanSell, offerFor, passNote, offerMoney, priceIsQuotable, orderNote, orderIsLive, dayLabel,
   type GymAccountFacts, type GymPlan, type GymPassOffer, type GymOrder,
 } from '../../src/lib/memberBuy';
 
 /** How a plan's price reads, with its own interval beside it. The interval is a
  *  word about the PLAN, not a promise that anything recurs: nothing bought here
- *  charges again on its own. */
+ *  charges again on its own.
+ *
+ *  The dash is `fig(null)` and not "AED 0.00", which is what stood here until
+ *  `GymPlan.priceCents` stopped being coerced with `Number()`. "a month" is
+ *  deliberately NOT appended to the dash: "— a month" reads as a price with the
+ *  figure clipped off, and there is no figure. */
 function planPrice(p: GymPlan): string {
   const m = offerMoney(p.priceCents, p.currency);
   if (!m) return fig(null);
   return p.interval === 'once' ? m : p.interval === 'year' ? `${m} a year` : `${m} a month`;
 }
+
+/** Said under a plan or a pass whose price this screen cannot put a figure on.
+ *
+ *  The row is still drawn. A gym that mis-typed a price must see the plan it
+ *  mis-typed — hiding it would tell the member the gym sells one fewer thing
+ *  than it does, which is the same class of lie as quoting zero, and it would
+ *  hide it from the only person in a position to mention it at the desk. */
+const NO_PRICE =
+  'Your gym has not recorded a price we can read for this, so there is no amount to show you and nothing to buy here yet. Reception can tell you what it costs.';
 
 export default function GymPlans() {
   const t = useTheme();
@@ -101,13 +129,34 @@ export default function GymPlans() {
     if (!USE_SUPABASE) { setFactStatus('ready'); setPlanStatus('ready'); setPassStatus('ready'); setMStatus('ready'); setOrderStatus('ready'); return; }
     if (!uid) { if (!auth.loading) { setFactStatus('error'); setPlanStatus('error'); setPassStatus('error'); setMStatus('error'); setOrderStatus('error'); } return; }
 
-    const [f, p, x, m, o] = await Promise.all([
+    // Under a ceiling. Every one of these five reports a refusal in its own
+    // `ok: false`, and this screen handles all five — but none of them can
+    // report a request that never SETTLES, and no request in this app carries a
+    // timeout (src/lib/readDeadline.ts). On a gym's own captive-portal wifi
+    // this `Promise.all` waits for ever, all five statuses stay at 'loading',
+    // and the member is shown five "Reading…" lines that never end. The
+    // sharpest loss is the last of them: the orders list is the ONLY place a
+    // member is told that their card was charged and the membership never
+    // granted, and it was gated away behind a status that could not move.
+    const read = await withDeadline(Promise.all([
       fetchGymPaymentFacts(supabase as any),
       fetchGymPlans(supabase as any),
       fetchGymPassOffers(supabase as any),
       fetchMyMemberships(supabase as any, uid),
       fetchMyGymOrders(supabase as any, uid),
-    ]);
+    ]));
+    if (!read.answered) {
+      // The same five lines the signed-out branch above writes, and for the
+      // same reason: 'error' is what src/ui/loadStatus.ts calls "the server did
+      // not answer, or refused", and every section below already says the right
+      // thing under it. Nothing on screen is cleared — a membership stays where
+      // it is, on this file's own argument about not replacing what somebody
+      // holds with the fact that we could not ask.
+      setFactStatus('error'); setPlanStatus('error'); setPassStatus('error');
+      setMStatus('error'); setOrderStatus('error');
+      return;
+    }
+    const [f, p, x, m, o] = read.value;
 
     // A refused readiness read is NOT "this gym cannot take payments". That is
     // a specific claim about the gym, and `value: null` — no account row at all
@@ -130,17 +179,32 @@ export default function GymPlans() {
     // Not cleared on failure, same as the memberships above: an order we read a
     // moment ago is still the last thing we knew, and the sentence below says
     // the list is short rather than pretending it is complete.
-    if (o.ok) { setOrders(o.value); setOrderStatus('ready'); }
+    //
+    // 'partial' when the member has more orders than the read's fifty. It is
+    // not 'ready': the count in the header below is a figure over a set, and a
+    // figure over a prefix is not a smaller figure, it is a wrong one — on the
+    // one screen where the difference is somebody's money.
+    if (o.ok) { setOrders(o.value.orders); setOrderStatus(o.value.truncated ? 'partial' : 'ready'); }
     else { reportError('gymPlans.orders', new Error(o.reason)); setOrderStatus('error'); }
   }, [uid, auth.loading]);
   useEffect(() => { void load(); }, [load]);
 
   const pull = usePullToRefresh(useCallback(() => load(), [load]));
 
-  // Recomputed per render rather than memoised on a date string: this screen
-  // can be open across midnight, and a term starting "today" must mean the day
-  // the member is actually in when they press the button.
-  const today = todayIso(new Date());
+  // This screen can be open across midnight, and a term starting "today" must
+  // mean the day the member is actually in when they press the button.
+  //
+  // `todayIso(new Date())` in the render body did not deliver that, and the
+  // comment it carried said so without noticing: a value recomputed per render
+  // is only right when a render happens, and this screen is registered
+  // `href: null` in app/(client)/_layout.tsx — mounted once, never torn down,
+  // and redrawing for nothing while it sits open. The button is the point: this
+  // is where a member buys a plan, so the stale day is not a stale label but
+  // the start date on something they are about to pay for.
+  //
+  // `useToday` (src/ui/today.ts) re-reads the day at the next local midnight
+  // and whenever the app returns to the foreground.
+  const today = useToday();
   const primary = primaryMembership(mships, today);
   const standing = primary ? standingOf(primary, today) : null;
 
@@ -148,6 +212,10 @@ export default function GymPlans() {
   // screen says three different things.
   const sell = factStatus === 'ready' ? gymCanSell(facts) : null;
   const canSell = sell?.ok === true;
+  // Whether this screen knows what the member is already on. Every offer below
+  // is relative to that, so under anything but a whole read the offers are
+  // sentences rather than buttons.
+  const membershipKnown = mStatus === 'ready';
 
   const waiting = useMemo(() => orders.filter(orderIsLive), [orders]);
   const overall = worstStatus(factStatus, planStatus, passStatus, orderStatus);
@@ -157,8 +225,8 @@ export default function GymPlans() {
     setBusy(label);
     const r = await startGymCheckout(supabase as any, req);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Nothing has been charged. Try again in a moment.'); return; }
-    try { await Linking.openURL(r.url); } catch { Alert.alert('Could not open Stripe', 'Nothing has been charged. Try again in a moment.'); }
+    if (!r.ok) { Alert.alert('Could Not Start Checkout', r.error || 'Nothing has been charged. Try again in a moment.'); return; }
+    try { await Linking.openURL(r.url); } catch { Alert.alert('Could Not Open Stripe', 'Nothing has been charged. Try again in a moment.'); }
   };
 
   return (
@@ -166,14 +234,8 @@ export default function GymPlans() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Plans &amp; Passes</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your gym sells, and what you are on now.</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
+        <PageHead title="Plans & Passes" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>What your gym sells, and what you are on now.</Text>
 
         {/* ── can the gym take a card at all ──────────────────────────────
             First, because every button below depends on it, and because
@@ -194,7 +256,6 @@ export default function GymPlans() {
           </View>
         ) : null}
 
-        <Rule />
 
         {/* ── what you are on now ─────────────────────────────────────────
             Short, because app/(client)/membership.tsx is the screen for it.
@@ -223,7 +284,6 @@ export default function GymPlans() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── memberships ────────────────────────────────────────────────── */}
         <Section>
@@ -241,16 +301,64 @@ export default function GymPlans() {
           ) : null}
 
           {(planStatus === 'error' ? [] : plans).map((p, i) => {
-            const offer = offerFor(p, mStatus === 'ready' ? primary : null, mStatus === 'ready' ? standing : null, today);
+            // `offerFor` reads a null current membership as "there is none",
+            // which is the right reading of a member who has none and the wrong
+            // reading of a read that failed — and under a failed read it
+            // answered "Buy This Plan · runs from today" for a member with a
+            // running membership, from a start date this screen had just told
+            // them it could not compute. Ten lines up it says so out loud.
+            const offer = offerFor(p, membershipKnown ? primary : null, membershipKnown ? standing : null, today);
             const key = `plan:${p.id}`;
+            // Whether there is an amount to put in front of somebody before
+            // they press a button that opens Stripe. `startGymCheckout` sends
+            // no price — the server reads the plan and quotes it — so a buy
+            // from a row this screen could not price is a member meeting the
+            // figure for the first time on a payment page. That is the one
+            // thing this screen's own header promises it will not do.
+            const priced = priceIsQuotable(p);
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{planPrice(p)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{p.name}</Text>
+                  <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{planPrice(p)}</Text>
                 </View>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{offer.note}</Text>
-                {offer.label && canSell ? (
+                {/* The NOTE was the other half of the same defect, and it
+                    survived the fix directly above. Under an unknown membership
+                    `offerFor` is handed `null, null`, reads that as "they hold
+                    none", and takes its first branch — so `offer.note` is
+                    `runNote(termFrom(today, interval))`, a concrete "Runs 8
+                    September 2026 to 8 October 2026." A member whose membership
+                    read failed was shown that term three lines above the
+                    sentence saying this screen cannot work one out until the
+                    read lands. Everywhere else in this file an unread fact
+                    withholds the claim; a date is a claim. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                  {membershipKnown ? offer.note
+                    : mStatus === 'loading' ? 'Reading your membership before a term can be worked out.'
+                    : 'We could not read your membership, so there is no term to state for this plan. A start date worked out without it would be a guess about a membership that may still be running.'}
+                </Text>
+                {/* And no transaction on an unknown PRICE, for the same reason
+                    one line further back: a member is entitled to the amount
+                    before the button, and this row has none to give. Said
+                    whether or not the gym can take a card and whether or not
+                    the membership read landed, because it is true either way —
+                    and said instead of the membership sentence below, which
+                    would be a second paragraph about a button that is already
+                    withheld for a plainer reason. */}
+                {priced ? null : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NO_PRICE}</Text>
+                )}
+                {/* No transaction on an unknown membership. Everywhere else in
+                    this file an unread fact withholds the CLAIM; this was the
+                    one place it was allowed to start a payment. */}
+                {priced && offer.label && canSell && !membershipKnown ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {mStatus === 'loading'
+                      ? 'Reading your membership before this can be offered.'
+                      : 'Buying is not offered until your membership can be read. Starting a second term over one that is still running is not something this screen can undo. Pull down to try again.'}
+                  </Text>
+                ) : null}
+                {priced && offer.label && canSell && membershipKnown ? (
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === key ? 'Opening…' : offer.label} wide disabled={busy === key}
                       onPress={() => buy(key, {
@@ -278,7 +386,6 @@ export default function GymPlans() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── drop-ins and packs ──────────────────────────────────────────
             The other half of the class screen. A pass is a CREDIT, not a seat:
@@ -299,14 +406,26 @@ export default function GymPlans() {
 
           {(passStatus === 'error' ? [] : passes).map((p, i) => {
             const key = `pass:${p.id}`;
+            // Same gate as the plans above, and a pass needs it at least as
+            // much: there is no membership to reason about here, so the price
+            // was the only figure on the row and "Buy This Pass" sat directly
+            // under it unconditionally.
+            const priced = priceIsQuotable(p);
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(offerMoney(p.priceCents, p.currency))}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{p.name}</Text>
+                  <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{fig(offerMoney(p.priceCents, p.currency))}</Text>
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{passNote(p, today)}</Text>
-                {canSell ? (
+                {/* `passNote` still runs and still says what the pass buys —
+                    ten visits, valid until a date — because those are facts
+                    about the pass and the price not reading does not unmake
+                    them. What is withheld is the amount and the button. */}
+                {priced ? null : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NO_PRICE}</Text>
+                )}
+                {priced && canSell ? (
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === key ? 'Opening…' : 'Buy This Pass'} wide disabled={busy === key}
                       onPress={() => buy(key, {
@@ -345,23 +464,30 @@ export default function GymPlans() {
             rows in it. An empty `waiting` under 'error' means unknown, never
             "there is nothing pending", and this is the one screen in the app
             where that difference is somebody's money. */}
-        {waiting.length || orderStatus === 'error' ? (
+        {waiting.length || orderStatus === 'error' || orderStatus === 'partial' ? (
           <>
             <Rule />
             <Section>
-              <SectionHead title="Waiting On Stripe" note={orderStatus === 'ready' ? String(waiting.length) : undefined} />
+              <SectionHead title="Waiting on Stripe" note={orderStatus === 'ready' ? String(waiting.length) : undefined} />
               {orderStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   We couldn’t read your purchases, so we can’t say whether any are still with Stripe. This is not a statement that none are. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.
+                </Flag>
+              ) : orderStatus === 'partial' ? (
+                /* A different sentence from the failed one above, and drawn on
+                   its own even when nothing here is waiting: "none of your
+                   recent fifty is stuck" is not "nothing of yours is stuck". */
+                <Flag tone={t.warn}>
+                  You have more purchases than we can show here, so this covers your {MY_ORDERS_CAP} most recent only. Anything older that Stripe never finished is not counted above. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.
                 </Flag>
               ) : null}
               {waiting.map((o, i) => (
                 <View key={o.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
                       {o.kind === 'membership' ? 'Membership' : 'Pass'}
                     </Text>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(offerMoney(o.amountCents, o.currency))}</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{fig(offerMoney(o.amountCents, o.currency))}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: o.status === 'failed' ? t.crit : t.warn }} />
@@ -376,7 +502,6 @@ export default function GymPlans() {
           </>
         ) : null}
 
-        <Rule />
 
         <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
           <Ghost label="Your Membership" onPress={() => router.push('/(client)/membership')} />

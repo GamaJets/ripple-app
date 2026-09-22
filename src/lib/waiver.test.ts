@@ -6,6 +6,7 @@
 // and it is not evidence that they didn't — and this gate is on the wrong side
 // of a legal record if it ever treats it as either.
 import { waiverState, waiverGate, bothGiven, WAIVER_VERSION, WAIVER_CLAUSES } from './waiver';
+import { BRAND, DEFAULT_BRAND_ID } from './brands';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -47,6 +48,27 @@ ok(WAIVER_CLAUSES.some((c) => /physician|doctor/i.test(c.label + c.detail)),
   'the release tells them to consult a physician first');
 ok(WAIVER_CLAUSES.some((c) => /release|liabilit/i.test(c.label + c.detail)),
   'the release actually releases liability');
+
+// ── and who it releases ─────────────────────────────────────────────────────
+//
+// This is the one document in the app that decides who pays if somebody is
+// hurt. It named "Repple" on every build, including the ones published under a
+// gym chain's own name, with their own bundle id, in their own store listing.
+{
+  const wording = WAIVER_CLAUSES.map((c) => c.label + ' ' + c.detail).join(' ');
+  ok(wording.includes(BRAND.label),
+    'THE PARTY BEING RELEASED IS THE BRAND THIS BUNDLE IS PUBLISHED UNDER');
+  ok(BRAND.id === DEFAULT_BRAND_ID || !/Repple/.test(wording),
+    'and a white-label member is never asked to release a company named nowhere else on their phone');
+  // The version identifies the wording, and two brands are two wordings. A
+  // stored acceptance that cannot say which one it was is not a record.
+  ok(WAIVER_VERSION.startsWith('2026-08-31'),
+    'the wording date is still the front of the version');
+  eq(WAIVER_VERSION === '2026-08-31', BRAND.id === DEFAULT_BRAND_ID,
+    'Repple’s own string is unchanged — every acceptance in the wild is Repple’s and must keep matching');
+  ok(BRAND.id === DEFAULT_BRAND_ID || WAIVER_VERSION.includes(BRAND.id),
+    'and another brand’s release is filed under its own version, not over Repple’s');
+}
 
 // ── what the gate actually does with each of those ──────────────────────────
 eq(waiverGate('loading', false), 'wait', 'a read in flight neither blocks nor passes');

@@ -21,22 +21,21 @@
 // twice with different spinner colours. `refreshControl` takes an element, so
 // the hook can hand back the finished element and there is nothing left at the
 // call site to get subtly different.
-import { useCallback, useRef, useState } from 'react';
+//
+// ── Why the state machine is not in here ───────────────────────────────────
+//
+// It is in src/lib/pullRefresh.ts, and that file's header is the reason: the
+// spinner used to be cleared only when the screen's reload SETTLED, and no
+// request this app makes has a timeout, so a read that never answered spun the
+// wheel until the app was killed and left the re-entry guard set for the life
+// of the screen. Fixing that needs a floor, a ceiling and a generation counter
+// running against a clock — which is testable when it is a plain function and
+// is not testable at all inside a hook, and one hundred and thirty-four screens
+// hang off it.
+import { useRef, useState } from 'react';
 import { RefreshControl } from 'react-native';
 import { useTheme } from './components';
-
-/**
- * How long the spinner stays up at minimum, in milliseconds.
- *
- * Most `reload` functions in this app return void: they bump a revision, or set
- * a state that an effect watches, and the read happens somewhere the caller
- * cannot await. Resolving instantly would snap the spinner away before the
- * finger has left the glass, which reads as "the gesture did not register" —
- * exactly the conclusion this whole file exists to stop somebody reaching.
- *
- * Short enough not to be a delay anybody waits on, long enough to be seen.
- */
-const MIN_SPIN_MS = 450;
+import { makeRefresher, type Refresher } from '../lib/pullRefresh';
 
 /**
  * A ready-made `refreshControl` for a ScrollView, driven by the screen's own
@@ -44,9 +43,9 @@ const MIN_SPIN_MS = 450;
  *
  * `reload` may return a promise or nothing. When it returns a promise the
  * spinner tracks the actual read, which is the honest thing and is what the two
- * screens that already had this did; when it returns nothing the floor above
- * takes over, because the alternative is pretending to know something about a
- * read this hook cannot see.
+ * screens that already had this did; when it returns nothing the floor in
+ * pullRefresh.ts takes over, because the alternative is pretending to know
+ * something about a read this hook cannot see.
  *
  * A rejected reload does NOT rethrow. The screen already has a status and
  * already says what went wrong; a pull-to-refresh that throws out of a gesture
@@ -55,22 +54,20 @@ const MIN_SPIN_MS = 450;
 export function usePullToRefresh(reload: () => void | Promise<unknown>) {
   const t = useTheme();
   const [refreshing, setRefreshing] = useState(false);
-  // Ref, not the state above. A second pull that arrives while the first read
-  // is in flight would otherwise fire the read again — and on a slow connection
-  // that is exactly when somebody pulls twice.
-  const busy = useRef(false);
+  // The latest `reload`, read at the moment of the pull. Most call sites build
+  // theirs in a `useCallback` over provider values, so its identity changes
+  // whenever any of those providers answers — including part-way through the
+  // very refresh it is running. Holding it in a ref keeps the machine below,
+  // and the handler the native view is holding, stable across all of that.
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  const machine = useRef<Refresher | null>(null);
+  if (!machine.current) {
+    machine.current = makeRefresher({
+      reload: () => reloadRef.current(),
+      setRefreshing,
+    });
+  }
 
-  const onRefresh = useCallback(() => {
-    if (busy.current) return;
-    busy.current = true;
-    setRefreshing(true);
-    const started = Date.now();
-    void Promise.resolve()
-      .then(() => reload())
-      .catch(() => { /* the screen's own status says what happened */ })
-      .then(() => new Promise<void>((r) => setTimeout(r, Math.max(0, MIN_SPIN_MS - (Date.now() - started)))))
-      .then(() => { busy.current = false; setRefreshing(false); });
-  }, [reload]);
-
-  return <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.ink3} />;
+  return <RefreshControl refreshing={refreshing} onRefresh={machine.current.onRefresh} tintColor={t.ink3} />;
 }

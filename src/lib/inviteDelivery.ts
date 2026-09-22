@@ -231,14 +231,14 @@ export function reminderMessage(
   lines.push(`Just in case it did not reach you: ${gym} has an invitation open for you on Repple.`);
   lines.push('');
   lines.push(`Download the Repple app and sign up with this exact address: ${invite.email}`);
-  lines.push('That is how the invitation finds you — an account made with a different address will not see it.');
+  lines.push('That is how the invitation finds you. An account made with a different address will not see it.');
 
   const days = daysUntilExpiry(invite, now);
   if (days != null) {
     lines.push('');
     lines.push(
       days <= 0
-        ? 'The invitation has lapsed — reply and we will reopen it.'
+        ? 'The invitation has lapsed. Reply and we will reopen it.'
         : `It is open for another ${days} day${days === 1 ? '' : 's'}.`,
     );
   }

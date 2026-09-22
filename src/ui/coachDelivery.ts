@@ -40,11 +40,13 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
+import { writeFailure } from '../lib/wroteRows';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 import { readCoachedModeOrNull, type CoachedMode } from '../lib/types';
 import { deliveryFact, type DeliveryDeclaration, type DeliveryFact } from '../lib/coachDelivery';
 import { useRoster } from './roster';
+import { sessionUid } from '../lib/sessionUid';
 
 interface CoachDeliveryValue {
   /** The coach's own answer, or null. Null means unanswered ONLY when
@@ -82,16 +84,49 @@ export function CoachDeliveryProvider({ children }: { children: ReactNode }) {
     // the same refusal src/ui/coachProfile.ts makes physical.
     if (!USE_SUPABASE || VARIANT !== 'trainer') { setStatus('ready'); return; }
     try {
-      // getSession and not getUser: getUser REJECTS with nobody signed in,
-      // which would latch this provider into 'error' on the first tick, before
-      // anybody had signed in, and leave it there.
-      const { data: sess } = await supabase.auth.getSession();
+      // getSession and not getUser, and the stated reason was wrong. It said
+      // "getUser REJECTS with nobody signed in"; it does not. `_getUser`
+      // catches every AuthError and RESOLVES with `{ data: { user: null },
+      // error }` — the source is quoted in src/lib/authReadFate.ts. The real
+      // reason to keep getSession is src/lib/sessionUidRead.ts's: it answers
+      // from device storage, so it answers in a gym with no signal, and
+      // src/ui/glucoseData.ts records what fronting a provider with the network
+      // call cost the last time somebody tried it. The call is NOT converted.
+      //
+      // ── what was actually wrong: this file's own stated failure mode ──────
+      //
+      // The header says null is three things and only one of them is an answer,
+      // and that collapsing them is how a coach with a live answer gets
+      // prompted to answer again over the top of it. That is precisely what the
+      // discarded `error` did. getSession() resolves `{ session: null, error }`
+      // when the stored token has expired and the refresh cannot reach the
+      // server, so an outage arrived as `id === null` and this set `declared`
+      // UNREAD at status 'ready' — and 'ready' is the word that turns a null
+      // into an answer. `deliveryFact` then read it as a SKIP, which is the
+      // widest declaration, so nothing visibly broke: the coach was simply
+      // asked again how they coach, over an answer they had already given, for
+      // as long as the auth server was unreachable.
+      const who = await sessionUid('coachDelivery.hydrate');
       if (cancelled()) return;
-      const id = sess?.session?.user?.id ?? null;
+      if (who.fate === 'signed-out') {
+        // No session is a true answer and not a failed check. There is nobody
+        // to have an answer, so 'ready' with a null is exactly right.
+        setUid(null);
+        setDeclared(UNREAD);
+        setStatus('ready');
+        return;
+      }
+      if (who.fate !== null) {
+        // 'unreadable'. Nothing was established, so this is the same state a
+        // refused `trainers` read below produces and it takes the same word.
+        // `uid` is cleared with it: a write must not go out under an id from a
+        // check that did not answer.
+        setUid(null);
+        setStatus('error');
+        return;
+      }
+      const id = who.uid;
       setUid(id);
-      // No session is a true answer and not a failed check. There is nobody to
-      // have an answer, so 'ready' with a null is exactly right.
-      if (!id) { setDeclared(UNREAD); setStatus('ready'); return; }
 
       const { data, error } = await supabase
         .from('trainers').select('delivery_mode').eq('id', id).maybeSingle();
@@ -131,8 +166,23 @@ export function CoachDeliveryProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) { setDeclared(mode); return true; }
     if (VARIANT !== 'trainer' || !uid) return false;
     try {
-      const { error } = await supabase.from('trainers').update({ delivery_mode: mode }).eq('id', uid);
-      if (error) { reportError('coachDelivery.write', error); return false; }
+      // COUNTED, not merely un-errored — the same shape the three other writes
+      // to `trainers` in this folder use (coachBrand.ts, coachLogo.ts,
+      // coachProfile.tsx). PostgREST answers an UPDATE that matched NOTHING
+      // with 204 and a null error, and the read above has already established
+      // that a signed-in coach with no `trainers` row is a case that happens —
+      // `maybeSingle` returns null rows for exactly that person and this
+      // provider calls it a real answer. For them `.eq('id', uid)` matches zero
+      // rows, `error` is null, and on `!error` this returned true, moved
+      // `declared` and set 'ready': DeliveryModeChoice told them their choice
+      // was saved, the app reshaped itself around it, and the next hydrate put
+      // it back. The count is the only thing that can tell those two apart.
+      const res = await supabase.from('trainers')
+        .update({ delivery_mode: mode }, { count: 'exact' })
+        .eq('id', uid);
+      if (res.error) { reportError('coachDelivery.write', res.error); return false; }
+      const why = writeFailure('How you coach', res);
+      if (why) { reportError('coachDelivery.write', new Error(why)); return false; }
       // Moved only after the server took it. A local value that ran ahead of a
       // refused write is a setting the coach believes they changed.
       setDeclared(mode);

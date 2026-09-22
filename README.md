@@ -126,7 +126,7 @@ points that run gates all run that one script:
 
 | | |
 | --- | --- |
-| `npm run preflight` | `check:all` plus the tests under three timezones and the LIVE schema probe |
+| `npm run preflight` | `check:all` plus the tests under six timezones and the LIVE schema probe |
 | `.github/workflows/ci.yml` | `check:all` on every push and pull request, plus the console build |
 | `scripts/publish.sh` | `check:all` plus the live schema probe, before any OTA |
 

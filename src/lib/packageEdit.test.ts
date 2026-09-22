@@ -6,8 +6,8 @@
 // silently refused sells at the old rate for a year; and a coach whose typing
 // slip is silently rounded or trimmed is shown a number they did not enter.
 import {
-  MAX_PRICE_CENTS, PACKAGE_NOT_SAVED, isReprice, packageEditBlocker,
-  packageUpdateRow, repriceNote,
+  MAX_PRICE_CENTS, PACKAGE_NOT_SAVED, RENAME_RELABELS_HISTORY, isRename, isReprice,
+  packageEditBlocker, packageUpdateRow, repriceNote,
 } from './packageEdit';
 
 const errors: string[] = [];
@@ -111,6 +111,34 @@ eq(new Set([none, one, many, unknown]).size, 4, 'the four answers read as four s
 ok(/still on sale/.test(PACKAGE_NOT_SAVED),
   'a refused edit says the package is unchanged rather than implying it saved');
 ok(/[Nn]othing has changed/.test(PACKAGE_NOT_SAVED), 'and says so in the words the rest of the app uses');
+
+/* ── the rename, which is the edit that reaches BACKWARDS ───────────────
+ *
+ * The whole of this module's header argues that an edit cannot touch a sale
+ * already made, and that argument holds for the price and not for the name:
+ * neither `client_purchases` nor `client_subscriptions` has a name column, so
+ * every list resolves one with a live `trainer_packages` lookup. A coach
+ * renaming a pack relabels their own sales history, their client's, and the
+ * refund sheet they are about to give money back from.
+ */
+
+ok(!isRename({ price_cents: 9900 }, 'Gold Pack'), 'a price edit alone is not a rename');
+ok(!isRename({ name: 'Gold Pack' }, 'Gold Pack'), 'the same name is not a rename');
+ok(!isRename({ name: '  Gold Pack  ' }, 'Gold Pack'), 'and neither is the same name with whitespace round it');
+ok(isRename({ name: 'Platinum Pack' }, 'Gold Pack'), 'a different name is a rename');
+ok(isRename({ name: 'Gold Pack' }, null), 'a name where there was none is a rename');
+ok(!isRename({}, 'Gold Pack'), 'an empty patch changes no name');
+
+// The warning has to say the thing a coach would otherwise be wrong about, and
+// it has to say the thing they would otherwise fear. Both, or it is not usable:
+// "your history is relabelled" without "the money is not" reads as though a
+// rename moved somebody's price.
+ok(/relabelled/.test(RENAME_RELABELS_HISTORY), 'the rename warning says past sales are relabelled');
+ok(/refund/.test(RENAME_RELABELS_HISTORY), 'and names the refund screen, where it costs the most');
+ok(/price/.test(RENAME_RELABELS_HISTORY) && /do not move/.test(RENAME_RELABELS_HISTORY),
+  'and says the amounts on those sales do not move');
+ok(RENAME_RELABELS_HISTORY !== repriceNote(0) && RENAME_RELABELS_HISTORY !== repriceNote(null),
+  'and it is not the reprice note wearing a different hat');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('packageEdit: ok');

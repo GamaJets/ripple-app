@@ -3,10 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>A coach on Repple</title>
 <meta name="description" content="A Repple coach's own page: what they do, what they are qualified in, and how to train with them.">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:title" content="A coach on Repple">
+<meta property="og:description" content="A coach’s own page: what they offer, what they charge, and how to train with them.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header, identical to web/join.html. Links collapse behind one
    button; without JavaScript they stay in the bar and wrap, which is why the
@@ -16,10 +39,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -34,6 +75,10 @@ addEventListener('DOMContentLoaded', function () {
 </script>
 </head>
 <body>
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <!--
   ONE COACH'S PAGE ON THE OPEN WEB.
@@ -103,13 +148,22 @@ addEventListener('DOMContentLoaded', function () {
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark" id="b-mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+      <span id="b-mark">
+        <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+          <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+            <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+            <path transform="translate(492 0)" d="M12 0V88H100"/>
+            <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+          </g>
+          <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+          <g class="signal" fill="#22c55e" transform="translate(124 0)">
+            <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+          </g>
         </svg>
       </span>
-      <span id="b-wordmark">Repple</span>
+      <span id="b-wordmark"></span><span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -128,7 +182,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
   <div class="wrap narrow page">
 
     <!-- Shown until the read lands, and replaced by whichever of the four
@@ -162,7 +216,7 @@ addEventListener('DOMContentLoaded', function () {
          data-noaddress-hd="This address is a coach&rsquo;s page"
          data-noaddress-note="A coach&rsquo;s link carries their own address on the end of it. This one does not, so there is nothing to show.">
       <p class="eyebrow" id="nothing-eyebrow">Nothing here</p>
-      <h1 class="display" id="nothing-hd"></h1>
+      <h1 class="display" id="nothing-hd" tabindex="-1"></h1>
       <p class="lede" id="nothing-note"></p>
       <p class="btn-row"><a class="btn" href="/">What Repple is</a><a class="btn" href="/client">The member app</a></p>
     </div>
@@ -176,7 +230,7 @@ addEventListener('DOMContentLoaded', function () {
       <div id="mono" aria-hidden="true"></div>
 
       <p class="eyebrow" id="p-eyebrow">Personal training</p>
-      <h1 class="display" id="p-name"></h1>
+      <h1 class="display" id="p-name" tabindex="-1"></h1>
       <p class="lede" id="p-tagline" hidden></p>
 
       <p class="btn-row"><a class="btn primary" id="p-join" href="#" hidden>Train with them</a></p>
@@ -189,12 +243,12 @@ addEventListener('DOMContentLoaded', function () {
 
       <div id="p-specbox" hidden>
         <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">Specialties</h2>
-        <div class="chips" id="p-specialties"></div>
+        <ul class="chips" id="p-specialties" role="list"></ul>
       </div>
 
       <div id="p-offerbox" hidden>
         <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">What they offer</h2>
-        <div class="chips" id="p-offers"></div>
+        <ul class="chips" id="p-offers" role="list"></ul>
       </div>
 
       <div id="p-feebox" hidden>
@@ -240,6 +294,15 @@ addEventListener('DOMContentLoaded', function () {
 </noscript>
 
 <style>
+  /* With scripting off there are TWO top-level headings on this page, and the
+     first is a lie. Nothing but the module hides #waiting, so "One moment /
+     Fetching this coach's page" stays on screen for ever, and the noscript
+     block below it adds "This page needs JavaScript", which is the true one.
+     `js-nav` is put on the root at parse time by the header script, so its
+     absence is exactly "no JavaScript", and #waiting is a claim about a fetch
+     that is never going to start. */
+  html:not(.js-nav) #waiting { display: none; }
+
   /* The monogram slot. A logo drops in here later without the layout moving. */
   #mono {
     width: 76px; height: 76px; border-radius: 18px; margin-bottom: 26px;
@@ -247,7 +310,10 @@ addEventListener('DOMContentLoaded', function () {
     font-family: var(--serif); font-size: 36px; line-height: 1;
     background: var(--accent); color: var(--brand-fill-ink);
   }
-  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  /* A real list element; `list-style: none` strips the list role in Safari and
+     VoiceOver, so `role="list"` is put back deliberately — see the same note in
+     web/styles.css. */
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; list-style: none; margin: 0; padding: 0; }
   .chips .pill { font-size: 13.5px; padding: 6px 13px; }
   #p-creds .row { grid-template-columns: 1fr auto; }
   #p-creds .ttl { color: var(--ink); font-weight: 500; }
@@ -329,7 +395,9 @@ addEventListener('DOMContentLoaded', function () {
   window.SITE_BRAND = b;
   if (!b || id === BAKED) return;
 
-  // The ripple is Repple's own mark, drawn inline, and there is no asset
+  // The R≡PPLE word is Repple's own logo, drawn inline inside #b-mark (a
+  // span: `hidden` does nothing on an <svg>), and #b-wordmark beside it is
+  // empty until a tenant's name is written into it. There is no asset
   // pipeline here to put another brand's in its place. Removed rather than
   // left: a chain's page carrying its supplier's mark is the one place the
   // white-label proposition is visibly untrue.
@@ -400,6 +468,28 @@ const VALID = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 
 /* ── the four outcomes ───────────────────────────────────────────────────── */
 
+/* Being told the answer arrived.
+   ─────────────────────────────────────────────────────────────────────────
+   This page replaces the whole of <main> after an async read, and it did so
+   silently: no live region anywhere, no focus moved. A screen reader read
+   "One moment / Fetching this coach's page" and was then never told which of
+   the four outcomes happened — not that the profile had arrived, not that
+   there is no coach at this address, not that the read failed. Those last two
+   are precisely the pair the six sentences above were written to keep apart,
+   and a reader who cannot see the screen was told neither.
+
+   Focus rather than aria-live, because what replaces the waiting message is a
+   whole page — a name, a tagline, chips, qualifications, reviews. A polite
+   live region would read the lot, uninterruptibly, at the moment it lands.
+   Moving focus to the new heading announces the one line that says what
+   happened and leaves the reader standing at the top of the new content, with
+   everything after it a normal read away. `preventScroll` because the page has
+   not moved and yanking it would be its own surprise. */
+function settle(heading) {
+  if (!heading) return;
+  try { heading.focus({ preventScroll: true }); } catch (e) { heading.focus(); }
+}
+
 /* The three outcomes with nothing to draw. `which` is 'absent', 'unreadable'
    or 'noaddress', and the words come off the element rather than out of this
    file — see the comment on it. */
@@ -412,6 +502,7 @@ function nothing(which) {
   $('nothing-hd').textContent = box.dataset[which + 'Hd'] || '';
   $('nothing-note').textContent = box.dataset[which + 'Note'] || '';
   box.hidden = false;
+  settle($('nothing-hd'));
 }
 
 const CLAIM_NOTE = 'These are what the coach says about themselves. Repple has not seen the certificates and has not checked them with the awarding bodies, so ask to see them or look the registration number up yourself.';
@@ -497,13 +588,19 @@ function dateWords(iso) {
   return Number(m[3]) + ' ' + MONTHS[mo - 1] + ' ' + m[1];
 }
 
+/* List items, not spans. These were adjacent bare spans in a flex row, so a
+   screen reader under "Specialties" got an unbroken run of words with no count
+   and no boundary between one specialty and the next — "Strength Rehab Olympic
+   lifting" is a different claim from three separate ones. A list says how many
+   there are before reading any of them, which is the whole reason to read a
+   list of specialties at all. */
 function chips(host, items) {
   const list = Array.isArray(items) ? items.filter((s) => String(s || '').trim()) : [];
   for (const s of list) {
-    const el = document.createElement('span');
-    el.className = 'pill';
-    el.textContent = String(s).trim();
-    host.appendChild(el);
+    const li = document.createElement('li');
+    li.className = 'pill';
+    li.textContent = String(s).trim();
+    host.appendChild(li);
   }
   return list.length;
 }
@@ -635,6 +732,7 @@ function render(result) {
   window.COACH_PAGE_SETTLED = true;
   $('waiting').hidden = true;
   $('profile').hidden = false;
+  settle($('p-name'));
 }
 
 /* ── the entry point, at the BOTTOM of the module ────────────────────────── */
@@ -688,6 +786,10 @@ addEventListener('DOMContentLoaded', function () {
     document.getElementById('nothing-hd').textContent = box.dataset.unreadableHd || '';
     document.getElementById('nothing-note').textContent = box.dataset.unreadableNote || '';
     box.hidden = false;
+    /* Same reason as settle() in the module above; this file cannot call it,
+       because a module's scope is not shared with a classic script. */
+    var hd = document.getElementById('nothing-hd');
+    if (hd) { try { hd.focus({ preventScroll: true }); } catch (e) { hd.focus(); } }
   }, 10000);
 });
 </script>

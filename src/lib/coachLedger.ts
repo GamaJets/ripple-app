@@ -202,28 +202,111 @@ export function sumSpend(rows: readonly SpendRow[]): SpendSum {
  * except by trying again. A screen that says "ask your owner to set a currency"
  * when the read simply failed sends a coach to a settings page where the value
  * is already correct, and they conclude the app is lying to them.
+ *
+ * ── the third silence, and why it is not `unset` ───────────────────────────
+ *
+ * This used to check `status === 'error'` and nothing else, so 'loading' and
+ * 'partial' both fell through to `unset` — the arm that names the gym settings
+ * and tells the coach nobody has set a currency for them. Under 'loading' that
+ * sentence is said about a value nothing has looked at yet, which is the same
+ * substitution the paragraph above refuses for 'error', arriving through the
+ * other end of `LoadStatus`. Under 'partial' the currency is missing from a
+ * page that was cut off at the row ceiling, and a currency absent from a prefix
+ * is not a currency that was never set.
+ *
+ * It was harmless only because the one caller — app/(trainer)/money.tsx —
+ * happens to draw `note` inside a branch that has already split 'loading',
+ * 'partial' and 'error' out above it. That is a fact about a screen, not about
+ * this function, and it would survive nobody rearranging that branch.
+ *
+ * A currency that IS stated still denominates under any status but 'error':
+ * three letters read off a real row are three letters, whether or not more rows
+ * were coming. Only the ABSENCE of one needs a whole read behind it.
+ *
+ * ── THE FOURTH ANSWER, AND WHY IT IS NOT ANY OF THE THREE ────────────────
+ *
+ * The test here was `code.length >= 3`, so 'POUNDS' came back `ok: true` with
+ * **POUNDS** as the currency, and so would 'Japanese yen'. The rule of record
+ * is `/^[a-z]{3}$/` after trim and lowercase — `currencyDecimals` and `moneyIn`
+ * in ./coachMoney.ts and `normaliseCurrency` in ./gymRecord.ts all apply it and
+ * all answer null for anything else — and they were made strict because two
+ * rows both holding "pounds" compared EQUAL, were subtracted, and put a member
+ * on list price. That fold is reached through the currency, not the amount, so
+ * a module that hands a non-code back as a currency is the hole the other three
+ * were closed to stop, sitting one import away.
+ *
+ * Nothing could reach it today, and that was checked rather than assumed —
+ * "unreachable today" and "correct" are different things, and the shape of this
+ * one is that it hands a non-currency back as a currency label. Both walls:
+ *
+ *   · app/(trainer)/money.tsx is the ONLY caller (the `denominate` in
+ *     ./siteRollUp.ts is a different function over a different argument), it
+ *     never reads `currency` off the result, and it draws `note` only inside
+ *     `!feeSum.pots.length` — where the argument it passed was `undefined` by
+ *     construction.
+ *   · the value it passes is `sumMajor(...).pots[0].currency`, off
+ *     `charges.currency`, which has carried `check (currency ~ '^[A-Z]{3}$')`
+ *     since the column was added. `tenants.currency` (part 99) carries it too.
+ *
+ * The five columns that held a currency with no format check at all until part
+ * 3090 — `gym_passes`, `gym_pass_types`, `membership_plans`, `gym_invoices`,
+ * `gym_orders` — are gym tables and none of them reaches this module. So this
+ * is a latent laxity rather than a live defect, and it is fixed because the
+ * next caller is one import away from the rest of the money library, where the
+ * same string is already refused.
+ *
+ * The refusal is its own answer rather than `unset`. `unset` names the gym
+ * settings AND says nobody has set a currency, and the second half is simply
+ * untrue of a gym where somebody typed 'pounds' — this file's whole argument is
+ * that two silences with different remedies are never collapsed, and a stated
+ * non-currency is not even a silence. It is refused under 'loading' and
+ * 'partial' too, for the same reason a good code is accepted under them: the
+ * value in hand is judged on what it is, and only an ABSENCE needs a whole read
+ * behind it before it can be called one.
  */
 export type Denom =
   | { ok: true; currency: string }
-  | { ok: false; why: 'unread' | 'unset'; note: string };
+  | { ok: false; why: 'unread' | 'unset' | 'unlanded' | 'unusable'; note: string };
 
 export function denominate(currency: string | null | undefined, status: LoadStatus): Denom {
   if (status === 'error') {
     return {
       ok: false,
       why: 'unread',
-      note: 'We couldn’t read what currency you charge in, so amounts that depend on it are withheld rather than printed in one we picked. Nothing is missing from your settings — the read failed. Open this again in a moment.',
+      note: 'We couldn’t read what currency you charge in, so amounts that depend on it are withheld rather than printed in one we picked. Nothing is missing from your settings. The read failed. Open this again in a moment.',
     };
   }
-  const code = (currency || '').trim().toUpperCase();
-  if (code.length < 3) {
+  const stated = (currency || '').trim();
+  // The rule of record, and deliberately the SAME rule rather than a near
+  // neighbour of it. See the paragraph above this function.
+  if (/^[a-z]{3}$/.test(stated.toLowerCase())) return { ok: true, currency: stated.toUpperCase() };
+  // Something is recorded and it is not a currency. That is not a silence at
+  // all, so it is not one of the three below: nobody can fix it by waiting and
+  // nobody can fix it by trying again, and telling this coach "nobody has set a
+  // currency for you" is a false sentence about a value somebody typed.
+  if (stated) {
     return {
       ok: false,
-      why: 'unset',
-      note: 'Nobody has set a currency for you yet. Repple is white-labelled, so there is no default that would be right for every gym, and a figure with the wrong three letters on it is a different amount of money. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.',
+      why: 'unusable',
+      note: `What is recorded as your currency, “${stated}”, is not a three-letter currency code, so amounts that depend on it are withheld rather than printed under a label that is not money. Nothing here is lost: the amounts are still on record and will read correctly the moment the code is. Your gym owner corrects it in the gym settings.`,
     };
   }
-  return { ok: true, currency: code };
+  // No currency in hand. Whether that is a fact about the settings or a fact
+  // about the read is the whole question, and only 'ready' answers it.
+  if (status !== 'ready') {
+    return {
+      ok: false,
+      why: 'unlanded',
+      note: status === 'partial'
+        ? 'More rows are on record than could be read in one request, and none of the ones that came back states a currency. That is not a statement that no currency is set, so amounts that depend on one are withheld until the whole set has been read.'
+        : 'We haven’t finished reading what currency you charge in, so nothing is denominated yet. This is not a statement that nobody has set one.',
+    };
+  }
+  return {
+    ok: false,
+    why: 'unset',
+    note: 'Nobody has set a currency for you yet. Repple is white-labelled, so there is no default that would be right for every gym, and a figure with the wrong three letters on it is a different amount of money. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.',
+  };
 }
 
 /* ── what an empty ledger means, which depends entirely on the read ───────── */
@@ -264,7 +347,7 @@ export function ledgerEmptyLine(side: LedgerSide, status: LoadStatus): string {
  * figure reads as an omission unless somebody says it was a decision.
  */
 export const NO_NET_NOTE =
-  'What comes in and what goes out are kept apart and are never subtracted from each other. They are recorded in different places, in currencies that may differ, and neither is complete on its own — a single net figure would be a number about neither question.';
+  'What comes in and what goes out are kept apart and are never subtracted from each other. They are recorded in different places, in currencies that may differ, and neither is complete on its own. A single net figure would be a number about neither question.';
 
 /**
  * What Stripe knows, and the one piece of it this app is now told.
@@ -286,7 +369,7 @@ export const NO_NET_NOTE =
  * src/lib/coachPayouts.ts carries the long form.
  */
 export const STRIPE_AUTHORITY_NOTE =
-  'These are amounts clients were charged, before Stripe’s fee and the platform fee. What actually reached your bank is a different figure from a different source, shown separately under what landed — a payout is a balance rather than the proceeds of a sale, so the two are never subtracted from each other. Your Stripe dashboard is the record of what moved.';
+  'These are amounts clients were charged, before Stripe’s fee and the platform fee. What actually reached your bank is a different figure from a different source, shown separately under what landed. A payout is a balance rather than the proceeds of a sale, so the two are never subtracted from each other. Your Stripe dashboard is the record of what moved.';
 
 /** What a period figure counts, said next to the period. A total with no
  *  stated span is read as "all time" by half its readers and "this month" by

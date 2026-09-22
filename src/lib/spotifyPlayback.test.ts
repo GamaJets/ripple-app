@@ -6,6 +6,7 @@
 import {
   classifySpotifyResponse, networkFailure, nowPlayingFrom, msLabel, progressLine,
   playlistsFrom, playlistLine, playlistSavedLine, ALLOWLIST_ADVICE,
+  playlistTracksNote, playlistTrackLine,
 } from './spotifyPlayback';
 
 const errors: string[] = [];
@@ -119,5 +120,40 @@ ok(/One track was/.test(playlistSavedLine('Leg Day', { url: 'u', added: 20, requ
 
 const both = playlistSavedLine('Leg Day', { url: 'u', added: 11, requested: 20, guessed: 3 });
 ok(/11 of its 20/.test(both) && /3 tracks were/.test(both), 'both facts survive together');
+
+
+/* ── an opened playlist can be shorter than the count beside its name ────── */
+
+// THE case. Spotify sends local files and removed tracks as a null `track`, so
+// spotifyPlaylistTracks drops them — while `trackCount` is Spotify's own
+// `tracks.total` and counts them. Twelve on the row, nine in the list, and a
+// reader with no sentence concludes the app failed to load three.
+{
+  const note = playlistTracksNote(9, 12);
+  ok(!!note && /3 more/.test(note), 'the shortfall is stated as a number');
+  ok(!!note && /your own machine/.test(note), 'and says what those rows actually are');
+}
+ok(/One more track/.test(playlistTracksNote(11, 12) ?? ''), 'one missing is singular, not "1 more tracks"');
+
+// Nothing to reconcile: no sentence. A note under every playlist would be noise
+// and would make the real case invisible.
+ok(playlistTracksNote(12, 12) === null, 'a complete list says nothing');
+ok(playlistTracksNote(0, 0) === null, 'and an empty playlist that really is empty says nothing');
+
+// Spotify did not report a total. NOT treated as zero — `Number('')` is 0 and a
+// missing count must never become a claim that tracks are missing.
+ok(playlistTracksNote(9, null) === null, 'an unknown total produces no claim about what is missing');
+
+// More came back than the playlist claims to hold. Impossible from Spotify, and
+// if it ever happens it is not a shortfall — it must not print "-3 more tracks".
+ok(playlistTracksNote(12, 9) === null, 'a negative shortfall is not a sentence');
+
+/* ── the line under a track ──────────────────────────────────────────────── */
+
+ok(playlistTrackLine({ artist: 'Fontaines D.C.' }) === 'Fontaines D.C.', 'the artist is the line');
+// Podcast episodes and some local files carry no artist. Left blank rather than
+// filled with a dash, which a reader takes for a failed read.
+ok(playlistTrackLine({ artist: '' }) === null, 'no artist draws no line at all');
+ok(playlistTrackLine({ artist: '   ' }) === null, 'and whitespace is not an artist either');
 
 if (errors.length) process.exit(1);

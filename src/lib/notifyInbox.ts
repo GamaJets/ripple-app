@@ -60,6 +60,7 @@
 // client or coach who missed the banner genuinely has no other way to learn.
 
 import { num } from './format';
+import { CLASS_OFF_TITLE, CLASS_OFF_TITLE_MANY } from './notifyCopy';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /** Icons the inbox draws. A subset of `IconName` in src/ui/Icon.tsx — narrowed
@@ -85,11 +86,84 @@ export interface InboxDecision {
  *  else. Matched as a prefix so `/(trainer)/chat?clientId=…` counts. */
 const CHAT_ROUTES = ['/(client)/messages', '/(trainer)/chat'];
 
+/* ── the two title heuristics, and the routes they are allowed to fire on ───
+ *
+ * Rules 2 and 3 in the header are matched on the TITLE because there is no
+ * structural signal for them — and the header's defence of that is "a miss here
+ * adds one extra row to an inbox", which is true of a MISS and was not true of
+ * a false HIT.
+ *
+ * Every title these two regexes were written for is a literal in this
+ * repository. The titles they are actually applied to are not: app/(owner)/
+ * promotions.tsx passes `pushTitle.trim() || 'A new offer'`, which is whatever
+ * the gym owner typed, and `noticeNotification` interpolates the gym's own name
+ * into 'A notice from …'. So a gym announcing "Our new studio just opened — 25%
+ * off" tripped `EXPIRING`, and the offer reached every member's phone with no
+ * inbox row behind it at all — the one kind of push in this product whose
+ * author is not a programmer, silently classified as a race for a PT slot. The
+ * owner was then told "No notifications were recorded", which is true and reads
+ * like a fault rather than like a rule.
+ *
+ * Both regexes are therefore scoped to the routes their own call sites carry,
+ * which costs nothing: the three pushes rule 2 exists for all send
+ * '/(client)/calendar' (app/(trainer)/calendar.tsx twice, src/ui/sessions.tsx),
+ * and the one push rule 3 exists for sends '/(client)/injuries'
+ * (src/ui/injuryAcks.tsx). `KNOWN_PUSHES` below carries those routes and the
+ * test asserts the refusals through them, so a call site that moved to another
+ * screen would have to move its entry too.
+ *
+ * This narrows only the FALSE hits. A refusal that was right is still a
+ * refusal, and the default for anything else is still to record.
+ */
+
 /** A push about something that is over before it can be read. */
 const EXPIRING = /\bjust opened\b/i;
+/** Where such a push is sent from, and the only routes the rule applies to. */
+const EXPIRING_ROUTES = ['/(client)/calendar'];
 
 /** A push confirming something the recipient can already see recorded. */
 const RECEIPT = /\bhas read your\b/i;
+/** The screen that already holds the record this rule defers to. */
+const RECEIPT_ROUTES = ['/(client)/injuries'];
+
+/**
+ * Pushes whose inbox row a DATABASE TRIGGER has already written.
+ *
+ * ── The second way to get two rows for one event ──────────────────────────
+ *
+ * Rule 1 above is about a push that duplicates the row `notify-message` writes.
+ * This is the same failure from the other side: a handset sends a push about a
+ * write that a trigger is notifying on ANYWAY, inside the same transaction, so
+ * `recordInbox` writes a second row for the identical event and the recipient's
+ * list reads as though it happened twice — in two different wordings, which is
+ * worse, because the two look like two things.
+ *
+ * Two are known:
+ *
+ *  · 'New coaching request'. app/(client)/trainers.tsx sends it the moment the
+ *    `coach_requests` insert lands, and `coach_requests_notify_trainer` (part
+ *    158) fires `after insert` on exactly that row and writes 'A coaching
+ *    request'. Both always happen, so the coach has always had two.
+ *  · the two class-off titles. supabase/parts/493 writes one row per member
+ *    booked or waitlisted the moment `gym_classes.status` goes to 'cancelled';
+ *    the push that carries it to a phone is sent by the handset that pressed
+ *    the button (src/lib/notifyCopy.ts says why the schema cannot send it
+ *    itself), and the row is the trigger's.
+ *
+ * Matched on the TITLE, which is brittle in the way rules 2 and 3 are and NOT
+ * in the way rule 1 is — there is no structural signal here, because the
+ * duplicate is caused by SQL this file cannot see. A reword that misses adds
+ * one extra row; it does not lose a notification. The titles are therefore
+ * imported from the module that produces them where that is possible
+ * (`CLASS_OFF_TITLE`), and written out where it is not: 'New coaching request'
+ * is a literal in app/(client)/trainers.tsx, and the test below is the thing
+ * that makes a reword of it visible.
+ */
+const SERVER_WROTE_THE_ROW: readonly string[] = [
+  'New coaching request',
+  CLASS_OFF_TITLE,
+  CLASS_OFF_TITLE_MANY,
+];
 
 /** Route → the icon that route's notifications are drawn with.
  *
@@ -116,6 +190,16 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // A notice from a coach or a gym. Not the bell either: the bell is the
   // fallback, and a noticeboard is a specific thing.
   ['/(client)/notices', 'info'],
+  // An invoice from the gym, now that it has a screen to open.
+  //
+  // 'info' rather than a money glyph because there is no money glyph: `IconName`
+  // in src/ui/Icon.tsx has no note, coin, card or receipt, and inventing one is
+  // a design change rather than a routing one. 'info' is the nearest honest
+  // reading — a document the gym is telling you about — and it shares that
+  // reading with /(client)/notices, which is a real cost and a smaller one than
+  // the alternative: the bell here is the icon this table uses to mean "we have
+  // no idea what this is", worn by a row that is asking somebody for money.
+  ['/(client)/invoices', 'info'],
   ['/(client)/explore', 'sparkle'],
   ['/(client)/offers', 'sparkle'],
   ['/(client)/calendar', 'calendar'],
@@ -123,6 +207,35 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/bookings', 'calendar'],
   ['/(client)/pt-sessions', 'calendar'],
   ['/(client)/classes', 'calendar'],
+  // Where a client is sent when their coach answers a request for an hour the
+  // coach had not opened (app/(trainer)/sessions.tsx, part 740). Without an
+  // entry it fell to the generic bell — the icon that means "we have no idea
+  // what this is" — over a yes or a no about a specific time.
+  ['/(client)/request-session', 'calendar'],
+  // ── the coach's half of that same conversation ───────────────────────────
+  //
+  // Mark What Happened, which is also where app/(client)/request-session.tsx
+  // sends 'A session request' — a client asking for an hour the coach never
+  // opened. The client's half above has been drawn as a calendar since it was
+  // added and the coach's half was not in this table at all, so the one
+  // notification in a coach's inbox that is somebody asking for a specific time
+  // arrived wearing the generic bell: the icon this list uses to say "we have
+  // no idea what this is", on the row that decays fastest in the whole product.
+  //
+  // TRAINER_NAV gives this screen 'check' (src/lib/features.ts) and `InboxIcon`
+  // has no 'check' — it is a deliberately short list. 'calendar' rather than
+  // widening it, because the two halves of one conversation about one hour must
+  // not be two different shapes in two inboxes, and that is the shape the other
+  // half already has.
+  ['/(trainer)/sessions', 'calendar'],
+  // ── the two an answered coaching request opens ───────────────────────────
+  //
+  // 'people' is the shape this table already gives '/(trainer)/dashboard', the
+  // coach's side of the same conversation, and it is the icon CLIENT_NAV gives
+  // Your Coach (src/lib/features.ts). A request answered is the one row in a
+  // client's inbox that is about who is coaching them.
+  ['/(client)/my-coach', 'people'],
+  ['/(client)/trainers', 'people'],
   ['/(client)/workouts', 'dumbbell'],
   ['/(client)/achievements', 'trophy'],
   // Memberships & Packs, which part 160 sends a client to when their card is
@@ -291,15 +404,20 @@ export function inboxDecision(
   const r = (route ?? '').trim();
   const icon = inboxIcon(r);
 
-  if (!b) return { record: false, icon, why: 'no body — an inbox row with only a heading says nothing' };
+  if (!b) return { record: false, icon, why: 'no body: an inbox row with only a heading says nothing' };
   if (startsWithAny(r, CHAT_ROUTES)) {
     return { record: false, icon, why: 'a chat message; the messages trigger writes this row already (part 26)' };
   }
-  if (EXPIRING.test(t)) {
-    return { record: false, icon, why: 'a race for a slot — over by the time an inbox is opened' };
+  // Route first in both, so a title somebody typed into a promotion or a gym's
+  // own name cannot trip a rule written about a PT slot or an injuries screen.
+  if (startsWithAny(r, EXPIRING_ROUTES) && EXPIRING.test(t)) {
+    return { record: false, icon, why: 'a race for a slot, over by the time an inbox is opened' };
   }
-  if (RECEIPT.test(t)) {
+  if (startsWithAny(r, RECEIPT_ROUTES) && RECEIPT.test(t)) {
     return { record: false, icon, why: 'a read receipt; the acknowledgement itself is already on the injuries screen' };
+  }
+  if (SERVER_WROTE_THE_ROW.includes(t)) {
+    return { record: false, icon, why: 'a trigger writes this row inside the same transaction; a second one would read as two events' };
   }
   return { record: true, icon, why: 'nothing else tells the recipient this happened' };
 }
@@ -319,12 +437,28 @@ export const KNOWN_PUSHES: ReadonlyArray<{
 }> = [
   { where: 'app/(trainer)/calendar.tsx', title: 'Session booked', body: 'Your session on Tue at 6:30 PM is confirmed.', route: '/(client)/calendar' },
   { where: 'app/(trainer)/calendar.tsx', title: 'Session cancelled', body: 'Your 6:30 PM session on Tue was cancelled.', route: '/(client)/calendar' },
-  { where: 'app/(trainer)/calendar.tsx', title: 'A slot just opened', body: '6:30 PM on Tue is available — first to book it gets it.', route: '/(client)/calendar' },
-  { where: 'app/(trainer)/broadcast.tsx', title: 'Message from your coach', body: 'Session times move next week.', route: '/(client)/messages' },
+  { where: 'app/(trainer)/calendar.tsx', title: 'A slot just opened', body: '6:30 PM on Tue is available. First to book it gets it.', route: '/(client)/calendar' },
+  // ── THE FOUR CHAT PUSHES THAT USED TO BE HERE ──────────────────────────
+  //
+  // Gone, and not reworded: nothing in this repository pushes a chat message
+  // from a handset any more. src/ui/messaging.ts (the live send, the outbox
+  // flush and the coach's fan-out behind app/(trainer)/broadcast.tsx) and the
+  // nudge on app/(trainer)/dashboard.tsx all wrote a `messages` row and THEN
+  // pushed, while part 26's trigger was already pushing the same row through
+  // supabase/functions/notify-message — so every message in the product arrived
+  // on the recipient's phone twice, in two wordings, seconds apart.
+  //
+  // Rule 1 at the top of this file is the reason the duplicate was invisible:
+  // somebody noticed the duplicate ROW and stopped it here, and the duplicate
+  // PUSH went on happening. That is supabase/parts/2392's sentence about a
+  // coaching request, arriving a second time.
+  //
+  // Rule 1 STAYS. It is not made redundant by the removal — it is what keeps
+  // any future chat push from writing a second row over the trigger's — and
+  // `PUSHED_BY_ITS_WRITER` in src/lib/notifyDispatch.ts stays with it, because
+  // notify-message is still the writer that pushes its own rows.
   { where: 'app/(owner)/promotions.tsx', title: 'A new offer', body: '20% off with code SPRING', route: '/(client)/explore' },
   { where: 'app/(client)/calendar.tsx', title: 'New booking', body: 'A client booked Tue 6:30 PM.', route: '/(trainer)/calendar' },
-  { where: 'src/ui/messaging.ts', title: 'New message from your coach', body: 'See you Tuesday.', route: '/(client)/messages' },
-  { where: 'src/ui/messaging.ts', title: 'New message from your client', body: 'Can we move to 7?', route: '/(trainer)/chat?clientId=abc' },
   { where: 'src/ui/injuryAsk.ts', title: 'Your coach asked about an injury', body: 'They’ve asked you to add your left knee to your injuries.', route: '/(client)/injuries' },
   { where: 'src/ui/injuryAcks.tsx', title: 'Your coach has read your injuries', body: 'They have seen what you disclosed.', route: '/(client)/injuries' },
   { where: 'src/ui/sessions.tsx', title: 'A PT slot just opened', body: 'Tue 6:30 PM with your coach just opened up.', route: '/(client)/calendar' },
@@ -333,21 +467,57 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // on their grid, and the client cancelling their own — and it is the one push
   // in this list that reports a booking somebody did not make themselves, so it
   // is the one an inbox row matters most for.
-  { where: 'app/(trainer)/calendar.tsx', title: 'The slot you were waiting for is yours', body: '6:30 PM on Tue freed up and you were next on the list — it is booked for you.', route: '/(client)/calendar' },
-  { where: 'src/ui/sessions.tsx', title: 'The slot you were waiting for is yours', body: 'Tue 6:30 PM with your coach just freed up and you were next on the list.', route: '/(client)/calendar' },
+  { where: 'app/(trainer)/calendar.tsx', title: 'The slot you were waiting for is yours', body: '6:30 PM on Tue freed up and you were next on the list, so it is booked for you.', route: '/(client)/calendar' },
+  { where: 'src/ui/sessions.tsx', title: 'The slot you were waiting for is yours', body: 'Tue 6:30 PM with your coach just freed up and you were next on the list, so it is booked for you.', route: '/(client)/calendar' },
+  // The coaching request itself. NOT recorded, and it was until this entry was
+  // added: `coach_requests_notify_trainer` (part 158) writes 'A coaching
+  // request' on the same insert, so every coach has had two rows for every
+  // request since the push was added — one from the trigger and one from
+  // recordInbox, worded differently enough to read as two people asking.
+  { where: 'app/(client)/trainers.tsx', title: 'New coaching request', body: 'Sam Okafor has asked you to coach them - online.', route: '/(trainer)/dashboard' },
+  // The two halves of an answered coaching request. RECORDED — nothing else
+  // ever tells a client their request was answered, and a declined one has no
+  // surface at all on the client side once the row leaves 'pending'.
+  { where: 'src/ui/CoachRequests.tsx', title: 'Your coaching request was accepted', body: 'Alex Rivera has taken you on. Your Coach screen has them now.', route: '/(client)/my-coach' },
+  { where: 'src/ui/CoachRequests.tsx', title: 'Your coaching request was declined', body: 'Alex Rivera has declined it. You can ask a different coach from the directory.', route: '/(client)/trainers' },
+  // A called-off class. NOT recorded — supabase/parts/493 writes that row from
+  // inside the update's own transaction, and this push exists only because
+  // nothing in the schema can carry that row to a phone.
+  { where: 'app/(trainer)/classes.tsx', title: 'A class you booked is not running', body: '\u201cSpin\u201d has been called off: the instructor is off sick. Your booking is kept on the record.', route: '/(client)/classes' },
+  { where: 'app/(trainer)/classes.tsx', title: 'Classes you booked are not running', body: '3 of your \u201cSpin\u201d classes have been called off: the room is being re-floored.', route: '/(client)/classes' },
   { where: 'src/ui/intake.ts', title: 'Your coach asked for your intake', body: 'They need your intake form before your first session.', route: '/(client)/intake' },
-  // The coach's check-in nudge. It does NOT go through sendPush() — it invokes
-  // the send-push function directly — so recordInbox() never sees it, and it is
-  // listed here so that reading this catalogue does not leave somebody
-  // believing it is one of the pushes this file decides about. It needs no row
-  // either way: it writes a `messages` row first, and part 26's trigger records
-  // that, which is the same reason the chat rule drops it.
-  { where: 'app/(trainer)/dashboard.tsx', title: 'A nudge from your coach', body: 'Hey Sam — checking in! How is your week going?', route: '/(client)/messages' },
+  // ── the three this catalogue had never heard of ──────────────────────────
+  //
+  // Every one of them is sent today and none was listed, which is the drift
+  // this snapshot exists to make visible and had stopped making visible. All
+  // three fall to the DEFAULT — recorded — and the default is right for all
+  // three: nothing else tells the recipient any of them happened. What was
+  // actually wrong was the icon on the third, and it was wrong precisely
+  // BECAUSE nothing here named the route (see '/(trainer)/sessions' above).
+  //
+  // A client asking their coach for an hour the coach never opened. It decays
+  // faster than anything else in this list — the hour it is about may be
+  // tomorrow — and it is the coach's half of 'Your session is on' below.
+  { where: 'app/(client)/request-session.tsx', title: 'A session request', body: 'A client asked about Tue 6:30 PM.', route: '/(trainer)/sessions' },
+  // The answer to it, either way. Part 740's pair, and the declining half
+  // matters most: a request that is refused has no surface at all on the
+  // client's side once it leaves 'pending'.
+  { where: 'app/(trainer)/sessions.tsx', title: 'Your session is on', body: 'Your coach said yes to Tue 6:30 PM.', route: '/(client)/request-session' },
+  { where: 'app/(trainer)/sessions.tsx', title: 'About that time', body: 'Your coach can’t do Tue 6:30 PM.', route: '/(client)/request-session' },
+  // A session the coach MOVED. Not a cancellation and not a booking — the one
+  // push in this list that reports a change to an appointment the client
+  // already had in their diary, which is why it is the one they most need a
+  // durable row for when the banner is missed.
+  { where: 'app/(trainer)/calendar.tsx', title: 'Your session has moved', body: 'Tue 6:30 PM moved to Wed 7:30 AM. Nothing is charged and your session is still paid for.', route: '/(client)/calendar' },
+  // The coach's check-in nudge used to be listed here. It invoked the send-push
+  // function directly, so recordInbox() never saw it — and it wrote a `messages`
+  // row first, so part 26's trigger both recorded AND pushed the same thing. It
+  // was one of the four duplicates described above and it has gone with them.
   // The two notices. Both are RECORDED whether or not the author asked for a
   // push — see src/ui/announcements.tsx — so these two rows are the only ones
   // in this catalogue that describe a send which may happen with no push at
   // all. The body is the author's own words; the heading is this app's.
-  { where: 'src/ui/announcements.tsx', title: 'A notice from your coach', body: 'No 6pm class this Thursday — the room is being re-floored.', route: '/(client)/notices' },
+  { where: 'src/ui/announcements.tsx', title: 'A notice from your coach', body: 'No 6pm class this Thursday. The room is being re-floored.', route: '/(client)/notices' },
   { where: 'src/ui/announcements.tsx', title: 'A notice from your gym', body: 'We are closed Monday for the public holiday. Normal hours from Tuesday.', route: '/(client)/notices' },
   // The invoice. Like the nudge above it does NOT go through sendPush() — it
   // calls recordInbox() directly, because an invoice is not worth waking a
@@ -355,7 +525,7 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // so that reading this catalogue does not leave somebody believing an invoice
   // notification is a push, and so the classification of its wording is
   // visible: it has a body, it is not chat, and it is recorded.
-  { where: 'src/ui/coachInvoices.ts', title: 'An invoice from your coach', body: 'Invoice 0007 for AED 450.00 — Ten sessions. Your coach states this amount is being requested.', route: null },
+  { where: 'src/ui/coachInvoices.ts', title: 'An invoice from your coach', body: 'Invoice 0007 for AED 450.00: Ten sessions. Your coach states this amount is being requested.', route: null },
   // The personal best. The only push in this catalogue sent from inside a
   // branch that has already made a judgement — see src/lib/prNotify.ts, which
   // holds the wording and the once-a-day rule, and supabase/parts/202, which
@@ -435,9 +605,18 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   {
     where: 'supabase/parts/146 · gym_invoices_notify_member',
     when: 'a gym invoice leaves draft',
-    // Routeless on purpose: there is no member screen for `gym_invoices` yet,
-    // and the bell is what a row with nowhere to go is drawn with.
-    to: 'client', title: 'An invoice from your gym', route: null, icon: 'bell',
+    // It now has somewhere to go. This was routeless "on purpose: there is no
+    // member screen for `gym_invoices` yet" — which was a UI gap and was never a
+    // permission one. `gym_invoices_own_r` has admitted the member on
+    // `member_id = auth.uid()` since part 29, so the row the notification is
+    // about has always been theirs to read; nobody had drawn it.
+    //
+    // The COACH's invoice is the opposite case and stays routeless below: part
+    // 138 does not merely omit a client policy, it names and DROPS
+    // `coach_invoices_client_read` so a rebuild cannot leave one standing,
+    // because reading that ledger exposes the per-coach gapless `seq` of every
+    // other document. A screen for it needs a schema decision, not a route.
+    to: 'client', title: 'An invoice from your gym', route: '/(client)/invoices', icon: 'info',
   },
   // ── the coach's three (part 158) ─────────────────────────────────────────
   //
@@ -447,7 +626,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // nothing at all. These are the three the roadmap named.
   {
     where: 'supabase/parts/158 · coach_request_notify',
-    when: 'a client asks to be coached — from the directory or by join code',
+    when: 'a client asks to be coached, from the directory or by join code',
     to: 'trainer', title: 'A coaching request', route: '/(trainer)/dashboard', icon: 'people',
   },
   {
@@ -457,7 +636,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   },
   {
     where: 'supabase/parts/158 · client_subscription_notify',
-    when: 'subChange() says a subscription started — see src/lib/subscriptionScope.ts',
+    when: 'subChange() says a subscription started (see src/lib/subscriptionScope.ts)',
     to: 'trainer', title: 'A subscription has started', route: '/(trainer)/payments', icon: 'grid',
   },
   {
@@ -517,7 +696,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   },
   {
     where: 'supabase/parts/159 · coach_review_notify',
-    when: 'a client leaves or revises a review — at every rating, unfiltered',
+    when: 'a client leaves or revises a review, at every rating, unfiltered',
     to: 'trainer', title: 'A client has left you a review', route: '/(trainer)/credentials', icon: 'trophy',
   },
   // ── the client's half of a failed card (part 160) ────────────────────────
@@ -530,7 +709,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // by the other's build.
   {
     where: 'supabase/parts/160 · client_subscription_notify_client',
-    when: 'subChange() says a payment failed — the client’s half of part 158’s middle band',
+    when: 'subChange() says a payment failed: the client’s half of part 158’s middle band',
     to: 'client', title: 'Your payment did not go through', route: '/(client)/packages', icon: 'trophy',
   },
   // ── the pack running out (part 163) ──────────────────────────────────────
@@ -557,7 +736,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   },
   {
     where: 'supabase/parts/163 · pack_balance_notify',
-    when: 'a paid session pack reaches none left — including via promote_from_waitlist()',
+    when: 'a paid session pack reaches none left, including via promote_from_waitlist()',
     to: 'trainer', title: 'A session pack has run out', route: '/(trainer)/payments', icon: 'grid',
   },
   // ── three the app computed and told nobody (part 202) ────────────────────
@@ -574,7 +753,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   },
   {
     where: 'supabase/parts/202 · goal_achieved_notify',
-    when: 'a client marks one of their own goals reached — the upward crossing of goal_targets.achieved_at',
+    when: 'a client marks one of their own goals reached (the upward crossing of goal_targets.achieved_at)',
     // The parameter is the point, as it is for the coach's chat thread and
     // their client's intake: client-goals.tsx has a roster picker and opens
     // without one, so a missing id is not an error — it is a notification about
@@ -595,7 +774,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // public form.
   {
     where: 'supabase/parts/470 · coach_lead_notify',
-    when: 'somebody fills in a coach’s enquiry form — the anon write path from part 157',
+    when: 'somebody fills in a coach’s enquiry form (the anon write path from part 157)',
     to: 'trainer', title: 'A new enquiry', route: '/(trainer)/leads', icon: 'message',
   },
   // ── the block that ran out and told nobody (part 471) ────────────────────
@@ -613,7 +792,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // block" is the one sentence this pass must never produce.
   {
     where: 'supabase/parts/471 · run_block_ended_notices',
-    when: 'a client reaches the end of the last week of their assigned block — starts_on plus weeks × 7',
+    when: 'a client reaches the end of the last week of their assigned block: starts_on plus weeks × 7',
     to: 'trainer', title: 'A block has run out', route: '/(trainer)/builder', icon: 'dumbbell',
   },
   {
@@ -640,12 +819,13 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // payment this app never recorded.
   {
     where: 'supabase/parts/611 · client_dispute_notify',
-    when: 'a chargeback opens on one of the coach’s charges — charge.dispute.created',
+    when: 'a chargeback opens on one of the coach’s charges (charge.dispute.created)',
+    // dash-ok: copy of the chargeback title the SERVER builds in supabase/parts/611. Change both together, never this alone.
     to: 'trainer', title: 'A chargeback — evidence due by 14 Sep 2026', route: '/(trainer)/payments', icon: 'grid',
   },
   {
     where: 'supabase/parts/611 · client_dispute_notify',
-    when: 'the bank decides it — the update that first sets closed_at',
+    when: 'the bank decides it: the update that first sets closed_at',
     to: 'trainer', title: 'A chargeback was decided in your favour', route: '/(trainer)/payments', icon: 'grid',
   },
   // ── the pack that ran out of time (part 612) ───────────────────────
@@ -669,7 +849,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // invoice rather than one a night.
   {
     where: 'supabase/parts/613 · run_invoice_ageing_notices',
-    when: 'a requested invoice crosses into a new ageing band — 1-7, 8-30, 31-60, 61+',
+    when: 'a requested invoice crosses into a new ageing band: 1-7, 8-30, 31-60, 61+',
     to: 'trainer', title: 'An invoice has gone past its date', route: '/(trainer)/invoices', icon: 'grid',
   },
   // ── the photo a client sent (part 614) ─────────────────────────
@@ -688,7 +868,7 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // photos for a reason that applies to a lock screen most of all.
   {
     where: 'supabase/parts/614 · progress_photo_share_notify',
-    when: 'a client shares a progress photo with their coach — an insert on progress_photo_shares',
+    when: 'a client shares a progress photo with their coach (an insert on progress_photo_shares)',
     to: 'trainer', title: 'A client has sent you a progress photo',
     route: '/(trainer)/client-photos?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
   },
@@ -982,7 +1162,7 @@ export function deletedNote(what: string, why: string | null): string | null {
  * "Done" would be a claim the server never made.
  */
 export function clearedNote(ok: boolean, changed: number): string {
-  if (!ok) return 'Nothing was deleted — the server did not answer. Your inbox is unchanged.';
+  if (!ok) return 'Nothing was deleted. The server did not answer. Your inbox is unchanged.';
   const n = Number.isFinite(changed) && changed > 0 ? Math.floor(changed) : 0;
   if (n === 0) return 'Nothing was deleted. There was nothing marked read to remove.';
   return n === 1 ? 'One read notification deleted.' : `${num(n)} read notifications deleted.`;

@@ -1,7 +1,7 @@
-// What a coach is told about the movements they programme.
+// What a coach is told about the movements they program.
 // Compile with tsc, run with node.
 //
-// Reported from the coach app: "25 of the 25 movements you programme have no
+// Reported from the coach app: "25 of the 25 movements you program have no
 // clip at all", while every one of those movements had a bought animation the
 // client could watch. The claim was true when it was written — there were two
 // kinds of cover, a coach's clip and an Academy clip — and it stopped being
@@ -13,7 +13,15 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 const COACH = 'coach-1';
-const clip = (name: string, trainerId: string | null): CoverageVideo => ({ exerciseId: null, name, trainerId });
+// `id` carries the half of the answer `trainerId` cannot. A 'db…' id is a row
+// on the server; anything else is a clip saved on this phone, which also has a
+// null trainer and is emphatically not the Academy's.
+let SEQ = 0;
+const clip = (name: string, trainerId: string | null): CoverageVideo =>
+  ({ id: 'db' + (SEQ += 1), exerciseId: null, name, trainerId });
+/** A clip whose insert was refused: kept on this handset, seen by nobody. */
+const phoneOnly = (name: string): CoverageVideo =>
+  ({ id: 'vx' + (SEQ += 1), exerciseId: null, name, trainerId: null });
 const programmed = ['Back Squat', 'Bench Press', 'Deadlift'];
 const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-')));
 
@@ -36,7 +44,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   const r = coverageFor(programmed, [], COACH, illustrated('Back Squat'));
   eq(r.illustratedOnly.length, 1, 'the illustrated one is separated');
   eq(r.missing.length, 2, 'and the two with nothing are still named');
-  ok(coverageLine(r)!.includes('2 of the 3'), 'counted against the whole programme, not the remainder');
+  ok(coverageLine(r)!.includes('2 of the 3'), 'counted against the whole program, not the remainder');
   ok(r.missing.includes('Bench Press') && r.missing.includes('Deadlift'), 'by the name the coach typed');
 }
 
@@ -61,7 +69,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
 {
   const r = coverageFor(programmed, programmed.map((n) => clip(n, COACH)), COACH, illustrated());
   eq(r.missing.length, 0, 'nothing missing');
-  ok(coverageLine(r)!.startsWith('Every movement you programme has your own clip'), 'and it says so plainly');
+  ok(coverageLine(r)!.startsWith('Every movement you program has your own clip'), 'and it says so plainly');
 }
 
 /* ── an unreadable catalogue is unknown, never "nothing" ──────────────── */
@@ -101,7 +109,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
 {
   const one = ['Back Squat'];
   const bare = coverageLine(coverageFor(one, [], COACH, illustrated()))!;
-  ok(bare.includes('1 of the 1 movements you programme has nothing'), `singular bare: ${bare}`);
+  ok(bare.includes('1 of the 1 movements you program has nothing'), `singular bare: ${bare}`);
   ok(!bare.includes('have nothing'), 'not the plural verb');
 
   const illus = coverageLine(coverageFor(one, [], COACH, illustrated('Back Squat')))!;
@@ -123,6 +131,52 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   ok(coverageLine(coverageFor(two, [], COACH, null))!.includes('2 have no clip of yours'), 'plural unknown');
 }
 
+/* ── a clip that never reached the server is not the Academy's ────────── */
+//
+// `useExerciseVideos` returns `[...remote, ...added]` and mints an `added` row
+// with `trainerId: null` — the same field a platform clip carries. Classified
+// on that alone, every clip a coach saved while the insert was refused was
+// reported as an Academy clip, so this screen told them their client was
+// watching a platform demonstration of a movement whose only demonstration was
+// on their own handset.
+{
+  const r = coverageFor(programmed, [phoneOnly('Back Squat')], COACH, illustrated());
+  eq(r.academyOnly.length, 0, 'a clip with no row is not the Academy\u2019s');
+  eq(r.mine.length, 0, 'and it is not cover of the coach\u2019s either, because no client can reach it');
+  eq(r.localOnly.length, 1, 'it is its own answer');
+  eq(r.localOnly[0], 'Back Squat', 'named as the coach wrote it');
+  ok(r.missing.includes('Back Squat'), 'the movement is still something the client has nothing for');
+
+  const line = coverageLine(r)!;
+  ok(!line.includes('Academy'), 'and the sentence never calls it the Academy clip');
+  ok(line.includes('saved on this phone only'), `it says where the clip actually is: ${line}`);
+  ok(line.includes('3 of the 3'), 'while still counting all three as having nothing to show');
+}
+
+// The same row, once it reaches the server. Nothing about the shape of the
+// clip changed except the id, and that is the whole of the difference.
+{
+  const r = coverageFor(programmed, [clip('Back Squat', null)], COACH, illustrated());
+  eq(r.academyOnly.length, 1, 'a platform row IS the Academy\u2019s');
+  eq(r.localOnly.length, 0, 'and is not on this phone only');
+}
+
+// A coach who filmed it properly AND has a stale phone copy is not nagged
+// about the phone copy: their clients can watch it.
+{
+  const r = coverageFor(['Back Squat'], [clip('Back Squat', COACH), phoneOnly('Back Squat')], COACH, illustrated());
+  eq(r.mine.length, 1, 'the server row is what counts');
+  eq(r.localOnly.length, 0, 'and the handset copy is not reported as a gap');
+  ok(coverageLine(r)!.includes('Every movement you program has your own clip'), 'so the screen reads as done');
+}
+
+// Singular and plural of the new clause, like every other count here.
+{
+  const two = coverageLine(coverageFor(['Back Squat', 'Deadlift'],
+    [phoneOnly('Back Squat'), phoneOnly('Deadlift')], COACH, illustrated()))!;
+  ok(two.includes('2 have clips saved on this phone only'), `plural phone-only: ${two}`);
+}
+
 /* ── the matching rule ─────────────────────────────────────────────────── */
 
 // Slug equality, so what this reports and what the player finds cannot differ.
@@ -137,14 +191,14 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   eq(r.mine.length, 0, 'a different movement is not cover');
   eq(r.missing.length, 1, 'it is still missing');
 }
-// Repeats across programmes are one movement.
+// Repeats across programs are one movement.
 {
   const r = coverageFor(['Back Squat', 'back squat', 'BACK SQUAT'], [], COACH, illustrated());
   eq(r.all.length, 1, 'the same movement written three ways is one row');
 }
 
 // Nothing programmed: no claim either way.
-eq(coverageLine(coverageFor([], [], COACH, illustrated())), null, 'no programmes means no sentence');
+eq(coverageLine(coverageFor([], [], COACH, illustrated())), null, 'no programs means no sentence');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('videoCoverage: ok');

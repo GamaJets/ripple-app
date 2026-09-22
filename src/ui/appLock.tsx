@@ -8,7 +8,7 @@
 // Shared by all three apps. It sits inside the auth provider in the root
 // layout, so it can ask whether anybody is signed in — a lock over a sign-in
 // screen protects nothing and would only teach people to dismiss it.
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useMemo, useState, type ReactNode } from 'react';
 import { BRAND } from '../lib/brands';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -116,9 +116,18 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
   }, []);
 
   // Signing out drops the lock; signing in re-arms it for the next time away.
+  //
+  // And it drops the PREFERENCE with it, not just the current state. Signing
+  // out clears `repple.appLock.enabled` from the device (src/lib/signOutState.ts)
+  // because it is one person's answer stored under a key with no account in it;
+  // leaving `enabled` true in memory afterwards would leave the next person to
+  // sign in on this handset — within the same session, before any relaunch —
+  // holding a lock armed by somebody who has gone. The read above is
+  // deliberately once-per-launch, so this is the only place that correction can
+  // be made.
   useEffect(() => {
     if (!hydrated.current) return;
-    if (!signedIn) setState('open');
+    if (!signedIn) { setState('open'); setEnabledState(false); }
   }, [signedIn]);
 
   useEffect(() => {
@@ -178,8 +187,16 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
     }
   }, [unlock]);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<AppLockValue>(() => ({ enabled, available, label, state, unlock, setEnabled }), [enabled, available, label, state, unlock, setEnabled]);
   return (
-    <Ctx.Provider value={{ enabled, available, label, state, unlock, setEnabled }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

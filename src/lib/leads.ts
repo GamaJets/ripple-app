@@ -84,7 +84,7 @@ export const LEAD_STATE_LABEL: Record<LeadState, string> = {
 export const LEAD_STATE_NOTE: Record<LeadState, string> = {
   new: 'Nobody has reached out yet.',
   contacted: 'You have reached out. What you did is below.',
-  closed: 'Finished — whether they joined or not.',
+  closed: 'Finished, whether they joined or not.',
 };
 
 /** A row of `coach_leads`, as PostgREST hands it back. */
@@ -96,8 +96,17 @@ export type RawLead = {
   via_code: string | null;
   at: string | null;
   state: string | null;
-  /** Part 204. Absent on a database that has not had it applied, which is
-   *  UNKNOWN and not "they did not join" — see `LeadRow.joined`. */
+  /** Part 211. Absent on a database that has not had it applied, which is
+   *  UNKNOWN and not "they did not join" — see `LeadRow.joined`.
+   *
+   *  This said part 204, which is timed sets and client plan edits and touches
+   *  neither column; `joined_via` appears in exactly one part file and it is
+   *  211-an-enquiry-that-later-joined-and-a-code-that-cost-nothing.sql, which
+   *  is also where the constraint, the trigger `coach_requests_mark_lead_joined`
+   *  and `lead_joined_notice()` live. Written down rather than swapped in
+   *  silence: anyone who went looking in 204 on the strength of the old number
+   *  found nothing and had no way to know whether the part or the claim was
+   *  what had moved. */
   joined_at?: string | null;
   joined_via?: string | null;
 };
@@ -132,7 +141,9 @@ export type LeadRow = {
    * Three values and they are not interchangeable:
    *
    *   true   an account with this exact email address joined through this exact
-   *          code, after the enquiry was left. Part 204's trigger.
+   *          code, after the enquiry was left. Part 211's trigger,
+   *          `coach_requests_mark_lead_joined`. (This line said 204, for the
+   *          reason recorded on `RawLead.joined_at` above.)
    *   false  the read came back and there is no such match. It does NOT mean
    *          they did not become a client — they may have joined on another
    *          code, typed a different address, or been added by hand — so the
@@ -158,7 +169,7 @@ export type FollowUp = { id: string; body: string; at: string | null };
  * left their number will hear nothing at all.
  */
 export const FOLLOW_UP_IS_MANUAL =
-  'Repple does not contact these people. Nothing has been sent to them and nothing will be — following one of these up is you, in your own phone, today. What you record here is a note to yourself.';
+  'Repple does not contact these people. Nothing has been sent to them and nothing will be. Following one of these up is you, in your own phone, today. What you record here is a note to yourself.';
 
 /**
  * That the coach is TOLD one arrived, which is a different promise entirely.
@@ -175,7 +186,7 @@ export const FOLLOW_UP_IS_MANUAL =
  * as one would believe the enquirer had been acknowledged.
  */
 export const ENQUIRY_IS_ANNOUNCED =
-  'You are told the moment one of these arrives, on whatever device you are signed in on. The notification carries their name and nothing else — not their number, not what they wrote — because it is drawn on a lock screen.';
+  'You are told the moment one of these arrives, on whatever device you are signed in on. The notification carries their name and nothing else (not their number, not what they wrote) because it is drawn on a lock screen.';
 
 /**
  * Said on the form, and repeated here so the app and the web page agree.
@@ -186,7 +197,7 @@ export const ENQUIRY_IS_ANNOUNCED =
  * about: a mistyped code is an enquiry neither of you will ever see.
  */
 export const MISTYPED_CODE_NOTE =
-  'An enquiry only reaches you if the link carried one of your codes. Somebody who retyped it wrong is not held anywhere — there is no coach to give them to.';
+  'An enquiry only reaches you if the link carried one of your codes. Somebody who retyped it wrong is not held anywhere. There is no coach to give them to.';
 
 const clean = (v: string | null | undefined, max: number): string =>
   String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -341,10 +352,16 @@ export function leadCountLine(status: LoadStatus, rows: LeadRow[]): string {
   const waiting = rows.filter((r) => r.state === 'new').length;
   const joined = rows.filter((r) => r.joined === true).length;
   if (status === 'partial') {
-    return `More enquiries came back than could be read in one go. ${num(rows.length)} of them are below and there are more — this is not the whole list, and no figure on this screen is a total.`;
+    // "More enquiries EXIST than came back", and never the reverse. This
+    // sentence used to read "More enquiries came back than could be read in one
+    // go", which puts the larger number on the side of what arrived — the
+    // opposite of what a truncated read is, and the opposite of what the next
+    // clause then says. src/lib/leadWait.ts, src/lib/leadConversion.ts and the
+    // leads.tsx header all state the true relation; this was the odd one out.
+    return `More enquiries exist than came back in one go. ${num(rows.length)} of them are below and there are more. This is not the whole list, and no figure on this screen is a total.`;
   }
   if (rows.length === 0) {
-    return 'Nobody has left their details yet. Your join link carries the form — share it and enquiries land here.';
+    return 'Nobody has left their details yet. Your join link carries the form. Share it and enquiries land here.';
   }
   const total = `${num(rows.length)} ${rows.length === 1 ? 'enquiry' : 'enquiries'}`;
   // The conversion count is added only when there IS one. "0 became clients" is
@@ -509,7 +526,7 @@ export function followUpDraft(
   if (kind === 'first') {
     return {
       subject: 'About your message',
-      body: `${hi}\n\nThanks for getting in touch${from} — I saw your enquiry and wanted to reply myself.${theirs}`
+      body: `${hi}\n\nThanks for getting in touch${from}. I saw your enquiry and wanted to reply myself.${theirs}`
         + `\n\nWhat are you hoping to get out of training at the moment? Once I know that I can tell you`
         + ` honestly whether I am the right person for it.${sign}`,
     };
@@ -524,7 +541,7 @@ export function followUpDraft(
   }
   return {
     subject: 'Leaving you to it',
-    body: `${hi}\n\nI have not heard back, so I will stop writing — nobody needs another inbox to clear.`
+    body: `${hi}\n\nI have not heard back, so I will stop writing. Nobody needs another inbox to clear.`
       + `\n\nIf you want to pick it up later, reply to this and I will still be here.${sign}`,
   };
 }

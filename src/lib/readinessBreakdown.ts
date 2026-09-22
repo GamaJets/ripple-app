@@ -60,6 +60,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 import { worstStatus } from '../ui/loadStatus';
 import { formatSleepHours } from './sleepMerge';
 import type { Readiness, ReadinessSignal, ReadinessSleep } from './readiness';
+import type { ReadinessDirection } from './readinessDirection';
 
 /**
  * One device's part in the sleep read, reduced to what a member needs told.
@@ -107,7 +108,15 @@ export interface ReadinessBreakdownInput {
   readiness: Readiness | null;
   /** Exactly what was handed to `readinessScore` as sleep. */
   sleep: ReadinessSleep;
-  /** How many nights back that window was allowed to reach. */
+  /**
+   * How many nights back that window was allowed to reach.
+   *
+   * A FALLBACK now, not the source of truth. `sleep.windowNights` is the window
+   * the average was actually taken over, and every sentence below about a span
+   * of nights is built from that — see `sleepWindow`. This field stays because
+   * three callers pass it and because it is still the right answer when there
+   * is no window on the sleep read at all.
+   */
   windowNights: number;
   /** The device walk as a whole: 'error' means it never completed. */
   deviceStatus: LoadStatus;
@@ -154,6 +163,30 @@ export interface ReadinessBreakdownInput {
   recoveryDeviceConnected?: boolean;
   /** As passed to readinessScore: null means the training log was unreadable. */
   workoutsLast2Days: number | null;
+  /**
+   * Which way the score has moved since yesterday, from `readinessDirection` —
+   * or null/omitted where the caller has no yesterday to offer.
+   *
+   * Optional for the same reason `recoveryPct` is: three callers build this
+   * input and an omitted field means the same as an explicit null, so they do
+   * not all have to be edited in one commit to keep compiling.
+   *
+   * Only its `caveat` is read here, and only two of the four direction states
+   * carry one — a yesterday that FAILED to read, and a yesterday whose score was
+   * built from a different set of signals and therefore out of a different
+   * denominator. Both make the number above them worth less than it looks, which
+   * is the only thing this list is for. A yesterday that is simply not there is
+   * a complete answer and gets no flag; see the note on `short` at the bottom of
+   * this file for why an ordinary absence must never be dressed as a short read.
+   *
+   * The caller, not this file, decides whether an incomparable pair is worth
+   * saying out loud: an incomparability that is a fact about YESTERDAY is rare
+   * and worth a sentence, and one that is a fact about what we are able to
+   * rebuild is permanent, would print on every single day, and is exactly the
+   * flag members learn to stop reading. src/ui/readiness.ts draws that line and
+   * says how.
+   */
+  direction?: ReadinessDirection | null;
 }
 
 export interface ReadinessBreakdown {
@@ -237,26 +270,63 @@ function sleepProvenance(s: ReadinessSleep): string {
   return s.fromTyped === 1 ? 'from a night you logged' : 'all from the nights you logged';
 }
 
+/**
+ * How many nights the span sentences may name.
+ *
+ * `sleep.windowNights` and not `i.windowNights`, because the first is the
+ * window the average was actually taken over and the second is a number the
+ * caller passed alongside it. They agree today. They are still two copies of
+ * one fact, and the defect this precedence exists for is exactly what a
+ * disagreement between them looks like on screen: `readinessSleep` had no
+ * window at all, so it averaged three nights from six weeks ago, and this
+ * function — holding a `windowNights` of 3 from the caller — printed "8h a
+ * night over the last 3 nights" about them. The sentence was built from a span
+ * nothing had measured.
+ *
+ * The fallback is for a hand-built `ReadinessSleep` with no window on it; a
+ * zero or NaN is treated the same way, since neither can be named in a span.
+ */
+function sleepWindow(i: ReadinessBreakdownInput): number {
+  const w = i.sleep?.windowNights;
+  return typeof w === 'number' && Number.isFinite(w) && w > 0 ? Math.round(w) : i.windowNights;
+}
+
 function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInputLine {
   const title = 'Sleep';
   const avg = i.sleep.avgHours;
   const used = i.sleep.nights.length;
+  const w = sleepWindow(i);
   if (avg != null && Number.isFinite(avg) && avg > 0 && used > 0) {
     // "across 2 of the last 3 nights" rather than a bare average. A mean over
     // one night and a mean over three are different claims and the figure
     // cannot tell them apart, which is the whole reason this line exists.
-    const span = used >= i.windowNights
-      ? `over the last ${i.windowNights} nights`
-      : `over ${used} of the last ${i.windowNights} nights`;
+    //
+    // `used > w` can no longer happen — readinessSleep slices to its own window
+    // — but it is stated rather than folded into the `>=`, because the shape it
+    // would print is the shape this whole change exists to stop: a span naming
+    // fewer nights than were averaged.
+    const span = used > w
+      ? `over the last ${used} nights`
+      : used === w
+      ? `over the last ${w} nights`
+      : `over ${used} of the last ${w} nights`;
     return {
       key: 'sleep', title, state: 'scored',
       detail: `${formatSleepHours(avg * 60)} a night ${span}, ${sleepProvenance(i.sleep)}`,
     };
   }
-  // No hours. Which of the four absences it is decides what the member does
-  // next, so they are never collapsed into one sentence.
+  // No hours. Which of the absences it is decides what the member does next, so
+  // they are never collapsed into one sentence.
   if (trust === 'loading' || i.typedStatus === 'loading') {
     return { key: 'sleep', title, state: 'unread', detail: 'still being read' };
+  }
+  if (i.sleep.state === 'unknown') {
+    // Ours. We could not work out which nights count as recent, so we do not
+    // know what is in them — which is an unread signal and not an empty one.
+    return {
+      key: 'sleep', title, state: 'unread',
+      detail: 'we could not work out which nights to read, so we cannot say what you have recorded',
+    };
   }
   if (trust === 'error') {
     return {
@@ -270,23 +340,53 @@ function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInpu
       detail: 'we could not read your sleep log, so we do not know what you have logged',
     };
   }
+  if (i.sleep.state === 'stale') {
+    // Read fine, nights on record, none of them recent. 'no-record' is right —
+    // there is no record IN THE WINDOW, which is the only span this row speaks
+    // about — but the sentence must not read as "you have never logged a
+    // night", which is what the line below says and would be false here.
+    return {
+      key: 'sleep', title, state: 'no-record',
+      detail: `nothing recorded for the last ${w} nights; the most recent night you have is older than that`,
+    };
+  }
   return {
     key: 'sleep', title, state: 'no-record',
-    detail: `nothing recorded for the last ${i.windowNights} nights`,
+    detail: `nothing recorded for the last ${w} nights`,
   };
 }
 
 /**
  * The device's own verdict, or the reason there isn't one.
  *
- * Four outcomes and they are not interchangeable, which is the same discipline
- * `sleepLine` applies one function up. The one that matters most is the last:
+ * Five outcomes and they are not interchangeable, which is the same discipline
+ * `sleepLine` applies one function up. The two that matter most are the last:
  * a member with a WHOOP whose sync has not landed is told their device did not
  * report today, because that is something they can go and fix in the WHOOP app
  * — and the member with no device at all is told nothing of the kind, because
  * for them nothing is wrong.
+ *
+ * ── the fourth silence, added here ─────────────────────────────────────────
+ *
+ * `trust` is the one this function used to be written without. It took `i`
+ * alone, so every connected-and-null case fell to "your device has not reported
+ * a recovery score today" — a statement about what the DEVICE did, made when
+ * the device walk had failed and we had not managed to ask it anything. It is
+ * the same substitution `sleepLine` and `absenceFor` refuse three functions
+ * away, and it sends a member into the WHOOP app to look for a sync that is
+ * probably sitting there fine.
+ *
+ * `readinessBreakdown` already computed `trust` and handed it to `sleepLine`
+ * and `caveatsFor` and not to this. Nothing kept it out; it was simply not
+ * passed.
+ *
+ * Any status but 'ready' takes the new arm, 'partial' included: a walk that
+ * came back short may be short of exactly the provider that scores recovery,
+ * `ReadinessSource` carries a display name and no id, so there is no way to
+ * tell which — and a maybe is not a basis for telling somebody their strap
+ * stayed quiet.
  */
-function recoveryLine(i: ReadinessBreakdownInput): ReadinessInputLine {
+function recoveryLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInputLine {
   // Title Case, and "Device Recovery" rather than "Recovery": this screen is
   // reached from a hero labelled Readiness and sits on a screen called
   // Recovery, so a bare "Recovery" row would be the third use of the word on
@@ -304,12 +404,20 @@ function recoveryLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   if (!i.recoveryDeviceConnected) {
     return {
       key: 'recovery', title, state: 'not-tracked',
-      detail: 'not in the scale — no connected device scores recovery',
+      detail: 'not in the scale: no connected device scores recovery',
+    };
+  }
+  if (trust !== 'ready') {
+    return {
+      key: 'recovery', title, state: 'unread',
+      detail: trust === 'loading'
+        ? 'not in the scale: still reading your devices'
+        : 'not in the scale: we could not read your devices, so we cannot say whether one scored your recovery today',
     };
   }
   return {
     key: 'recovery', title, state: 'unread',
-    detail: 'not in the scale — your device has not reported a recovery score today',
+    detail: 'not in the scale: your device has not reported a recovery score today',
   };
 }
 
@@ -324,25 +432,44 @@ function hydrationLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   // score — so both say so, because a member who reads "no hydration figure"
   // under a lower number will assume they were marked down for it.
   if (!i.hydrationGoal) {
-    return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale — you have not set a daily water goal' };
+    return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale: you have not set a daily water goal' };
   }
   if (i.hydrationStatus !== 'ready') {
-    return { key: 'hydration', title, state: 'unread', detail: "not in the scale — today's count could not be read" };
+    return { key: 'hydration', title, state: 'unread', detail: "not in the scale: today's count could not be read" };
   }
-  return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale — nothing was scored against it' };
+  return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale: nothing was scored against it' };
 }
 
 function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   // Title Case, and the member's words rather than ours: "load" is a coach's
   // term and this row is read by everybody.
-  const title = 'Recent Sessions';
+  //
+  // ── Days, and not sessions, because that is what the figure is ──────────
+  //
+  // `workoutsLast2Days` is a count of DISTINCT LOCAL DAYS with a logged set in
+  // the window, not a count of sessions — src/ui/readiness.ts builds it out of
+  // a `Set` of day keys and says so on the line above it: "Days with a session
+  // in the last two, not entries — three sets on Monday are one day of
+  // training." This row printed it as "1 session in the last two days" to a
+  // member who trained morning and evening yesterday, which is a false
+  // statement about their own record and one they can check. It is the same
+  // defect app/(client)/consistency.tsx already fixed from the other side,
+  // where a per-exercise row count was labelled "Sessions" and read out as
+  // seven of them over one visit to the gym: "The fix is the label rather than
+  // the arithmetic, because a session count is not available." It is not
+  // available here either — the log holds one row per exercise, so the number
+  // of sessions inside a day cannot be recovered from it — and a day of
+  // training is a fact this app can stand behind.
+  const title = 'Recent Training';
   const n = i.workoutsLast2Days;
   if (n == null || !Number.isFinite(n)) {
     return { key: 'load', title, state: 'unread', detail: 'we could not read your training log' };
   }
   return {
     key: 'load', title, state: 'scored',
-    detail: n === 0 ? 'no sessions in the last two days' : `${n} session${n === 1 ? '' : 's'} in the last two days`,
+    detail: n === 0
+      ? 'no training logged in the last two days'
+      : `training logged on ${n} day${n === 1 ? '' : 's'} in the last two`,
   };
 }
 
@@ -356,22 +483,36 @@ function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
  * read sends them to do work that will not help.
  */
 function absenceFor(i: ReadinessBreakdownInput, trust: LoadStatus): string {
+  const w = sleepWindow(i);
   if (i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days)) {
-    return 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.';
+    return 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.';
   }
   if (trust === 'loading') return 'Reading last night from your devices…';
   if (i.typedStatus === 'loading') return 'Reading the nights you have logged…';
+  if (i.sleep.state === 'unknown') {
+    return 'We could not work out which nights to read just now, so there is no readiness to show. It does not mean you slept badly.';
+  }
   if (trust === 'error') {
-    return 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.';
+    return 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.';
   }
   if (i.typedStatus === 'error') {
     // Live until now: an unreadable sleep log with an empty cache reached the
     // home screen as "log a night of sleep", which is a statement about what
     // the member has done, made out of a read that failed.
-    return 'We could not read your sleep log just now, so there is no readiness to show — it does not mean you have not logged a night.';
+    return 'We could not read your sleep log just now, so there is no readiness to show. It does not mean you have not logged a night.';
+  }
+  // Nights on record, all of them older than the window. Neither of the two
+  // sentences below can be said to this member: "no sleep on record" is false
+  // of their log, and "log a night of sleep" reads as a claim that they never
+  // have. Until now they got the second one, under a score of 100 built from
+  // the very nights it was telling them did not exist.
+  if (i.sleep.state === 'stale') {
+    return i.sources.some((s) => s.status !== 'unsupported')
+      ? `Nothing on record for the last ${w} nights. The most recent night you have is older than that.`
+      : `The most recent night you logged is older than the last ${w} nights, so there is no readiness to show yet.`;
   }
   if (i.sources.some((s) => s.status !== 'unsupported')) {
-    return `No sleep on record for the last ${i.windowNights} nights yet.`;
+    return `No sleep on record for the last ${w} nights yet.`;
   }
   return 'Log a night of sleep, or connect a watch, to see your readiness.';
 }
@@ -407,7 +548,7 @@ function caveatsFor(i: ReadinessBreakdownInput, trust: LoadStatus): string[] {
  */
 export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdown {
   const trust = deviceSleepTrust(i.deviceStatus, i.sources);
-  const lines = [sleepLine(i, trust), recoveryLine(i), hydrationLine(i), loadLine(i)];
+  const lines = [sleepLine(i, trust), recoveryLine(i, trust), hydrationLine(i), loadLine(i)];
   const caveats = caveatsFor(i, trust);
 
   // With no score, the status is about the READ that failed to produce one —
@@ -418,6 +559,11 @@ export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdo
       trust === 'partial' ? 'ready' : trust,
       i.typedStatus === 'partial' ? 'ready' : i.typedStatus,
       i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days) ? 'error' : 'ready',
+      // A window we could not draw is our failure, exactly like an unreadable
+      // log, and it must not report as 'ready'. 'stale' deliberately does NOT
+      // join it: nights older than the window are a complete answer about a
+      // member who has not logged recently, not a broken one.
+      i.sleep.state === 'unknown' ? 'error' : 'ready',
     );
     return { lines, status: stalled, caveats, absence: absenceFor(i, trust) };
   }
@@ -427,5 +573,22 @@ export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdo
   // is not a short read, and calling it one would train the member to ignore
   // the word on the many days it means nothing.
   const short = caveats.length > 0 || lines.some((l) => l.state === 'unread');
-  return { lines, status: short ? 'partial' : 'ready', caveats, absence: null };
+
+  // The direction's caveat joins the LIST but is deliberately not part of
+  // `short`, and it is appended after the line above rather than inside
+  // `caveatsFor` so that it cannot become part of it by accident.
+  //
+  // `status` answers "how complete is the thing on screen". Every other sentence
+  // in this list is evidence that today's own inputs came back short; a
+  // yesterday that failed to read, or one built out of a different denominator,
+  // takes nothing away from today's figure at all. Calling the score 'partial'
+  // for it would report a complete read as an incomplete one — and on a screen
+  // that colours the word, it would do so every day a member's strap started or
+  // stopped reporting.
+  //
+  // Last in the list, because it is the least of them: the others say a figure
+  // IN the score may be missing, this one only that the score cannot be placed
+  // beside yesterday's.
+  const withDirection = i.direction?.caveat ? [...caveats, i.direction.caveat] : caveats;
+  return { lines, status: short ? 'partial' : 'ready', caveats: withDirection, absence: null };
 }

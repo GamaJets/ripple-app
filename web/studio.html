@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: light)">
 <title>Repple Studio — the whole gym on one board</title>
   <link rel="canonical" href="https://www.repplefitness.com/studio">
 <meta name="description" content="Timetable, memberships, payments, the door log, the equipment register and payroll computed only from sessions somebody confirmed. Repple Studio is the operating record for a gym.">
 <meta property="og:title" content="Repple Studio — the whole gym on one board">
 <meta property="og:description" content="Classes, members, money, staff and the door, in one record — with payroll that pays for delivered sessions and nothing else.">
 <meta property="og:url" content="https://www.repplefitness.com/studio">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og-studio.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple Studio app icon beside the words “Repple Studio — timetable, memberships, payroll and the door on one board, over one record.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="audience-redesign.css?v=82df941359">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,20 +77,30 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body class="tone-studio">
+<body class="tone-studio audience-page audience-studio">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#2a1704" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
@@ -67,7 +117,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <section class="hero" id="repple-studio-for-the-gym">
   <div class="wrap">
@@ -82,25 +132,28 @@ addEventListener('DOMContentLoaded', function () {
           becomes "which area is moving the others".
         </p>
 
+    <!-- Present for the document outline, not for the eye: this page went h1 → h3
+         and a screen reader was told a level was missing at the top of it. -->
+    <h2 class="vh">Get Repple Studio</h2>
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Studio app icon" focusable="false">
-          <defs><linearGradient id="tile-studio-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#b45309"/></linearGradient></defs>
-          <rect width="1024" height="1024" rx="220" fill="url(#tile-studio-top)"/>
-          <g stroke="#fff" fill="#fff">
-            <circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/>
-            <circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/>
-            <circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/>
-            <circle cx="512" cy="512" r="52"/>
-          </g>
-        </svg>
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><rect width="1024" height="1024" rx="220" fill="#0a1311"/><g transform="translate(182 374.5) scale(2.75)"><path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12" fill="none" stroke="#fff" stroke-width="24" stroke-linejoin="round"/><path fill="#fff" d="M38 62H70L112 100H78Z"/><g fill="#d88c0b" transform="translate(124 0)"><path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/></g></g></svg>
         <div class="who">
           <h3>Repple Studio</h3>
           <p class="role">For gym owners and managers</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
           </div>
+          <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
+            Not on the stores yet &mdash; each button is that app&rsquo;s permanent address and opens the
+            moment its listing publishes. <a href="/signup">Create your account</a> today and sign in when it lands.
+          </p>
         </div>
       </div>
     </div>
@@ -138,7 +191,7 @@ addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
     </div>
-      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#board">Why one board</a></li>
       <li><a href="#payroll">Payroll</a></li>
       <li><a href="#timetable">Timetable</a></li>
@@ -147,6 +200,7 @@ addEventListener('DOMContentLoaded', function () {
       <li><a href="#equipment">Equipment</a></li>
       <li><a href="#bringing-your-history-in">Bringing your history in</a></li>
       <li><a href="#data-protection">Data protection</a></li>
+      <li><a href="#leaving">Leaving</a></li>
     </ul>
 </div>
 </section>
@@ -224,11 +278,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Last 30 days</span>
-          <h3>What happened to 115 booked sessions</h3>
+          <h3 id="chart-what-happened-to-115-booked">What happened to 115 booked sessions</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-happened-to-115-booked">
         <svg viewBox="0 0 740 250" width="740" height="250" role="img" aria-label="Horizontal bar chart of the outcomes recorded against 115 booked personal-training sessions in thirty days: 84 went ahead, 6 did not turn up, 4 cancelled late, 9 cancelled in time, and 12 that nobody has marked yet.">
           <line class="cx-grid" x1="281.9" y1="30" x2="281.9" y2="212"/>
           <line class="cx-grid" x1="393.8" y1="30" x2="393.8" y2="212"/>
@@ -276,11 +330,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Last 30 days</span>
-          <h3>Payroll by trainer</h3>
+          <h3 id="chart-payroll-by-trainer">Payroll by trainer</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-payroll-by-trainer">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Horizontal bar chart of payroll by trainer over thirty days. Trainer A delivered 31 sessions with 2 unmarked, worth 4,650 dirhams; Trainer B delivered 24 with none unmarked, worth 3,600; Trainer C delivered 18 with 6 unmarked, worth 2,700; Trainer D delivered 11 with 4 unmarked, worth 1,650. The total of 12,600 dirhams cannot be settled while 12 sessions remain unmarked.">
           <line class="cx-grid" x1="333.3" y1="26" x2="333.3" y2="252"/>
           <line class="cx-grid" x1="466.7" y1="26" x2="466.7" y2="252"/>
@@ -322,7 +376,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="212" y="293">AED 12,600 across 84 delivered sessions — 12 still need an outcome.</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw f-hi"></span>Delivered <span class="n">84</span></li>
         <li><span class="sw s-book"></span>Awaiting an outcome <span class="n">12</span></li>
       </ul>
@@ -333,7 +387,7 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -391,11 +445,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Twelve weeks</span>
-          <h3>Capacity, booked and turned up</h3>
+          <h3 id="chart-capacity-booked-and-turned-up">Capacity, booked and turned up</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-capacity-booked-and-turned-up">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Grouped bar chart of group-class attendance across twelve weeks. Each week shows three bars: places on the timetable, places booked and people who turned up. Capacity holds at 168 places a week except week six, which had fewer classes. Bookings climb from 121 to a peak of 163 in week eleven. Across the twelve weeks 1,668 of 2,002 places were booked and 1,433 people turned up.">
           <line class="cx-base" x1="56" y1="232" x2="716" y2="232"/>
           <line class="cx-grid" x1="56" y1="180" x2="716" y2="180"/>
@@ -461,7 +515,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="70" y="285">1,668 of 2,002 places booked — 83% fill · 1,433 of those turned up — 86% show</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw s-book"></span>Places on the timetable <span class="n">2,002</span></li>
         <li><span class="sw s-class"></span>Booked <span class="n">1,668</span></li>
         <li><span class="sw s-att"></span>Turned up <span class="n">1,433</span></li>
@@ -475,7 +529,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split after">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A series is real rows, not a rule</strong> — build twelve weeks in one action and then move one week to a different room, or drop the week of a public holiday, without unpicking a recurrence pattern.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -497,10 +551,10 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="rows">
           <div class="row"><span class="nm">Mon 06:00 · Strength</span><span class="mt">14 / 14 · 13 in</span><span class="pill ok">full</span></div>
-          <div class="row"><span class="nm">Mon 18:00 · Conditioning</span><span class="mt">13 / 14 · 11 in</span><span class="pill ok">93% fill</span></div>
-          <div class="row"><span class="nm">Tue 18:00 · Conditioning</span><span class="mt">5 / 14 · 5 in</span><span class="pill crit">36% fill</span></div>
-          <div class="row"><span class="nm">Wed 06:00 · Strength</span><span class="mt">12 / 14 · 9 in</span><span class="pill warn">75% show</span></div>
-          <div class="row"><span class="nm">Thu 18:00 · Yoga Flow</span><span class="mt">8 / 14 · 8 in</span><span class="pill warn">57% fill</span></div>
+          <div class="row"><span class="nm">Mon 18:00 · Conditioning</span><span class="mt">13 / 14 · 11 in</span><span class="pill ok">93% fill<span class="vh"> — healthy</span></span></div>
+          <div class="row"><span class="nm">Tue 18:00 · Conditioning</span><span class="mt">5 / 14 · 5 in</span><span class="pill crit">36% fill<span class="vh"> — needs attention</span></span></div>
+          <div class="row"><span class="nm">Wed 06:00 · Strength</span><span class="mt">12 / 14 · 9 in</span><span class="pill warn">75% show<span class="vh"> — worth watching</span></span></div>
+          <div class="row"><span class="nm">Thu 18:00 · Yoga Flow</span><span class="mt">8 / 14 · 8 in</span><span class="pill warn">57% fill<span class="vh"> — worth watching</span></span></div>
           <div class="row"><span class="nm">Sat 09:00 · Cycle</span><span class="mt">18 / 18 · —</span><span class="pill">not yet run</span></div>
         </div>
         <div class="surface-body">
@@ -533,11 +587,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Recurring revenue</span>
-          <h3>Where the monthly figure comes from</h3>
+          <h3 id="chart-where-the-monthly-figure-comes">Where the monthly figure comes from</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-where-the-monthly-figure-comes">
         <svg viewBox="0 0 740 320" width="740" height="320" role="img" aria-label="Horizontal bar chart of monthly recurring revenue by membership type. Full monthly contributes 35,400 dirhams from 118 members, off-peak monthly 12,960 from 72, annual memberships spread over twelve months contribute 8,528 from 41, and corporate monthly 3,120 from 12. Day passes and session packs contribute nothing because they are one-off. The total is 60,008 dirhams a month.">
           <line class="cx-grid" x1="326.7" y1="26" x2="326.7" y2="266"/>
           <line class="cx-grid" x1="443.3" y1="26" x2="443.3" y2="266"/>
@@ -588,7 +642,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split after">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A price book you can audit</strong> — retire a plan rather than deleting it, so the memberships sold on it keep pointing somewhere and the history has no holes in it.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -649,11 +703,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">One day</span>
-          <h3>Arrivals by hour</h3>
+          <h3 id="chart-arrivals-by-hour">Arrivals by hour</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-arrivals-by-hour">
         <svg viewBox="0 0 740 280" width="740" height="280" role="img" aria-label="Bar chart of gym arrivals by hour across one day, 435 visits in total. A morning peak of 41 at eight o'clock, a quiet middle of the day around thirteen an hour, and the day's busiest hour at six in the evening with 52 arrivals. Nothing at all between eleven at night and five in the morning.">
           <line class="cx-base" x1="56" y1="212" x2="716" y2="212"/>
           <line class="cx-grid" x1="56" y1="149.3" x2="716" y2="149.3"/>
@@ -755,18 +809,22 @@ addEventListener('DOMContentLoaded', function () {
         <div class="eyebrow">Equipment</div>
         <h2 class="hd">A capacity of fourteen<br><span class="serif">is a claim about the room.</span></h2>
         <p class="lede after-sm">
-          It stops being true the moment six of the rowers break. Without a register, a gym measures
-          its fill rate against a number that quietly became fiction. The equipment register is an
-          inventory that the timetable actually reads: put a class on at a capacity the kit cannot
-          support and Studio says so while you are still typing it.
+          It stops being true the moment six of the rowers break, and a gym then measures its fill
+          rate against a number that quietly became fiction. The equipment register is an inventory
+          that the timetable actually reads: put a class on at a capacity the kit cannot support and
+          Studio says so while you are still typing it. Be clear about where that stops &mdash; the check
+          is a warning at the moment you set the number, not a correction applied afterwards. Fill
+          rate is still measured against the capacity somebody typed, so when kit goes out of service
+          it is the owner who decides whether the class capacity moves. Studio makes that visible; it
+          does not quietly re-divide last month&rsquo;s figures behind you.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>It names the number it can actually seat</strong> — "six of eighteen bikes out of action, this class seats twelve, not twenty" — and lets you add the class anyway, because a stale inventory should not stop a class reaching the timetable.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>An empty register is not an empty gym</strong> — if nothing of that kind is recorded, the check returns nothing and says why. It never reports zero, which would tell an owner their class cannot run on the strength of a form nobody filled in.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Staff take a machine out of action</strong> — from the floor, where they are standing next to it, with a note about what is wrong. Usable units drop immediately and so does the capacity it supports.</span></li>
+            <span><strong>Staff take a machine out of action</strong> — from the floor, where they are standing next to it, with a note about what is wrong. Usable units drop immediately, and so does the seat count the check reports the next time somebody sets a capacity.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Retired kit is gone, not broken</strong> — it leaves the counts entirely, rather than sitting in the out-of-action pile making the gym look worse than it is.</span></li>
         </ul>
@@ -784,7 +842,7 @@ addEventListener('DOMContentLoaded', function () {
           <div class="kpi"><div class="k">Out of service</div><div class="v">9</div></div>
         </div>
         <div class="rows">
-          <div class="row"><span class="nm">Spin bike · 18</span><span class="mt">6 out of action</span><span class="pill crit">seats 12</span></div>
+          <div class="row"><span class="nm">Spin bike · 18</span><span class="mt">6 out of action</span><span class="pill crit">seats 12<span class="vh"> — below the twenty it is advertised at</span></span></div>
           <div class="row"><span class="nm">Rower · 12</span><span class="mt">3 out of action</span><span class="pill warn">service due</span></div>
           <div class="row"><span class="nm">Treadmill · 10</span><span class="mt">every 90 days</span><span class="pill crit">overdue</span></div>
           <div class="row"><span class="nm">Squat rack · 6</span><span class="mt">every 180 days</span><span class="pill warn">never serviced</span></div>
@@ -800,17 +858,18 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <div class="scroll after">
+    <div class="scroll after" tabindex="0" role="region" aria-labelledby="tbl-svcstate">
       <table class="data">
+        <caption class="vh" id="tbl-svcstate">Equipment service states, and what each one means</caption>
         <thead>
-          <tr><th>Service state</th><th>What it means</th></tr>
+          <tr><th scope="col">Service state</th><th scope="col">What it means</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>No schedule</strong></td><td>You decided this kit needs no service interval. A decision, recorded as one.</td></tr>
-          <tr><td><strong>Never serviced</strong></td><td>An interval was set and no service has ever been logged against it. Deliberately not the same state as the one above — collapsing them would hide the one that matters.</td></tr>
-          <tr><td><strong>In date</strong></td><td>Serviced, and the next one is more than a week away.</td></tr>
-          <tr><td><strong>Due</strong></td><td>Owed within the next seven days — the grace window, so you can book an engineer before the machine is overdue rather than after.</td></tr>
-          <tr><td><strong>Overdue</strong></td><td>The date derived from the last recorded service has passed. Sorted to the top of the maintenance list.</td></tr>
+          <tr><th scope="row"><strong>No schedule</strong></th><td>You decided this kit needs no service interval. A decision, recorded as one.</td></tr>
+          <tr><th scope="row"><strong>Never serviced</strong></th><td>An interval was set and no service has ever been logged against it. Deliberately not the same state as the one above — collapsing them would hide the one that matters.</td></tr>
+          <tr><th scope="row"><strong>In date</strong></th><td>Serviced, and the next one is more than a week away.</td></tr>
+          <tr><th scope="row"><strong>Due</strong></th><td>Owed within the next seven days — the grace window, so you can book an engineer before the machine is overdue rather than after.</td></tr>
+          <tr><th scope="row"><strong>Overdue</strong></th><td>The date derived from the last recorded service has passed. Sorted to the top of the maintenance list.</td></tr>
         </tbody>
       </table>
     </div>
@@ -842,7 +901,7 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -879,42 +938,43 @@ addEventListener('DOMContentLoaded', function () {
       </li>
     </ol>
 
-    <div class="scroll after">
+    <div class="scroll after" tabindex="0" role="region" aria-labelledby="tbl-import">
       <table class="data">
+        <caption class="vh" id="tbl-import">What the importer does with each kind of row, and why</caption>
         <thead>
-          <tr><th>What the sheet says</th><th>What the importer does, and why</th></tr>
+          <tr><th scope="col">What the sheet says</th><th scope="col">What the importer does, and why</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>A quarterly plan</strong></td>
+            <th scope="row"><strong>A quarterly plan</strong></th>
             <td>Refused with a reason. A price book holds monthly, yearly and one-off, and there is nowhere truthful to put a quarter. Calling it monthly would divide your recurring revenue by three; calling it yearly would multiply it by four.</td>
           </tr>
           <tr>
-            <td><strong>A plan with a blank price</strong></td>
+            <th scope="row"><strong>A plan with a blank price</strong></th>
             <td>Refused. A blank price is an unfinished row, not a free plan. A deliberate zero is accepted, because a complimentary or staff membership is a real thing a gym sells at nothing on purpose.</td>
           </tr>
           <tr>
-            <td><strong>A status it does not recognise</strong></td>
+            <th scope="row"><strong>A status it does not recognise</strong></th>
             <td>Refused rather than defaulted to active. A cancelled member imported as active gets chased for money.</td>
           </tr>
           <tr>
-            <td><strong>An amount with four decimal places</strong></td>
+            <th scope="row"><strong>An amount with four decimal places</strong></th>
             <td>Refused rather than rounded. A column of four-decimal figures is a unit price or an exchange rate, and rounding it silently turns a data problem into a money problem.</td>
           </tr>
           <tr>
-            <td><strong>A negative payment</strong></td>
+            <th scope="row"><strong>A negative payment</strong></th>
             <td>Refused — that is a refund, and this is not the tool for one. A zero is accepted, because a comped month and a correction both really happen.</td>
           </tr>
           <tr>
-            <td><strong>The same email twice</strong></td>
+            <th scope="row"><strong>The same email twice</strong></th>
             <td>The first row keeps its place and the second is flagged against the line number of the first. Two members for one person is not a thing you want to discover later.</td>
           </tr>
           <tr>
-            <td><strong>A membership ending before it starts</strong></td>
+            <th scope="row"><strong>A membership ending before it starts</strong></th>
             <td>Refused. So is the thirty-first of February, which a date library would otherwise roll helpfully forward into March.</td>
           </tr>
           <tr>
-            <td><strong>A payment with no name and no email</strong></td>
+            <th scope="row"><strong>A payment with no name and no email</strong></th>
             <td>Refused — it cannot be attributed to anybody. A payment whose member simply cannot be matched is still recorded, as unattributed, because that is true and dropping it would lose money you actually took.</td>
           </tr>
         </tbody>
@@ -941,11 +1001,63 @@ addEventListener('DOMContentLoaded', function () {
           The clock starts the moment they tap it in the app, not when you next open the console —
           so the queue exists, it counts down, and it goes red when a request is past the promise.
         </p>
-        <ul class="ticks">
+        <!-- NO NUMBER HERE, DELIBERATELY — and this is the note that stops the
+             next editor putting one back.
+
+             The figure IS known and IS measured. As of 14 September 2026, an
+             erasure reaches 118 tables in `public` plus 11 inside Supabase's
+             own `auth` schema, 129 in all. Measured against the live database
+             (project phgfwzpkkwdysftlgkoq) as the transitive closure of
+             `on delete cascade` from the row `action_account_deletion()`
+             actually deletes:
+
+               with recursive fk as (
+                 select (conrelid::regclass)::text  as child,
+                        (confrelid::regclass)::text as parent
+                   from pg_constraint
+                  where contype = 'f' and confdeltype = 'c')
+               , rec as (
+                 select 'auth.users'::text as tbl
+                  union
+                 select fk.child from fk join rec on fk.parent = rec.tbl)
+               select count(*) from rec;
+
+             Count it against the LIVE catalogue, never by parsing
+             supabase/setup.sql: a `create table` clause is not the last word
+             on a foreign key, and the retention part drops and recreates
+             memberships_member_id_fkey, gym_invoices_member_id_fkey and
+             gym_payments_member_id_fkey with a different action. The
+             file-parsed closure gives 125 and is wrong.
+
+             This page never carried the figure; four other surfaces did, and
+             all four said 39 until 14 September 2026 — the owner console, the
+             owner app's confirmation, a comment in src/ui/notifications.tsx
+             and one in supabase/parts/41-account-deletion.sql. 39 was taken
+             when the schema was about a quarter of its present size and was
+             never re-counted, so every one of them understated an irreversible
+             act by a factor of three while sounding precise. What this bullet
+             carried instead was the sentence "Their invoices and memberships
+             go too", which was not stale but INVERTED: those three foreign
+             keys are `on delete set null`, so the gym's financial record
+             survives on purpose, for its retention obligation. This page told
+             an owner their books would be destroyed.
+
+             The fix is not a fresher number on this page. A count belongs
+             where something polices it: web/security.html carries the chart,
+             with a "Counted from the live catalogue, <date>" stamp, and
+             check F of scripts/check-site-claims.mjs fails on a partial edit
+             to it. A figure repeated in prose over here would be a second
+             place to update and nothing would notice when it was missed —
+             which is precisely how this site once shipped a password minimum
+             corrected on four screens and missed on the fifth. So this bullet
+             states the KIND of thing that goes and the kind that survives,
+             which does not go stale when a table is added, and sends a reader
+             who wants the count to the page that holds it. -->
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Two confirmations, and both say what goes</strong> — the profile, the workouts, the logs, the scans, the messages and the bookings, across every table that holds them. Their invoices and memberships go too.</span></li>
+            <span><strong>Two confirmations, and both say what goes</strong> — the profile, the workouts, the logs, the scans, the messages and the bookings, across every table that hangs off the account, and the sign-in account itself. Their invoices and memberships are not in that set. Those are your financial record and they survive; <a href="/security#deletion">the deletion page counts what is reached</a>, from the database's own foreign keys rather than from memory.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>What stays, and why</strong> — payments, door-log visits and guest passes remain, with the person detached from them. Your books do not develop a hole because somebody exercised their rights.</span></li>
+            <span><strong>What stays, and why</strong> — invoices, memberships and payments remain, and so do door-log visits and guest passes. Each loses its link to the account. Several keep the name on purpose, copied onto the row as the account goes, because an invoice billed to nobody reconciles nothing and a waiver without the name that signed it is not evidence of anything. Detached is not anonymous, and your books do not develop a hole because somebody exercised their rights.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The erasure is logged even though the person is not</strong> — that they asked, and when you actioned it, is kept. The record of the deletion is the evidence that it happened.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -966,8 +1078,8 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="rows">
           <div class="row"><span class="nm">Member · asked 24 Jul</span><span class="mt">33 days ago</span><span class="pill crit">overdue</span></div>
-          <div class="row"><span class="nm">Member · asked 22 Aug</span><span class="mt">4 days ago</span><span class="pill warn">4d left</span></div>
-          <div class="row"><span class="nm">Trainer · asked 19 Aug</span><span class="mt">7 days ago</span><span class="pill warn">7d left</span></div>
+          <div class="row"><span class="nm">Member · asked 22 Aug</span><span class="mt">4 days ago</span><span class="pill warn">4d left<span class="vh"> — due soon</span></span></div>
+          <div class="row"><span class="nm">Trainer · asked 19 Aug</span><span class="mt">7 days ago</span><span class="pill warn">7d left<span class="vh"> — due soon</span></span></div>
         </div>
         <div class="surface-body">
           <p class="tiny">
@@ -994,46 +1106,52 @@ addEventListener('DOMContentLoaded', function () {
         version of the truth.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-pages">
       <table class="data">
+        <caption class="vh" id="tbl-pages">The console pages, who can open each and what it is for</caption>
         <thead>
-          <tr><th>Page</th><th>Who can open it</th><th>What it is for</th></tr>
+          <tr><th scope="col">Page</th><th scope="col">Who can open it</th><th scope="col">What it is for</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Overview</strong></td>
+            <th scope="row"><strong>Overview</strong></th>
             <td>Owner</td>
             <td>Money taken, recurring revenue, active members, class fill, who is in the building, sessions awaiting an outcome and the trainer roster. Each department is read separately, so one failing read shows a dash instead of blanking the page.</td>
           </tr>
           <tr>
-            <td><strong>Members</strong></td>
+            <th scope="row"><strong>Members</strong></th>
             <td>Owner</td>
             <td>One member, everything the gym knows: membership and plan, what they have paid, when they were last actually in the building, classes booked against attended, one-to-ones and their outcomes, passes. It separates a member who moved from classes to the gym floor from one who stopped coming &mdash; on the timetable alone those two look identical.</td>
           </tr>
           <tr>
-            <td><strong>Timetable</strong></td>
+            <th scope="row"><strong>Timetable</strong></th>
             <td>Owner</td>
             <td>Build a class or a weekly series with skip dates, check the capacity against the equipment register as you type, and open a class's roster to mark people present.</td>
           </tr>
           <tr>
-            <td><strong>Sessions</strong></td>
+            <th scope="row"><strong>Sessions</strong></th>
             <td>Owner</td>
             <td>The personal-training payroll: outcomes waiting to be marked, payroll by trainer, what is outstanding, what has already been settled, and an undo on anything marked wrongly.</td>
           </tr>
           <tr>
-            <td><strong>Money</strong></td>
+            <th scope="row"><strong>Money</strong></th>
             <td>Owner</td>
             <td>The price book, the memberships on it, and every payment recorded in the last thirty days.</td>
           </tr>
           <tr>
-            <td><strong>Door</strong></td>
+            <th scope="row"><strong>Door</strong></th>
             <td>Owner, staff</td>
             <td>Check people in and out, see who is inside, and sell or redeem a drop-in, a guest pass or a class pack at the desk.</td>
           </tr>
           <tr>
-            <td><strong>Import</strong></td>
+            <th scope="row"><strong>Import</strong></th>
             <td>Owner</td>
             <td>Paste a spreadsheet, see exactly what would be written, then decide.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Export</strong></th>
+            <td>Owner</td>
+            <td>The other direction, deliberately next to Import in the console's own menu: the gym's whole record out as a folder of spreadsheets. What is in it, and what it is for, is the next section.</td>
           </tr>
         </tbody>
       </table>
@@ -1042,6 +1160,157 @@ addEventListener('DOMContentLoaded', function () {
       Open a page your role does not cover and it says so plainly — the money is owner-only, the
       door is for gym staff — rather than showing an empty screen you would have to interpret.
     </p>
+    <!-- The eight rows above are the eight this PAGE explains. The console's own
+         menu carries thirty, and saying "seven console pages" — which this page
+         did — sold a gym a quarter of what it was getting. The count and the five
+         group names are read out of studio-web/components/Shell.tsx by check K in
+         scripts/check-site-claims.mjs, so a page added to that rail fails this
+         sentence rather than quietly ageing it. -->
+    <!-- site-claim: console-rail -->
+    <p class="tiny after-sm">
+      Those are the eight this page explains, and they are not the whole console. Its menu carries
+      <strong>thirty-one pages</strong> in five groups &mdash; Floor, Delivery, Money, My book and
+      System &mdash; because a gym is not eight jobs. Floor is the overview, the members, the
+      invitations, the retention list, the passes and the door; Delivery is the staff, the classes,
+      the timetable and the one-to-ones; Money runs from the price book through online orders,
+      revenue, costs, the accountant's month, tax and payroll to signing a month off; System holds
+      analytics, the equipment register, the gym's own settings, the sites an owner holds,
+      compliance, the activity log, the erasure queue, and the import and export. My book is the fifth, and it is there because an owner who still takes
+      clients is one person: their own roster and their own earnings sit in the same console,
+      kept separate from the gym's.
+    </p>
+  </div>
+</section>
+
+<!-- ── leaving ────────────────────────────────────────────────────────── -->
+<!--
+     Why this section exists.
+
+     A gym owner reading this page has four fears, and the page answered three
+     of them at length: their staff, their members' data and their money. The
+     fourth — what happens if we want to leave — was one line in an FAQ, "ask
+     and we export everything we hold for your gym", which reads as a favour
+     somebody does you and is the exact shape of an answer a person about to
+     migrate does not believe.
+
+     It was also a wild understatement of the product. `studio-web/app/export`
+     is a console page an owner opens themselves, and `src/lib/gymExport.ts`
+     builds twenty-nine named parts out of it. Every figure below is read from
+     that file rather than described from memory:
+
+       · EXPORT_PARTS (src/lib/gymExport.ts:350)  — the twenty-nine
+       · EXPORT_LABEL (:634)                      — the words in column one
+       · EXPORT_COST  (:667)                      — the words in column two,
+                                                    which are the product's own
+                                                    sentences about what a gym
+                                                    would be leaving behind
+       · the INCOMPLETE naming rule               — :1431
+       · manifest.json + README.txt               — :1559, :1567
+       · PRESET_IDS                               — src/lib/exportWindow.ts:236
+       · MEMBER_PARTS                             — src/lib/gymExport.ts:1175
+       · gym_export_runs                          — studio-web/app/export/page.tsx:984
+
+     check L in scripts/check-site-claims.mjs holds the count and the labels
+     against EXPORT_PARTS and EXPORT_LABEL, so a part added or renamed in the
+     code fails this section rather than leaving it a year out of date.
+-->
+<section class="band tint" id="leaving">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Leaving</div>
+      <h2 class="hd">A gym you cannot export<br><span class="serif">is a gym that cannot leave.</span></h2>
+      <p class="lede">
+        So Export sits directly beside Import in the console's menu, and it is a page you open
+        yourself rather than a request you send us. It writes the gym's whole record as a folder
+        of spreadsheets &mdash; one file per part, a manifest and a plain-text README saying what
+        is in it and what is not. Nothing about this is a retention feature: the point of writing
+        it down here is that you can check it before you migrate rather than after.
+      </p>
+    </div>
+
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-export">
+      <table class="data">
+        <caption class="vh" id="tbl-export">The twenty-nine parts of a gym export, and what a gym would be leaving behind without each one</caption>
+        <thead>
+          <tr><th scope="col">The part</th><th scope="col">What you would be leaving behind without it</th></tr>
+        </thead>
+        <!-- site-claim: export-parts -->
+        <tbody>
+          <tr><th scope="row">the price book</th><td>what the gym sells and for how much</td></tr>
+          <tr><th scope="row">the member roster</th><td>who the members are</td></tr>
+          <tr><th scope="row">the gym&rsquo;s own file on each member</th><td>contact numbers, next of kin, the medical note and what the desk wrote about each member</td></tr>
+          <tr><th scope="row">memberships</th><td>who holds what plan, since when, and in what state</td></tr>
+          <tr><th scope="row">payments</th><td>every payment the gym has recorded</td></tr>
+          <tr><th scope="row">the invoice register</th><td>what the gym billed, to whom, and what is still owed on it</td></tr>
+          <tr><th scope="row">what members bought online</th><td>every card payment the gym took online, and the Stripe reference each one reconciles to</td></tr>
+          <tr><th scope="row">the reconciliation marks</th><td>which payments and invoices somebody accepted as explained, and the reason they gave</td></tr>
+          <tr><th scope="row">what the gym paid out</th><td>everything the gym spent &mdash; rent, power, staff off payroll, maintenance, stock, insurance and the rest of what leaves the account</td></tr>
+          <tr><th scope="row">the months that were signed off</th><td>the figures each month was signed off on, who signed it, and what they were told was wrong at the time</td></tr>
+          <tr><th scope="row">the timetable</th><td>what was on the timetable</td></tr>
+          <tr><th scope="row">class attendance</th><td>who booked a class and who turned up</td></tr>
+          <tr><th scope="row">one-to-ones</th><td>one-to-ones delivered and what they were worth</td></tr>
+          <tr><th scope="row">pass types</th><td>what a drop-in, guest pass or class pack costs</td></tr>
+          <tr><th scope="row">passes issued</th><td>passes sold and the visits still owed on them</td></tr>
+          <tr><th scope="row">the door log</th><td>who came through the door and when</td></tr>
+          <tr><th scope="row">invites</th><td>who was invited and whether they joined</td></tr>
+          <tr><th scope="row">payroll settlements</th><td>what the gym actually paid its staff, and when</td></tr>
+          <tr><th scope="row">payroll adjustments</th><td>the bonuses, deductions, reimbursements and advances behind what the staff were actually paid</td></tr>
+          <tr><th scope="row">the equipment register</th><td>what the gym owns and what is due a service</td></tr>
+          <tr><th scope="row">the maintenance and accident book</th><td>when each machine was serviced, what the engineer found, and every incident recorded on one</td></tr>
+          <tr><th scope="row">the rota</th><td>who was rostered on the floor and when</td></tr>
+          <tr><th scope="row">member contact</th><td>the record that anybody was ever contacted about leaving</td></tr>
+          <tr><th scope="row">promo codes</th><td>what was discounted and how often it was used</td></tr>
+          <tr><th scope="row">the activity log</th><td>what happened in the building, as the database recorded it</td></tr>
+          <tr><th scope="row">PT packs sold</th><td>what the coaches sold through their own checkout</td></tr>
+          <tr><th scope="row">the documents people are asked to sign</th><td>the wording of every waiver, consent and set of terms, as each version stood</td></tr>
+          <tr><th scope="row">signatures</th><td>who signed what, when, and whether they signed it themselves</td></tr>
+          <tr><th scope="row">the filing cabinet</th><td>the contracts, insurance, certificates and incident reports the gym holds</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      The right-hand column is not marketing copy written about the export. It is the sentence the
+      console itself prints beside a part when that part cannot be read &mdash; the product's own
+      account of what a gym would be walking away without.
+    </p>
+
+    <div class="split" style="margin-top:clamp(34px,5vw,52px)">
+      <div>
+        <h3 class="hd" style="font-size:clamp(21px,2.5vw,27px)">What stops it lying about itself</h3>
+        <ul class="ticks" role="list">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A part that could not be read is named, not omitted.</strong> It gets a file of its own saying so, the word &ldquo;INCOMPLETE&rdquo; goes into the name of every file in the bundle, and the manifest records that it is not complete. A folder in Downloads is read by its filename long before anybody opens the README, so that is where the warning goes.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>No read comes back short in silence.</strong> Each one either asks for a row more than it will accept and fails on getting it, or pages until it has the set. There is no third behaviour where a large gym quietly exports the first thousand rows of its door log.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A slice says it is a slice.</strong> Take a month or a year rather than everything &mdash; this month, last month, the last ninety days, this year, last year, or two dates you type &mdash; and the bundle is labelled with the period and separately with the day it was taken, so two dates in one filename cannot be read as one. &ldquo;Complete&rdquo; on a windowed bundle is stated to mean nothing was lost to a failed read, not that this is the whole record.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A missing column is absent, not blank.</strong> Where member email addresses could not be read, the roster ships with no email column at all and a note saying why &mdash; because an empty column reads as &ldquo;this member has no address&rdquo;, which is a different and worse thing to believe.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Every run is written down.</strong> Who exported, what they took and when is a row in your gym's own record &mdash; which is what makes an export something you can be accountable for rather than something that merely happened.</span></li>
+        </ul>
+      </div>
+
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></div>
+            <h3>One member, on request</h3>
+            <p>The same page builds the record of a single person &mdash; their own file, memberships, payments, invoices, attendance, one-to-ones, passes, visits, invitations, contact history, what they bought and the events against them. It is named for the person, so a folder of them cannot be mistaken for a backup of the gym.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+            <h3>Spreadsheets, not our format</h3>
+            <p>Comma-separated files in a zip, with a manifest and a README. Nothing in the bundle needs Repple to open it, which is the only definition of portable that is worth anything.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5l3 1.8"/></svg></div>
+            <h3>Where it is not</h3>
+            <p>This is a console page, not a phone screen &mdash; the Studio app on your phone has no gym export in it. And the Export My Data button in any app's own Settings is a different thing entirely: that one hands you <em>your own</em> record as a person, not your gym's. Two exports, two meanings, and it is worth knowing which you pressed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1058,7 +1327,7 @@ addEventListener('DOMContentLoaded', function () {
           and how many sessions they actually delivered — and it says which of the two is the
           problem in a sentence.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Client load and delivery weigh the same</strong> — a full book is a dozen clients and twenty sessions a month, not a ceiling on how good anybody is.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -1101,7 +1370,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow">Your figures against your records</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">Your figures against your records</h2>
+        <div class="eyebrow" aria-hidden="true">Your figures against your records</div>
         <p class="q">Two sources for one number,<br>and nothing comparing them.</p>
         <p class="lede after-sm">
           The financial-health review works from figures you type — revenue, expenses, members,
@@ -1205,24 +1481,29 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Control</div>
       <h2 class="hd">Your gym's data,<br><span class="serif">fenced off properly.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">Rows</div>
-        <div class="lbl"><strong>Isolated at the database.</strong> Every table carries row-level rules keyed to your gym. Another gym's account cannot reach your rows even if its app asked for them.</div>
+        <dt class="stat-n">Rows</dt>
+        <dd class="lbl"><strong>Isolated at the database.</strong> Every table carries row-level rules keyed to your gym. Another gym's account cannot reach your rows even if its app asked for them.</dd>
       </div>
       <div>
-        <div class="stat-n">Roles</div>
-        <div class="lbl"><strong>Owner, trainer, member.</strong> Staff see their own clients and rota; owners see the business; nobody sees private coaching messages. The console enforces it page by page.</div>
+        <dt class="stat-n">Roles</dt>
+        <dd class="lbl"><strong>Owner, trainer, member.</strong> Staff see their own clients and rota; owners see the business; nobody sees private coaching messages. The console enforces it page by page.</dd>
       </div>
       <div>
-        <div class="stat-n">Export</div>
-        <div class="lbl"><strong>Yours to take.</strong> Anyone with an account can export everything Repple holds about them as a file, from Settings, without asking a person for it.</div>
+        <dt class="stat-n">Export</dt>
+        <dd class="lbl"><strong>Yours to take.</strong> Anyone with an account can export everything Repple holds about them as a file, from Settings, without asking a person for it.</dd>
       </div>
       <div>
-        <div class="stat-n">Brand</div>
-        <div class="lbl"><strong>Your colours.</strong> Set the name and the palette and it carries through what your members and coaches see, with a live preview before you commit to it.</div>
+        <dt class="stat-n">Brand</dt>
+        <dd class="lbl"><strong>Your colours.</strong> Set the name and the palette and it carries through what your members and coaches see, with a live preview before you commit to it.</dd>
       </div>
-    </div>
+    </dl>
     <p class="tiny after-sm">
       <a href="/security">Security &amp; data</a> is the long version: what a coach can and cannot
       read, why the test is &ldquo;the owner of this gym&rdquo; rather than &ldquo;an owner&rdquo;,
@@ -1259,9 +1540,21 @@ addEventListener('DOMContentLoaded', function () {
         <summary>Does it replace our door system?</summary>
         <div class="a"><p>It records visits — at the desk, from a member's entry barcode, or as an unattributed walk-in — and that log is what attendance, dwell time and last-seen are read from. It is a record of who came in, not a lock on the turnstile.</p></div>
       </details>
+      <!-- Two questions a gym owner asks in the first five minutes that this
+           site had no answer to anywhere. Both are exact rather than
+           flattering; the branding one in particular is mostly a list of what
+           does NOT happen, because that is what is true. -->
+      <details>
+        <summary>What currency does it work in?</summary>
+        <div class="a"><p>Yours. There is no default currency anywhere in the system — a gym picks one of forty once, and everything written after that is denominated in it: the price book, a pass, a session fee, a recorded payment. Until one is picked, money renders as a dash and asks rather than guessing, which is deliberate; an amount printed in a currency nobody chose is worse than no amount. Change it later and nothing already recorded moves — a payment is a historical fact, so it keeps the currency it was taken in, and any total that would mix the two is withheld rather than added up.</p></div>
+      </details>
+      <details>
+        <summary>Can we put our own name and colours on it?</summary>
+        <div class="a"><p>Partly, and it is worth being exact about which part. A gym sets its own name and one accent colour. <strong>The name is the part that reaches your members</strong>: the app in their hand takes your gym's name, and their member card and member number are issued under it rather than under ours. <strong>The colour is not</strong> — it themes the console and an owner's own app, and does not reach the member or coach apps today. There is no logo upload for a gym, no gym-specific web address, and no gym-branded app in the App Store: a chain that wants its own apps under its own name is a build and an onboarding project rather than a setting, and it is a conversation to have before you sign rather than after. If branding is a large part of what you are buying, say so early and you will be told exactly where it stands.</p></div>
+      </details>
       <details>
         <summary>What does it cost?</summary>
-        <div class="a"><p>Pricing isn't published yet. The apps are in their first release and we would rather set it against how gyms actually use them than guess in advance. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>, tell us how your gym runs, and we will talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that nothing is charged today.</p></div>
+        <div class="a"><p>Pricing isn't published yet. The apps are in their first release and we would rather set it against how gyms actually use them than guess in advance. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>, tell us how your gym runs, and we will talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that no subscription is charged today — the one live charge being 10% of anything sold through Repple’s own checkout.</p></div>
       </details>
     </div>
   </div>
@@ -1278,10 +1571,36 @@ addEventListener('DOMContentLoaded', function () {
       <a class="btn primary" href="mailto:support@repplefitness.com?subject=Repple%20Studio%20for%20my%20gym">Talk to us about your gym</a>
       <a class="btn" href="/trainer">See the coach's side</a>
     
-        <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+        <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
+        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
         <a class="btn" href="/download">All three apps</a>
       </div>
+      <!-- The same caveat as the one under the badges at the top of this page, and
+           it is here because it was NOT. The 3 Sep 2026 sweep added it to the hero
+           and missed the closing call to action, so the last thing a reader saw on
+           this page was an "App Store" badge with nothing beside it — and on
+           13 Sep 2026 `itunes.apple.com/lookup` still answered `resultCount 0` for
+           all three ids and all three Play pages still returned 404. A badge reading
+           "Download on the App Store" over a link that 404s is a claim this site
+           cannot support; the sentence is what makes it one it can.
+
+           It says "not on the stores yet" and nothing about a release being under
+           way, which is the second thing 13 Sep changed. App Store Connect reports
+           the only version of each of the three apps as iOS 1.0 in appStoreState
+           PREPARE_FOR_SUBMISSION — nothing in review, nothing approved — so the
+           previous wording ("being released now", "still going live") was a claim
+           about motion that did not exist.
+
+           The href itself stays. It is the permanent address and starts working by
+           itself the moment the listing publishes — see docs/LAUNCH-CHECKLIST.md
+           section 2, which is also where the instruction to DELETE this caveat on
+           that day lives. Check N in scripts/check-site-claims.mjs refuses a store
+           badge on any page that has no caveat near it, so this cannot go missing
+           again by being forgotten in one place out of two. -->
+      <p class="tiny" style="margin:14px auto 0;max-width:58ch">
+        Not on the stores yet &mdash; each button is that app&rsquo;s permanent address and opens the
+        moment its listing publishes. <a href="/signup">Create your account</a> today and sign in when it lands.
+      </p>
   </div>
 </section>
 
@@ -1292,30 +1611,37 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#2a1704" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
-            </svg>
-          </span>
-          Repple
-        </a>
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+    </a>
         <p class="tiny">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
+        <h2 class="fh">Apps</h2>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Getting started</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>
@@ -1323,17 +1649,24 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

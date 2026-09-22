@@ -97,9 +97,9 @@ export function needsResponse(status: DisputeStatus): boolean {
 export function disputeStatusLabel(status: DisputeStatus): string {
   switch (String(status ?? '')) {
     case 'needs_response': return 'Needs a response';
-    case 'warning_needs_response': return 'Early warning — needs a response';
+    case 'warning_needs_response': return 'Early warning · needs a response';
     case 'under_review': return 'With the bank';
-    case 'warning_under_review': return 'Early warning — with the bank';
+    case 'warning_under_review': return 'Early warning · with the bank';
     case 'won': return 'Decided in your favour';
     case 'lost': return 'Decided against you';
     case 'warning_closed': return 'Early warning, closed';
@@ -193,12 +193,12 @@ export function deadlineLine(d: DisputeDeadline, when: string | null, now: numbe
   }
   if (ms <= 0) {
     const n = Math.max(1, Math.floor(-ms / 86_400_000));
-    return `The date for evidence was ${when} — about ${n} day${n === 1 ? '' : 's'} ago. Stripe decides on what was submitted by then.`;
+    return `The date for evidence was ${when}, about ${n} day${n === 1 ? '' : 's'} ago. Stripe decides on what was submitted by then.`;
   }
   if (ms < 86_400_000) return `Evidence is due within the DAY, by ${when}. After that Stripe decides on what has been submitted.`;
   if (ms < 2 * 86_400_000) return `Evidence is due TOMORROW, ${when}. After that Stripe decides on what has been submitted.`;
   const days = Math.ceil(ms / 86_400_000);
-  return `Evidence is due by ${when} — ${days} days from now. After that Stripe decides on what has been submitted.`;
+  return `Evidence is due by ${when}, ${days} days from now. After that Stripe decides on what has been submitted.`;
 }
 
 /**
@@ -231,7 +231,7 @@ export const EVIDENCE_GOES_TO_STRIPE =
 /** And what to send, because "submit evidence" is not an instruction anybody
  *  can act on at nine in the evening. */
 export const WHAT_EVIDENCE_LOOKS_LIKE =
-  'Send something even if it feels thin — an empty response loses by default. What you have is usually enough: the sessions you delivered and when, your messages with them, and anything they signed.';
+  'Send something even if it feels thin. An empty response loses by default. What you have is usually enough: the sessions you delivered and when, your messages with them, and anything they signed.';
 
 /* ── the row the webhook writes ───────────────────────────────────────────── */
 

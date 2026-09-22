@@ -12,27 +12,39 @@
 // one hero figure, each feedback card became a hairline-separated row, and the
 // category no longer tints the *text* — a coloured dot sits beside ink-coloured
 // text instead, so Bug/Confusing stay readable at any contrast.
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, RefreshControl } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PartialRead, Flag, PageHead, Meter, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { num1 } from '../../src/lib/format';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
 export default function OwnerFeedback() {
   const t = useTheme();
-  const router = useRouter();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errors, setErrors] = useState<AppErrorRow[]>([]);
+  /**
+   * The crash log, or nothing.
+   *
+   * `AppErrorRow[] | null`, not `AppErrorRow[]`. `fetchAppErrors` returns null
+   * for a refused read and says so in its own doc comment — "which is not the
+   * same as there having been no crashes" — and this screen collapsed that null
+   * to `[]` with `errs ?? []`. The section below is drawn only when the array is
+   * non-empty, so a refused `app_errors` read removed the crash list from the
+   * screen entirely, with nothing anywhere to distinguish it from a clean
+   * build. On the screen an owner opens during a test round, "no crashes" is
+   * the one sentence a silence must not be allowed to say.
+   */
+  const [errors, setErrors] = useState<AppErrorRow[] | null>(null);
   const [showErr, setShowErr] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** The inbox could not be read. Distinct from it being empty. */
@@ -63,7 +75,7 @@ export default function OwnerFeedback() {
     try {
       const [page, errs] = await Promise.all([fetchAllFeedbackPage(), fetchAppErrors(20)]);
       // null is "we could not read it" and must not become an empty list.
-      setRows(page?.rows ?? []); setErrors(errs ?? []);
+      setRows(page?.rows ?? []); setErrors(errs);
       setUnread(page == null);
       // Under a failed read there is no page to be truthful about, so the flag
       // is cleared rather than left standing from the previous attempt.
@@ -80,7 +92,13 @@ export default function OwnerFeedback() {
     }
   };
   useEffect(() => { let cancelled = false; (async () => { if (!cancelled) await load(); })(); return () => { cancelled = true; }; }, []);
-  const onRefresh = async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } };
+  const onRefresh = useCallback(async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }, []);
+  // Was four hand-written lines of RefreshControl with its own spinner colour —
+  // the duplication src/ui/pullToRefresh.tsx exists to end. The hook also
+  // brings the thing the hand-rolled version lacked: a second pull arriving
+  // while the first read is still in flight is ignored rather than firing the
+  // read again, which is exactly when somebody pulls twice.
+  const pull = usePullToRefresh(onRefresh);
 
   const fmt = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
   // Null, not 0, and null under truncation too. An average over the newest
@@ -93,38 +111,64 @@ export default function OwnerFeedback() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.brand} />}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What testers are telling you</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Feedback</Text>
-          </View>
-        </View>
+        <PageHead title="Feedback" />
+
+        {/* ── the figure: the one number that summarises the inbox ───────── */}
+        {/* A card rather than the kit's bare `Hero`. The ring the Hero drew
+            beside the average is a bar under it now — the same share of five,
+            said aloud the same way — so a second figure never competes with
+            the first. */}
+        {(() => {
+          const figure = num1(avg);
+          const note = loading ? 'Loading…'
+            : unread ? 'Could not be read'
+            // The count goes with the average. Saying "1,000 submissions" under
+            // a dash would state as a total the very figure the dash exists to
+            // withhold.
+            : truncated ? `More than ${rows.length.toLocaleString()} submissions, too many to average here`
+            : rows.length === 0 ? 'No submissions yet'
+            : `${rows.length} submission${rows.length === 1 ? '' : 's'}`;
+          return (
+            <Section>
+              <SectionHead title="Average Rating" />
+              <View accessible accessibilityLabel={`Average rating, ${figure}${avg == null ? '' : ' out of 5'}, ${note}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                  {avg == null ? null : <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>/ 5</Text>}
+                </View>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+              {/* The rating as the five stars it was given in, filled to the
+                  nearest whole one; the figure above keeps the decimal. Hidden
+                  from a screen reader, which has already been told the number.
+                  Amber INK and not the amber mark: a glyph is text. */}
+              {avg == null ? null : (
+                <Text accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                  style={{ ...ty.title, letterSpacing: 2, marginTop: sp.sm }}>
+                  <Text style={{ color: t.data.amberInk }}>{'★'.repeat(Math.round(avg))}</Text>
+                  <Text style={{ color: t.ink3 }}>{'☆'.repeat(5 - Math.round(avg))}</Text>
+                </Text>
+              )}
+              {/* How the average is made up — which a 3.0 of all threes and a
+                  3.0 of ones and fives do not share. Withheld with the average
+                  under a capped read (`avg` is null then), for the same
+                  reason: a share of a slice of the inbox is not a share. */}
+              {avg == null ? null : [5, 4, 3, 2, 1].map((n) => {
+                const c = rated.filter((r) => r.rating === n).length;
+                return <Meter key={n} label={`${n} Star${n === 1 ? '' : 's'}`} val={c} target={rated.length}
+                  tone={n >= 4 ? 'brand' : n === 3 ? 'amber' : 'red'} note={c.toLocaleString()} />;
+              })}
+            </Section>
+          );
+        })()}
 
         {/* The pull-to-refresh reloads; this says when it last worked, and
             whether the phone can reach us at all. */}
         <Fetched at={fetchedAt} onRefresh={() => { void onRefresh(); }} busy={refreshing || loading} />
 
-        {/* ── the hero: the one number that summarises the inbox ─────────── */}
-        <Hero
-          label="Average Rating"
-          figure={avg == null ? '—' : avg.toFixed(1)}
-          unit={avg == null ? undefined : '/ 5'}
-          arc={avg == null ? undefined : avg / 5}
-          arcLabel="of five stars"
-          note={loading ? 'Loading…'
-            : unread ? 'Could not be read'
-            // The count goes with the average. Saying "1,000 submissions" under
-            // a dash would state as a total the very figure the dash exists to
-            // withhold.
-            : truncated ? `More than ${rows.length.toLocaleString()} submissions — too many to average here`
-            : rows.length === 0 ? 'No submissions yet'
-            : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
-        />
-
-        <Rule />
 
         <Section>
           <SectionHead title="Submissions" note={!truncated && rows.length ? String(rows.length) : undefined} />
@@ -136,7 +180,7 @@ export default function OwnerFeedback() {
               <Icon name={unread ? 'bell' : 'message'} size={26} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
                 {unread
-                  ? 'The inbox could not be read, so this is not "no feedback" — pull down to try again.'
+                  ? 'The inbox could not be read, so this is not "no feedback". Pull down to try again.'
                   : 'No feedback yet. It shows up here as testers send it from inside the app.'}
               </Text>
             </View>
@@ -156,13 +200,23 @@ export default function OwnerFeedback() {
           ))}
         </Section>
 
-        {errors.length > 0 ? (<>
+        {errors === null ? (<>
+          <Rule />
+          <Section>
+            <Flag tone={t.warn}>
+              The crash log could not be read, so this cannot tell you whether the build has been
+              throwing. That is a failed read, not a clean build. Do not sign anything off on it.
+            </Flag>
+          </Section>
+        </>) : null}
+
+        {errors && errors.length > 0 ? (<>
           <Rule />
           <Section>
             <Pressable onPress={() => setShowErr((v) => !v)} accessibilityRole="button"
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
               <Icon name="wrench" size={15} color={t.crit} />
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent errors ({errors.length})</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent Errors ({errors?.length ?? 0})</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{showErr ? 'Hide' : 'Show'}</Text>
             </Pressable>
             {showErr ? errors.map((e, i) => (

@@ -26,9 +26,28 @@
 // prices at render time from `tenants.currency` and shows as a dash when the
 // gym has not set one. Nothing in this file formats anything, and nothing in it
 // may ever assume a currency.
+// ── Whose months, and who says so ──────────────────────────────────────────
+//
+// Both functions TAKE the account. Neither resolves one, and that is the same
+// fix as src/lib/coachPrefsStore.ts for the same reason, stated at length in
+// src/lib/accountScopedWrite.ts.
+//
+// The hazard here is the sharper of the two, because the read and the write are
+// links in one chain. `useMonthlyHistory` reads the account's months, hands them
+// to `historyPass`, which decides `upload` = this month plus only the months the
+// SERVER has never heard of, and then writes. With each end resolving its own
+// uid, a handset that changed hands mid-pass produced a decision taken against
+// one account's rows and a write filed under another's — a coach's revenue
+// permanently attributed to somebody else, in the one table nothing can
+// recompute. src/lib/monthlyHistory.ts walks the five steps of it.
+//
+// Passing the uid through makes the read, the decision and the write one
+// account by construction. A session that moves mid-pass now meets RLS, which
+// refuses the write rather than retargeting it.
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import { reportError } from './reportError';
+import { accountUid, writeTargetFor, NO_ACCOUNT_TO_WRITE_AS } from './accountScopedWrite';
 import { sanitiseSnapshots, isMonthKey, type Snapshots } from './monthlyHistory';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -42,16 +61,20 @@ import type { LoadStatus } from '../ui/loadStatus';
  * the source of truth in that case, so there is no absent server being
  * misreported. Same rule as src/ui/loadStatus.ts states.
  */
-export async function fetchMetricHistory(metricKey: string): Promise<{ snapshots: Snapshots; status: LoadStatus }> {
+export async function fetchMetricHistory(
+  uid: string | null | undefined,
+  metricKey: string,
+): Promise<{ snapshots: Snapshots; status: LoadStatus }> {
   if (!USE_SUPABASE) return { snapshots: {}, status: 'ready' };
+  // Not an account is the signed-out answer, unchanged: it is what `getUser()`
+  // produced for the same session before the uid was passed in.
+  const account = accountUid(uid);
+  if (!account) return { snapshots: {}, status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { snapshots: {}, status: 'ready' };
     const { data, error } = await supabase
       .from('metric_history')
       .select('month, value')
-      .eq('user_id', uid)
+      .eq('user_id', account)
       .eq('metric_key', metricKey);
     if (error) {
       reportError('metricHistory.read', error);
@@ -85,18 +108,29 @@ export async function fetchMetricHistory(metricKey: string): Promise<{ snapshots
  * Returns the number of rows the server confirms it wrote. Zero from a
  * non-empty request is a refusal — PostgREST does not treat writing nothing as
  * an error — so it is reported rather than read as success.
+ *
+ * `uid` is the account the months are filed under, and it is the CALLER's — the
+ * same id the pass above read and decided with. First in the signature because
+ * it is the thing that must not be forgotten. Not an account is a refusal, is
+ * reported, and is never a cue to go and resolve one.
  */
-export async function saveMetricHistory(metricKey: string, snapshots: Snapshots): Promise<number> {
+export async function saveMetricHistory(
+  uid: string | null | undefined,
+  metricKey: string,
+  snapshots: Snapshots,
+): Promise<number> {
   if (!USE_SUPABASE) return 0;
   const months = Object.keys(snapshots).filter(isMonthKey);
   if (!months.length) return 0;
+  const target = writeTargetFor(uid);
+  if (!target.write) {
+    reportError('metricHistory.write', new Error(NO_ACCOUNT_TO_WRITE_AS));
+    return 0;
+  }
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return 0;
     const rows = months
       .filter((m) => Number.isFinite(snapshots[m]))
-      .map((m) => ({ user_id: uid, metric_key: metricKey, month: m, value: snapshots[m], recorded_at: new Date().toISOString() }));
+      .map((m) => ({ user_id: target.uid, metric_key: metricKey, month: m, value: snapshots[m], recorded_at: new Date().toISOString() }));
     if (!rows.length) return 0;
     const { data, error } = await supabase
       .from('metric_history')

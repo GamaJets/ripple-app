@@ -89,7 +89,7 @@ export function targetIndex(heights: readonly number[], from: number, dy: number
  * The list with the item at `from` moved to `to`. Returns the SAME array
  * reference when nothing moves, so a caller can skip a re-render and, more
  * importantly, so an accidental one-pixel drag does not register as an edit
- * against a programme somebody is part way through writing.
+ * against a program somebody is part way through writing.
  */
 export function applyMove<T>(items: readonly T[], from: number, to: number): readonly T[] {
   if (from === to) return items;

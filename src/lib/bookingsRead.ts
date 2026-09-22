@@ -48,7 +48,7 @@ export function bookingsGap(classStatus: LoadStatus, sessionStatus: LoadStatus):
     return {
       title: 'Some of your bookings could not be read',
       note: `We couldn’t read ${halves(cErr, sErr)}, so anything of that kind is missing from this list. `
-        + 'This is not a cancellation — check before assuming a booking is not on.',
+        + 'This is not a cancellation. Check before assuming a booking is not on.',
     };
   }
   const cLoad = classStatus === 'loading', sLoad = sessionStatus === 'loading';

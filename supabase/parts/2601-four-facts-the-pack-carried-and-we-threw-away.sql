@@ -1,0 +1,67 @@
+-- Four columns RepDB has always shipped and this catalogue never stored.
+--
+-- ── What they are ──────────────────────────────────────────────────────────
+--
+--   synonyms       the names a member actually types. 305 rows carry at least
+--                  one. Without it a search for "butt kicks" finds nothing,
+--                  though `heel-flicks` lists it as a synonym and is exactly
+--                  the movement being looked for.
+--   is_unilateral  145 rows. src/lib/stretchBuilder.ts hand-typed a 51-row
+--                  constant to stand in for this, and its header said the
+--                  catalogue "does not store" it. That is now false.
+--   body_part      608 rows. Same story, same file.
+--   is_bodyweight  183 rows. Stored for completeness and DELIBERATELY not used
+--                  to price a set — see the paragraph below, and the header of
+--                  src/lib/bodyweightSets.ts.
+--
+-- ── is_bodyweight is not what its name suggests ────────────────────────────
+--
+-- It was going to be wired into the tonnage maths on the reasonable-looking
+-- grounds that a column called `is_bodyweight` says which movements are lifted
+-- with the body. Checked against the pack before believing it:
+--
+--   · not one of the 183 rows carries any equipment;
+--   · `chin-ups` and `dips` are both FALSE, because they need a bar and a dip
+--     station — and those are precisely the movements the bodyweight maths
+--     exists for;
+--   · 58 of the 183 are stretches, which move no load at all.
+--
+-- So it means "needs no kit", not "the load is the person". Wiring it would
+-- have refused to price a pull-up and priced a hamstring stretch as the
+-- member's entire bodyweight. It is also a fact about a MOVEMENT where the
+-- thing being asked is a fact about a SET: a belted dip and an assisted dip are
+-- one catalogue row. src/lib/bodyweightSets.ts keeps asking the member, whose
+-- per-set answer is the better evidence.
+--
+-- ── No grant here, and that is the considered answer ──────────────────────
+--
+-- The first version of this added
+--
+--     grant select (synonyms, is_bodyweight, is_unilateral, body_part)
+--       on public.exercises to authenticated, anon;
+--
+-- reasoning from part 2471, where public.trainers is granted COLUMN BY COLUMN
+-- and a column added later inherits nothing, so PostgREST refuses the whole
+-- select with a 403 and the screen goes silently empty.
+--
+-- That is a real defect and it is the wrong table. `exercises` holds a
+-- TABLE-LEVEL select for anon and authenticated — checked, not assumed:
+-- information_schema.table_privileges lists both — so every column it will
+-- ever have is already readable and no column grant is owed.
+--
+-- Adding one anyway is not merely redundant, it is harmful. The moment any
+-- role holds a COLUMN-level select on a table, that table is column-granted,
+-- and every other column then owes that role a grant of its own. check:grants
+-- refused the first version over 46 such columns, then 23 after anon came
+-- back out. Both numbers were the gate describing damage this part had just
+-- done, not damage it had found.
+--
+-- So: the columns, and nothing else. If `exercises` is ever moved to
+-- column-level grants, all 27 columns move together and this comment is the
+-- reason to do it in one part rather than as a side effect of adding a field.
+
+alter table public.exercises
+  add column if not exists synonyms      text[] not null default '{}',
+  add column if not exists is_bodyweight boolean not null default false,
+  add column if not exists is_unilateral boolean not null default false,
+  add column if not exists body_part     text;

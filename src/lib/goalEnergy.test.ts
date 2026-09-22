@@ -12,7 +12,8 @@ import {
   MAX_LOSS_FRACTION_PER_WEEK, MAX_GAIN_FRACTION_PER_WEEK,
   type DerivedPlan, type EnergyPlan,
 } from './goalEnergy';
-import { projectionOf, MIN_TREND_DAYS, type GoalTarget, type Point } from './goalTargets';
+import { projectionOf, isOverdue, MIN_TREND_DAYS, type GoalTarget, type Point } from './goalTargets';
+import { isoDay } from './weekStart';
 import { macrosFor, maintenanceFor } from './nutrition';
 import type { BodyStats } from './types';
 
@@ -219,6 +220,120 @@ ok(planKcal(2400, -3).floored, 'an impossible rate is reported as floored, not s
 ok(planKcal(2400, -3).kcal === 1800, 'and lands on 75% of maintenance');
 ok(planKcal(1400, -3).kcal === MIN_PLAN_KCAL, 'with the absolute 1,200 floor underneath it for a small maintenance');
 
-declare const process: { exit(code: number): void };
+/* ── a bare `date` deadline is the END of that day, in the reader's zone ──── */
+//
+// `goal_targets.target_date` is a bare date column — '2026-09-12'. `Date.parse`
+// reads that as UTC midnight: the START of the day in UTC, and the day BEFORE
+// in every zone west of Greenwich. Two faults came out of it — this module
+// called a goal 'date-passed' from the first moment of its target day while
+// `goalTargets.isOverdue` said otherwise about the same goal at the same
+// instant, and the date the plan renders was a day early for every reader west
+// of Greenwich. Every fixture above uses a full Z timestamp, which is exactly
+// why neither ever showed up here.
+//
+// ── and why the fixture that first stood here was itself wrong ────────────
+//
+// It pinned `now` to a fixed UTC instant — '2026-09-12T17:00:00.000Z',
+// annotated "13:00 in New York" — and asserted from it that the target day was
+// still running. 17:00 UTC is not still the 12th east of about UTC+7: it is
+// 07:00 on the 13TH in Kiritimati (UTC+14) and 05:00 on the 13th in Auckland.
+// So for those two readers the target day was over and 'date-passed' was the
+// correct answer; the assertion, not the module, was wrong. It failed exactly
+// where a timezone assertion must not — Kiritimati is the FIRST zone
+// `test:zones` runs, so it took the whole zone sweep down behind it.
+//
+// The rule underneath: a goal's target date is a bare YYYY-MM-DD the member
+// picked off their own calendar, so it belongs to the READER's calendar and to
+// no other. A fixture about it therefore cannot name a UTC instant at all. It
+// has to name a local wall-clock moment on the target day and let the zone
+// decide which instant that is — which is what `new Date(y, m, d, h)` does, and
+// why every case below is built with it and not one `Date.parse` of a Z string.
+{
+  const TARGET = '2026-09-12';
+  /** A local wall-clock moment in September 2026. Whatever zone this suite is
+   *  running in, `on(12, 13)` IS one in the afternoon of the member's 12th. */
+  const on = (day: number, hour: number, min = 0, sec = 0, msec = 0) =>
+    new Date(2026, 8, day, hour, min, sec, msec).getTime();
+
+  const dateGoal = (targetDateISO: string): GoalTarget => ({
+    id: 'g', kind: 'weight', targetValue: 84, title: null,
+    targetDateISO, achievedAtISO: null, createdAtISO: '2026-08-01T00:00:00.000Z',
+  });
+  // Real ISO strings, not `Date.parse` numbers cast through `unknown`: `Point.t`
+  // is a string, and `Date.parse(<number>)` is NaN, so the casts the old fixture
+  // used meant the readings were unreadable and the case was one step from
+  // passing on 'no-readings' instead of on anything it claimed to be about.
+  const SERIES_2609: readonly Point[] = [
+    { t: '2026-08-15T08:00:00.000Z', v: 91.4 },
+    { t: '2026-09-11T08:00:00.000Z', v: 90.0 },
+  ];
+  const dated = (targetDateISO: string, nowMs: number): EnergyPlan =>
+    energyPlanFor({ goal: dateGoal(targetDateISO), weightSeries: SERIES_2609, tdeeKcal: 2586, nowMs });
+  const reasonAt = (nowMs: number): string => {
+    const p = dated(TARGET, nowMs);
+    return p.kind === 'enum' ? p.reason : 'derived';
+  };
+
+  const dayCases = (where: string) => {
+    ok(reasonAt(on(12, 0)) !== 'date-passed',
+      `${where}: a goal is not past its date at the first moment of its target day`);
+    ok(reasonAt(on(12, 13)) !== 'date-passed',
+      `${where}: a goal is not past its date while its target day is still running`);
+    ok(reasonAt(on(12, 23, 59, 59, 999)) !== 'date-passed',
+      `${where}: nor in the last millisecond of that day`);
+    // Named, not merely "not date-passed": a case that only says what the answer
+    // is NOT would be satisfied by the module falling over somewhere earlier.
+    ok(reasonAt(on(12, 13)) === 'date-too-soon',
+      `${where}: a deadline still running but hours away is 'date-too-soon', got '${reasonAt(on(12, 13))}'`);
+    // And the moment the day ends, it has gone by.
+    ok(reasonAt(on(13, 0)) === 'date-passed',
+      `${where}: the target day is over at local midnight, got '${reasonAt(on(13, 0))}'`);
+    ok(reasonAt(on(13, 0, 0, 0, 1)) === 'date-passed',
+      `${where}: and stays over a millisecond later`);
+    // The invariant the module's own note promises: these two answer the same
+    // question about the same goal at the same instant, so they may never
+    // disagree — including at the boundary, which is where they used to.
+    for (const t of [on(12, 0), on(12, 13), on(12, 23, 59, 59, 999), on(13, 0), on(13, 9)]) {
+      const passed = reasonAt(t) === 'date-passed';
+      ok(passed === isOverdue(dateGoal(TARGET), t),
+        `${where}: at ${new Date(t).toISOString()} energyPlanFor says ${passed ? '' : 'not '}past ` +
+        `and isOverdue says ${isOverdue(dateGoal(TARGET), t) ? '' : 'not '}past — they must never disagree`);
+    }
+    // The other half of the original defect: the day the plan RENDERS. A bare
+    // date far enough out to plan from, so this runs through a derived plan and
+    // not a fallback. `targetDateMs` is the first instant after the day, so the
+    // last millisecond of it is the member's own date, in their own zone.
+    const far = derived(dated('2026-12-24', on(12, 13)), `${where}: a bare-date deadline three months out`);
+    ok(isoDay(new Date(far.targetDateMs - 1)) === '2026-12-24',
+      `${where}: the plan must render the member's own day, got ${isoDay(new Date(far.targetDateMs - 1))}`);
+  };
+
+  dayCases('in the suite’s own zone');
+
+  // ── UTC+14 pinned explicitly, whatever zone the suite was started in ─────
+  //
+  // `test:zones` already runs Kiritimati, but only first and only as an ambient
+  // TZ, so a future edit to that script — or anyone running this file by hand —
+  // silently drops the one zone this block exists for. Node re-reads
+  // `process.env.TZ` on every Date it constructs, so assigning it here is a real
+  // run at +14 and not a simulation of one. Chatham is +12:45 (a zone whose
+  // offset is not a whole hour, which is where "just add 12" fixes break) and
+  // Midway is −11, so the boundary is pinned from both ends of the world.
+  const startedIn = process.env.TZ;
+  try {
+    for (const zone of ['Pacific/Kiritimati', 'Pacific/Chatham', 'Pacific/Midway']) {
+      process.env.TZ = zone;
+      dayCases(zone);
+    }
+  } finally {
+    // Restore by DELETING when it was unset: assigning `undefined` into
+    // process.env writes the string 'undefined', which is not a timezone and
+    // would leave every later reader of TZ holding a lie.
+    if (startedIn === undefined) delete process.env.TZ;
+    else process.env.TZ = startedIn;
+  }
+}
+
+declare const process: { exit(code: number): void; env: Record<string, string | undefined> };
 console.log(errors.length ? 'GOAL-ENERGY FAILURES:\n' + errors.join('\n') : 'ALL GOAL-ENERGY TESTS PASSED');
 if (errors.length) process.exit(1);

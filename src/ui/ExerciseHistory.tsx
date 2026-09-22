@@ -47,15 +47,18 @@ import { Icon } from './Icon';
 import { Rule, Section, SectionHead, KpiRow, Flag } from './kit';
 import { sp, radius, hairline, type as ty, numeric } from '../theme/scale';
 import { type LoadStatus } from './loadStatus';
+import { Fetched } from './fetched';
+import { useReadStamp } from './readStamp';
 import type { WorkoutEntry } from '../lib/mockData';
 import { setsSummary } from '../lib/ownTraining';
 import { dayLabel } from '../lib/adherence';
 import { num } from '../lib/format';
+import { useMovementName } from './catalogueTranslations';
 import { liftLabel, liftDeltaIn, est1RMIn, volumeIn, type WeightUnit } from '../lib/units';
 import { deltaLabel } from '../lib/deltaLabel';
 import {
-  exerciseIndex, matchExercises, exerciseOutings, exerciseTrend,
-  type ExerciseOuting, type ExerciseSummary,
+  exerciseIndex, matchExercises, exerciseOutings, exerciseTrend, readCoversRecord,
+  type ExerciseOuting, type ExerciseRead, type ExerciseSummary,
 } from '../lib/exerciseHistory';
 import { holdLabel } from '../lib/timedSets';
 import type { BodyweightHistory } from '../lib/bodyweightSets';
@@ -82,13 +85,47 @@ export interface HistoryVoice {
 const LIST_CAP = 20;
 
 /** Outings drawn for one movement. Same kind of limit, said the same way: a
- *  lifter four years into a programme has done bench press three hundred times
+ *  lifter four years into a program has done bench press three hundred times
  *  and nobody scrolls that, but nothing may imply they have not. */
 const TRAIL_CAP = 30;
 
+/* ── saying how much of somebody's training a figure is about ──────────────
+ *
+ * Every count on this panel is a count over WHAT WAS READ, and the read is not
+ * always the record. app/(trainer)/client-training.tsx narrows its query to a
+ * window on purpose — that is what the 12 Weeks control does — and the answer
+ * comes back complete, so `LoadStatus` is 'ready' and there is nothing to flag
+ * about truncation. `ExerciseRead` in src/lib/exerciseHistory.ts is what tells
+ * the two apart, and these two helpers are how the difference is said out loud.
+ *
+ * The rule is that a count is never dropped for being windowed. "20 movements"
+ * over twelve weeks is a true and useful number; what it may not do is wear the
+ * words "on record". So it keeps the figure and gains the qualifier.
+ */
+
+/** A count of days, pluralised. */
+const dayCount = (n: number): string => `${n} day${n === 1 ? '' : 's'}`;
+
+/**
+ * The phrase that has to follow a count when the count is not about the whole
+ * record. Empty when it is, so a full read reads exactly as it always did.
+ *
+ * `windowDays` null with `covers` false is a read that came back CUT, which is
+ * the page rather than a span of time — the caller's own truncation flag says
+ * the rest.
+ */
+function readQualifier(covers: boolean, windowDays: number | null): string {
+  if (covers) return '';
+  return windowDays != null ? ` in the last ${windowDays} days` : ' on this page';
+}
+
 /** One movement's row in the list of what somebody has been doing. */
-function MovementRow({ e, unit, picked, onPress }: {
-  e: ExerciseSummary; unit: WeightUnit; picked: boolean; onPress: () => void;
+function MovementRow({ e, shown, unit, windowDays, picked, onPress }: {
+  e: ExerciseSummary;
+  /** The name to READ. `e.name` stays the identity the log is keyed on; this
+   *  is the reader's own language where the catalogue has it. */
+  shown: string;
+  unit: WeightUnit; windowDays: number | null; picked: boolean; onPress: () => void;
 }) {
   const t = useTheme();
   const best = est1RMIn(e.best1RMKg, unit);
@@ -97,7 +134,7 @@ function MovementRow({ e, unit, picked, onPress }: {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: picked }}
-      accessibilityLabel={e.name}
+      accessibilityLabel={shown}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: sp.md,
         paddingVertical: sp.md, paddingHorizontal: sp.md,
@@ -106,9 +143,13 @@ function MovementRow({ e, unit, picked, onPress }: {
       }}
     >
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{e.name}</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{shown}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-          {e.days} day{e.days === 1 ? '' : 's'}
+          {/* `recordDays` is `days` offered as a fact about the person, and it
+              is null under a windowed or a cut read. The figure is shown
+              either way — it is real — but only the record-shaped one is
+              allowed to stand on its own. */}
+          {dayCount(e.days)}{readQualifier(e.recordDays != null, windowDays)}
           {e.lastDay ? ` · last ${dayLabel(e.lastDay)}` : ' · no readable date'}
         </Text>
       </View>
@@ -118,7 +159,7 @@ function MovementRow({ e, unit, picked, onPress }: {
       {best != null ? (
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{num(best)} {unit}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>best est. 1RM</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>Best Est. 1RM</Text>
         </View>
       ) : (
         <Text style={{ ...ty.caption, color: t.ink3 }}>
@@ -175,8 +216,8 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
         </Text>
       ) : o.sets.length ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-          No load could be put on any set of this day, so there is no tonnage and no estimated max —
-          bodyweight work with no weight on record reads exactly like this.
+          No load could be put on any set of this day, so there is no tonnage and no estimated max.
+          Bodyweight work with no weight on record reads exactly like this.
         </Text>
       ) : null}
       {/* Folded, not deduplicated. The live record holds one squat session
@@ -187,8 +228,8 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
           day block: report the shape of the record rather than pick a winner. */}
       {o.entryCount > 1 ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-          Saved in {o.entryCount} separate entries that day, and the sets above are all of them —
-          if the same work was saved twice, this day reads high.
+          Saved in {o.entryCount} separate entries that day, and the sets above are all of them.
+          If the same work was saved twice, this day reads high.
         </Text>
       ) : null}
       {/* What the tonnage does not cover, said beside it. A bodyweight set is
@@ -248,7 +289,7 @@ function MovementLine({ label, value, unit, from, decimals }: {
  * lift's history is exactly the divergence this file's header was written
  * against, so there is one.
  */
-export function ExerciseTrail({ summary, log, status, unit, voice, history = [] }: {
+export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, history = [] }: {
   /** The movement, as the index of somebody's record holds it. Null when they
    *  have never logged it — the caller says what that means on its screen,
    *  because "you have not done this yet" and "your client has not" are
@@ -256,6 +297,19 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
   summary: ExerciseSummary | null;
   log: WorkoutEntry[] | null;
   status: LoadStatus;
+  /**
+   * How many days back the read behind `log` ASKED for, or null when it asked
+   * for the whole record.
+   *
+   * Required rather than optional, and carried separately from `status`,
+   * because they are two different facts and this panel had been deriving both
+   * from one. `status` says whether anything fell off the end; this says
+   * whether the question covered the person's record at all. A coach tapping
+   * 12 Weeks on app/(trainer)/client-training.tsx gets a read that is complete
+   * AND is not the record, and every sentence below that says "on record",
+   * "the first day" or names a lifetime best is worded off the second fact.
+   */
+  windowDays: number | null;
   unit: WeightUnit;
   voice: HistoryVoice;
   /** The member's own weight over time, so a bodyweight set carries the load it
@@ -264,10 +318,12 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
 }) {
   const t = useTheme();
   const trend = useMemo(
-    () => exerciseTrend(log && summary ? exerciseOutings(log, summary.name, history) : null, status),
-    [log, summary, status, history],
+    () => exerciseTrend(
+      log && summary ? exerciseOutings(log, summary.name, history) : null,
+      { status, windowDays },
+    ),
+    [log, summary, status, windowDays, history],
   );
-  const whole = status === 'ready';
   // The day a movement is measured FROM, already formatted. Null where that
   // outing's timestamp could not be read: "+5 kg since —" is a hole in a
   // sentence rather than a fact, so the line is not drawn at all.
@@ -285,11 +341,14 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
   if (summary.daysWithSets === 0) {
     return (
       <View>
-        <SectionHead title={summary.name} note={`${summary.days} day${summary.days === 1 ? '' : 's'}`} />
+        <SectionHead
+          title={summary.name}
+          note={`${dayCount(summary.days)}${readQualifier(summary.recordDays != null, windowDays)}`}
+        />
         <Text style={{ ...ty.body, color: t.ink2 }}>
-          Logged on {summary.days} day{summary.days === 1 ? '' : 's'}
+          Logged on {dayCount(summary.days)}{readQualifier(summary.recordDays != null, windowDays)}
           {summary.lastDay ? `, most recently ${dayLabel(summary.lastDay)}` : ''}, with no sets
-          recorded against any of them — so there are no reps or loads to follow here. Cardio is
+          recorded against any of them, so there are no reps or loads to follow here. Cardio is
           logged as time and distance rather than as sets, and it reads exactly like this.
         </Text>
       </View>
@@ -302,7 +361,16 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
     <View>
       <SectionHead
         title={summary.name}
-        note={trend.outingCount != null ? `${trend.outingCount} day${trend.outingCount === 1 ? '' : 's'}` : undefined}
+        // `recordOutingCount` is the count offered as a fact about the person
+        // and is null under a window; `outingCount` is the same number as a
+        // fact about the read, and is null only when the read was cut. So a
+        // windowed read still shows how many days it holds — it just says
+        // which days they are.
+        note={trend.recordOutingCount != null
+          ? dayCount(trend.recordOutingCount)
+          : trend.outingCount != null
+            ? `${dayCount(trend.outingCount)}${readQualifier(false, windowDays)}`
+            : undefined}
       />
 
       <KpiRow items={[
@@ -318,8 +386,12 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
           label: 'Best Est. 1RM',
           value: num(est1RMIn(trend.best?.best1RMKg, unit)),
           unit: trend.best?.best1RMKg != null ? unit : undefined,
+          // "set" is a claim that this is the best there has ever been, and
+          // only a read that covers the record supports it. Under the coach's
+          // twelve-week window it is the best of the window, and the word for
+          // that is the one a truncated read already used.
           delta: trend.best?.day
-            ? `${whole ? 'set' : 'best read'} ${dayLabel(trend.best.day)}`
+            ? `${trend.coversRecord ? 'set' : 'best read'} ${dayLabel(trend.best.day)}`
             : undefined,
         },
         {
@@ -339,7 +411,7 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
       <View style={{ marginTop: sp.lg }}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>Since the Day Before</Text>
         <View style={{ marginTop: sp.xs }}>
-          <MovementLine label="Top load" unit={unit} decimals={1} from={lastFrom}
+          <MovementLine label="Top Load" unit={unit} decimals={1} from={lastFrom}
             value={liftDeltaIn(trend.sinceLast.topLoadKg, unit)} />
           <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={lastFrom}
             value={est1RMIn(trend.sinceLast.est1RMKg, unit)} />
@@ -359,10 +431,10 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
       {trend.sinceFirst.from ? (
         <View style={{ marginTop: sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>
-            {whole ? 'Since the First Day on Record' : 'Since the First Day on This Page'}
+            {trend.coversRecord ? 'Since the First Day on Record' : 'Since the First Day on This Page'}
           </Text>
           <View style={{ marginTop: sp.xs }}>
-            <MovementLine label="Top load" unit={unit} decimals={1} from={firstFrom}
+            <MovementLine label="Top Load" unit={unit} decimals={1} from={firstFrom}
               value={liftDeltaIn(trend.sinceFirst.topLoadKg, unit)} />
             <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={firstFrom}
               value={est1RMIn(trend.sinceFirst.est1RMKg, unit)} />
@@ -373,16 +445,33 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
         A movement is stated here and not judged. Whether more load, more reps or the same
         weight held is the right direction depends on the block being run, which this screen
-        does not know — so nothing above is marked as good or bad, and a lift that has not
+        does not know, so nothing above is marked as good or bad, and a lift that has not
         moved is said to have not moved rather than given a sign.
       </Text>
 
-      {!whole ? (
+      {/* Two different things can be missing, and they need two different
+          sentences. This one is truncation: the read hit the row cap and the
+          rest fell off the end of it. */}
+      {!trend.whole ? (
         <View style={{ marginTop: sp.md }}>
           <Flag tone={t.warn}>
             There is more training on record than fits in one read, so every day below is real
             and current but the earliest of them is not necessarily the first time this was
             done. Nothing here is counted as a lifetime.
+          </Flag>
+        </View>
+      ) : null}
+
+      {/* And this one is the window: nothing fell off the end, because the
+          question was only ever asked about part of the record. The coach's
+          range control does this deliberately, which is exactly why the screen
+          had nothing to warn about and said "on record" anyway. */}
+      {trend.whole && !trend.coversRecord ? (
+        <View style={{ marginTop: sp.md }}>
+          <Flag tone={t.warn}>
+            {windowDays != null
+              ? `This read asked for the last ${windowDays} days only, and it came back complete, so every day below is the whole of that window. Training before it is still on record and is in nothing above: the best and the earliest here are the best and the earliest of these ${windowDays} days, not of a lifetime.`
+              : 'This read did not ask for the whole record, so the best and the earliest above are the best and the earliest of what was asked for rather than of a lifetime.'}
           </Flag>
         </View>
       ) : null}
@@ -401,35 +490,65 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
       ) : null}
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
         Grouped by the day it was done on. Sets logged twice on one day are one day here, so a
-        movement saved in two goes — or saved twice by a double tap — is not read as two
+        movement saved in two goes (or saved twice by a double tap) is not read as two
         sessions. Loads are shown in {unit}.
       </Text>
     </View>
   );
 }
 
-export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }: {
+export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, history = [], onRefresh }: {
   /** Everything read, in any order. Null means the read did not land, and is
    *  the ONLY thing that produces "could not be read" — an empty array that
    *  arrived from a successful read means they have not done this, which is a
    *  completely different sentence about a named person. */
   log: WorkoutEntry[] | null;
   status: LoadStatus;
+  /** How far back the read behind `log` asked, or null for the whole record.
+   *  Required, and it fails closed: see `ExerciseTrail`'s own note and
+   *  `ExerciseRead` in src/lib/exerciseHistory.ts. */
+  windowDays: number | null;
   unit: WeightUnit;
   voice: HistoryVoice;
   /** The member's own weight over time. Optional, and absent means a
    *  bodyweight set has no load rather than an invented one. */
   history?: BodyweightHistory;
+  /**
+   * Read this again. Optional, and the line below still says WHEN without it —
+   * but a stamp with no way to act on it is half an answer, so a screen that
+   * has a `reload` should pass it.
+   *
+   * See src/lib/readStamp.ts for why this panel is the first thing outside
+   * `app/(owner)/**` to carry a read stamp at all: all eighteen `<Fetched>`
+   * call sites were owner screens, and the argument for the line — a figure
+   * with nothing on the page saying when it was fetched is read as current —
+   * was never an argument about owners.
+   */
+  onRefresh?: () => void;
 }) {
   const t = useTheme();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
+  // Before the early returns below, because hooks are not conditional. `log` is
+  // the token: this panel is handed a new array whenever the read behind it
+  // lands, including a re-read that never announced itself as 'loading'.
+  const read = useReadStamp(status, log);
 
-  const index = useMemo(() => (log ? exerciseIndex(log, history) : []), [log, history]);
-  const matches = useMemo(() => matchExercises(index, q), [index, q]);
+  // The read is handed to the index, not just its status: `recordDays` on each
+  // summary is the only thing that licenses printing a day count bare, and it
+  // is withheld unless the read covered the whole record.
+  const readShape = useMemo<ExerciseRead>(() => ({ status, windowDays }), [status, windowDays]);
+  const index = useMemo(() => (log ? exerciseIndex(log, history, readShape) : []), [log, history, readShape]);
+  // The list reads in the reader's own language and the SEARCH accepts either
+  // name — see matchExercises in src/lib/exerciseHistory.ts. `e.slug` is
+  // untouched: it is what a picked movement is identified by and what every
+  // trail below is keyed on.
+  const { textOf } = useMovementName();
+  const matches = useMemo(() => matchExercises(index, q, (e) => textOf(e.name)), [index, q, textOf]);
   const chosen = useMemo(() => index.find((e) => e.slug === picked) ?? null, [index, picked]);
 
   const whole = status === 'ready';
+  const covers = readCoversRecord(readShape);
   const shown = matches.slice(0, LIST_CAP);
 
   if (status === 'loading') {
@@ -474,11 +593,17 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
       <SectionHead
         title="Exercise History"
         // A count over a truncated read would be a subtotal wearing a total's
-        // label. See src/lib/rowCap.ts.
-        note={whole ? `${index.length} movement${index.length === 1 ? '' : 's'}` : undefined}
+        // label, and is not shown at all. See src/lib/rowCap.ts. A count over a
+        // WINDOW is a different thing: it is complete, so it is shown, with the
+        // window named beside it rather than passed off as the record.
+        note={covers
+          ? `${index.length} Movement${index.length === 1 ? '' : 's'}`
+          : whole
+            ? `${index.length} Movement${index.length === 1 ? '' : 's'}${readQualifier(false, windowDays)}`
+            : undefined}
       />
       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-        Pick a movement to see every day it appears in — the sets, the reps and the load as they
+        Pick a movement to see every day it appears in: the sets, the reps and the load as they
         were recorded, newest first, with how the top set has moved.
       </Text>
 
@@ -505,13 +630,13 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
 
       {matches.length === 0 ? (
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-          Nothing logged matches that. {voice.they} may have written it down under another name —
-          the search matches the words in it, in any order.
+          Nothing logged matches that. {voice.they} may have written it down under another name.
+          The search matches the words in it, in any order.
         </Text>
       ) : (
         <View style={{ marginTop: sp.sm }}>
           {shown.map((e) => (
-            <MovementRow key={e.slug} e={e} unit={unit} picked={e.slug === picked}
+            <MovementRow key={e.slug} e={e} shown={textOf(e.name)} unit={unit} windowDays={windowDays} picked={e.slug === picked}
               onPress={() => setPicked(e.slug === picked ? null : e.slug)} />
           ))}
         </View>
@@ -519,7 +644,7 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
 
       {matches.length > LIST_CAP ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-          Showing {LIST_CAP} of the {matches.length} movements {whole ? 'on record' : 'read'} — type
+          Showing {LIST_CAP} of the {matches.length} movements {covers ? 'on record' : 'read'}. Type
           above to narrow it.
         </Text>
       ) : null}
@@ -529,9 +654,23 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
       {chosen ? (
         <View>
           <Rule />
-          <ExerciseTrail summary={chosen} log={log} status={status} unit={unit} voice={voice} history={history} />
+          <ExerciseTrail summary={chosen} log={log} status={status} windowDays={windowDays}
+            unit={unit} voice={voice} history={history} />
         </View>
       ) : null}
+
+      {/* ── and when this was read ───────────────────────────────────────────
+          Drawn only here, in the branch that actually shows the record. Under
+          'error' this panel returns the "could not be read" flag above and puts
+          no figures on screen, so a "read 20 minutes ago" there would be an age
+          for something nobody is looking at.
+
+          It is worth having on this panel in particular because the providers
+          behind it now repair themselves on reconnect (src/lib/readRefresh.ts),
+          silently — so "this landed a second ago" and "this landed before you
+          came downstairs" look identical, and a lifter checking what they did
+          last week is deciding what to load onto a bar from it. */}
+      <Fetched at={read.at} onRefresh={onRefresh} busy={read.busy} />
     </Section>
   );
 }

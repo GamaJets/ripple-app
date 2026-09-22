@@ -28,7 +28,22 @@
 // half-written-record problem to solve. An upload that fails is a file that
 // does not exist, and there is nothing left dangling behind it.
 //
-// ── THE ORDER: STORE, THEN READ ───────────────────────────────────────────
+// ── THE DOCUMENT LEAVES THE ACCOUNT, AND THAT IS ASKED ABOUT ──────────────
+//
+// Reading a document means SENDING it. `ocr-scan` POSTs the whole page, base64,
+// to https://api.ocr.space/parse/image. For most of this file's life that
+// happened unconditionally, with no consent question anywhere on the path,
+// under a screen that promised the member "the document stays in your account
+// and only you can open it". The argument, the wording and the four states the
+// screen may now describe a document in are in src/lib/injuryDocConsent.ts.
+//
+// The shape of the fix HERE is the required parameter. `readInjuryDocument`
+// takes an `OcrAnswer` with no default, and `OcrAnswer` has no 'unasked'
+// member, so a call site that has not asked does not compile. Everything else
+// about a consent — a flag, a setting, a comment — can be forgotten by the next
+// person; a required argument of a two-member union cannot.
+//
+// ── THE ORDER: STORE, RECORD, THEN READ ───────────────────────────────────
 //
 // The upload happens before the OCR call, and it is reported separately.
 //
@@ -37,6 +52,19 @@
 // having on its own, and telling them "that did not work" would be false. So
 // `readInjuryDocument` returns the path either way, and the screen offers to
 // delete it if the read was useless to them.
+//
+// Between those two sits the consent row, and the send WAITS FOR IT. If the row
+// does not land, nothing is posted to the vendor — the document is stored, the
+// member is told exactly that, and the manual route is offered. The alternative
+// is a state where the bytes have gone and the agreement is not on file, which
+// is the app being able to say somebody consented while unable to show it. That
+// is the shape this codebase refuses; see the long argument under decision 4 in
+// src/lib/injuryDocConsent.ts and the table in supabase/parts/1000-*.sql.
+//
+// A refusal is written too, and if THAT write fails nothing is sent either —
+// the refusal is honoured by not acting, not by the row. The document then
+// carries no record, which reads as "no record either way" and not as "never
+// sent", because those are different facts and one of them is a claim.
 //
 // ── supabase-js RESOLVES ON AN ERROR ──────────────────────────────────────
 // `await supabase.from(...)` / `.storage...` give back { data, error } instead
@@ -47,13 +75,36 @@ import { readFileBase64, FILE_READ_UNAVAILABLE_NOTE } from './nativeModules';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import { extractFromDocument, type Extraction } from '../lib/injuryExtract';
+import {
+  maySendToOcr, OCR_ENDPOINT, OCR_VENDOR, RECORD_FAILED_NOTE,
+  type OcrAnswer,
+} from '../lib/injuryDocConsent';
+import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 
 /** Private. Reads are signed, never getPublicUrl(). */
 export const INJURY_DOC_BUCKET = 'injury-docs';
 
-/** Long enough to look at the page you just uploaded and think about it. */
+/** Long enough to look at the page you just uploaded and think about it.
+ *
+ *  It is also long enough to RUN OUT while the screen is open, which is what
+ *  people do with a document viewer. The list is signed once when it is read,
+ *  so a member who left this screen an hour ago and then tapped a report used
+ *  to get a black rectangle with their own filename over it and no sentence
+ *  anywhere — which reads as the app having lost their medical records. Every
+ *  open now re-signs first; see `signInjuryDoc`. */
 export const INJURY_DOC_TTL_S = 60 * 60;
+
+/**
+ * How many documents the list reads.
+ *
+ * A hundred, as before. What changed is that it asks for one more than that
+ * and uses it as a probe, so a member with more than a hundred is told rather
+ * than quietly shown the newest hundred under a confident count. Somebody with
+ * a long clinical history is exactly the person whose oldest report is the one
+ * they go looking for. See src/lib/rowCap.ts.
+ */
+export const INJURY_DOC_LIST_CAP = 100;
 
 /** The key shape, mirrored from the policies in 91-injury-documents.sql. */
 export const INJURY_DOC_PATH_RE = /^[0-9a-fA-F-]{36}\/[A-Za-z0-9._-]{1,120}$/;
@@ -113,7 +164,19 @@ export interface InjuryDocFile {
 export interface InjuryDocRead {
   stored: 'ready' | 'error';
   path: string | null;
-  read: 'ready' | 'error';
+  /** The answer this call was made under, echoed back. The screen words the
+   *  outcome from what the member DECIDED, not from what happened afterwards:
+   *  "nothing was sent" is a different sentence when it is the member's choice
+   *  than when it is a failure, and they must not be shown each other's. */
+  consent: OcrAnswer;
+  /** Whether that answer reached the server. False with `consent: 'granted'`
+   *  is the one case where the member agreed and the document still did not go
+   *  — see the ordering argument in the header. */
+  recorded: boolean;
+  /** Whether the bytes were actually posted to the vendor. The only field that
+   *  says what left, and the one an audit would read. */
+  sent: boolean;
+  read: 'ready' | 'error' | 'not-asked';
   extraction: Extraction | null;
   /** Something to show the client. Never a raw vendor string. */
   error: string | null;
@@ -131,18 +194,77 @@ async function requireUid(): Promise<string | null> {
   return data?.user?.id ?? null;
 }
 
+/** The table in supabase/parts/1000-*.sql. Insert-and-select only, own rows
+ *  only, no update or delete policy anywhere. */
+export const INJURY_DOC_CONSENT_TABLE = 'injury_doc_ocr_consents';
+
 /**
- * Store a document and read it.
+ * Write down what the member answered about ONE document.
+ *
+ * Returns whether the row actually landed, and the caller acts on that rather
+ * than on the absence of an error: PostgREST does not error when a policy
+ * filters a row out of the returned set, so a write that inserted nothing comes
+ * back looking exactly like a write that inserted something. `injuryAcks.tsx`
+ * counts the returned row for the same reason and says so at length; this is
+ * the same trap on a table where the consequence is a medical document.
+ *
+ * A duplicate is a success. The unique key is (client_id, object_path) and a
+ * path carries its own millisecond and random token, so the only way to hit it
+ * is to write the same decision about the same document twice — a retry. The
+ * row that is already there says what this one would have said.
+ */
+async function recordInjuryDocConsent(
+  uid: string, path: string, answer: OcrAnswer,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from(INJURY_DOC_CONSENT_TABLE)
+      .insert({
+        client_id: uid,
+        object_path: path,
+        decision: answer,
+        vendor: OCR_VENDOR,
+        endpoint: OCR_ENDPOINT,
+        decided_at: new Date().toISOString(),
+      })
+      .select('id');
+    if (error) {
+      // 23505 is the unique key: the decision is already on file, which is what
+      // this call was for. Anything else is a consent we cannot show.
+      if ((error as { code?: string }).code === '23505') return true;
+      reportError('injuryDocs.consent.write', error, { path });
+      return false;
+    }
+    if (!data || !data.length) {
+      reportError('injuryDocs.consent.write', new Error('consent insert returned no row'), { path });
+      return false;
+    }
+    return true;
+  } catch (e) {
+    reportError('injuryDocs.consent.write', e, { path });
+    return false;
+  }
+}
+
+/**
+ * Store a document and, if the member said so, read it.
  *
  * Downscaled and re-encoded as JPEG first: it is what the bucket accepts, what
  * OCR.space is given, and it strips a HEIC the picker would otherwise hand us
  * under an image/jpeg content type that would then be a lie.
+ *
+ * `consent` is required and has no default. It is the member's answer to the
+ * question in src/lib/injuryDocConsent.ts, asked against THIS document, before
+ * this call. 'refused' still stores the file — that is the member keeping a
+ * private copy, which is the thing the screen has always promised and which is
+ * true on this branch — and posts nothing anywhere.
  */
 export async function readInjuryDocument(
   input: { uri: string; name?: string | null; mimeType?: string | null },
+  consent: OcrAnswer,
 ): Promise<InjuryDocRead> {
   const fail = (error: string): InjuryDocRead =>
-    ({ stored: 'error', path: null, read: 'error', extraction: null, error });
+    ({ stored: 'error', path: null, consent, recorded: false, sent: false, read: 'error', extraction: null, error });
 
   const uid = await requireUid();
   if (!uid) return fail('Sign in to add a document.');
@@ -210,40 +332,109 @@ export async function readInjuryDocument(
     return fail('That document could not be saved, so nothing was read from it.');
   }
 
-  // ── read ───────────────────────────────────────────────────────────────
+  // ── record the answer ──────────────────────────────────────────────────
   // Stored, and said so, whatever happens from here.
-  const storedOnly = (error: string): InjuryDocRead =>
-    ({ stored: 'ready', path, read: 'error', extraction: null, error });
+  const storedOnly = (error: string, recorded: boolean, sent = false): InjuryDocRead =>
+    ({ stored: 'ready', path, consent, recorded, sent, read: 'error', extraction: null, error });
 
-  if (!b64) return storedOnly('Your document is saved, but there was nothing in it to read.');
+  const recorded = await recordInjuryDocConsent(uid, path, consent);
+
+  // The member said no. Nothing is posted, and the outcome is not an error:
+  // `read: 'not-asked'` is its own state precisely so the screen cannot render
+  // this as a failure. Their document is in their account and went nowhere,
+  // which is what they chose.
+  if (!maySendToOcr(consent)) {
+    // `error: null`, deliberately. This is not a failure and a sentence in the
+    // error slot is how it would end up rendered as one; the screen words this
+    // outcome from `REFUSED_TITLE` / `REFUSED_NOTE` in the consent module.
+    return { stored: 'ready', path, consent, recorded, sent: false, read: 'not-asked', extraction: null, error: null };
+  }
+
+  // They said yes and we could not write it down. The document is NOT sent —
+  // the ordering in the header is the whole point, and this is the branch it
+  // exists for. An agreement the app cannot produce afterwards is not one it
+  // may act on.
+  if (!recorded) return storedOnly(RECORD_FAILED_NOTE, false);
+
+  if (!b64) return storedOnly('Your document is saved, but there was nothing in it to read.', recorded);
 
   try {
     // The reader defaults to JPEG when nothing is said, which is every other
     // caller, so saying it here is what makes a PDF read as a PDF rather than
     // as a corrupt image.
     const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64, mime: contentType } });
+    // `sent: true` from here down, on every branch including the failures. The
+    // request was made and the bytes left this device; whether the vendor could
+    // read them is a different question from whether they had them, and the
+    // member is entitled to the first answer rather than the second.
     if (error) {
       reportError('injuryDocs.ocr', error, { path });
-      return storedOnly('Your document is saved. We could not reach the reader, so nothing has been read from it yet.');
+      return storedOnly('Your document is saved. We could not reach the reader, so nothing has been read from it yet.', recorded, true);
     }
     if (!data?.ok) {
       // The function reports its own failure in the body — a missing key, an
       // image it could not parse. Pass its sentence through when it has one;
       // it is written for a person and says what to do.
       const detail = typeof data?.error === 'string' && data.error ? data.error : null;
-      return storedOnly(detail ?? 'Your document is saved. The reader could not get any text out of it.');
+      return storedOnly(detail ?? 'Your document is saved. The reader could not get any text out of it.', recorded, true);
     }
     return {
       stored: 'ready',
       path,
+      consent,
+      recorded,
+      sent: true,
       read: 'ready',
       extraction: extractFromDocument(String(data.text ?? '')),
       error: null,
     };
   } catch (e) {
     reportError('injuryDocs.ocr', e, { path });
-    return storedOnly('Your document is saved. We could not reach the reader, so nothing has been read from it yet.');
+    // A throw here is the invoke itself failing — a dead network, a DNS
+    // failure. It is not knowable from this side whether anything reached the
+    // wire, so `sent` stays true: over-reporting a send is the safe direction
+    // when the alternative is telling somebody their record never left.
+    return storedOnly('Your document is saved. We could not reach the reader, so nothing has been read from it yet.', recorded, true);
   }
+}
+
+/**
+ * What this member answered about each of their own documents.
+ *
+ * Keyed by object path, which is what `listInjuryDocs` returns, so the screen
+ * can put a sentence under each document saying where it has been.
+ *
+ * The status matters more here than on most reads. An empty map means "this
+ * member has answered nothing we can find", and for a document that predates
+ * the consent question that is TRUE and important — it was sent unasked, and
+ * the app must say it has no record rather than invent one in either direction.
+ * A FAILED read means we could not look, which is a third thing again. Both are
+ * handled by `docSendState` in src/lib/injuryDocConsent.ts, which takes this
+ * status as its first argument for exactly that reason.
+ */
+export async function listInjuryDocConsents(): Promise<{ status: LoadStatus; byPath: Record<string, OcrAnswer> }> {
+  const uid = await requireUid();
+  if (!uid) return { status: 'error', byPath: {} };
+
+  const { data, error } = await supabase
+    .from(INJURY_DOC_CONSENT_TABLE)
+    .select('object_path, decision')
+    .eq('client_id', uid)
+    .order('decided_at', { ascending: false })
+    .limit(capLimit());
+  if (error) { reportError('injuryDocs.consent.read', error); return { status: 'error', byPath: {} }; }
+
+  // A truncated page cannot tell you a row is absent, only that it was not on
+  // this page. 'partial' carries that to `docSendState`, which then answers
+  // 'unknown' for any document it did not see a row for.
+  const rows = capped(data ?? []);
+  const byPath: Record<string, OcrAnswer> = {};
+  for (const r of rows.rows as { object_path?: unknown; decision?: unknown }[]) {
+    const p = typeof r.object_path === 'string' ? r.object_path : '';
+    const d = r.decision;
+    if (p && (d === 'granted' || d === 'refused')) byPath[p] = d;
+  }
+  return { status: rows.truncated ? 'partial' : 'ready', byPath };
 }
 
 /**
@@ -260,13 +451,19 @@ export async function listInjuryDocs(): Promise<{ status: LoadStatus; docs: Inju
 
   const { data, error } = await supabase.storage
     .from(INJURY_DOC_BUCKET)
-    .list(uid, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+    .list(uid, { limit: capLimit(INJURY_DOC_LIST_CAP), sortBy: { column: 'created_at', order: 'desc' } });
   if (error) { reportError('injuryDocs.list', error); return { status: 'error', docs: [] }; }
+
+  // Capped BEFORE the placeholder is filtered out, and that order matters: the
+  // probe row is what says the set was bigger, and dropping a placeholder out
+  // of a full page first would turn 101 rows into 100 and hide it.
+  const page = capped(data ?? [], INJURY_DOC_LIST_CAP);
+  const whole: LoadStatus = page.truncated ? 'partial' : 'ready';
 
   // Supabase inserts a zero-byte placeholder for an empty folder; it is not a
   // document and must not be counted as one.
-  const files = (data ?? []).filter((f) => f.name && f.name !== '.emptyFolderPlaceholder');
-  if (!files.length) return { status: 'ready', docs: [] };
+  const files = page.rows.filter((f) => f.name && f.name !== '.emptyFolderPlaceholder');
+  if (!files.length) return { status: whole, docs: [] };
 
   const paths = files.map((f) => `${uid}/${f.name}`);
   const { data: signed, error: signErr } = await supabase.storage
@@ -280,7 +477,7 @@ export async function listInjuryDocs(): Promise<{ status: LoadStatus; docs: Inju
   }
 
   return {
-    status: 'ready',
+    status: whole,
     docs: files.map((f) => ({
       path: `${uid}/${f.name}`,
       name: f.name,
@@ -288,6 +485,34 @@ export async function listInjuryDocs(): Promise<{ status: LoadStatus; docs: Inju
       url: urlByPath.get(`${uid}/${f.name}`) ?? null,
     })),
   };
+}
+
+/**
+ * A fresh signed URL for one document the member owns.
+ *
+ * The list signs every document once, when it is read, and those links last
+ * `INJURY_DOC_TTL_S`. A viewer is a screen people leave open, so the link a
+ * member taps is routinely older than the link they were handed — and an
+ * expired one renders as a blank rectangle rather than as an error, which is
+ * the worst possible way to be told anything about a medical record.
+ *
+ * Null means we could not sign it now, which is not the same as the document
+ * being gone: the path is still there and the caller says so in those words.
+ */
+export async function signInjuryDoc(path: string): Promise<string | null> {
+  const uid = await requireUid();
+  // The same ownership check `deleteInjuryDoc` makes. A signature is a grant,
+  // and this one is never minted for a path outside the member's own folder.
+  if (!uid || !isOwnInjuryDocPath(path, uid)) return null;
+
+  const { data, error } = await supabase.storage
+    .from(INJURY_DOC_BUCKET)
+    .createSignedUrl(path, INJURY_DOC_TTL_S);
+  if (error || !data?.signedUrl) {
+    reportError('injuryDocs.sign.one', error ?? new Error('no signed url'), { path });
+    return null;
+  }
+  return data.signedUrl;
 }
 
 /**

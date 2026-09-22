@@ -3,8 +3,15 @@
 // The assertions that matter here are the negative ones: that an absent target
 // produces NO row rather than a default one. A test that only checks the happy
 // path would have passed against the five-item constant this replaces.
-import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, type ChecklistInput } from './checklist';
+import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, OWN_HABITS, ownHabitsKey, parseOwnHabits, type ChecklistInput } from './checklist';
 import { buildProgram } from './programs';
+// The step, calorie, protein and sleep labels now go through `num` and `plain`,
+// which ask the reader's locale — so every assertion below that names a figure
+// is an assertion about a locale, and the runner's own is a fact about this
+// machine rather than about this module. Stated, for the reason
+// units.test.ts states its own.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -80,7 +87,8 @@ ok(scheduledFocus(ppl, 3) === 'Pull', 'Wednesday of a PPL plan is Pull');
 ok(scheduledFocus(ppl, 0) === null, 'Sunday is not in a Mon/Wed/Fri plan and must not borrow the nearest day');
 ok(scheduledFocus(ppl, 2) === null, 'Tuesday is not a training day in a Mon/Wed/Fri plan');
 ok(scheduledFocus([], 1) === null, 'a plan with no days schedules nothing');
-ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'Pull' }, 'train') === 'Train — Pull', 'the training row names the session');
+ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'Pull' }, 'train') === 'Train · Pull', 'the training row names the session');
+ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'LEGS' }, 'train') === 'Train · Legs', 'a focus in capitals reads in Title Case');
 ok(!ids({ ...NOTHING, todaysTrainingFocus: '   ' }).includes('train'), 'a blank focus is not a session');
 ok(!ids(NOTHING).includes('train'), 'a rest day carries no training row');
 
@@ -145,6 +153,27 @@ ok(donePercent(4, 4) === 100, 'all ticked is 100%');
 ok(donePercent(5, 4) === 100, 'a stale done count must not exceed 100%');
 ok(donePercent(1, NaN) === null, 'a non-finite total has no percentage');
 ok(donePercent(1, -4) === null, 'a negative total has no percentage — clamping it to 0% would state a fact');
+
+// The endpoints, on the same rule src/lib/sharePercent.ts states. Nought is
+// reserved for nothing ticked and a hundred for everything ticked; a list long
+// enough for one tick to round away must not print either.
+ok(donePercent(1, 201) === 1, 'one habit ticked out of 201 is not nought per cent — the day has been started');
+ok(donePercent(200, 201) === 99, 'one habit outstanding out of 201 is not a hundred per cent — a box is still open');
+ok(donePercent(0, 201) === 0, 'but nothing ticked on a long list is still a real nought');
+ok(donePercent(201, 201) === 100, 'and everything ticked on a long list is still a real hundred');
+
+// ── the member's own habits ──
+{
+  const base: ChecklistInput = { waterGoalGlasses: null, proteinTargetG: null, kcalTarget: null, stepGoal: null, sleepGoalHours: null, todaysTrainingFocus: null, coachItems: [] };
+  const own = buildChecklist({ ...base, ownHabits: ['own:read', 'own:meditate', 'own:nope', 'own:read'] }).items;
+  ok(own.map((i) => i.id).join() === 'own:read,own:meditate', 'own habits appear once each, unknown ids dropped');
+  ok(own.every((i) => i.source === 'own'), 'and are marked as the member\'s own');
+  ok(buildChecklist(base).items.length === 0, 'none unless chosen');
+  ok(parseOwnHabits('["own:read","own:meditate","x"]').join() === 'own:meditate,own:read', 'stored list kept in catalogue order');
+  ok(parseOwnHabits('not json').length === 0 && parseOwnHabits(null).length === 0, 'a bad store reads as nothing chosen');
+  ok(ownHabitsKey('u1') !== ownHabitsKey('u2') && ownHabitsKey(null) === null && ownHabitsKey('unknown') === null, 'the key is per account');
+  ok(OWN_HABITS.every((h) => h.id.startsWith('own:')) && !OWN_HABITS.some((h) => h.id.startsWith(COACH_ID_PREFIX)), 'own ids never collide with coach ids');
+}
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'CHECKLIST FAILURES:\n' + errors.join('\n') : 'ALL CHECKLIST TESTS PASSED');

@@ -37,7 +37,7 @@ export interface AskResult {
  *
  * Deliberately says the coach CANNOT do it for them. Without that sentence the
  * request reads as bureaucracy — "why are you asking me, you know already" —
- * and the honest answer, that this has to come from them for their programme to
+ * and the honest answer, that this has to come from them for their program to
  * be built around it, is also the reason they should bother.
  */
 export function askMessage(areaId: string | null, note: string): string {
@@ -50,7 +50,7 @@ export function askMessage(areaId: string | null, note: string): string {
   ];
   if (trimmed) lines.push(`Could you add ${what} under Injuries & Limitations in your app?`);
   lines.push(
-    'I can’t add it for you — it has to come from you — and once it’s there your training works around it automatically.',
+    'I can’t add it for you, because it has to come from you, and once it’s there your training works around it automatically.',
   );
   return lines.join('\n\n');
 }
@@ -78,7 +78,7 @@ export async function askToRecordInjury(
       return { sent: false, pushed: false, error: error.message };
     }
     if (!data || !data.length) {
-      return { sent: false, pushed: false, error: 'The message was not accepted — check they are still on your roster.' };
+      return { sent: false, pushed: false, error: 'The message was not accepted. Check they are still on your roster.' };
     }
   } catch (e: any) {
     reportError('injuryAsk.send', e, { clientId });

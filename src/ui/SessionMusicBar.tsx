@@ -30,6 +30,8 @@ import {
   SpotifyError, spotifyConfigured, type NowPlaying,
 } from '../lib/spotify';
 import { progressLine } from '../lib/spotifyPlayback';
+import { hitSlopFor } from '../lib/a11y';
+import { FORWARD_ICON } from './direction';
 
 /** How often the bar re-reads the player. Spotify's own clients poll at about
  *  this rate; faster burns the development-mode quota for no visible gain. */
@@ -118,12 +120,12 @@ export function SessionMusicBar() {
   if (phase === 'off' || phase === 'reconnect') {
     const line = phase === 'off'
       ? 'Connect Spotify to control music without leaving the session.'
-      : 'Reconnect Spotify — this version needs playback permission, which the old sign-in did not grant.';
+      : 'Reconnect Spotify. This version needs playback permission, which the old sign-in did not grant.';
     return (
       <Pressable onPress={() => router.push('/(client)/music')} accessibilityRole="button" accessibilityLabel="Open music settings" style={shell}>
         <Icon name="play" size={17} color={t.ink3} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{line}</Text>
-        <Icon name="chevron" size={15} color={t.ink3} />
+        <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
       </Pressable>
     );
   }
@@ -136,7 +138,7 @@ export function SessionMusicBar() {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Spotify</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{problem}</Text>
           {!transportDead ? (
-            <Pressable onPress={refresh} accessibilityRole="button" style={{ marginTop: sp.sm }}>
+            <Pressable onPress={refresh} accessibilityRole="button" hitSlop={hitSlopFor(21)} style={{ marginTop: sp.sm }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
             </Pressable>
           ) : null}
@@ -151,7 +153,11 @@ export function SessionMusicBar() {
       <View style={shell}>
         <Icon name="play" size={17} color={t.ink3} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Nothing playing. Start a track in Spotify and it appears here.</Text>
-        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy}>
+        {/* A bare label is only as tall as its own line — about 21pt at
+            ty.label — and nothing here gives it padding, so this is a 21pt
+            target on a bar a member taps mid-set. Same arithmetic as the
+            transport below; no layout moves. */}
+        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy} accessibilityState={{ disabled: busy }} hitSlop={hitSlopFor(21)}>
           <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Resume</Text>
         </Pressable>
       </View>
@@ -171,19 +177,45 @@ export function SessionMusicBar() {
           {(now.artist ?? '—') + ' · ' + progressLine(now.progressMs, now.durationMs)}
         </Text>
       </View>
-      <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
-        <Icon name="back" size={18} color={t.ink2} />
-      </Pressable>
-      <Pressable
-        onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
-        disabled={busy} accessibilityRole="button"
-        accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
-        style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-        {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
-      </Pressable>
-      <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
-        <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
-      </Pressable>
+      {/* ── the transport, pinned ────────────────────────────────────────
+          rtl-ok: previous / play / next keep their physical order and their
+          physical glyphs in every locale, and `direction: 'ltr'` on this row
+          is what holds them there while the art, the title and the chevron
+          above mirror normally around it.
+
+          "Previous track" does not mean "back", it means earlier in this
+          track's timeline, and a timeline is not read — it plays. iOS and
+          Android both leave transport controls alone in RTL for that reason,
+          so a member who has used any other music app on the same handset
+          finds skip-back on the same side here. Mirroring it would also flip
+          the scaleX below into pointing backwards, which is the failure this
+          note exists to stop somebody re-introducing. See UNMIRRORED in
+          src/lib/direction.ts. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, direction: 'ltr' }}>
+        <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
+          {/* rtl-ok: transport, not navigation — see the note above this row. */}
+          <Icon name="back" size={18} color={t.ink2} />
+        </Pressable>
+        <Pressable
+          onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
+          disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button"
+          accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
+          // 34pt, and the one control on this bar a person reaches for without
+          // looking — mid-set, one-handed, phone propped on a rack. Its two
+          // neighbours already carry 8pt of slop and the row's gap is 12, so
+          // the 5 this adds overlaps each of them by a point; where they meet,
+          // the later sibling wins and that is play/pause, which is the right
+          // way round for the button people are actually aiming at.
+          hitSlop={hitSlopFor(34)}
+          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+          {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
+        </Pressable>
+        <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
+          {/* rtl-ok: the same glyph flipped by scaleX is skip-FORWARD in the
+              track, and it must not mirror either. See the note above this row. */}
+          <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
+        </Pressable>
+      </View>
     </View>
   );
 }

@@ -31,10 +31,15 @@
 //      told nothing. Nothing in this repository can run that plpgsql, so these
 //      assertions are the only proof its five branches are right.
 import {
+  CLASS_OFF_ROUTE, CLASS_OFF_TITLE, CLASS_OFF_TITLE_MANY,
+  COACH_ACCEPTED_ROUTE, COACH_DECLINED_ROUTE,
   NOTICE_BODY_MAX, NOTICE_ROUTE, NOTICE_TITLE_MAX,
-  classStartsIn, clip, deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
+  classOffBuckets, classOffConfirmation, classOffNotification, classStartsIn, clip,
+  coachAnswerConfirmation, coachAnswerNotification,
+  deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
+  PUSH_PARTIAL_NOTE, pushPartialNote,
 } from './notifyCopy';
-import { safeRoute } from './notifyInbox';
+import { inboxDecision, safeRoute } from './notifyInbox';
 import type { CoachInvoice } from './coachInvoice';
 
 const errors: string[] = [];
@@ -196,13 +201,77 @@ ok(/did not go out/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'f
 ok(/no push/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'off' })),
   'not pushing is stated too — silence about it would read as a push');
 
+/* ── a send that was accepted and did not reach everybody ─────────────────
+ *
+ * send-push pages its recipient list and returns `partial: true` when a chunk
+ * of it could not be read, so `sent` is a floor. Nothing in the app read that
+ * flag: `sendPushChecked` discarded the function's response and every caller
+ * took `ok: true` for "it went to everybody" — the truncation-as-total defect
+ * one layer out from the one send-push's paging fixed.
+ */
+
+const partial = deliverySummary({ recipients: 900, recorded: 900, push: 'queued', pushPartial: true });
+ok(/not all of the recipient list could be read/i.test(partial),
+  'a partly-read recipient list is said out loud rather than reported as a send that went out');
+ok(/notifications/i.test(partial),
+  'and the inbox rows, which DID all land, are still credited — the two halves are different facts');
+ok(!/\bdelivered\b/i.test(partial), 'still nothing claims delivery');
+// The ordinary queued sentence must not appear as well: two sentences about
+// the same push, one of them reassuring, is worse than either alone.
+ok(!/only people on a push-enabled build/i.test(partial),
+  'the partial sentence REPLACES the ordinary one rather than being appended to it');
+ok(!/not all of the recipient list/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'queued' })),
+  'and a send with nothing wrong carries no warning — an absent flag is not a truncation');
+ok(!/not all of the recipient list/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'queued', pushPartial: false })),
+  'nor does an explicit false');
+
+/* ── a fan-out that ran into the ceiling inside notify_users() ───────────── */
+//
+// supabase/parts/122 ends its recipient CTE with `limit 2000` and returns the
+// number of rows written, so past two thousand recipients the answer is a floor
+// wearing a count's clothes. An owner announcing a closure to 2,400 members was
+// told "2,000 people have it", and the four hundred who were skipped were
+// counted out of the sentence they were missing from.
+
+const atCap = deliverySummary({ recipients: 2400, recorded: 2000, push: 'off', recordedAtCap: true });
+ok(/at least/i.test(atCap), 'a floor is stated as a floor');
+ok(atCap.includes('2,000'), 'the rows that were written are still counted, with their separator');
+ok(!atCap.includes('2,400'), 'and the number addressed is not stated beside it');
+// 2400 − 2000 is not the number of people who were skipped: `notify_users`
+// also drops recipients the caller may not reach, so the difference conflates
+// two causes. Neither figure may be presented as the shortfall.
+ok(!atCap.includes('400'), 'and the difference is never presented as the number missed');
+ok(!/send it again/i.test(atCap),
+  'no remedy is offered — the ceiling has no ORDER BY, so a second send would address an arbitrary two thousand');
+ok(!/\bdelivered\b/i.test(atCap), 'and still nothing claims delivery');
+ok(!/at least/i.test(deliverySummary({ recipients: 40, recorded: 38, push: 'off' })),
+  'an ordinary fan-out under the ceiling says nothing about one');
+
+/* ── a recipient list that was itself capped ─────────────────────────────── */
+//
+// src/ui/announcements.tsx read the coach's roster with `capLimit()` and then
+// used every row it got, probe row included, as the number of people addressed.
+// `recipients` under this flag is a floor, so the sentence states neither it
+// nor a comparison against it.
+
+const cappedList = deliverySummary({ recipients: 1001, recorded: 998, push: 'off', recipientsTruncated: true });
+ok(/more people to address than this app could read/i.test(cappedList),
+  'a capped roster admits that the list is not the whole roster');
+// 998 rows were counted by notify_users and may be stated. 1001 is the probe
+// row plus the cap — a floor nobody counted — and must appear nowhere, in
+// particular not as the second half of "998 of 1,001", which invites the author
+// to go looking for three people who are not the ones missing.
+ok(cappedList.includes('998'), 'the rows that were actually written are still counted');
+ok(!cappedList.includes('1,001'), 'and the floor is never stated as a total');
+ok(!/\bof\b/.test(cappedList.split('.')[0]), 'nor compared against, when one of the two is not a count');
+
 /* ── the control that wakes people up says so ──────────────────────────── */
 
 const warn = pushConsequence('gym', 240);
 ok(warn.includes('240 members'), 'the author is told how many phones this is');
 ok(/straight away/i.test(warn) && /what ?ever time it is where they are/i.test(warn.replace('whatever', 'what ever')),
   'and that it happens now, wherever they are — there is no scheduler and no timezone on record');
-eq(pushConsequence('coach', 1), 'Sends a push to 1 client straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications — quietly.',
+eq(pushConsequence('coach', 1), 'Sends a push to 1 client straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications, quietly.',
   'one client is a client');
 ok(/every member/.test(pushConsequence('gym', null)),
   'an uncounted audience is "every member", never a figure nobody counted');
@@ -263,6 +332,213 @@ eq(classStartsIn(NaN, T0), '', 'an unreadable start time produces nothing at all
 eq(classStartsIn(T0, NaN), '', 'and so does an unreadable now');
 eq(classStartsIn(Infinity, T0), '', 'infinity is not a start time');
 
+
+/* ── an answer to a coaching request ────────────────────────────────────────
+ *
+ * The fifth defect these assertions are aimed at: A PERSON LEFT WAITING ON AN
+ * ANSWER THAT HAS ALREADY BEEN GIVEN. `coach_requests_notify_trainer` is
+ * `after insert`, so the coach's answer wrote no row and sent nothing, and a
+ * DECLINED client sees exactly what they saw the day before — a request they
+ * believe is pending — for as long as they are willing to wait.
+ */
+
+{
+  const yes = coachAnswerNotification(true, 'Alex Rivera');
+  const no = coachAnswerNotification(false, 'Alex Rivera');
+  ok(yes.title !== no.title, 'a yes and a no do not share a heading');
+  ok(/accepted/i.test(yes.title), 'the yes says so in the heading, which is the half that renders on a lock screen');
+  ok(/declined/i.test(no.title), 'and so does the no');
+  ok(yes.body.includes('Alex Rivera'), 'the coach is named');
+  ok(no.body.includes('Alex Rivera'), 'in both');
+  // Two screens, because they are two different next steps.
+  eq(yes.route, COACH_ACCEPTED_ROUTE, 'an accepted request opens the screen that just changed');
+  eq(no.route, COACH_DECLINED_ROUTE, 'a declined one opens the only useful next step');
+  ok(yes.route !== no.route, 'and they are not the same screen');
+  eq(safeRoute(yes.route, 'client'), yes.route, 'the accepted route is one the client app will open');
+  eq(safeRoute(no.route, 'client'), no.route, 'and so is the declined one');
+  // A name that could not be read is a subject that is still there.
+  for (const missing of [null, undefined, '', '   ']) {
+    const n = coachAnswerNotification(false, missing);
+    ok(!n.body.startsWith(' '), `a ${JSON.stringify(missing)} name does not leave the sentence starting with a space`);
+    ok(n.body.includes('The coach you asked'), 'it names them as best it can rather than dropping the subject');
+  }
+  // The decline is not softened into a reason nobody gave.
+  ok(!/not taking|right now|at the moment/i.test(no.body),
+    'the decline states what happened and invents no reason on the coach\u2019s behalf');
+  // Recorded, both. Nothing else in the product would ever tell them.
+  ok(inboxDecision(yes.title, yes.body, yes.route).record, 'an accepted request is worth an inbox row');
+  ok(inboxDecision(no.title, no.body, no.route).record, 'and a declined one is the row that matters most');
+}
+
+/* what the coach is told, which is never more than happened */
+{
+  const sent = coachAnswerConfirmation(true, 'Sam', { ok: true, recorded: 1 });
+  const rowOnly = coachAnswerConfirmation(true, 'Sam', { ok: false, recorded: 1 });
+  const neither = coachAnswerConfirmation(true, 'Sam', { ok: false, recorded: 0 });
+  ok(sent !== rowOnly && rowOnly !== neither && sent !== neither,
+    'three outcomes, three sentences');
+  for (const line of [sent, rowOnly, neither]) {
+    ok(line.startsWith('Sam is now on your roster.'), 'the write that did happen is stated first, in every branch');
+    ok(!/delivered/i.test(line), 'nothing claims a delivery this app never witnessed');
+  }
+  ok(!/couldn/i.test(sent), 'the successful branch does not hedge');
+  ok(/couldn\u2019t reach their phone/.test(rowOnly), 'the row-only branch says the phone was not reached');
+  ok(/notifications the next time they open/.test(rowOnly), 'and where they will find it instead');
+  ok(/nothing was written to their notifications/.test(neither), 'the nothing-happened branch says nothing happened');
+
+  const declined = coachAnswerConfirmation(false, 'Sam', { ok: false, recorded: 0 });
+  ok(declined.includes('still waiting on you'),
+    'a decline nobody could deliver says the consequence out loud: their app still shows it pending');
+  ok(!coachAnswerConfirmation(false, 'Sam', { ok: true, recorded: 1 }).includes('roster'),
+    'a decline never says roster');
+  ok(coachAnswerConfirmation(true, '   ', { ok: true, recorded: 1 }).startsWith('That client is now on your roster.'),
+    'a name that could not be read still leaves a sentence with a subject, and a grammatical one');
+}
+
+/* ── a class that was called off ────────────────────────────────────────────
+ *
+ * The sixth: A ROW THAT IS NOT A PHONE. supabase/parts/493 writes one
+ * `notifications` row per member the moment a class is called off, and nothing
+ * in that schema can turn it into a push — so twelve people booked on a 6am
+ * still find out when they next open the app, which is after they have
+ * travelled to a locked room.
+ */
+
+{
+  // Mirrors the literal in supabase/parts/493 · class_cancelled_notify. The
+  // banner and the row a member later scrolls past have to be the same event.
+  eq(CLASS_OFF_TITLE, 'A class you booked is not running', 'the singular title is part 493\u2019s own');
+
+  const one = classOffNotification('Spin', 1, 'the instructor is off sick');
+  eq(one.title, CLASS_OFF_TITLE, 'one class off gets the singular heading');
+  ok(one.body.includes('Spin'), 'the class is named');
+  ok(one.body.includes('the instructor is off sick'), 'the reason the coach typed is passed on, not summarised');
+  eq(one.route, CLASS_OFF_ROUTE, 'it opens the timetable');
+  eq(safeRoute(one.route, 'client'), one.route, 'which is a screen the client app has');
+
+  const many = classOffNotification('Spin', 3, 'the room is being re-floored');
+  eq(many.title, CLASS_OFF_TITLE_MANY, 'more than one gets the plural heading');
+  ok(many.body.includes('3'), 'and says how many of THEIR bookings went');
+
+  const noReason = classOffNotification('Spin', 1, '   ');
+  ok(!noReason.body.includes(':'), 'a blank reason leaves no dangling colon');
+  const noName = classOffNotification(null, 1, null);
+  ok(noName.body.includes('A class'), 'a class with no title is still a class');
+
+  // No clock time and no calendar date, for the reason classStartsIn is
+  // written for: nothing here has a time zone to render one in.
+  for (const n of [one, many, noReason]) {
+    ok(!/\b\d{1,2}[:.]\d{2}\b/.test(n.body), 'no clock time in a body composed without a zone');
+    ok(!/\b(mon|tue|wed|thu|fri|sat|sun)day\b/i.test(n.body), 'and no weekday either');
+  }
+
+  // NOT recorded: part 493 wrote that row already.
+  ok(!inboxDecision(one.title, one.body, one.route).record,
+    'the singular class-off push leaves the row to the trigger');
+  ok(!inboxDecision(many.title, many.body, many.route).record,
+    'and so does the plural one');
+}
+
+/* who gets which sentence */
+{
+  eq(classOffBuckets([]).length, 0, 'nothing cancelled reaches nobody');
+  const one = classOffBuckets([{ userId: 'a', classId: 'c1' }, { userId: 'b', classId: 'c1' }]);
+  eq(one.length, 1, 'one class off is one send');
+  eq(one[0].classes, 1, 'and everybody on it is told one');
+  eq(one[0].userIds.join(','), 'a,b', 'with the roster in it');
+
+  // A member holding both a booking and a waiting-list row on the same class is
+  // still one class they are not going to.
+  const dup = classOffBuckets([{ userId: 'a', classId: 'c1' }, { userId: 'a', classId: 'c1' }]);
+  eq(dup.length, 1, 'a duplicated pair is one bucket');
+  eq(dup[0].classes, 1, 'and one class, not two');
+
+  // A series. Nobody is told a figure about somebody else's diary.
+  const series = classOffBuckets([
+    { userId: 'a', classId: 'c1' }, { userId: 'a', classId: 'c2' }, { userId: 'a', classId: 'c3' },
+    { userId: 'b', classId: 'c1' },
+    { userId: 'c', classId: 'c2' }, { userId: 'c', classId: 'c3' },
+  ]);
+  eq(series.length, 3, 'three distinct counts is three sends, not six');
+  eq(series.map((x) => x.classes).join(','), '1,2,3', 'ordered by how many each of them lost');
+  eq(series[0].userIds.join(','), 'b', 'the person who lost one is told one');
+  eq(series[2].userIds.join(','), 'a', 'and the person who lost three is told three');
+
+  // Damage is dropped rather than counted.
+  eq(classOffBuckets([{ userId: '', classId: 'c1' }, { userId: 'a', classId: '  ' }]).length, 0,
+    'a row with no person or no class is not somebody to notify');
+}
+
+/* what the coach is told about the fan-out */
+{
+  const unread = classOffConfirmation(1, null, null);
+  ok(unread.includes('couldn\u2019t read who had booked'),
+    'a roster that could not be read is never reported as nobody');
+  ok(!/\bnobody had booked\b/i.test(unread), 'and is not collapsed into the empty case');
+  ok(classOffConfirmation(1, 0, 0).includes('Nobody had booked'), 'an empty class had nobody to tell');
+  ok(classOffConfirmation(1, 4, 0).toLowerCase().includes('tell them yourself'),
+    'four people and no push reached is four people the coach has to tell');
+  ok(classOffConfirmation(1, 4, 2).includes('2 of them'), 'a partial fan-out says which part');
+  ok(classOffConfirmation(1, 4, 4).includes('all of them'), 'and a whole one says so');
+  for (const line of [unread, classOffConfirmation(9, 4, 4), classOffConfirmation(1, 4, 2)]) {
+    ok(!/delivered/i.test(line), 'a queued push is never called a delivery');
+    // The row is part 493's and this app cannot see whether it landed, so
+    // nothing here may promise it is in anybody's notifications.
+    ok(!/in their notifications/i.test(line),
+      'nothing claims a row this app did not write and cannot see');
+  }
+  ok(classOffConfirmation(1, 1, 1).includes('1 class was'), 'one is singular');
+  ok(classOffConfirmation(9, 1, 1).includes('9 classes were'), 'nine is not');
+}
+
+/* ── a room that was only partly reached ───────────────────────────────────
+ *
+ * send-push pages `push_tokens` and says `partial` when it could not read all
+ * of them. app/(trainer)/classes.tsx threw that away, so a send that resolved
+ * an unknown fraction of a full class was reported as "a push was queued to
+ * all of them" — the sentence a coach reads and then does not ring anybody.
+ */
+{
+  const whole = classOffConfirmation(1, 12, 12, true);
+  ok(!/all of them/i.test(whole),
+    'a partly-read handset list withdraws exactly the claim that everybody got one');
+  ok(whole.includes(PUSH_PARTIAL_NOTE),
+    'and says why in the one wording this product has for it, not a fifth');
+  ok(/tell them yourself/i.test(whole), 'and leaves the coach with something to do about it');
+  ok(!/in their notifications/i.test(whole), 'still nothing claims a row this app did not write');
+
+  const some = classOffConfirmation(1, 12, 8, true);
+  ok(some.includes('8 of them'), 'the number that WAS handed over is still stated');
+  ok(some.includes(PUSH_PARTIAL_NOTE), 'with the same clause after it');
+  ok(!/couldn\u2019t reach the rest/i.test(some),
+    'and not the confident "we could not reach the rest", which names a set nobody counted');
+
+  // A partly-read list is not a failed send: some of the room was woken up.
+  ok(!/couldn\u2019t reach any of their phones/i.test(classOffConfirmation(1, 12, 12, true)),
+    'a partial send is never collapsed into the nobody-was-told branch');
+  // And an absent flag changes nothing, so every existing caller keeps its
+  // sentence.
+  ok(classOffConfirmation(1, 12, 12) === classOffConfirmation(1, 12, 12, false),
+    'an explicit false is the same as saying nothing');
+  ok(!classOffConfirmation(1, 12, 12).includes(PUSH_PARTIAL_NOTE),
+    'and a send with nothing wrong carries no warning');
+}
+
+/* ── one wording, and its one-person form ────────────────────────────────── */
+{
+  // The five screens that state a delivery count all say this, and they say it
+  // with the same words. `deliverySummary` is the one that had it first.
+  ok(deliverySummary({ recipients: 900, recorded: 900, push: 'queued', pushPartial: true })
+    .includes(PUSH_PARTIAL_NOTE),
+    'the summary that owned this sentence now shares the constant rather than a copy of it');
+  ok(pushPartialNote(4) === PUSH_PARTIAL_NOTE, 'a crowd gets the crowd wording');
+  ok(pushPartialNote() === PUSH_PARTIAL_NOTE, 'and so does an unstated number');
+  const one = pushPartialNote(1);
+  ok(one !== PUSH_PARTIAL_NOTE, 'one recipient is not "more people"');
+  ok(!/more people/i.test(one), 'which is the half that would have been false');
+  ok(one.startsWith('Not all of the recipient list could be read'),
+    'and the CAUSE — the half a reader can act on — is word for word the same');
+}
 
 if (errors.length) {
   console.error(`notifyCopy: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

@@ -59,7 +59,7 @@
 -- and copies drift, which is why it is the smallest possible one: a single
 -- CASE over `jsonb_array_length`, with no notion of what a week contains. The
 -- alternative — a `weeks` column on the table — would be a second opinion about
--- a programme that the builder would have to remember to keep in step, which is
+-- a program that the builder would have to remember to keep in step, which is
 -- worse.
 --
 -- ── The guards ───────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@
 -- profiles(id)`:
 --
 --   `assigned_programs.coach_id`  NULLABLE (on delete set null) — GUARDED. A
---                                 programme whose coach deleted their account
+--                                 program whose coach deleted their account
 --                                 has nobody to tell.
 --   `assigned_programs.client_id`  the primary key, `not null`. Used only as a
 --                                 NAME, and a missing profile falls back to
@@ -99,7 +99,7 @@
 --
 -- Part 160's test: the recipient must be able to act AND have no other way to
 -- learn. A client fails the first half completely — they cannot write
--- themselves a block, and a notification saying "your programme ran out" with
+-- themselves a block, and a notification saying "your program ran out" with
 -- nothing they can do about it is an anxious message about somebody else's
 -- work. When the coach writes the next block the client's Train tab changes,
 -- which is the notification that means something.

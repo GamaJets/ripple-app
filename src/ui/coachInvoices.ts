@@ -8,14 +8,23 @@
 // DELETE, and no policy for any of them. The number has to be allocated under
 // a lock to stay gapless per coach, and an issued document cannot be edited
 // once somebody is holding a copy of it — neither of which a client-side write
-// could promise. So every write in this file is an `rpc` — issue, void, and
-// since part 168 the chase — and the read below is the only place the table is
-// touched directly. The chase moves two columns that are NOT on the document
-// (when the coach last chased, and how many times), and it still goes through a
-// function rather than an UPDATE grant: a grant on this table is a grant on the
-// row, RLS narrows a grant rather than creating one, and the immutable trigger
-// would then be the only thing between an issued amount and anybody who wanted
-// to edit it.
+// could promise. So every write in this file is an `rpc` — issue, void, the
+// chase since part 188, and since part 660 the settlement and the chase date —
+// and the read below is the only place the table is touched directly.
+//
+// Each of those moves columns that are NOT on the issued document: when the
+// coach last chased and how many times, whether they say it was paid and when,
+// and their own note of the day to start chasing from. Every one still goes
+// through a function rather than an UPDATE grant, because a grant on this table
+// is a grant on the ROW: RLS narrows a grant rather than creating one, and the
+// immutable trigger would then be the only thing between an issued amount and
+// anybody who wanted to edit it.
+//
+// The line none of them crosses is the same line. Nothing about a document
+// already issued is rewritten: a settlement is a NEW FACT recorded beside
+// `kind` rather than an edit of it, and `chase_from` appears on no artefact
+// anybody else ever sees. `due_on`, `kind` and `amount_cents` are exactly as
+// immutable as they were.
 //
 // ── supabase-js RESOLVES ON AN ERROR ───────────────────────────────────────
 //
@@ -32,17 +41,23 @@
 // void_coach_invoice() in part 138, which raises when it updates no row. What
 // reaches this file is an error message a coach can read.
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()`
+// resolves rather than rejects on a dropped connection, so an outage arrives as
+// the same null user a sign-out does — see src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
+import { isMissingColumn } from '../lib/coachCurrency';
+import type { MyCurrencyGap } from '../lib/currencySource';
 import { draftMinorUnits, readTaxRate, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
 import { invoiceNotification, invoiceReminderNotification } from '../lib/notifyCopy';
 import { recordInbox } from './pushNotifications';
 
 /** Every column the document needs and nothing else. */
 const INVOICE_COLS =
-  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, reminded_at, reminder_count, note, tax_rate_pct, tax_registration, voided_at, void_reason, created_at';
+  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, settled_on, settled_at, settle_note, chase_from, reminded_at, reminder_count, note, tax_rate_pct, tax_registration, voided_at, void_reason, created_at';
 
 interface InvoiceRow {
   id: string;
@@ -55,6 +70,10 @@ interface InvoiceRow {
   kind: string;
   issued_on: string;
   due_on: string | null;
+  settled_on: string | null;
+  settled_at: string | null;
+  settle_note: string | null;
+  chase_from: string | null;
   reminded_at: string | null;
   reminder_count: number | string | null;
   note: string | null;
@@ -96,6 +115,14 @@ function toInvoice(r: InvoiceRow): CoachInvoice {
     // due date of the 1st on the 31st for every coach west of Greenwich — the
     // same trap `splitByDay` in coachStatement.ts exists to document.
     dueOn: (r.due_on || '').slice(0, 10) || null,
+    // Both `date` columns, and both kept as bare `YYYY-MM-DD` for the reason
+    // `due_on` is: they mean a DAY. `settled_at` is a real instant — when the
+    // coach wrote it down, as opposed to the day they say the money arrived —
+    // and is the one of the three that is left alone.
+    settledOn: (r.settled_on || '').slice(0, 10) || null,
+    settledAt: r.settled_at ?? null,
+    settleNote: (r.settle_note || '').trim() || null,
+    chaseFrom: (r.chase_from || '').slice(0, 10) || null,
     remindedAt: r.reminded_at ?? null,
     // `integer` arrives as a number, but the same PostgREST bigint-as-string
     // rule that bit `amount_cents` is one migration away from applying here.
@@ -158,9 +185,23 @@ export async function fetchMyInvoices(): Promise<{ rows: CoachInvoice[]; status:
 export async function fetchInvoiceIssuer(): Promise<{ name: string | null; status: LoadStatus }> {
   if (!USE_SUPABASE) return { name: null, status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { name: null, status: 'error' };
+    // The error beside this call was discarded, so an outage and a sign-out
+    // both arrived as `uid === undefined` (src/lib/authReadFate.ts). The
+    // OUTCOME was already the cautious one and stays exactly as it was —
+    // 'error', which the document builder prints as "could not be read" rather
+    // than putting the platform's name where a business name belongs. What was
+    // missing is that an outage left no trace anywhere: the return type has
+    // room for two answers and the third had nowhere to go. `signedInUid`
+    // reports it under this key, so a coach who cannot issue an invoice leaves
+    // a record of why.
+    //
+    // Both fates stay 'error' deliberately. On a financial document a coach who
+    // is genuinely signed out has no name to print either, and "try again in a
+    // moment" is recoverable where a wrong From line on an immutable document
+    // is not.
+    const who = await signedInUid('coachInvoices.issuer');
+    if (who.fate !== null) return { name: null, status: 'error' };
+    const uid = who.uid;
     const { data, error } = await supabase.from('profiles').select('full_name').eq('id', uid).limit(1);
     if (error) { reportError('coachInvoices.issuer', error); return { name: null, status: 'error' }; }
     const rows = (data ?? []) as { full_name: string | null }[];
@@ -176,8 +217,9 @@ export async function fetchInvoiceIssuer(): Promise<{ name: string | null; statu
 
 /* ── the currency, which is never assumed ─────────────────────────────────── */
 
-/** Where a currency came from, so the screen can say. */
-export type CurrencySource = 'packages' | 'gym';
+/** Where a currency came from, so the screen can say. 'own' is
+ *  `trainers.currency` (part 940) — a coach with no gym, priced by themselves. */
+export type CurrencySource = 'packages' | 'gym' | 'own';
 
 export interface InvoiceCurrency {
   /** ISO 4217 uppercase, or null when nobody has stated one. Null is NOT a
@@ -186,70 +228,215 @@ export interface InvoiceCurrency {
   currency: string | null;
   source: CurrencySource | null;
   status: LoadStatus;
+  /**
+   * WHY there is no code, when there is none. Null whenever a code was found.
+   *
+   * `status` alone cannot say it any more. It separates "still reading", "a
+   * read failed" and "everything answered", and that was the whole story while
+   * a gym was the only place a currency could live — "everything answered and
+   * there is none" meant one thing and one sentence. It now means four:
+   * the gym has set none, the coach has no gym and has chosen none, there is
+   * no `trainers` row to keep one on, or part 940 is not applied. The first
+   * sends the coach to an owner and the second sends them to their own
+   * Settings, and telling an independent coach to go and find a gym owner is
+   * the dead end this whole change exists to end.
+   */
+  gap: MyCurrencyGap | null;
 }
 
 /**
  * The currency this coach's invoices are denominated in.
  *
- * Resolved in the same order as `issue_coach_invoice()` resolves it in part
- * 138 — the coach's own packages when they unanimously agree on one, else the
- * gym's `tenants.currency` — so the screen shows the coach exactly what the
- * server will use, rather than a second opinion that could differ from it.
+ * Resolved in the same order `issue_coach_invoice()` resolves it — part 138 as
+ * amended by part 941 — so the screen shows the coach exactly what the server
+ * will use rather than a second opinion that could differ from it:
+ *
+ *   1 · the coach's own packages, when they unanimously agree on one.
+ *   2 · the gym on `profiles.tenant_id`.
+ *   3 · `trainers.currency` (part 940), and ONLY when there is no gym.
  *
  * Packages first, deliberately. A coach who sells in sterling inside a gym
- * denominated in dirhams is selling in sterling; the gym's setting is the
+ * denominated in dirhams is selling in sterling; the two links below are the
  * fallback for a coach who has priced nothing yet.
  *
- * There is NO literal fallback anywhere in this function. tenants.currency is
- * nullable on purpose (part 99) and null means "this gym has not told us" — and
- * an invoice with the wrong three letters on it is worse than no invoice,
- * because it reads as a considered figure and it is a different amount of
- * money.
+ * ── The column this used to join on, and the year it was wrong for ────────
+ *
+ * The gym half was `from trainers tr join tenants t on t.id = tr.tenant_id`.
+ * That is the wrong column. `revoke_staff_role()` (part 711) takes a coach off
+ * a gym's staff by clearing `profiles.tenant_id` and deliberately KEEPS the
+ * `trainers` row — deleting it would strand every per-coach figure that joins
+ * on it — so `trainers.tenant_id` goes on naming the gym they have left, for
+ * ever. Every other screen in the coach app reads `profiles.tenant_id` and
+ * showed such a coach a dash; this one denominated their invoices in their old
+ * gym's currency. One coach, two answers, and the one that reached a client
+ * was the wrong one.
+ *
+ * ── Link 3 is guarded on "no gym", not on "nothing answered yet" ──────────
+ *
+ * That is part 940's precedence rule, and src/lib/currencySource.ts is where
+ * it is stated and tested. A coach INSIDE a gym whose owner has not chosen is
+ * waiting on that owner: answering them from their own dormant column would
+ * put a different currency on their invoice from the one their packages charge
+ * in, and from the one the coach at the next desk issues in.
+ *
+ * There is NO literal fallback anywhere in this function. Every code is one
+ * somebody chose, and an invoice with the wrong three letters on it is worse
+ * than no invoice, because it reads as a considered figure and it is a
+ * different amount of money.
+ *
+ * ── A link that did not answer stops the chain; it does not hand over ─────
+ *
+ * At every step, the FAILURE is checked before the emptiness — the rule
+ * `resolveMyCurrency` in src/lib/currencySource.ts states in those words. A
+ * link that could not be read has not said "nothing", it has said nothing, and
+ * the link beneath it answers a different question. So a packages read that
+ * errored or truncated returns no currency at all rather than the gym's, in the
+ * same way a failed profile read has always stopped rather than reaching
+ * `trainers.currency`. See the long note at the packages read for what the
+ * missing half of that rule cost.
+ *
+ * That means an invoice cannot be issued while a link is unreadable, and that
+ * is the intended outcome: the number comes out of a gapless per-coach
+ * sequence and the document is immutable once issued, so "try again in a
+ * moment" is recoverable and a wrong three letters is not.
  */
 export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
-  if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready' };
+  if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready', gap: null };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { currency: null, source: null, status: 'error' };
+    // Same repair, same reasoning, and here the answer this branch already
+    // gave happens to be the exactly right word: `gap: 'unreadable'`. It was
+    // being returned for a signed-out coach too, which overstated that case —
+    // but it is the honest one for the outage that used to arrive dressed as
+    // it, and the house rule for this file is that the currency is never
+    // assumed. An invoice cannot be issued while this is unknown, which is the
+    // intended outcome: the number comes out of a gapless per-coach sequence
+    // and the document is immutable once issued, so a retry is recoverable and
+    // a wrong three letters is not.
+    const who = await signedInUid('coachInvoices.currency');
+    if (who.fate !== null) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    const uid = who.uid;
 
-    const [pkgRes, gymRes] = await Promise.all([
+    const [pkgRes, profRes] = await Promise.all([
       supabase.from('trainer_packages').select('currency').eq('trainer_id', uid).limit(capLimit()),
-      supabase.from('trainers').select('tenant_id, tenants(currency)').eq('id', uid).limit(1),
+      supabase.from('profiles').select('tenant_id').eq('id', uid).maybeSingle(),
     ]);
 
     if (pkgRes.error) reportError('coachInvoices.currency.packages', pkgRes.error);
-    if (gymRes.error) reportError('coachInvoices.currency.gym', gymRes.error);
-    // Both halves failing is genuinely unknown. One failing still leaves the
-    // other able to answer, and an answer from one is a real answer.
-    if (pkgRes.error && gymRes.error) return { currency: null, source: null, status: 'error' };
+    if (profRes.error) reportError('coachInvoices.currency.profile', profRes.error);
 
-    if (!pkgRes.error) {
-      const codes = new Set(
-        ((pkgRes.data ?? []) as { currency: string | null }[])
-          .map((p) => (p.currency || '').trim().toUpperCase())
-          .filter((c) => c.length >= 3),
-      );
-      // Unanimous or nothing. A coach with packages in two currencies has not
-      // told us which one this invoice is in, and picking the commoner of the
-      // two would be a guess wearing a statistic.
-      if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready' };
+    // `capped()` rather than the raw rows, because unanimity is a claim about
+    // the WHOLE set. `.limit(capLimit())` hands back a prefix, and a prefix that
+    // happens to be all one currency says "unanimous" about a coach whose next
+    // package is priced in another — which puts the wrong three letters on an
+    // invoice and makes it a different amount of money.
+    //
+    // ── A packages read that did not come back whole STOPS the chain ──────
+    //
+    // It used to fall through to the gym on both a truncated read and a FAILED
+    // one, and return `status: 'ready'` with the gym's code. Only the
+    // truncation half was ever argued, in a comment that ended "a truncated
+    // read here knows less than an empty one, so it falls through to the gym" —
+    // and that is the opposite of the rule this function applies twenty lines
+    // below, where a failed PROFILE read stops rather than consulting the link
+    // beneath it, and the opposite of `resolveMyCurrency` in
+    // src/lib/currencySource.ts, whose whole statement of the precedence rule
+    // is "the failure is checked before the emptiness, at every step".
+    //
+    // What it costs is not a wrong sentence, it is a wrong document. Link 1 is
+    // the coach's own packages and it BEATS the gym: a coach pricing in GBP
+    // inside an AED gym is pricing in GBP. When that read fails, whether link 1
+    // would have answered is unknown — so the gym's code is not the fallback,
+    // it is a different link's answer standing in for one nobody read.
+    // `currencyGapOfStatus` cannot catch it either: it short-circuits on
+    // `input.currency` and a code was found, so no gap is reported, no blocker
+    // is raised, and `issueInvoice` sends that code as `p_currency`. Part 941's
+    // chain takes what the caller states in preference to everything below it,
+    // so the server does not re-resolve and does not disagree. The coach issues
+    // AED 480 where they meant GBP 480 — on a document that is immutable and
+    // numbered out of a gapless per-coach sequence, so it cannot be edited and
+    // cannot be deleted, only voided in the coach's own record while the client
+    // holds the copy.
+    //
+    // Refusing is therefore the cheap outcome and it is the one taken. The
+    // screen already has the words: 'error' reads as "your currency could not
+    // be read … try again in a moment" and 'partial' as "could not be
+    // established, because part of the read did not come back", neither of
+    // which sends anybody to a gym owner over a setting that is already
+    // correct. Nothing is invented, and no currency is stated that nobody chose.
+    const pkgPage = capped((pkgRes.data ?? []) as { currency: string | null }[]);
+    if (pkgRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    // 'unreadable' of the six, because what this is is UNKNOWN rather than
+    // "none is set" — which is the only distinction `MyCurrencyGap` has to
+    // carry here. The 'partial' status is what the screen actually prints from,
+    // and it says truncation in its own words.
+    if (pkgPage.truncated) return { currency: null, source: null, status: 'partial', gap: 'unreadable' };
+    const codes = new Set(
+      pkgPage.rows
+        .map((p) => (p.currency || '').trim().toUpperCase())
+        .filter((c) => c.length >= 3),
+    );
+    // Unanimous or nothing. A coach with packages in two currencies has not
+    // told us which one this invoice is in, and picking the commoner of the
+    // two would be a guess wearing a statistic.
+    if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready', gap: null };
+
+    // The profile read is what says whether there is a gym at all, so a failure
+    // of it is UNKNOWN and stops here. Falling through to `trainers.currency`
+    // on it would consult the coach's own column for a coach who may well be in
+    // a gym — the exact second answer this function has just stopped giving.
+    if (profRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+
+    const tid = (profRes.data as { tenant_id: string | null } | null)?.tenant_id ?? null;
+    // Everything from here down is reached only with the packages read WHOLE —
+    // it answered, and it either had nothing to say or did not agree with
+    // itself. So the links below are a genuine fallback and 'ready' is the
+    // truth about them. The old `partial` here covered a packages read that had
+    // failed or truncated, and it covered only the branches that end with NO
+    // code; the branches that found one returned 'ready' regardless, which is
+    // where the wrong currency got out.
+
+    if (tid) {
+      const { data: ten, error: tenErr } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
+      if (tenErr) {
+        reportError('coachInvoices.currency.gym', tenErr);
+        return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+      }
+      // A tenant_id that resolves to no readable row is still a gym — the
+      // profile names one. It is a gym whose currency we do not have, which is
+      // unknown rather than unset: RLS hiding the row and an owner never
+      // choosing look identical from here, and only one of them is fixed by an
+      // owner.
+      if (!ten) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+      const code = ((ten as { currency: string | null }).currency || '').trim().toUpperCase();
+      if (code.length >= 3) return { currency: code, source: 'gym', status: 'ready', gap: null };
+      // A gym with no currency is the owner's to fix, and it stays that way.
+      // `trainers.currency` is deliberately not reached from here.
+      return { currency: null, source: null, status: 'ready', gap: 'gym-unset' };
     }
 
-    if (!gymRes.error) {
-      const rows = (gymRes.data ?? []) as { tenants?: { currency: string | null } | { currency: string | null }[] | null }[];
-      const t = rows[0]?.tenants;
-      const cur = (Array.isArray(t) ? t[0]?.currency : t?.currency) || '';
-      const code = cur.trim().toUpperCase();
-      if (code.length >= 3) return { currency: code, source: 'gym', status: 'ready' };
+    // No gym. Only now is the coach's own column consulted.
+    const { data: tr, error: trErr } = await supabase.from('trainers').select('currency').eq('id', uid).maybeSingle();
+    if (trErr) {
+      // An unapplied part 940 is a deploy step, not a failed read. Reported as
+      // 'error' it becomes "try again in a moment" about a thing that will
+      // never come true until somebody runs the part.
+      if (isMissingColumn(trErr)) return { currency: null, source: null, status: 'ready', gap: 'unavailable' };
+      reportError('coachInvoices.currency.own', trErr);
+      return { currency: null, source: null, status: 'error', gap: 'unreadable' };
     }
+    // `trainers_self_rw` is `for all using (auth.uid() = id)`, so a coach can
+    // always see their own row. No row here is genuinely no row, not RLS — and
+    // it is a real state: there is nowhere for a currency to be kept.
+    if (!tr) return { currency: null, source: null, status: 'ready', gap: 'nowhere' };
+    const own = ((tr as { currency: string | null }).currency || '').trim().toUpperCase();
+    if (own.length >= 3) return { currency: own, source: 'own', status: 'ready', gap: null };
 
-    // Read fine, and nobody has set one. That is an answer, and it is the
-    // answer the screen turns into "ask your gym owner to set a currency".
-    return { currency: null, source: null, status: pkgRes.error || gymRes.error ? 'partial' : 'ready' };
+    // Read fine, no gym, and they have not chosen. THEY fix this, in Settings,
+    // and there is no owner anywhere in the sentence.
+    return { currency: null, source: null, status: 'ready', gap: 'own-unset' };
   } catch (e) {
     reportError('coachInvoices.currency', e);
-    return { currency: null, source: null, status: 'error' };
+    return { currency: null, source: null, status: 'error', gap: 'unreadable' };
   }
 }
 
@@ -306,8 +493,10 @@ async function tellTheClient(invoice: CoachInvoice): Promise<boolean | null> {
     // the number of rows it wrote, which is the only honest answer to whether
     // this landed — an undeployed function and a refused write both come back
     // as zero, and both mean the client was not told.
-    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
-    return wrote > 0;
+    // One recipient, so `atCap` cannot be true here and is not read. The count
+    // is still the only honest answer to whether this landed.
+    const { recorded } = await recordInbox([invoice.clientId], note.title, note.body);
+    return recorded > 0;
   } catch (e) {
     reportError('coachInvoices.notify', e);
     return false;
@@ -391,7 +580,7 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
     // The function returns the row it inserted. Nothing came back means nothing
     // was written, whatever the absence of an error suggests.
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That invoice was not issued — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That invoice was not issued. Nothing came back from the server.' };
     const invoice = toInvoice(row);
     return { ok: true, invoice, notified: await tellTheClient(invoice) };
   } catch (e) {
@@ -446,7 +635,7 @@ export async function remindInvoice(id: string): Promise<IssueResult> {
     // coach is told went out, that did not, is a client who hears nothing and a
     // coach who stops asking.
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That reminder was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That reminder was not recorded. Nothing came back from the server.' };
     const invoice = toInvoice(row);
     return { ok: true, invoice, notified: await tellTheClientAgain(invoice) };
   } catch (e) {
@@ -463,11 +652,99 @@ async function tellTheClientAgain(invoice: CoachInvoice): Promise<boolean | null
   if (!invoice.clientId) return null;
   const note = invoiceReminderNotification(invoice);
   try {
-    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
-    return wrote > 0;
+    // One recipient, so `atCap` cannot be true here and is not read. The count
+    // is still the only honest answer to whether this landed.
+    const { recorded } = await recordInbox([invoice.clientId], note.title, note.body);
+    return recorded > 0;
   } catch (e) {
     reportError('coachInvoices.remind.notify', e);
     return false;
+  }
+}
+
+/**
+ * Record that one was paid, on a day the coach names (part 660).
+ *
+ * ── The write that had nowhere to go ──────────────────────────────────────
+ *
+ * This file's header says every write here is an `rpc` because "an issued
+ * document cannot be edited once somebody is holding a copy of it". That is
+ * right, and it is why a settlement is not an edit: `settle_coach_invoice`
+ * writes three columns that did not exist on the document when it was issued
+ * and leaves `kind` exactly as it was. The immutable guard still refuses to
+ * move `kind`, `amount_cents`, `due_on` or anything else on the page.
+ *
+ * ── The client is not told ────────────────────────────────────────────────
+ *
+ * Deliberately no notification, and it is the opposite decision from `issue`.
+ * An issue notification exists because the coach has made a claim ABOUT the
+ * client — most sharply a 'received' one, which records that this person has
+ * paid — in the client's absence. A settlement is the coach agreeing with
+ * something the client already knows they did: they paid it. A push saying "your
+ * coach noticed you paid" is a notification about nothing, and where the money
+ * did NOT arrive the client hearing that it did is far worse than silence.
+ *
+ * Raises rather than updating nothing on the server, so "that is not yours",
+ * "it is already settled" and "it is voided" arrive here as messages rather
+ * than as a silent success over zero rows.
+ */
+export async function settleInvoice(id: string, settledOn: string, note?: string | null): Promise<IssueResult> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build is not connected to a server.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(settledOn ?? '').trim())) {
+    return { ok: false, error: 'Say which day the money arrived.' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('settle_coach_invoice', {
+      p_id: id,
+      p_settled_on: settledOn.trim(),
+      p_note: (note || '').trim() || null,
+    });
+    if (error) {
+      reportError('coachInvoices.settle', error);
+      return { ok: false, error: error.message || 'That settlement was not recorded.' };
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
+    // Nothing back means nothing was written, whatever the absence of an error
+    // suggests — and an invoice the coach believes came off their chase list
+    // and did not is one part 613's nightly pass keeps telling them about.
+    if (!row?.id) return { ok: false, error: 'That settlement was not recorded. Nothing came back from the server.' };
+    return { ok: true, invoice: toInvoice(row) };
+  } catch (e) {
+    reportError('coachInvoices.settle', e);
+    return { ok: false, error: 'That settlement was not recorded.' };
+  }
+}
+
+/**
+ * Set, move, or clear the day the coach means to start chasing one (part 660).
+ *
+ * `from` null CLEARS it, and that is a real request rather than a no-op: it
+ * puts the invoice back on the undated list, which is where it was before
+ * anybody made a plan for it.
+ *
+ * This does not write `due_on` and cannot — that column is on the document and
+ * on the immutable list, and part 660's function refuses this call outright on
+ * an invoice that carries one, so no invoice ever has two answers to when it is
+ * late.
+ */
+export async function setInvoiceChaseFrom(id: string, from: string | null): Promise<IssueResult> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build is not connected to a server.' };
+  const day = (from || '').trim();
+  if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return { ok: false, error: 'Write the day to start chasing from as a date.' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('set_coach_invoice_chase_from', { p_id: id, p_from: day || null });
+    if (error) {
+      reportError('coachInvoices.chaseFrom', error);
+      return { ok: false, error: error.message || 'That was not changed.' };
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
+    if (!row?.id) return { ok: false, error: 'That was not changed. Nothing came back from the server.' };
+    return { ok: true, invoice: toInvoice(row) };
+  } catch (e) {
+    reportError('coachInvoices.chaseFrom', e);
+    return { ok: false, error: 'That was not changed.' };
   }
 }
 
@@ -490,7 +767,7 @@ export async function voidInvoice(id: string, reason: string): Promise<IssueResu
       return { ok: false, error: error.message || 'That invoice was not voided.' };
     }
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That invoice was not voided — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That invoice was not voided. Nothing came back from the server.' };
     return { ok: true, invoice: toInvoice(row) };
   } catch (e) {
     reportError('coachInvoices.void', e);

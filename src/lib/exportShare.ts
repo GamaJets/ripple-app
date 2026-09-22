@@ -10,6 +10,7 @@
 // post-mortem anyway before changing anything here, because the probes it
 // explains still have to stay for anybody on an older binary.
 import { Share } from 'react-native';
+import { macroWords } from './nutrition';
 // The CSV writer is not written again here. gymExport.ts already quotes on
 // every delimiter src/lib/csv.ts is willing to sniff — not just the comma — so
 // a value cannot turn into a column break for somebody opening the file in a
@@ -24,9 +25,17 @@ import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLab
 // exactly the sort of thing a coach notices and the app never would.
 import { localDate } from './localDate';
 import { money } from './gymRecord';
+import { minorFromWhole } from './coachMoney';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
-import { weightIn, convertedNote, type WeightUnit } from './units';
+import { weightIn, convertedNote, plainExact, type WeightUnit } from './units';
+// Every figure in a shared document is read by a person and re-parsed by
+// nobody — a PDF, a share-sheet body, an email. `num` is the reader's own
+// grouping. Nothing in this file is reachable from supabase/functions or from
+// studio-web, so `appLocale()` here is genuinely the locale of whoever pressed
+// share; see the header of scripts/check-numbers.mjs for the two trees where
+// that is not true.
+import { num } from './format';
 
 // ── Why the file share degraded, and what it took to stop it ────────────────
 //
@@ -161,7 +170,7 @@ export const fileExportAvailable = () => !!(fileSystemWritable() && Sharing?.sha
  */
 export function fileShareBlocker(): string | null {
   if (!Sharing?.shareAsync) {
-    return 'This version of the app can’t attach files — the part that hands a file to your phone’s share sheet isn’t in it yet. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
+    return 'This version of the app can’t attach files. The part that hands a file to your phone’s share sheet isn’t in it yet. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
   }
   if (!fileSystemWritable()) {
     return 'This version of the app can’t save the file to your phone before sending it. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
@@ -314,7 +323,7 @@ const esc = (v: string | number | null | undefined): string =>
 const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
   `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;padding:26px;margin:0}
-   .h{background:${accent ? accent : 'linear-gradient(135deg,#2dd4bf,#0d9488)'};color:#fff;padding:18px 22px;border-radius:14px}
+   .h{background:${accent ? accent : 'linear-gradient(135deg,#4ade80,#15803d)'};color:#fff;padding:18px 22px;border-radius:14px}
    .h h1{margin:0;font-size:22px} .h p{margin:4px 0 0;opacity:.9;font-size:13px}
    table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #e2e8f0}
@@ -325,17 +334,33 @@ const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
 
 export interface PlanMealRow { slot: string; name: string; K: number; P: number; C: number; F: number }
 
-export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string): { html: string; text: string } {
+/**
+ * A plan a member sends to somebody.
+ *
+ * `note` is the footnote the document is REQUIRED to carry when a row in it is
+ * somebody else's recipe: Spoonacular's terms ask for the credit and the
+ * backlink wherever a recipe is shown, and a plan shared to a notes app or
+ * printed is shown somewhere none of the app's own attribution exists. It also
+ * carries the other sentence a shared plan may owe — that a planned recipe
+ * could not be read, so the plan's own meal is in the table in its place.
+ */
+export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string, note?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
   const rows = meals.map((m) => `<tr><td><b>${esc(m.slot)}</b><br><span style="color:#64748b">${esc(m.name)}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
   const totK = meals.reduce((a, m) => a + m.K, 0), totP = meals.reduce((a, m) => a + m.P, 0), totC = meals.reduce((a, m) => a + m.C, 0), totF = meals.reduce((a, m) => a + m.F, 0);
   const avoidLine = avoid.length ? `<p style="color:#64748b;font-size:13px;margin-top:10px">Excludes: ${esc(avoid.join(', '))}</p>` : '';
-  const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${targetKcal.toLocaleString()} kcal</p>${avoidLine}
+  const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${num(targetKcal)} kcal</p>${avoidLine}
     <table><tr><th>Meal</th><th class="r">Kcal</th><th class="r">P</th><th class="r">C</th><th class="r">F</th></tr>
-    ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>`;
-  const text = `${first}'s meal plan (${brand}) — target ~${targetKcal} kcal\n` +
-    meals.map((m) => `• ${m.slot}: ${m.name} — ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
-    `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '');
+    ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>` +
+    (note ? `<p style="color:#64748b;font-size:12px;margin-top:14px">${esc(note)}</p>` : '');
+  // The HTML above and this line are the same figure in two formats, and they
+  // were spelled two different ways: `toLocaleString` in the document and raw
+  // in the text. A 2,400 kcal target read "2,400 kcal" in the PDF a member
+  // opened and "2400 kcal" in the message body it was attached to.
+  const text = `${first}'s meal plan (${brand}) · target ~${num(targetKcal)} kcal\n` +
+    meals.map((m) => `• ${m.slot}: ${m.name} · ${m.K} kcal (${macroWords(m.P, m.C, m.F)})`).join('\n') +
+    `\nTotal: ${totK} kcal · ${macroWords(totP, totC, totF)}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '') +
+    (note ? `\n\n${note}` : '');
   return { html: page('Meal Plan', body, brand, accent), text };
 }
 
@@ -403,7 +428,7 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
   // reported "weight 0.0kg · body fat 0.0%" — a client's first scan rendered as
   // having achieved nothing.
   const note = lines.length ? lines.join(' · ')
-    : rows.length ? 'One scan so far — a change needs two.'
+    : rows.length ? 'One scan so far. A change needs two.'
     : 'No scans recorded yet.';
   // Said in the document, not just on the screen that made it. This page is
   // built to be sent, and the coach who opens it is entitled to know that the
@@ -461,9 +486,20 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     // payroll30For multiplies by it) and `money()` takes minor units, which is
     // the mismatch that once printed AED 63.00 for a gym owed AED 6,300 — so it
     // is converted here rather than assumed either way.
+    //
+    // `minorFromWhole`, not `Math.round(payroll30 * 100)`. The factor is a
+    // property of the currency, not of the arithmetic: a yen has no minor unit,
+    // so a hundred there overstates what a gym is owed a hundredfold, and a
+    // dinar has a thousand of them. It returns null for a gym that has not
+    // stated a currency, which lands on the same dash `money()` would have
+    // rendered and which the note under the table already explains.
     ['Value of those sessions',
-      money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100), d.currency) ?? '\u2014'],
-    ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
+      money(minorFromWhole(d.payroll30, d.currency), d.currency) ?? '\u2014'],
+    // `plainExact`, not `String`: `gymRollup` rounds this to ONE DECIMAL
+    // PLACE, so most gyms have a fraction here — 4.2 clients a trainer — and
+    // `String` writes an English full stop into a document that leaves the
+    // app. `figure()` two tables down already spells its figures this way.
+    ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : plainExact(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],
   ];
@@ -480,15 +516,19 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     : 'The value of those sessions is blank because this gym has not set its currency, and an amount with no currency is not a figure.';
 
   const mRows = metrics.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${esc(v)}</td></tr>`).join('');
-  const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
+  // A cohort on a PLATFORM report is every account that signed up in one month
+  // across every gym on Repple, not one coach's book — four digits is the
+  // ordinary case rather than the far end of it. Both halves of the ratio are
+  // grouped: "1,204/2,500" and "1204/2,500" is worse than either spelling.
+  const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${num(c.active)}/${num(c.total)}</td><td class="r">${c.pct}%</td></tr>`).join('');
   const body = `
     <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
     ${valueNote ? `<p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${esc(valueNote)}</p>` : ''}
     <table><thead><tr><th>Cohort (signup)</th><th class="r">Active</th><th class="r">Retention</th></tr></thead><tbody>${cRows || '<tr><td colspan="3">No cohorts yet</td></tr>'}</tbody></table>`;
-  const html = page(`Platform report — ${d.generatedOn}`, body, brand);
-  const text = `${brand} — Platform report (${d.generatedOn})\n` +
+  const html = page(`Platform report · ${d.generatedOn}`, body, brand);
+  const text = `${brand} · Platform report (${d.generatedOn})\n` +
     metrics.map(([k, v]) => `${k}: ${v}`).join('\n') +
     (valueNote ? `\n\n${valueNote}` : '') +
-    (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${c.active}/${c.total} (${c.pct}%)`).join('\n') : '');
+    (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${num(c.active)}/${num(c.total)} (${c.pct}%)`).join('\n') : '');
   return { html, text };
 }

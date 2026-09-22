@@ -28,6 +28,14 @@
 // device and never will, and that is a permanent, true state rather than a
 // failed read; see the long note on readinessScore below, which already had to
 // draw this exact line once.
+//
+// `recentNights` is imported rather than reimplemented: it is the same function
+// src/ui/deviceSleep.tsx bounds the device half of the sleep read with, and a
+// second run of night keys written here would be a second answer to "which
+// nights are recent" for one screen to disagree with itself over. sleepMerge
+// imports nothing from this file, so the direction is one-way.
+import { recentNights } from './sleepMerge';
+
 export type ReadinessTone = 'good' | 'moderate' | 'low';
 
 /** The signals the score is built from, named so a screen can say which of them
@@ -196,7 +204,7 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
   let tone: ReadinessTone, label: string, tip: string;
   if (score >= 75) {
     tone = 'good'; label = 'Well Recovered';
-    tip = 'Great day to push — aim for a PR or add a little load.';
+    tip = 'Great day to push. Aim for a PR or add a little load.';
   } else if (score >= 50) {
     tone = 'moderate'; label = 'Moderately Recovered';
     tip = 'Train as planned, but listen to your body and don’t force it.';
@@ -263,6 +271,62 @@ export function readinessMadeOf(r: Readiness): string {
 // gap with either. A night nobody recorded contributes nothing and shortens the
 // window instead, because readiness over a shorter run of real nights is a
 // smaller claim, and readiness over an invented one is a wrong claim.
+//
+// ── The window, which this function did not have ──────────────────────────
+//
+// "Shortens the window" above was describing a window that existed on one side
+// only. `deviceNights` arrives already bounded — src/ui/deviceSleep.tsx builds
+// it from `recentNights(DEVICE_SLEEP_NIGHTS, today)` and nothing older can be
+// in it. `typed` does not: src/ui/wellness.tsx reads `sleep_logs` with no date
+// filter at all, newest first up to the page cap, so it is the member's WHOLE
+// history. The two were merged, sorted and sliced to `count`, and the slice is
+// a count rather than a date — so the three newest nights on record were taken
+// whatever their age.
+//
+// What that scored. A member whose last logged nights were 30 July to 1 August,
+// opening the app on 13 September: three typed nights of eight hours, averaged
+// to eight, scored 100 out of 100, labelled 'Well Recovered', with the tip
+// "Great day to push". No caveat anywhere — the breakdown's own status was
+// 'ready' — and readinessBreakdown printed "8h a night over the last 3 nights"
+// about three nights six weeks gone. That sentence is not a rounding error or a
+// stale cache; it is a statement about a span of time that did not happen.
+//
+// ── What an empty window returns, and why it is neither 0 nor 100 ─────────
+//
+// The window is now `count` night keys ending today, from the same
+// `recentNights` that bounds the device half, so the two halves cannot come to
+// disagree about which nights exist. Everything outside it is dropped. The
+// question that leaves is what to hand back when nothing survives.
+//
+// Not zero hours. A member with no sleep on record is not a member who slept
+// none, and `readinessScore`'s own header is a record of what that arithmetic
+// did the last time somebody wrote it: 0 sleep + 0 hydration + 20 rest = 20,
+// 'Under-recovered', handed to a brand-new account. Not the old behaviour
+// either, which is what 100 was: an average over whatever nights existed
+// somewhere in the past, presented as an average over this week.
+//
+// So `avgHours` is null and there is NO SCORE — `readinessScore` already
+// refuses a null average, and that refusal is the honest answer. A readiness
+// score computed over no nights is not a smaller readiness score; it is not one
+// at all. What is added is `state`, so that the four ways of having no average
+// stay four things rather than collapsing into one dash:
+//
+//   'scored'   at least one night landed inside the window. `nights.length`
+//              says how many, and it is never more than `windowNights`.
+//   'stale'    nights are on record and every one of them is older than the
+//              window. Nothing failed and nothing is missing from our read —
+//              the member simply has not logged or synced recently, and the
+//              sentence they need says so rather than "log a night of sleep",
+//              which reads as a claim that they never have.
+//   'none'     nothing is recorded at all, in the window or out of it.
+//   'unknown'  the window could not be drawn, because `now` was not a readable
+//              instant. Ours, not theirs, and it must not read as 'none' — see
+//              the house rule that a failed read is not an empty list.
+//
+// `windowNights` travels with the answer for the same reason. The breakdown's
+// span sentence used to be built from a window number the CALLER passed
+// separately, so the sentence and the arithmetic were two copies of one fact
+// and could drift; it is now taken from the answer that did the averaging.
 
 export interface ReadinessNight {
   night: string;
@@ -270,27 +334,69 @@ export interface ReadinessNight {
   from: 'device' | 'typed';
 }
 
+/**
+ * Why there is no average, when there is none — and 'scored' when there is.
+ * See the long note above: these are four different things to say to a member
+ * and only one of them is "you have not logged a night".
+ */
+export type ReadinessSleepState = 'scored' | 'stale' | 'none' | 'unknown';
+
 export interface ReadinessSleep {
-  /** Mean of the nights that were actually recorded, or null when none were. */
+  /** Mean of the nights inside the window, or **null when none were**. Never
+   *  zero: no night on record is not a night of no sleep. */
   avgHours: number | null;
-  /** The nights behind it, newest first — so a screen can say how many. */
+  /** The nights behind it, newest first — so a screen can say how many. Every
+   *  one of them is inside the window, so a span named over them is true. */
   nights: ReadinessNight[];
   fromDevice: number;
   fromTyped: number;
+  /**
+   * How many nights the window spans — the run `nights` was taken from.
+   *
+   * Carried on the answer rather than looked up again by whoever describes it.
+   * "over the last 3 nights" is a claim about THIS average, and a description
+   * built from a separately-passed number is a second copy of the fact.
+   */
+  windowNights: number;
+  /** Whether there is an average, and if not, which absence it is. */
+  state: ReadinessSleepState;
 }
 
 /**
- * The nights readiness may score, newest first, at most `count` of them.
+ * The nights readiness may score: those inside the window, newest first.
  *
  * `deviceNights` are merged nights from src/lib/sleepMerge — only `measured`
  * ones carry a figure. `typed` are wellness-log entries, dated by the local day
- * they were logged for.
+ * they were logged for, and arriving UNBOUNDED: the whole log, to whatever
+ * depth it was read.
+ *
+ * The window is the `count` night keys ending on `now`'s local day, built by
+ * the same `recentNights` that bounds the device half one layer up. Nights are
+ * matched by bare day key, as strings — never by parsing one into a Date, which
+ * would take UTC midnight and shift the whole window for anybody west of
+ * Greenwich.
+ *
+ * `now` defaults to the clock for the benefit of the one caller
+ * (src/ui/readiness.ts), whose memo already re-runs on `useNow()`, so the
+ * default is read afresh whenever the day rolls over or the app comes back.
+ * Pass it explicitly anywhere the answer must be reproducible.
  */
 export function readinessSleep(
   deviceNights: readonly { night: string; outcome: string; minutesAsleep: number | null }[],
   typed: readonly { at: string; hours: number }[],
   count = 3,
+  now: Date = new Date(),
 ): ReadinessSleep {
+  const windowNights = Math.max(0, Math.floor(count));
+  const ms = now instanceof Date ? now.getTime() : NaN;
+  // No readable instant, no window. Emphatically not 'none': that would be a
+  // statement about what the member has recorded, made out of our own failure
+  // to work out which nights to look at.
+  if (!Number.isFinite(ms)) {
+    return { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights, state: 'unknown' };
+  }
+  const inWindow = new Set(recentNights(windowNights, now));
+
   const byNight = new Map<string, ReadinessNight>();
 
   for (const d of deviceNights) {
@@ -313,16 +419,36 @@ export function readinessSleep(
     if (!byNight.has(night)) byNight.set(night, { night, hours: h, from: 'typed' });
   }
 
+  // Bare day keys against bare day keys. `inWindow` holds YYYY-MM-DD strings
+  // built by local-date arithmetic in recentNights, and `n.night` is the same
+  // shape from the same kind of arithmetic; neither is parsed back into a Date
+  // to be compared, because `new Date('2026-09-04')` is UTC midnight and is the
+  // previous day for most of the world.
   const nights = [...byNight.values()]
+    .filter((n) => inWindow.has(n.night))
     .sort((a, b) => (a.night < b.night ? 1 : a.night > b.night ? -1 : 0))
-    .slice(0, Math.max(0, count));
+    // Belt and braces: the window already holds at most `windowNights` keys, so
+    // this can only ever be a no-op. It stays so that a future window built some
+    // other way cannot silently lengthen the run the average is taken over.
+    .slice(0, windowNights);
 
-  if (!nights.length) return { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0 };
+  if (!nights.length) {
+    // Recorded-but-older is not unrecorded, and the difference is the whole
+    // point of this branch — see the header. `byNight` is every night we hold
+    // from either source, so its emptiness is the only honest test for "there
+    // is nothing at all".
+    return {
+      avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights,
+      state: byNight.size ? 'stale' : 'none',
+    };
+  }
   return {
     avgHours: nights.reduce((a, n) => a + n.hours, 0) / nights.length,
     nights,
     fromDevice: nights.filter((n) => n.from === 'device').length,
     fromTyped: nights.filter((n) => n.from === 'typed').length,
+    windowNights,
+    state: 'scored',
   };
 }
 

@@ -14,7 +14,7 @@
 //
 // ── WHAT MAKES THIS DIFFERENT FROM THE OTHER FOUR BULK ACTIONS ────────────
 //
-// A bulk assign REPLACES a programme and `overwriteGuard` withholds the control
+// A bulk assign REPLACES a program and `overwriteGuard` withholds the control
 // until it can say who is about to be written over. A bulk message writes one
 // row per thread and cannot be taken back. This one is neither: it ADDS rows,
 // and the failure it can produce is duplication.
@@ -208,7 +208,7 @@ export function guardChecklistCopy(rosterStatus: LoadStatus, existingStatus: Loa
         reason:
           'What these clients already have came back at its row limit, so a line past the point it stopped would '
           + 'look new and be added a second time. A duplicate sits on their list every morning and only you can '
-          + 'remove it — and removing it takes their ticks for it with it.',
+          + 'remove it, and removing it takes their ticks for it with it.',
       };
     case 'error':
       return {
@@ -288,7 +288,7 @@ export function copyBrief(plan: CopyPlan, sourceName: string): CopyBrief {
       + `${to === 1 ? 'one client’s' : `${num(to)} clients’`} daily list, marked as set by you.`
       + partialNote
       + skipNote
-      + '\n\nThey cannot tick them off your list or take them off it — that stays with you. Adding a line is not '
+      + '\n\nThey cannot tick them off your list or take them off it. That stays with you. Adding a line is not '
       + 'a message: nobody is told, it simply appears on their list tomorrow morning.',
     confirmLabel: to === 1 ? 'Copy To Them' : `Copy To ${num(to)}`,
     actionable: true,

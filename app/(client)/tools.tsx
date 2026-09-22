@@ -44,16 +44,16 @@
 // through `readLift` — the same kilogram round trip a logged set makes — before
 // anything is estimated or loaded, so this screen and the workout log cannot
 // disagree about what "225" was.
-import { useState, useEffect } from 'react';
-import { num } from '../../src/lib/format';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Field, fig, HERO_FIT } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   liftingMacros, rangeLabel,
   PROTEIN_G_PER_KG_LEAN, FAT_G_PER_KG_BODYWEIGHT,
@@ -61,10 +61,14 @@ import {
 import { useSettings } from '../../src/ui/settings';
 import {
   readLift, liftIn, liftLabel, est1RMIn, weightIn, weightLabel, convertedNote, plain,
-  type WeightUnit,
+  type WeightUnit, weightShown,
 } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
-import { BARS, loadBar } from '../../src/lib/plateMath';
+import { BARS, PLATES, loadBar } from '../../src/lib/plateMath';
+// The rep box, which was `parseInt(r, 10) || 0` and nothing else — see
+// src/lib/repEstimate.ts for the 3,430 kg hero figure that produced.
+import { readReps, epleyCaveat } from '../../src/lib/repEstimate';
+import { warmupRamp, warmupNote, warmupRefusal } from '../../src/lib/warmupRamp';
 
 function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // Empty, not "60". A prefilled number on a screen that used to assume
@@ -73,13 +77,19 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // was taken as. Nothing is shown until something is typed into a labelled box.
  const [w, setW] = useState('');
  const [r, setR] = useState('5');
+ // The rep count gets the same treatment the load beside it has always had.
+ // `readLift` refuses a load "heavier than anyone has lifted"; this box took
+ // anything at all, so the screen refused an INPUT of 700 kg and then printed
+ // an estimated one-rep max of 3,430 kg from 100 kg x 999 reps as its hero,
+ // and 83 kg from a rep count of -5. See src/lib/repEstimate.ts.
+ const repRead = readReps(r);
  // The typed load makes the same trip to kilograms that a logged set makes, and
  // through the same reader — so "225" here and "225" in the workout log are the
  // same load, and text that is not a number is refused rather than quietly
  // becoming 0 and estimating a one-rep max from it.
  const read = readLift(w, wu);
  const kg = read.ok ? read.kg : null;
- const reps = parseInt(r, 10) || 0;
+ const reps = repRead.ok ? repRead.reps : null;
  // Epley, computed on the record's own kilograms and through the very function
  // History's personal records use. The formula does not care about units, but
  // WHICH figure it is applied to does: estimating in pounds and converting the
@@ -87,6 +97,12 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // same set, and two screens disagreeing about one lift is how a client learns
  // not to trust either.
  const oneRmKg = kg && reps ? est1RM(kg, reps) : 0;
+ // Said BESIDE the figure rather than instead of it. A set of fifteen is a real
+ // set and the member gets their number; what they also get is the fact that
+ // Epley runs high out there, so the figure is a ceiling and not a load to go
+ // and put on a bar. Past thirty reps `readReps` refuses outright instead —
+ // a caveat under a number people will remember is not a refusal.
+ const caveat = oneRmKg ? epleyCaveat(reps) : null;
  // `?? 0` only for the empty case: est1RMIn returns null when it is handed
  // nothing, which is exactly when there is no estimate to show.
  const oneRm = est1RMIn(oneRmKg || null, wu) ?? 0;
@@ -114,8 +130,27 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {/* A refused load says so where the answer would have been, rather than
      leaving the last good estimate on screen next to a number it was not
      computed from. */}
- <Hero label="Estimated 1RM · Epley" figure={fig(oneRm || null)} unit={wu}
- note={!read.ok ? read.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'} />
+ {/* The board's figure card where the Hero was. */}
+ <Section>
+   <SectionHead title="Estimated 1RM · Epley" />
+   {/* Label, figure, unit and sentence are one fact, and one stop. */}
+   <View accessible accessibilityLabel={['Estimated 1RM · Epley', [fig(oneRm || null), wu].filter(Boolean).join(' '), !read.ok ? read.reason : !repRead.ok ? repRead.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'].filter(Boolean).join(', ')}>
+     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+       {/* Shrunk to fit and never wrapped: a figure broken across two lines
+           is a figure read wrong. */}
+       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+         style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(oneRm || null)}</Text>
+       <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{wu}</Text>
+     </View>
+     <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{!read.ok ? read.reason : !repRead.ok ? repRead.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'}</Text>
+   </View>
+ {/* The caveat is its own line under the figure, in ink rather than in the
+     reserved warn colour — this screen already had that rule corrected once,
+     on "Closest loadable". */}
+ {caveat ? (
+ <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{caveat}</Text>
+ ) : null}
+ </Section>
 
  {oneRm > 0 ? (<>
  <Rule />
@@ -129,7 +164,7 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {/* Each percentage is taken off the KILOGRAM estimate and read out once,
      rather than off the already-converted figure — so the 100% row is the
      hero to the pound rather than a pound away from it. */}
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{fig(est1RMIn((oneRmKg * p) / 100, wu))} {wu}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{fig(est1RMIn((oneRmKg * p) / 100, wu))} {wu}</Text>
  </View>
  </View>
  ))}
@@ -158,6 +193,13 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  const read = readLift(target, wu);
  const asked = read.ok ? liftIn(read.kg, wu) : null;
  const load = loadBar(asked, bar, wu);
+ /* The smallest change the BAR can make, which is a PAIR of the smallest
+    plates — 1.25 a side is a 2.5 jump. Derived from `PLATES` rather than
+    written down, so a rack that gains a smaller fractional plate one day
+    changes the ramp with it instead of leaving a second copy of the fact
+    here to go stale. */
+ const rampStep = 2 * Math.min(...PLATES[wu]);
+ const ramp = warmupRamp(asked ?? 0, rampStep);
  const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1, textAlign: 'center' } as const;
  return (
  <View>
@@ -168,7 +210,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
      bar buttons beside it are both labelled in kg, which makes a bare figure
      next to them read like a third one. Both now name the client's own unit. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
- <Field label="Target total" hint={wu}>
+ <Field label="Target Total" hint={wu}>
  <TextInput value={target} onChangeText={setTarget} keyboardType="decimal-pad" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
  </Field>
  <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>bar</Text>
@@ -177,7 +219,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  return (
  <Pressable key={b} onPress={() => setBarIdx(i)} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ paddingHorizontal: sp.md, paddingVertical: 11, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{b} {wu}</Text>
+ <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{b} {wu}</Text>
  </Pressable>
  );
  })}
@@ -201,14 +243,44 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  ]} />
  </Section>
 
+ {/* ── the sets before the set ──────────────────────────────────────────
+     Off the weight already typed above, because asking for it twice is the
+     thing this feature exists to remove: the ramp is worked out standing at a
+     rack between sets, and the reason people skip a warm-up is rarely that
+     they do not know they should. src/lib/warmupRamp.ts rounds every rung
+     DOWN to a weight the bar can actually hold — 40% of 102.5 is 41, and
+     there is no 41 kg. */}
+ {asked != null ? (<>
+ <Rule />
+ <Section>
+ <SectionHead title="Warm-Up Ramp" note={`To ${plain(asked)} ${wu}`} />
+ {ramp.length ? (<>
+ {ramp.map((r, i) => (
+ <View key={r.pct}>
+ {i > 0 ? <Rule /> : null}
+ <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
+ <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{r.pct}%</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>
+ {plain(r.weight)} {wu} × {r.reps}
+ </Text>
+ </View>
+ </View>
+ ))}
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{warmupNote(ramp, wu)}</Text>
+ </>) : (
+ <Text style={{ ...ty.label, color: t.ink3 }}>{warmupRefusal(asked, rampStep)}</Text>
+ )}
+ </Section>
+ </>) : null}
+
  {load.plates.length ? (<>
  <Rule />
  <Section>
- <SectionHead title="Load, Heaviest First" note={`${wu} a side`} />
+ <SectionHead title="Load, Heaviest First" note={`${wu} a Side`} />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {load.plates.map((p, i) => (
  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink }}>{p}</Text>
+ <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink }}>{p}</Text>
  </View>
  ))}
  </View>
@@ -249,8 +321,8 @@ function TargetRow({ t, name, grams, from }: { t: Theme; name: string; grams: st
  return (
  <View style={{ paddingVertical: sp.md }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{grams}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{name}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{grams}</Text>
  </View>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{from}</Text>
  </View>
@@ -271,15 +343,15 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  <View>
  {m ? (<>
  <Section>
- <SectionHead title="Your Figures" note="Your latest scan or measurement" />
+ <SectionHead title="Your Figures" note="Your Latest Scan or Measurement" />
  {/* The client's own bodyweight, read out the way every other screen reads
      it. It was printed in kilograms here whatever they had chosen, which is
      the same figure their profile shows in pounds — two numbers for one
      body, and no way to tell which the grams below were worked out from. */}
  <KpiRow items={[
- { label: 'Bodyweight', value: fig(weightIn(c.weightKg, wu)), unit: wu },
+ { label: 'Bodyweight', value: fig(weightShown(c.weightKg, wu)), unit: wu },
  { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%' },
- { label: 'Lean Mass', value: fig(weightIn(m.leanMassKg, wu)), unit: wu },
+ { label: 'Lean Mass', value: fig(weightShown(m.leanMassKg, wu)), unit: wu },
  ]} />
  {convertedNote(wu) ? (
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{convertedNote(wu)}</Text>
@@ -306,7 +378,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  from={`${FAT_G_PER_KG_BODYWEIGHT.low}–${FAT_G_PER_KG_BODYWEIGHT.high} g per kg of your ${fig(weightLabel(c.weightKg, 'kg'))} bodyweight`} />
  {m.proteinPerMeal ? (<>
  <Rule />
- <TargetRow t={t} name="Protein a meal" grams={rangeLabel(m.proteinPerMeal)}
+ <TargetRow t={t} name="Protein a Meal" grams={rangeLabel(m.proteinPerMeal)}
  from={`The day's protein across your ${c.mealsPerDay} meals`} />
  </>) : null}
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
@@ -326,7 +398,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {c.status === 'loading'
  ? 'Reading your measurements…'
  : c.status === 'error'
- ? 'We could not read your weight and body fat, so these are not worked out. They are still on your record — we just cannot see them right now.'
+ ? 'We could not read your weight and body fat, so these are not worked out. They are still on your record. We just cannot see them right now.'
  : 'These are worked out from your weight and body fat, and there is nothing on record yet to work them out from.'}
  </Text>
  {c.status === 'ready' ? (
@@ -340,14 +412,14 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  <Rule />
 
  <Section>
- <SectionHead title="Macro Reference" note={m ? 'Where those figures come from' : undefined} />
+ <SectionHead title="Macro Reference" note={m ? 'Where Those Figures Come from' : undefined} />
  {rows.map(([k, cal, note], i) => (
  <View key={k}>
  {i > 0 ? <Rule /> : null}
  <View style={{ paddingVertical: sp.md }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{k}</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{cal}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{k}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{cal}</Text>
  </View>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
  </View>
@@ -380,6 +452,11 @@ export default function Tools() {
  // tools are working in and leads to the one place it is chosen. A client who
  // reads in pounds finds out before they type, not after they load the bar.
  const wu = useSettings().weightUnit;
+ // The calculators are arithmetic and need nothing. The macro reference is not:
+ // its two g/kg lines are the client's own weight and body fat, read from the
+ // profile, and a failed profile read renders them as dashes with no way back.
+ const cd = useClientData();
+ const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
  // A caller can name the tab. Meals links here for the macro reference, and
  // landing that reader on the 1RM estimator is how "why is tapping macros
  // sending you to lifting tools?" got reported — the destination was right and
@@ -414,15 +491,10 @@ export default function Tools() {
  const G = layout.gutter;
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon="back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Calculators for the gym floor</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Lifting Tools</Text>
- </View>
- </View>
+ {/* The board's pushed-page head: back, the title centred. */}
+ <PageHead title="Lifting Tools" subtitle="Calculators for the gym floor" />
 
  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
  {([['1rm', '1RM'], ['plates', 'Plates'], ['macros', 'Macros']] as const).map(([k, label]) => {
@@ -430,7 +502,7 @@ export default function Tools() {
  return (
  <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+ <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
  </Pressable>
  );
  })}

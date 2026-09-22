@@ -4,7 +4,7 @@
  *
  * ── What a coach was doing instead ────────────────────────────────────────
  *
- * A programme could say "4 × 6 at 100 kg" and nothing else. Everything a coach
+ * A program could say "4 × 6 at 100 kg" and nothing else. Everything a coach
  * actually adds to that — "@8", "@75%", "3-1-1" — went into
  * `ProgramExercise.note`, as free text, because there was nowhere else for it.
  * That is not a cosmetic problem. A note is a sentence rendered under a
@@ -46,9 +46,9 @@
  *
  * The same rule the rest of src/lib/setRows.ts follows, for the same reason.
  * These three fields are OPTIONAL on both `ProgramExercise` and `SetRow`, and
- * absent on a row means "the exercise's own answer". Every programme already
+ * absent on a row means "the exercise's own answer". Every program already
  * written carries none of them, and every one of those must render and run in
- * a new build exactly as it does in the old one — a programme lives in
+ * a new build exactly as it does in the old one — a program lives in
  * `program_templates`, on each client's `assigned_programs` row, and in the
  * coach's on-device AsyncStorage draft, and no migration reaches all three.
  *
@@ -87,6 +87,8 @@
  * written before the set, and prescribing an RPE of 2 is prescribing nothing.
  * `feel` in src/lib/mockData.ts is the post-hoc side and has its own vocabulary.
  */
+import { numUpTo } from './format';
+
 export const RPE_MIN = 6;
 
 /** Ten is the top of the scale by definition: no further rep was possible. */
@@ -141,7 +143,7 @@ export function readRpe(text: string | null | undefined): ReadRpe {
   // this magnitude — 8.5 * 2 is 17, not 16.999999999999996. Tested rather than
   // trusted; see setIntensity.test.ts, which sweeps every tenth from 6 to 10.
   if (!Number.isInteger(n * 2)) {
-    return { ok: false, why: 'RPE is written in halves — 8 or 8.5, not 8.3.' };
+    return { ok: false, why: 'RPE is written in halves: 8 or 8.5, not 8.3.' };
   }
   return { ok: true, rpe: n };
 }
@@ -160,10 +162,19 @@ export function readRpe(text: string | null | undefined): ReadRpe {
  */
 export function rpeLabel(rpe: number | null | undefined): string | null {
   if (typeof rpe !== 'number' || !Number.isFinite(rpe)) return null;
-  // No trailing zero: 8, not 8.0. `Number.prototype.toString` already does
-  // this and does not need a decimal-place count that would have to be kept in
-  // step with the halves rule above.
-  return `@${rpe}`;
+  // No trailing zero: 8, not 8.0 — `numUpTo` caps the decimal places rather
+  // than padding to them, so the halves rule above is honoured and a whole
+  // number stays whole.
+  //
+  // `numUpTo` rather than the bare `${rpe}` this was, and for the same reason
+  // `readRpe` above takes a comma: an RPE is written in HALVES, so half of
+  // these labels carry a decimal separator, and `Number.prototype.toString`
+  // writes an English full stop in every locale. A coach on a German handset
+  // typed "8,5" into a decimal pad whose decimal key is a comma and read "@8.5"
+  // back on the row — and `rpeMeaning` two functions down was already printing
+  // its "about 1,5 reps left" through `numUpTo` in the same panel. One figure,
+  // two decimal conventions, on one screen.
+  return `@${numUpTo(rpe, 1)}`;
 }
 
 /**
@@ -181,7 +192,7 @@ export function rpeMeaning(rpe: number | null | undefined): string | null {
   if (left <= 0) return 'no further rep was possible';
   if (left < 1) return 'about half a rep left';
   if (left === 1) return 'one rep left';
-  return `about ${left % 1 === 0 ? left : left.toFixed(1)} reps left`;
+  return `about ${numUpTo(left, 1)} reps left`;
 }
 
 /* ── %1RM ─────────────────────────────────────────────────────────────────── */
@@ -325,7 +336,7 @@ export function readTempo(text: string | null | undefined): ReadTempo {
   // in the regex, so a mixed spelling like "31-10" reaches the same place.
   const chars = parts.length === 1 ? parts[0].split('') : parts;
   if (chars.length !== 3 && chars.length !== 4) {
-    return { ok: false, why: 'A tempo is three or four numbers — down, pause, up, and a pause at the top if there is one. Like 3-1-1 or 3-0-X-1.' };
+    return { ok: false, why: 'A tempo is three or four numbers: down, pause, up, and a pause at the top if there is one. Like 3-1-1 or 3-0-X-1.' };
   }
   const slots = chars.length === 3 ? [...chars, '0'] : chars;
   for (let i = 0; i < slots.length; i++) {
@@ -336,7 +347,7 @@ export function readTempo(text: string | null | undefined): ReadTempo {
       // it is a coach typing in the wrong box, and storing it would render a
       // rep instruction nobody can follow.
       if (i !== 2) {
-        return { ok: false, why: 'X means "as fast as you can" and only fits the lifting phase — the third number.' };
+        return { ok: false, why: 'X means "as fast as you can" and only fits the lifting phase, the third number.' };
       }
       continue;
     }
@@ -419,7 +430,7 @@ const own = (o: object | null | undefined, k: string): boolean =>
  * and it matters in exactly the same way: `{ rpe: null }` on a row is a set the
  * coach deliberately took the RPE off, inside an exercise that carries one, and
  * it must not silently pick the exercise's back up. That is a top single with
- * no target inside a block written at RPE 8, which is a thing coaches programme
+ * no target inside a block written at RPE 8, which is a thing coaches program
  * on purpose.
  */
 export function intensityOf(ex: IntensitySpec | null | undefined, row: IntensitySpec | null | undefined): Intensity {
@@ -441,7 +452,7 @@ export function intensityOf(ex: IntensitySpec | null | undefined, row: Intensity
  *
  * Null rather than an empty string when nothing is set, so a caller renders
  * NOTHING rather than an empty line taking vertical space under every set of
- * every programme ever written — which is every programme, since none of them
+ * every program ever written — which is every program, since none of them
  * carry these fields.
  */
 export function intensityLine(i: Intensity): string | null {
@@ -479,7 +490,11 @@ export function intensityLine(i: Intensity): string | null {
 export function intensityMeaning(i: Intensity): string[] {
   const out: string[] = [];
   const rpe = rpeMeaning(i.rpe);
-  if (i.rpe != null && rpe) out.push(`RPE ${i.rpe} means ${rpe}.`);
+  // `numUpTo` for the same reason `rpeLabel` uses it: RPE 8.5 is half the
+  // scale's values, and `rpe` — the sentence this is interpolated beside —
+  // comes out of `rpeMeaning`, which already spells its own fraction in the
+  // reader's separator.
+  if (i.rpe != null && rpe) out.push(`RPE ${numUpTo(i.rpe, 1)} means ${rpe}.`);
   if (i.pct1rm != null) {
     out.push(
       `${i.pct1rm}% is the share of a one rep max your coach wrote. It stays a percentage here: `

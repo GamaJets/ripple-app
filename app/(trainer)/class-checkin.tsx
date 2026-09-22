@@ -42,14 +42,14 @@
 // called it 12 and quietly replaced a real rate mid-keystroke. And an empty box
 // after a FAILED read says why it is empty, rather than looking like a coach
 // who has never set one. src/lib/coachPrefs.ts holds those rules, under test.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, fig, Flag, Ring, TonedChip, SyncBadge } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
 import { parseRate, rateText, payEstimate, rateFieldNote } from '../../src/lib/coachPrefs';
@@ -57,8 +57,12 @@ import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import {
+  floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine, registerVisibilityLine,
+} from '../../src/lib/floorQueue';
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -69,7 +73,7 @@ export default function ClassCheckin() {
   const branch = String(params.branch || '');
 
   // Routed to without an id, `classId` falls back to UNLINKED_CLASS — and both
-  // classRoster and setAttendance refuse that id by name. The screen then
+  // classRoster refuses that id by name, and so does the queue's sender. The screen then
   // rendered an empty roster under "No one has booked this class yet", which is
   // a statement about a class, and offered ticks that went nowhere while the
   // footnote promised "Check-ins are saved as you tap". Neither is a claim this
@@ -81,10 +85,17 @@ export default function ClassCheckin() {
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
+  // Rule 6: the rows whose last tap the server REFUSED, keyed class:member so a
+  // mark never follows a member into another class's register. The queue cannot
+  // say this — a refused act leaves it — so the tap that saw the answer records it.
+  const [refusedMarks, setRefusedMarks] = useState<string[]>([]);
   // The tick a trainer is PAID on, and the gym's payroll is built from it. This
   // screen is used standing in a studio, which is where the signal is worst.
   const auth = useAuth();
   const queue = useFloorQueue(auth.user?.id ?? null);
+  // Pulled out because the hook hands back a fresh object each render while the
+  // callback inside it is stable.
+  const flushQueue = queue.flush;
   // Send what this phone is still carrying, now. The queue is also emptied on
   // the app's own two triggers (signal back, app foregrounded) through the
   // registry in src/lib/offlineQueue.ts; this is the one a coach can press.
@@ -121,21 +132,25 @@ export default function ClassCheckin() {
   // The rate the coach has already set, read once. `fetchCoachPrefs` reports
   // its own failure rather than returning a bare null, so an empty box after a
   // refused read can say so instead of looking like a coach who never set one.
-  useEffect(() => {
-    let on = true;
-    fetchCoachPrefs().then(
-      ({ prefs, status }) => {
-        if (!on) return;
-        setRateStatus(status);
-        if (status === 'ready') {
-          rateRead.current = true;
-          if (!touched.current) setRate(rateText(prefs.classRate));
-        }
-      },
-      () => { if (on) setRateStatus('error'); },
-    );
-    return () => { on = false; };
-  }, []);
+  const loadRate = useCallback(async () => {
+    setRateStatus('loading');
+    try {
+      const { prefs, status } = await fetchCoachPrefs(auth.user?.id ?? null);
+      setRateStatus(status);
+      if (status === 'ready') {
+        rateRead.current = true;
+        // Still guarded on `touched`. A refresh must not yank the box out from
+        // under a coach who is mid-type any more than the first read may.
+        if (!touched.current) setRate(rateText(prefs.classRate));
+      }
+    } catch { setRateStatus('error'); }
+    // The account is in the deps deliberately. `fetchCoachPrefs` no longer
+    // resolves its own uid — it is handed one — and an empty dep array here
+    // would close over the mount-time value, which is null before auth lands.
+    // That would pass null forever and the rate box would read empty for every
+    // coach, silently, with no error anywhere to notice.
+  }, [auth.user?.id]);
+  useEffect(() => { void loadRate(); }, [loadRate]);
 
   // Saved as the coach stops typing rather than on every keystroke, and the
   // timer is cleared on unmount so a half-typed rate cannot land after the
@@ -163,7 +178,7 @@ export default function ClassCheckin() {
     const parsed = parseRate(text);
     if (parsed.kind === 'invalid') return;
     if (parsed.kind === 'empty' && !rateRead.current) return;
-    void saveCoachPrefs({ classRate: parsed.kind === 'empty' ? null : parsed.value });
+    void saveCoachPrefs(auth.user?.id ?? null, { classRate: parsed.kind === 'empty' ? null : parsed.value });
   };
 
   const onRateChange = (text: string) => {
@@ -173,17 +188,104 @@ export default function ClassCheckin() {
     savePending.current = setTimeout(() => persistRate(text), 700);
   };
 
-  useEffect(() => {
-    let on = true;
-    // The rejection handler is not decoration: without it a thrown read would
-    // leave `loading` true forever, and "Loading roster…" is at least honest,
-    // where a silent unhandled rejection is not.
-    classRoster(classId).then(
-      (r) => { if (on) { setRoster(r); setReadFailed(r === null && !unlinked); setLoading(false); } },
-      () => { if (on) { setReadFailed(!unlinked); setLoading(false); } },
-    );
-    return () => { on = false; };
-  }, [classId]);
+  /* ── whose answer may land, and whose members may be drawn ────────────────
+   *
+   * `wanted` is the guard every sibling reader in this app already has —
+   * src/ui/clientAttendance.ts, app/(trainer)/client-week.tsx,
+   * app/(trainer)/my-register.tsx — and this screen was the one without it.
+   *
+   * The register is reached from the open-registers list on my-register.tsx, so
+   * tapping down a list of classes starts a read per tap and they do not come
+   * back in the order they went out. Tuesday's Spin (slow), back out,
+   * Wednesday's HIIT: HIIT landed and drew, then Spin's answer overwrote it. The
+   * header said HIIT, the hero said "Checked In 3 / 12", and the twelve members
+   * listed under it were Spin's — every one of them tappable, and `toggle` sends
+   * the classId this render has, so a tick on one of them was a write about a
+   * Spin member against Wednesday's HIIT.
+   *
+   * `drawn` is the other half and does not exist on the siblings, because they
+   * hold one subject's rows and this screen holds a ROOM. Dropping the late
+   * answer is not enough on its own: the rows already on screen belong to the
+   * previous class and stay there under the new class's title while the new read
+   * is in flight. So a change of class empties the register first. `loading`
+   * goes back up with it, which is the one case the note below does not cover:
+   * an empty register under "Loading roster…" is the truth about a class nothing
+   * has been read for yet.
+   *
+   * The banner goes too. `saveFailed` names a MEMBER — "Priya is still marked
+   * absent" — and a sentence about somebody who was in Tuesday's Spin, left
+   * standing over Wednesday's HIIT, is about a person who is not in the room.
+   */
+  const wanted = useRef<string | null>(null);
+  const drawn = useRef<string | null>(null);
+
+  // The rejection handler is not decoration: without it a thrown read would
+  // leave `loading` true forever, and "Loading roster…" is at least honest,
+  // where a silent unhandled rejection is not.
+  // `loading` is deliberately NOT set back to true for a re-read of the SAME
+  // class. It starts true and is cleared by the first read; a refresh that
+  // raised it again would replace a register the coach is reading off in front
+  // of a room with "Loading roster…", which is the one thing worse than a
+  // slightly old count.
+  const loadRoster = useCallback(async () => {
+    wanted.current = classId;
+    if (drawn.current !== classId) {
+      drawn.current = classId;
+      setRoster(null);
+      setReadFailed(false);
+      setSaveFailed(null);
+      setLoading(true);
+    }
+    try {
+      const r = await classRoster(classId);
+      // The coach has moved on to another class. Dropping the answer is the
+      // whole of it: the read for the class that is on screen now will set the
+      // state, and this one may not.
+      if (wanted.current !== classId) return;
+      setRoster(r);
+      setReadFailed(r === null && !unlinked);
+    } catch {
+      if (wanted.current !== classId) return;
+      // The rows already on screen are left alone. A failed re-read is not a
+      // class that emptied — `readFailed` is what says the count is unknown,
+      // and blanking the register a coach is standing in front of would be the
+      // worse of the two mistakes by a distance.
+      setReadFailed(!unlinked);
+    } finally { if (wanted.current === classId) setLoading(false); }
+  }, [classId, unlinked]);
+  useEffect(() => { void loadRoster(); }, [loadRoster]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen is used standing in a studio with the worst signal in the
+   * building, and the register it draws is written by members booking and
+   * dropping the class on their own phones right up to the door. A coach whose
+   * roster read failed on the way in was left with "could not be read" and no
+   * way to ask again while the room filled up.
+   *
+   * The queued check-ins are flushed too. They are the ticks a trainer is PAID
+   * on, they are sitting on this handset, and the gesture a coach reaches for
+   * when they want the screen to be right about the room should not leave them
+   * on it. `flush` is the same call the "Send" button makes and it is safe to
+   * repeat — an empty queue sends nothing. */
+  const reloadEverything = useCallback(
+    () => Promise.all([loadRoster(), loadRate(), flushQueue()]),
+    [loadRoster, loadRate, flushQueue],
+  );
+  const pull = usePullToRefresh(reloadEverything);
+  /* ── and on the way back in ──────────────────────────────────────────────
+   *
+   * The register was read ONCE, on mount, while the room was still filling —
+   * and this screen is registered `href: null` inside <Tabs>, so it stays
+   * mounted between classes. A coach who opened it, stepped away to take a
+   * payment, and came back was taking a register written before three people
+   * booked and one dropped. Members book and cancel on their own phones right
+   * up to the door; nothing else on this screen goes and looks.
+   *
+   * The queued check-ins flush with it, exactly as they do on the gesture: the
+   * ticks a trainer is PAID on are sitting on this handset, and coming back to
+   * the screen is as good a moment to send them as pulling it. */
+  useRefreshOnFocus(reloadEverything);
 
   // Whether there is a roster to count at all. Without this the two counts
   // below are computed over `[]` and come out as 0 — and the hero then prints a
@@ -222,8 +324,9 @@ export default function ClassCheckin() {
   // 'ready' an empty box speaks for itself.
   const rateNote = rate.trim() ? null : rateFieldNote(rateStatus);
 
-  // The tick used to move before anything was written, and `setAttendance`
-  // swallowed every failure — so a refused check-in looked exactly like a saved
+  // The tick used to move before anything was written, and the direct write it
+  // went through (`setAttendance`, since removed from
+  // src/lib/classAttendance.ts) swallowed every failure — so a refused check-in looked exactly like a saved
   // one. Attendance is what the trainer is paid on, so the row moves only once
   // this phone has actually taken responsibility for it, and the banner says
   // whether the GYM has it.
@@ -232,7 +335,7 @@ export default function ClassCheckin() {
     tapLight();
     // ── the tick, and the basement it is usually made in ──────────────────
     //
-    // `setAttendance` returns a boolean, which collapses the only two answers
+    // That direct write returned a boolean, which collapses the only two answers
     // that matter here into one: a refusal the server MADE, and a request that
     // never reached it. The screen said the same sentence for both — "that
     // change did not save" — and the coach, standing in a room with no signal,
@@ -248,11 +351,37 @@ export default function ClassCheckin() {
     const out = await queue.attempt({
       kind: 'class-attendance', classId, userId: m.userId, memberName: m.name, present: next,
     });
+    const markKey = `${classId}:${m.userId}`;
+    setRefusedMarks((p) => (out === 'refused' ? [...p.filter((k) => k !== markKey), markKey] : p.filter((k) => k !== markKey)));
     if (out === 'refused') {
+      // ── and now a refusal can mean the booking is gone ────────────────────
+      //
+      // src/ui/floorQueue.ts used to report this write on the error alone, and
+      // `set_class_attendance` is `returns void` over an update that raises
+      // nothing when it matches no row. It now establishes the write instead, so
+      // 'refused' has a second cause the coach can act on and a likelier one
+      // than a permission: the member cancelled their place after this register
+      // was read, and there is no longer a booking to mark. `cancel_class`
+      // deletes the row.
+      //
+      // So the register is re-read rather than left standing. A list that still
+      // shows somebody who has cancelled, beside a sentence saying their tick
+      // did not save, invites the coach to tap them again — and it would be
+      // refused again, for the same reason, for as long as the screen is open.
       setSaveFailed(refusedLine(
-        `${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`,
-        classId === UNLINKED_CLASS ? 'This screen was opened without a class.' : null,
+        `${m.name} is still marked ${m.attended ? 'present' : 'absent'}, and that change`,
+        classId === UNLINKED_CLASS
+          ? 'This screen was opened without a class.'
+          : `The usual cause is that ${m.name} no longer holds a place on this class. A cancelled booking is removed, and there is nothing left to mark. This register is being read again now.`,
       ));
+      if (classId !== UNLINKED_CLASS) void loadRoster();
+      return;
+    }
+    // Nothing was kept, so the row does not move either. A tick drawn against a
+    // change this phone refused to hold is the same lie as one drawn against a
+    // change the server refused, and it is the lie a trainer is paid on.
+    if (out === 'full') {
+      setSaveFailed(floorFullLine(`${m.name} is still marked ${m.attended ? 'present' : 'absent'}, and that change`));
       return;
     }
     setRoster((p) => (p ?? []).map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
@@ -263,32 +392,57 @@ export default function ClassCheckin() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{title}{branch ? ' · ' + branch : ''}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Check-in</Text>
-          </View>
-          <Ghost icon="back" onPress={() => router.back()} />
-        </View>
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is now `PageHead`, which
+            carries the whole argument; the class is the subtitle. */}
+        <PageHead title="Check-in" subtitle={`${title}${branch ? ' · ' + branch : ''}`} />
 
-        {/* ── the hero: the count payroll is built from ───────────────────── */}
-        <Hero
-          label="Checked In"
-          figure={fig(counted ? present : null)}
-          unit={counted ? '/ ' + booked : undefined}
-          note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted)}
-          arc={!counted ? undefined : registerArc(reg) ?? undefined}
-          arcLabel="of those booked checked in"
-        />
+        {/* ── the figure: the count payroll is built from ───────────────────
+            The board's figure card in place of the Hero: the count at the
+            board's figure size, those booked beside it, and how far through
+            the register this is as a bar in the pill idiom. `counted` is the
+            gate — no class, a failed read or a roster still in flight is a
+            dash and an empty track, never a nought. */}
+        {(() => {
+          const arc = counted ? registerArc(reg) : null;
+          const pct = arc == null ? null : Math.round(Math.max(0, Math.min(1, arc)) * 100);
+          const note = unlinked ? 'No class was passed to this screen, so this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted);
+          return (
+            <Section>
+              <SectionHead title="Checked In" note={counted ? `${fig(booked)} Booked` : undefined} />
+              {/* `present` and `booked` are plain counts under `counted`, so
+                  they go into the sentence as digits; the dash is only ever
+                  drawn under the label, never spoken mid-sentence. */}
+              {/* The register as a RING: how far through it the coach is, read
+                  at a glance from the door. It replaces a figure over a pill
+                  bar and keeps both of their rules — `arc` is null unless
+                  `counted`, and a null ring is a track with no arc and a dash,
+                  never an empty circle that reads as nobody here. The ring
+                  speaks the whole sentence; the words beside it are hidden from
+                  a screen reader so it is not said twice. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={112} value={arc == null ? null : Math.max(0, Math.min(1, arc))}
+                  figure={counted ? String(present) : null} sub={counted ? `of ${booked}` : undefined}
+                  spoken={`Checked in, ${counted ? `${present} of ${booked}` : 'not counted'}. ${note}`} />
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flex: 1, minWidth: 140, gap: sp.xs }}>
+                  {pct != null ? <TonedChip tone={pct >= 100 ? 'brand' : 'blue'} label={`${pct}% In`} /> : null}
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
+                </View>
+              </View>
+            </Section>
+          );
+        })()}
 
-        <Rule />
 
         {/* ── the trainer's own estimate ──────────────────────────────────── */}
         <Section>
           <SectionHead title="Pay Estimate" />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per Attendee</Text>
           <TextInput value={rate} onChangeText={onRateChange} onEndEditing={() => persistRate(rate)} onBlur={() => persistRate(rate)}
             keyboardType="decimal-pad" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
@@ -314,14 +468,14 @@ export default function ClassCheckin() {
             // this the missing total reads as a broken screen rather than as a
             // number the app cannot make sense of. Nothing is saved either.
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-              That is not a rate this can multiply yet — digits and at most one decimal point. Nothing has been saved.
+              That is not a rate this can multiply yet: digits and at most one decimal point. Nothing has been saved.
             </Text>
           ) : rate.trim() ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
               {unlinked
                 ? 'No class was passed to this screen, so there is nobody checked in to multiply by.'
                 : loading ? 'Waiting on the roster before this is worth anything.'
-                : 'The roster could not be read, so there is no check-in count to multiply — this is not zero attendees.'}
+                : 'The roster could not be read, so there is no check-in count to multiply. This is not zero attendees.'}
             </Text>
           ) : null}
           {/* This sentence used to say "Repple is not told your rate", which
@@ -330,18 +484,17 @@ export default function ClassCheckin() {
               untouched — the number has no currency attached, nothing is paid
               from it, and nobody else can read it. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Your own arithmetic. Your rate is kept on your account so you don't retype it — nobody else can see it, no currency is attached to it, and Repple does not process this payment. Your gym owner pays from the attendance below.
+            Your own arithmetic. Your rate is kept on your account so you don't retype it. Nobody else can see it, no currency is attached to it, and Repple does not process this payment. Your gym owner pays from the attendance below.
           </Text>
         </Section>
 
-        <Rule />
 
         {/* What this phone is still carrying. Drawn even when the last tick
             went through, because the count is about the morning and not about
             the tap — and a queue that could not be READ is not an empty one. */}
         {!queue.queueRead ? (
           <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>
-            What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+            What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost, and it is not being written over either.
           </Flag>
         ) : floorPendingNote(queue.unsent) ? (
           <>
@@ -365,10 +518,16 @@ export default function ClassCheckin() {
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Members" note={roster?.length ? String(roster.length) : undefined} />
+          {/* `counted` is the same fact the body under this header spells out
+              in words. On a thrown re-read the previous rows are deliberately
+              kept and `readFailed` is set, so a header taken from
+              `roster.length` asserted that twelve members are known directly
+              above a Flag saying the roster could not be read — while the coach
+              is standing at the door of a full room. */}
+          <SectionHead title="Members" note={counted && roster?.length ? String(roster.length) : undefined} />
           {unlinked ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              This screen was opened without a class. Nothing can be read or checked in here — open a
+              This screen was opened without a class. Nothing can be read or checked in here. Open a
               class from your schedule and use its Check in button.
             </Text>
           ) : loading ? (
@@ -376,37 +535,67 @@ export default function ClassCheckin() {
           ) : readFailed || roster === null ? (
             <Flag tone={t.crit}>
               This class's roster could not be read, so nobody can be checked in here yet. This is
-              not the same as an empty class — do not treat it as one. Leave the screen and open it
+              not the same as an empty class. Do not treat it as one. Leave the screen and open it
               again once you have signal.
             </Flag>
           ) : roster.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
-          ) : (
-            roster.map((m, i) => (
-              <Pressable key={m.userId} onPress={() => toggle(m)} accessibilityRole="button" accessibilityLabel={m.name}
+            <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet. Members appear here as they book.</Text>
+          ) : (<>
+            {/* The instruction every booked row used to repeat, said once. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.xs, marginBottom: sp.xs }}>Tap a name when they arrive</Text>
+            {roster.map((m, i) => {
+              // Rule 6, read off the queue itself (queued) and off the tap's own
+              // answer (refused); a mark the gym has shows nothing.
+              const sync = refusedMarks.includes(`${classId}:${m.userId}`) ? 'failed' as const
+                : queue.pending.some((q) => q.act.kind === 'class-attendance' && q.act.classId === classId && q.act.userId === m.userId) ? 'queued' as const
+                : null;
+              const syncWords = sync === 'failed' ? 'Not Saved · Tap to Try Again' : 'On This Phone · Waiting to Send';
+              return (
+              // The state carries "present"; the WAITLIST was carried by an
+              // amber dot and a caption, and a Pressable's label replaces both.
+              // So a coach taking the register with VoiceOver heard a
+              // waitlisted member exactly as they heard a booked one — and the
+              // tap that tells them apart is the one that marks somebody in.
+              <Pressable key={m.userId} onPress={() => toggle(m)} accessibilityRole="button"
+                accessibilityLabel={[m.status === 'waitlist' ? `${m.name}, on the waiting list` : m.name, sync ? syncWords : null].filter(Boolean).join('. ')}
                 accessibilityState={{ checked: m.attended, selected: m.attended }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
                   {m.attended ? <Icon name="check" size={15} color={t.brandInk} /> : null}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{m.name}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                    {m.status === 'waitlist' ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>{m.status === 'waitlist' ? 'Waitlist' : m.attended ? 'Present' : 'Booked · tap when they arrive'}</Text>
-                  </View>
+                {/* Name in the heading face, state as a toned chip at the far
+                    end: green present, amber waitlist, blue booked. The
+                    Pressable's label above still carries the waitlist in words
+                    — a chip inside a button is drawn, not spoken. */}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{m.name}</Text>
+                  {sync ? <View style={{ marginTop: 3 }}><SyncBadge state={sync} label={syncWords} /></View> : null}
                 </View>
+                <TonedChip tone={m.status === 'waitlist' ? 'amber' : m.attended ? 'brand' : 'blue'}
+                  label={m.status === 'waitlist' ? 'Waitlist' : m.attended ? 'Present' : 'Booked'} />
               </Pressable>
-            ))
-          )}
+              );
+            })}
+          </>)}
         </Section>
 
-        <Rule />
 
+        {/* Who can see the ticks that have just been made.
+
+            This said "Your gym owner sees attendance per class for payroll and
+            class analytics" unconditionally — including while the queue above
+            was holding every one of them on this phone. That is rule 1 in
+            src/lib/floorQueue.ts broken on the register a trainer is PAID from,
+            and it is the worse of the two sentences on screen because it is the
+            calm one: the banner said the ticks were waiting and this footnote
+            said the gym had them, and a person believes the footnote.
+
+            `registerVisibilityLine` has the three answers, and the third of
+            them is that a queue which could not be READ cannot say either. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           {unlinked
-            ? 'Nothing on this screen is being saved — it was not told which class it is checking in.'
-            : 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.'}
+            ? 'Nothing on this screen is being saved. It was not told which class it is checking in.'
+            : registerVisibilityLine(queue.unsent, queue.queueRead)}
         </Text>
 
       </ScrollView>

@@ -58,6 +58,12 @@ export type BrandApp = {
   /** Tile colour behind the icon — the Android adaptive-icon plate, and the
    *  one difference anybody can see between three apps at 60 points. */
   tile: string;
+  /** The Android adaptive icon's foreground, when this app's mark differs from
+   *  the shared one in app.json (Repple's coach and studio bars are purple and
+   *  gold, the owner's choice on 22 Sep 2026). Absent keeps app.json's. */
+  adaptive?: string;
+  /** The launch screen image, when this app's differs from app.json's. */
+  splash?: string;
 };
 
 export type Brand = {
@@ -180,9 +186,9 @@ export const BRANDS: Record<string, Brand> = {
     id: 'repple',
     label: 'Repple',
     apps: {
-      client:  { name: 'Repple',        bundle: 'com.washateria.repple',        scheme: 'repple',       icon: './assets/icon.png',        tile: '#0d9488' },
-      trainer: { name: 'Repple Coach',  bundle: 'com.washateria.repple.coach',  scheme: 'repplecoach',  icon: './assets/icon-coach.png',  tile: '#4338ca' },
-      owner:   { name: 'Repple Studio', bundle: 'com.washateria.repple.studio', scheme: 'repplestudio', icon: './assets/icon-studio.png', tile: '#b45309' },
+      client:  { name: 'Repple',        bundle: 'com.washateria.repple',        scheme: 'repple',       icon: './assets/icon.png',        tile: '#0b0f0e' },
+      trainer: { name: 'Repple Coach',  bundle: 'com.washateria.repple.coach',  scheme: 'repplecoach',  icon: './assets/icon-coach.png',  tile: '#0c1210', adaptive: './assets/adaptive-icon-coach.png', splash: './assets/splash-coach.png' },
+      owner:   { name: 'Repple Studio', bundle: 'com.washateria.repple.studio', scheme: 'repplestudio', icon: './assets/icon-studio.png', tile: '#0a1311', adaptive: './assets/adaptive-icon-studio.png', splash: './assets/splash-studio.png' },
     },
     joinOrigin: 'https://www.repplefitness.com',
     // Deliberately apex, no www — this is the exact literal deepLink.ts has

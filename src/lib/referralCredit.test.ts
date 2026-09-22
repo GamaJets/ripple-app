@@ -17,7 +17,7 @@
 // and about not promising a reward nobody has agreed to.
 import {
   CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, joinedLabel,
-  shapeReferrals, summaryLine, type RawReferral, type ReferralRow,
+  shapeReferrals, summaryLine, invitesCutLine, type RawReferral, type ReferralRow,
   COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE, shapeCoachReferrers,
   referrerLine, coachSummaryLine, type RawCoachReferrer,
 } from './referralCredit';
@@ -213,6 +213,24 @@ ok(/yours to decide/i.test(COACH_REWARD_NOTE), 'and hands the decision back to t
 ok(/never been told/i.test(COACH_REWARD_NOTE), 'saying outright that the app does not know the amount');
 ok(/not shown who those people are/i.test(COACH_REFERRAL_PRIVACY_NOTE),
   'the privacy note says the referred people are not named to the coach');
+
+// ── the ceiling inside `my_referrals()` ────────────────────────────────────
+//
+// The list stops at 200 server-side and nothing on the client can see it, so
+// the sentence saying so is the only thing standing between a referrer and a
+// silently short guest list.
+eq(invitesCutLine(0, 200), null, 'an empty list says nothing about a ceiling');
+eq(invitesCutLine(199, 200), null, 'nor does one that stopped short of it on its own');
+ok(invitesCutLine(200, 200) != null, 'a list that came back AT the ceiling says so');
+ok(invitesCutLine(200, 200)!.includes('200'), 'and names the number rather than saying "some"');
+ok(/most recent/.test(invitesCutLine(200, 200)!),
+  'and says WHICH end was cut — the order is created_at desc, so it is the oldest that went');
+ok(/counts above/.test(invitesCutLine(200, 200)!),
+  'and protects the two figures above it, which my_referral_summary() computes over every row');
+ok(!/could not|couldn|failed|error/i.test(invitesCutLine(200, 200)!),
+  'this is a full read that ended at a product limit, not a failure, and must not read as one');
+eq(invitesCutLine(Number.NaN, 200), null, 'a length that is not a number states no ceiling');
+eq(invitesCutLine(200, 0), null, 'and a cap of zero is not a cap');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`referralCredit: ok (${shaped.length} rows shaped, ${shaped.filter((r) => r.converted).length} converted)`);

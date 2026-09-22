@@ -34,22 +34,25 @@
 //
 // A signup is also not a conversion, and the screen is explicit about which one
 // it counts: a friend has converted when they log their first workout.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useBrand } from '../../src/ui/brand';
-import { myReferralCode, myReferrals, myReferralSummary } from '../../src/lib/referrals';
+import { myReferralCode, myReferrals, myReferralSummary, REFERRAL_ROW_CAP } from '../../src/lib/referrals';
 import { referralLink, referralMessage } from '../../src/lib/referralLink';
 import { copyToClipboard, HAS_NATIVE_CLIPBOARD } from '../../src/ui/nativeModules';
 import {
   CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, shapeReferrals,
-  summaryLine, type ReferralRow,
+  summaryLine, invitesCutLine, type ReferralRow,
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, Card, Cta, Ghost } from '../../src/ui/kit';
-import { sp, layout, hairline, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { useReadDeadline } from '../../src/ui/readDeadline';
+import { Section, SectionHead, Ghost, PageHead, HeroCard, KpiRow, TonedChip, Expandable, fig } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 
 export default function Referral() {
   const t = useTheme();
@@ -60,18 +63,66 @@ export default function Referral() {
   const [rows, setRows] = useState<ReferralRow[]>([]);
   const [joined, setJoined] = useState<number | null>(null);
   const [converted, setConverted] = useState<number | null>(null);
-  const [status, setStatus] = useState<LoadStatus>('loading');
+  // Under a ceiling — see src/lib/readDeadline.ts. `setStatus('error')` is
+  // reached only by a read that came BACK null; a socket that is accepted and
+  // then answers nothing settles neither way, and this screen's "Reading…"
+  // sentence had no end.
+  const [readStatus, setStatus] = useState<LoadStatus>('loading');
+  const status = useReadDeadline(readStatus);
+  /**
+   * Whether the LIST came back at the server's ceiling, held apart from
+   * `status` on purpose.
+   *
+   * `my_referrals()` ends `limit 200` inside the function body, where
+   * src/lib/rowCap.ts cannot reach it — the server will never answer with 201,
+   * so `capped()` sees a full page and a cut one as the same thing. The two
+   * counts above the list come from `my_referral_summary()`, which part 128
+   * computes over every row, so they stay exact under a cut list and this must
+   * not drag them down to 'partial' with it.
+   *
+   * Held as the RAW row count rather than as a boolean, because the boolean was
+   * only half of the gate and the other half was asked of the wrong number.
+   * `invitesCutLine(shown, cap)` returns null when `shown < cap`, and it was
+   * being handed `rows.length` — the count AFTER `shapeReferrals`, which drops
+   * any row whose `joined_at` will not parse. So one malformed row turned a
+   * cut list of 200 into 199 shaped rows, the sentence returned null, and a
+   * member with two hundred and fifty invites scrolled to the bottom of 199
+   * names with nothing anywhere saying the list ended before their friends did
+   * — the exact sentence `invitesCutLine` was written to prevent, silenced by
+   * the bad row rather than by the good ones. What the server returned is the
+   * only number that answers "did the list get cut", so it is the only number
+   * the gate now sees.
+   */
+  const [listRows, setListRows] = useState(0);
+
+  /**
+   * Which load is the one still wanted.
+   *
+   * `load` is called on mount AND by the pull-to-refresh below, and it holds
+   * three awaits — the code, then the list and the summary together. Two runs
+   * therefore overlap the first time somebody pulls down while the first read is
+   * still out, and whichever finishes LAST wrote the screen. The ordinary case
+   * is harmless and the bad one is not: a slow first read landing after a fast
+   * refresh replaces a current list of invites with an older one, under a
+   * 'ready' status, with nothing to say it went backwards. src/ui/challenges.tsx
+   * guards its own read with exactly this `runRef` for exactly this reason.
+   */
+  const runRef = useRef(0);
 
   const load = useCallback(async () => {
+    const run = ++runRef.current;
     setStatus('loading');
     // The code is asked for first and on its own: it is the thing the screen
     // exists to hand over, and a failure to get it is a different failure from
     // a failure to count what it has done.
     const c = await myReferralCode();
+    if (run !== runRef.current) return;
     setCode(c);
     const [list, sum] = await Promise.all([myReferrals(), myReferralSummary()]);
+    if (run !== runRef.current) return;
     if (!c || !sum) { setStatus('error'); return; }
     setRows(shapeReferrals(list));
+    setListRows(list?.length ?? 0);
     setJoined(sum.joined);
     setConverted(sum.converted);
     // A null list with a good summary is still a failed read of the list, and
@@ -82,6 +133,10 @@ export default function Referral() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // The code, the list of people who used it and the two counts over them all
+  // come from `load`, so one call brings the whole screen back.
+  const pull = usePullToRefresh(load);
 
   // The message and the bare link, both from src/lib/referralLink.ts so that
   // the thing shared, the thing copied and the thing a friend's app opens are
@@ -105,6 +160,10 @@ export default function Referral() {
    * claiming a copy that happened five minutes ago.
    */
   const [copied, setCopied] = useState<string | null>(null);
+  /** The one timer that clears it. Declared beside the state it clears rather
+   *  than beside the handler that arms it, so a reader can see both halves. */
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   const copy = async (what: 'link' | 'code') => {
     const text = what === 'link' ? link : code;
     if (!text) return;
@@ -115,7 +174,7 @@ export default function Referral() {
     const ok = await copyToClipboard(text);
     if (!ok) {
       Alert.alert(
-        'Not copied',
+        'Not Copied',
         HAS_NATIVE_CLIPBOARD
           ? 'That could not be put on your clipboard just now. Share My Invite sends the same link straight to whichever app you pick.'
           : 'This version of the app cannot use the clipboard. Share My Invite sends the same link straight to whichever app you pick.',
@@ -123,7 +182,14 @@ export default function Referral() {
       return;
     }
     setCopied(what === 'link' ? 'Link copied' : 'Code copied');
-    setTimeout(() => setCopied(null), 2500);
+    // One timer, replaced rather than stacked. Copy the link and then the code
+    // inside two and a half seconds and the FIRST timer was still running: it
+    // fired against the second confirmation and cleared it early, so the member
+    // who had just copied their code was shown nothing and had to guess whether
+    // it worked. Cleared on unmount too, so nothing sets state on a screen that
+    // has gone.
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 2500);
   };
 
   const steps = [
@@ -140,76 +206,48 @@ export default function Referral() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Training is easier with company</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite Friends</Text>
+        <PageHead title="Invite Friends" subtitle="Training is easier with company" />
+
+        {/* ── the hero: the code, and the one thing to do with it ───────────
+            The night card every tab root opens on, here on a pushed page
+            because this screen HAS one state and one action: the code is the
+            headline, what has come of it is the line under it, Share is the
+            bright button. With no code the headline says so and the button is
+            Try Again — a failed read is never a blank card. */}
+        <HeroCard eyebrow="Your Code"
+          title={code ?? (status === 'loading' ? 'Reading…' : 'Not Available')}
+          meta={code || status === 'loading' ? summaryLine(status, joined, converted)
+            : 'We couldn’t reach your code just now. Nothing has been changed or cancelled.'}
+          cta={code ? { label: 'Share My Invite', onPress: invite } : { label: 'Try Again', onPress: load, disabled: status === 'loading' }}>
+          {/* The link, shown as well as sent. A member pasting their invite
+              into an Instagram bio or a WhatsApp group needs the URL itself,
+              and a share sheet cannot put it there. */}
+          {code ? (
+            <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: sp.md }} numberOfLines={2}>{link}</Text>
+          ) : null}
+        </HeroCard>
+        {code ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.md, marginTop: 14 }}>
+            <Ghost label="Copy Link" icon="share" onPress={() => copy('link')} />
+            <Ghost label="Copy Code" onPress={() => copy('code')} />
+            {/* Ink, not a coloured flash. `copied` is a fact about what
+                just happened rather than a state worth a status colour, and
+                t.crit/t.warn are marks in this app and not text anyway. */}
+            {copied ? <Text style={{ ...ty.caption, color: t.ink2 }}>{copied}</Text> : null}
           </View>
-        </View>
+        ) : null}
 
-        {/* ── the one card: the thing you act on ─────────────────────────── */}
-        <Section>
-          <Card>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your code</Text>
+        {/* The two counts as tiles. Both come from the server's own totals and
+            are stated only under a 'ready' read — under anything else they are
+            dashes, and the hero's line above says which kind of not-knowing it
+            is. They are exact even where the list below is cut at its cap. */}
+        <KpiRow tiles items={[
+          { label: 'Joined on Your Code', value: status === 'ready' && joined != null ? fig(num(joined)) : fig(null), tone: 'blue' },
+          { label: 'Started Training', value: status === 'ready' && converted != null ? fig(num(converted)) : fig(null), tone: 'brand' },
+        ]} />
 
-            {code ? (
-              <Text style={{ ...value(30), color: t.ink, letterSpacing: 1.5, marginTop: 6 }}>{code}</Text>
-            ) : status === 'loading' ? (
-              <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}><ActivityIndicator color={t.ink3} /></View>
-            ) : (
-              // No invented fallback. A code this screen made up is a code the
-              // server has not registered, so anything a friend did with it
-              // would be credited to nobody — and the reader would never know.
-              // "It hasn't changed" asserted a code the reader may never have
-              // seen: `setCode(c)` runs before this branch, so this is what a
-              // FIRST load failure shows too, and with no referral code issued
-              // yet a first load is the common case. The sentence now claims
-              // only what is true either way.
-              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-                We couldn’t reach your code just now. Nothing has been changed or cancelled — try again in
-                a moment.
-              </Text>
-            )}
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
-              <View accessibilityElementsHidden importantForAccessibility="no"
-                style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: status === 'ready' && (joined || 0) > 0 ? t.brand : t.ink3 }} />
-              <Text style={{ ...ty.label, ...numeric, color: t.ink2 }} numberOfLines={2}>
-                {summaryLine(status, joined, converted)}
-              </Text>
-            </View>
-
-            {/* The link, shown as well as sent. A member pasting their invite
-                into an Instagram bio or a WhatsApp group needs the URL itself,
-                and a share sheet cannot put it there. */}
-            {code ? (
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.md }} numberOfLines={2}>{link}</Text>
-            ) : null}
-
-            <View style={{ marginTop: sp.lg }}>
-              {code ? (
-                <Cta label="Share My Invite" wide onPress={invite} />
-              ) : (
-                <Ghost label="Try Again" onPress={load} />
-              )}
-            </View>
-            {code ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-                <Ghost label="Copy Link" icon="share" onPress={() => copy('link')} />
-                <Ghost label="Copy Code" onPress={() => copy('code')} />
-                {/* Ink, not a coloured flash. `copied` is a fact about what
-                    just happened rather than a state worth a status colour, and
-                    t.crit/t.warn are marks in this app and not text anyway. */}
-                {copied ? <Text style={{ ...ty.caption, color: t.ink2 }}>{copied}</Text> : null}
-              </View>
-            ) : null}
-          </Card>
-        </Section>
-
-        <Rule />
 
         {/* ── who actually came ───────────────────────────────────────────── */}
         <Section>
@@ -217,7 +255,7 @@ export default function Referral() {
 
           {status === 'error' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
-              We couldn’t check who has joined. This is a connection problem — nobody has been removed.
+              We couldn’t check who has joined. This is a connection problem. Nobody has been removed.
             </Text>
           ) : null}
 
@@ -238,41 +276,53 @@ export default function Referral() {
 
           {status === 'ready' ? rows.map((r, i) => (
             <View key={r.joinedAt + r.name + i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: r.converted ? t.brand : t.ink3 }}>{r.name.slice(0, 1).toUpperCase()}</Text>
+              <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: r.converted ? t.brandSoft : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, ...font('700'), color: r.converted ? t.brandText : t.ink2 }}>{r.name.slice(0, 1).toUpperCase()}</Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{r.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{friendLine(r)}</Text>
               </View>
+              {/* The state as words on a plate; `friendLine` has the date. */}
+              <TonedChip label={r.converted ? 'Training' : 'Joined'} tone={r.converted ? 'brand' : 'neutral'} />
             </View>
           )) : null}
+
+          {/* The list ends where the server's `limit 200` ends, and until this
+              line existed nothing said so — a referrer scrolling to the bottom
+              of two hundred names simply found no more names. The counts in the
+              card above are untouched by it and stay exact, which is why this
+              is a sentence under the list rather than a 'partial' over the
+              screen. */}
+          {status === 'ready' && invitesCutLine(listRows, REFERRAL_ROW_CAP) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {invitesCutLine(listRows, REFERRAL_ROW_CAP)}
+            </Text>
+          ) : null}
         </Section>
 
-        <Rule />
 
+        {/* How it works, and what is and is not being promised — prose, so it
+            is behind a control (round five). Every sentence is still here:
+            the conversion rule, the reward note and the privacy note are the
+            terms of the invite, and one tap is where terms belong. */}
         <Section>
-          <SectionHead title="How It Works" />
+          <Expandable title="How It Works" note="The steps, the rule and what your friend’s gym sees">
           {steps.map((s, i) => (
-            <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink2 }}>{s.n}</Text>
+              <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 32, height: 32, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...ty.label, ...numeric, ...font('700'), color: t.brandText }}>{s.n}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{s.label}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.label}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
-              </View>
-            </View>
-          ))}
-        </Section>
-
-        <Rule />
-
-        {/* ── what is and is not being promised ───────────────────────────── */}
-        <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{CONVERSION_RULE}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{rewardNote(appName)}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFERRAL_PRIVACY_NOTE}</Text>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{CONVERSION_RULE}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{rewardNote(appName)}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFERRAL_PRIVACY_NOTE}</Text>
+          </Expandable>
         </Section>
 
       </ScrollView>

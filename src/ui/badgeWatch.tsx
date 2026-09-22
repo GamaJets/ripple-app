@@ -47,7 +47,7 @@
 // already-told on the first run. That is the right failure: a reinstalled app
 // that fires eleven congratulation banners on launch is a bug, and one that
 // stays quiet about badges the member earned in 2024 is not.
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWorkoutLog } from './workoutLog';
 import { useClientData } from './clientData';
@@ -175,7 +175,15 @@ export function BadgeWatchProvider({ children }: { children: ReactNode }) {
 
   const acknowledge = useCallback(() => { setPending(null); setAlsoUnlocked(0); }, []);
 
-  return <Ctx.Provider value={{ pending, alsoUnlocked, acknowledge, seen }}>{children}</Ctx.Provider>;
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<Value>(() => ({ pending, alsoUnlocked, acknowledge, seen }), [pending, alsoUnlocked, acknowledge, seen]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 /**

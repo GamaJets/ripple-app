@@ -102,9 +102,209 @@ export const CATEGORIES: readonly CategoryDef[] = [
   },
   {
     key: 'coach', title: 'From Your Coach And Gym', local: false, quietable: false,
-    note: 'Messages, notices and invoices. These are sent from the server, so they follow the single Push Notifications switch rather than this list.',
+    // "so they follow the single Push Notifications switch rather than this
+    // list" is what this said, and it was true when it was written. Part 530
+    // made it false: `notify_quiet_hours` is keyed on `user_id` and both
+    // senders apply it to whoever the recipient is, so a member's quiet hours
+    // have reached these for as long as the rollout row has been enforced —
+    // and nothing said so, because the sentence described the app rather than
+    // the server. It now points at the control instead of naming an effect,
+    // because whether the server applies it is a fact about the installation
+    // and `quietAvailability` is what reads it.
+    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them. The ones below, which are stored on your account, are what does. Quiet Hours is stored there too, which is why it reaches them as well.',
   },
 ];
+
+/* ── the refusal this file made, and what has since made it false ─────────
+ *
+ * The header above says, twice and as a fact about the product, that "REMOTE
+ * pushes are sent by the send-push edge function from a server that has never
+ * heard of these preferences", and `CategoryDef.local` exists to stop a switch
+ * being offered for one. app/(client)/notification-prefs.tsx said the same
+ * thing in its own words and rendered the coach-and-gym category as a text row
+ * rather than a switch.
+ *
+ * Every word of that was true when it was written and the first half of it
+ * still is: nothing on this handset can gate a push somebody else's server
+ * sends, and a DEVICE-local preference for a remote category would still be a
+ * switch reading "off" while the banner arrived. That is not what has changed.
+ *
+ * What has changed is that the preference no longer has to live on the device.
+ * `notify_channel_prefs` (parts 251 and 730) is keyed on `user_id` — "not
+ * coach-only by construction", in its own words, and its RLS policy `ncp_self`
+ * is `user_id = auth.uid()` for any authenticated account, a member's included.
+ * Both senders read it:
+ *
+ *   · supabase/functions/send-push drops every recipient with an explicit
+ *     `enabled = false` on the channel it was given, BEFORE the tokens are
+ *     read, whoever the recipient is.
+ *   · supabase/functions/notify-message does the same for `chat` against its
+ *     single `recipient` — which is the CLIENT whenever a coach sends.
+ *
+ * So the server has been able to honour a member's answer for as long as those
+ * have been deployed, and the only reason it never did is that nothing in the
+ * client app ever offered them the control. That is the same shape of mistake
+ * the `coach` note above was corrected for once already: a sentence that
+ * described the app and was read as describing the server.
+ *
+ * ── what the screen may claim, given that the table is EMPTY ─────────────
+ *
+ * `notify_channel_prefs` holds 0 rows. Not one coach and not one member has
+ * ever turned a channel off, so neither filter has ever dropped a recipient in
+ * production. Nothing here is a report of observed behaviour, and the copy is
+ * written so that it never has to be: every sentence on the switches states
+ * what the senders DO with a row, in the present tense of a rule, and not one
+ * of them says a notification was or was not suppressed. That is the same line
+ * `sendPushChecked`'s callers hold — a push is never claimed delivered — and it
+ * matters more here, because the first row this table gets will be written by
+ * somebody reading these sentences and expecting them to come true.
+ *
+ * The empty table is also why `wholeChannel` below is stated per channel rather
+ * than assumed: with no row ever written, nobody has been in a position to
+ * notice that four of the five only reach part of what their label names.
+ */
+
+/**
+ * A channel a MEMBER can be sent on, in the member's own words.
+ *
+ * The keys are `CoachChannel` strings because there is one table and one
+ * filter, and a second vocabulary for the same column would be two chances to
+ * disagree about a value the server compares literally. What is member-specific
+ * is the label and the note: `COACH_CHANNELS` describes each channel as things
+ * a coach's clients did, and every one of those sentences is the wrong way
+ * round for the person they were done to.
+ *
+ * `MemberChannel` below is a SUBSET of `CoachChannel` written out rather than
+ * imported, and both halves of that are deliberate. Written out, because this
+ * module is pure and compiles into the test tree on its own — a runtime edge to
+ * the coach's module would drag `coachReminders` in behind it — and because the
+ * subset is the point: 'book' must not be nameable here at all. Pinned, because
+ * a string that fails the database's own CHECK constraint would otherwise be
+ * discovered by a member whose save silently did nothing; `notifyPrefs.test.ts`
+ * imports both lists and asserts every key here is a real channel.
+ */
+export interface MemberChannelDef {
+  key: MemberChannel;
+  /** Title Case — a switch's label. */
+  title: string;
+  /** Sentence case prose under it, naming what would stop. */
+  note: string;
+  /**
+   * Whether EVERY push of this kind names the channel when it is sent.
+   *
+   * This is the honest half of the control and it is per channel because the
+   * answer differs. supabase/functions/send-push filters a send only when it
+   * was given a `channel` — "a send with no channel is not filtered at all", in
+   * its own comment — and the client-directed pushes in this product are sent
+   * three ways:
+   *
+   *   · by supabase/parts/900's dispatcher, which derives the channel from the
+   *     row and always passes it. Filtered.
+   *   · by notify-message, which hard-codes 'chat'. Filtered.
+   *   · by somebody's HANDSET calling `sendPushChecked`, where the channel is
+   *     the optional fifth argument and most callers omit it — a freed PT slot
+   *     broadcast, a gym's offer, an intake ask, an injury ask. Not filtered.
+   *
+   * Only `chat` has no handset sender that omits it, so only `chat` is true.
+   * The rest are switches that stop the server's sends and cannot stop a
+   * coach's phone, and `MEMBER_CHANNELS_REACH` says exactly that on the screen
+   * rather than letting a member infer a guarantee from a label.
+   */
+  wholeChannel: boolean;
+}
+
+/** The subset of `CoachChannel` a member can actually be a recipient on. */
+export type MemberChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin';
+
+/**
+ * The five, and why there are five rather than six.
+ *
+ * `book` is the sixth channel and it is the coach's own book — an unmarked
+ * session, an ageing invoice, a client who has stopped. Every route on it is a
+ * `/(trainer)/` one, so no notification a member can receive has ever carried
+ * it, and offering it here would be a switch over an empty set: the exact
+ * defect `notifyDispatch.ts` was written for, where two channels had switches
+ * and no sender.
+ *
+ * The order is what a member would look for first. Messages are the reason
+ * anybody opens this screen.
+ */
+export const MEMBER_CHANNELS: readonly MemberChannelDef[] = [
+  {
+    key: 'chat', title: 'Messages From Your Coach', wholeChannel: true,
+    note: 'Every message your coach sends you.',
+  },
+  {
+    key: 'bookings', title: 'Sessions And Classes', wholeChannel: false,
+    note: 'A session answered, moved or cancelled, a slot you were waiting for coming free, and a class seat opening up.',
+  },
+  {
+    key: 'money', title: 'Payments And Packs', wholeChannel: false,
+    note: 'A card that was declined, an invoice from your gym, a pack running out, and an offer your gym is running.',
+  },
+  {
+    key: 'clients', title: 'You And Your Coach', wholeChannel: false,
+    note: 'An answer to a coaching request, a coaching arrangement ending, a goal you reached, an assessment your coach recorded, and a reply to your community post.',
+  },
+  {
+    key: 'admin', title: 'Forms And Paperwork', wholeChannel: false,
+    note: 'An intake form to fill in, an injury your coach has asked you to add, and a document to sign.',
+  },
+];
+
+/** The definition for a member channel, or null. */
+export function memberChannelDef(key: string): MemberChannelDef | null {
+  return MEMBER_CHANNELS.find((c) => c.key === key) ?? null;
+}
+
+/**
+ * That these are stored on the account rather than on the handset.
+ *
+ * Said because the section above it is the opposite, in the same list, on the
+ * same screen — and the closing paragraph of that screen already promises that
+ * "the switches above are kept on this phone, and only this phone". Without
+ * this sentence a member reads that promise as covering all of them.
+ */
+export const MEMBER_CHANNELS_ACCOUNT =
+  'These are stored on your account rather than on this phone, because the phone is not what sends them. They follow you to a new handset, and they are the same on every device you sign in on.';
+
+/**
+ * What a muted channel does not do.
+ *
+ * The member's half of `CHANNEL_STILL_RECORDED`, and the same argument: muting
+ * is safe to offer only because the row is written either way. Both senders
+ * write the notification BEFORE they check this table — notify-message's own
+ * comment turns on it, "muting is safe to offer BECAUSE the row exists" — so
+ * nothing is lost, and saying so is what stops a member reading a mute as
+ * "do not tell me".
+ */
+export const MEMBER_CHANNELS_STILL_RECORDED =
+  'Turning one off stops your phone buzzing about it. It is still written into your notifications list either way, so nothing is lost. You find out when you next open the app instead of as it happens.';
+
+/**
+ * How far a switch reaches, stated rather than implied.
+ *
+ * The `wholeChannel` note above is the reasoning; this is the sentence. It
+ * names the one that is complete instead of hedging all five equally, because
+ * "some notifications may still arrive" under a switch a member has just turned
+ * off is the kind of sentence that teaches people the controls do not work.
+ */
+export const MEMBER_CHANNELS_REACH =
+  'Messages is the complete one: every message your coach sends is checked against it. The other four stop everything the app’s own server sends on them, but some of these can also be sent straight from your coach’s or your gym’s phone, and those do not pass through the check.';
+
+/**
+ * The one kind no switch here covers.
+ *
+ * '/(client)/notices' is deliberately unclassified in `notifyDispatch.ts` — all
+ * six channels are things a coach receives, and a notice is the one kind whose
+ * only recipient is a member, who had no switches at all. That reasoning is
+ * still sound and this list does not fix it: a notice carries no channel, so no
+ * row in this table can stop one. A member who muted all five and then got a
+ * gym announcement at 9pm would otherwise conclude the whole screen is a
+ * decoration.
+ */
+export const MEMBER_CHANNELS_NOT_COVERED =
+  'Notices from your coach or your gym are not on this list. They are sent without a category on them, so none of these switches can stop one. Quiet Hours can, and turning off Push Notifications stops them at every hour.';
 
 export interface NotifyPrefs {
   /** Per category. A category absent from the map is ON — see `allows`. */
@@ -166,6 +366,78 @@ export function prefsFromStored(raw: string | null | undefined): NotifyPrefs {
 /** The definition for a category, or null. */
 export function categoryDef(key: string): CategoryDef | null {
   return CATEGORIES.find((c) => c.key === key) ?? null;
+}
+
+/* ── the switch that did not work ─────────────────────────────────────────
+ *
+ * The header above states, as a fact about this app, that badge unlocks
+ * (src/ui/badgeWatch.tsx) go through `scheduleLocal` "which is where the gate
+ * is applied so that a caller cannot skip it". `CATEGORIES` says the same thing
+ * in the words on the switch: 'Streaks And Badges' — "When a streak is about to
+ * break, and when you unlock a badge."
+ *
+ * badgeWatch.tsx calls `scheduleLocal(note.title, note.body, at, { route:
+ * '/(client)/achievements' })` — FIVE arguments. There is no category, and
+ * `scheduleLocal` reads `if (category && !allows(...))`, so a missing one is
+ * not a gate at all. It is the only uncategorised caller of that function in
+ * the three apps, and the consequence is exact: a member who turns off Streaks
+ * And Badges goes on being congratulated, and a member with quiet hours set
+ * gets the congratulation at the hour it happened, because `motivation` is
+ * `quietable: true` and nothing asked.
+ *
+ * A switch that reads off while the banner keeps arriving is the shape of bug
+ * src/lib/pushConsent.ts exists for, and it is worse here than a missing switch
+ * would be: the member has been shown a control, used it, and been ignored.
+ *
+ * ── Why the fallback is by ROUTE and lives here ──────────────────────────
+ *
+ * The narrow fix is one argument at one call site, and this codebase has
+ * already argued twice why that is not the fix: `registerForPush` puts the
+ * consent gate inside the function "because there were three call sites … and
+ * the next call site added would have been the fourth chance to forget", and
+ * src/lib/notifyInbox.ts puts the record/skip decision at one choke point
+ * rather than at eleven call sites. A category the caller may omit is a gate
+ * the caller may skip, and the one caller that omitted it is the one whose
+ * switch stopped working.
+ *
+ * So an omitted category falls back to what the ROUTE says, which is the same
+ * structural signal `inboxIcon` and `notificationChannel` are derived from and
+ * for the same reason: a notification that opens Achievements is about a badge
+ * whoever wrote it. An explicit category always wins — this only ever fills a
+ * hole — and a route nobody has classified still returns null and is still
+ * delivered ungated, which is the safe direction the header argues for.
+ */
+const CATEGORY_BY_ROUTE: ReadonlyArray<readonly [string, NotifyCategory]> = [
+  // Badges. The whole of the defect above, and 'motivation' is the category
+  // whose own label already promises it.
+  ['/(client)/achievements', 'motivation'],
+  // The streak nudge's route, from app/(client)/dashboard.tsx. That caller
+  // already passes 'motivation' explicitly and this changes nothing for it —
+  // it is here so the table is a statement about the two motivational routes
+  // rather than a single-entry patch, and so a second caller cannot land on
+  // the same screen ungated.
+  ['/(client)/workouts', 'motivation'],
+];
+
+/**
+ * The category a route implies, or null for one this build cannot place.
+ *
+ * WHOLE-ROUTE matching with a query string allowed after it — the rule
+ * `inboxIcon` and `notificationChannel` both use, stated rather than assumed so
+ * that nobody "fixes" a miss by reordering the table.
+ *
+ * Null is the safe answer and it means "nobody has decided", not "no category".
+ * An unclassified local notification is scheduled ungated, which is what it is
+ * today: the failure of a missed gate is a banner somebody did not want, and
+ * the failure of a default-deny is a session reminder that never arrives.
+ */
+export function categoryForRoute(route: string | null | undefined): NotifyCategory | null {
+  const r = (route ?? '').trim();
+  if (!r) return null;
+  for (const [screen, key] of CATEGORY_BY_ROUTE) {
+    if (r === screen || r.startsWith(screen + '?')) return key;
+  }
+  return null;
 }
 
 /**
@@ -230,7 +502,7 @@ export function whenToDeliver(at: Date, category: NotifyCategory, prefs: NotifyP
   if (!def?.quietable || !prefs.quiet) return new Date(at.getTime());
   if (!inQuietHours(at.getHours(), prefs)) return new Date(at.getTime());
   const out = new Date(at.getTime());
-  out.setHours(prefs.quietToHour, 0, 0, 0);
+  out.setHours(prefs.quietToHour, deliveryMinute(at.getHours(), at.getMinutes(), prefs), 0, 0);
   // The window wrapped past midnight, so the end of it is TOMORROW morning
   // relative to the notification's own evening. Without this a 23:00 nudge with
   // a 22→07 window would be moved to 07:00 the same morning, sixteen hours in
@@ -253,6 +525,94 @@ export function hourToDeliver(hour: number, category: NotifyCategory, prefs: Not
   const def = categoryDef(category);
   if (!def?.quietable || !prefs.quiet) return hour;
   return inQuietHours(hour, prefs) ? prefs.quietToHour : hour;
+}
+
+/* ── why a shifted reminder does not land on the top of the hour ───────────
+ *
+ * Everything moved out of quiet hours used to be set to `quietToHour, 0, 0, 0`
+ * — the same instant, to the millisecond, for every reminder in the window.
+ * src/lib/reminderPlan.ts emits a hydration nudge on the hour for every step of
+ * its window, so a 22:00 and a 23:00 reminder both became 07:00:00.000, as did
+ * any fixed reminder set on the hour. The OS collapses simultaneous banners, so
+ * the member got one and lost the rest — the shift exists so a nudge is never
+ * dropped, and stacking is how it dropped them anyway.
+ *
+ * So the window is mapped ONTO the ending hour, monotonically: a reminder's
+ * position through quiet hours becomes its minute past `quietToHour`. Order is
+ * preserved — a 22:00 nudge still arrives before a 23:00 one — and everything
+ * still lands inside the first hour the member is awake.
+ *
+ * It is not injective and cannot be: a ten-hour window has 600 minutes in it
+ * and there are 60 to land on. Two reminders within about ten minutes of each
+ * other in the night still share a minute. That is a far smaller collapse than
+ * every reminder in the window sharing one instant, and the honest description
+ * of the guarantee is "order kept, spread out", not "never collides".
+ */
+
+/** Minutes from the start of quiet hours to `hour:minute`, wrapping midnight. */
+function intoQuiet(hour: number, minute: number, prefs: NotifyPrefs): number {
+  const from = prefs.quietFromHour * 60;
+  const at = hour * 60 + minute;
+  return at >= from ? at - from : at + 24 * 60 - from;
+}
+
+/** How long quiet hours run, in minutes. Never zero: `inQuietHours` already
+ *  treats a zero-length window as no quiet hours at all. */
+function quietLengthMinutes(prefs: NotifyPrefs): number {
+  const from = prefs.quietFromHour * 60;
+  const to = prefs.quietToHour * 60;
+  return to > from ? to - from : to + 24 * 60 - from;
+}
+
+/**
+ * The minute past `quietToHour` a reminder due at `hour:minute` should take.
+ *
+ * 0–59, monotonic in the reminder's position through the window, so the first
+ * thing due in the night is the first thing delivered in the morning.
+ */
+export function deliveryMinute(hour: number, minute: number, prefs: NotifyPrefs): number {
+  const len = quietLengthMinutes(prefs);
+  if (len <= 0) return 0;
+  const into = Math.max(0, Math.min(len, intoQuiet(hour, minute, prefs)));
+  if (len <= 60) return Math.min(59, into);
+  return Math.min(59, Math.round((into / len) * 59));
+}
+
+/**
+ * The hour AND minute a repeating reminder should fire at.
+ *
+ * The full form of `hourToDeliver`, which answers with an hour and therefore
+ * could only ever put everything on the top of it.
+ */
+export function timeToDeliver(
+  hour: number,
+  minute: number,
+  category: NotifyCategory,
+  prefs: NotifyPrefs,
+): { hour: number; minute: number } {
+  const def = categoryDef(category);
+  if (!def?.quietable || !prefs.quiet || !inQuietHours(hour, prefs)) return { hour, minute };
+  return { hour: prefs.quietToHour, minute: deliveryMinute(hour, minute, prefs) };
+}
+
+/**
+ * What to tell somebody who has just typed a time inside their own quiet hours,
+ * or null when the time they typed is the time it will arrive.
+ *
+ * The reminders screen echoed the typed time back beside the box and said
+ * nothing, so a member who set a supplement reminder for 11pm found out it was
+ * a morning reminder by never being reminded at night.
+ */
+export function movedNote(
+  hour: number,
+  minute: number,
+  category: NotifyCategory,
+  prefs: NotifyPrefs,
+  label: (h: number, m: number) => string,
+): string | null {
+  const out = timeToDeliver(hour, minute, category, prefs);
+  if (out.hour === hour && out.minute === minute) return null;
+  return `That is inside your quiet hours (${quietLabel(prefs)}), so this one will arrive at ${label(out.hour, out.minute)} instead. Nothing is dropped. It waits.`;
 }
 
 /** "10pm to 7am" — for the sentence under the switch. Sentence case, no stop. */

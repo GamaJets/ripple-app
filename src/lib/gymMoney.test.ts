@@ -59,7 +59,7 @@ const plan = (id: string, priceCents: number, currency: string,
 
 const member = (id: string, planId: string | null): Membership => ({
   id, memberId: `m-${id}`, memberName: null, planId, planName: null,
-  status: 'active', startedOn: '2026-01-01', endsOn: null,
+  status: 'active', frozenFrom: null, frozenTo: null, startedOn: '2026-01-01', endsOn: null,
 });
 
 {

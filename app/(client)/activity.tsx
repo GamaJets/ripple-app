@@ -13,24 +13,48 @@
 // does NOT: that unit is recorded on the log entry itself (the client chose km
 // or miles when they logged the run), so it is already the client's answer and
 // the body-measurement preference has no business overriding it.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Notice, fig, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
-import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
+import { shownStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel } from '../../src/lib/units';
+import { liftIn, weightLabel } from '../../src/lib/units';
+import { setChipLabel } from '../../src/lib/timedSets';
+// A session, put back together out of the rows that make it up. One row per
+// movement is how `workouts` stores an hour; this is what turns five of them
+// back into the hour the member and their coach both remember.
+import { loggedSessions, sessionFeedTitle, sessionSummary } from '../../src/lib/loggedSession';
+import { tonnage, tonnageNote } from '../../src/lib/bodyweightSets';
+import { attributionLine } from '../../src/lib/workoutAttribution';
+import { coachNameFor } from '../../src/lib/coachLogReview';
+import { useLoggingCoach } from '../../src/ui/coachLogQueries';
+import type { WorkoutEntry } from '../../src/lib/mockData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
+import { ZoneStrip } from '../../src/ui/ZoneBoard';
+import { sessionZones, sessionZonesLine } from '../../src/lib/sessionZones';
+import type { ZoneSeconds } from '../../src/lib/hr';
 import { ageFromDob } from '../../src/lib/hr';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
+// The clock, kept current. This screen is registered `href: null`, which mounts
+// it once and never tears it down — see the note over `now` below.
+import { useNow } from '../../src/ui/today';
+// What a finished session may be called, and what a week of this feed came to.
+// Written for this screen and imported by nothing else.
+import { catchUp, catchUpLine, sessionFeedRows, type FeedKind } from '../../src/lib/activityFeed';
+import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
+import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -38,10 +62,38 @@ import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 // matched every other client's filter — so two people would see each other's
 // bookings, and the trainer side (which stores real user ids) never matched at all.
 
-interface Event { at: string; icon: string; title: string; sub: string; route?: string; hr?: { title: string; startISO: string; durationMin: number } }
+interface Event { at: string; icon: string; title: string; sub: string; route?: string;
+  /** The word on the button that opens `route`. "View Details" unless the row
+   *  is going somewhere more specific than that. */
+  routeLabel?: string;
+  /** The movements of a SESSION, drawn when the row is opened. One line per
+   *  exercise with its sets as they were performed — which is the thing this
+   *  feed was reported for not showing. Absent on a row that is one movement,
+   *  where `sub` already is the sets. */
+  lines?: { title: string; sets: string; pr: boolean }[];
+  /** A sentence that qualifies a figure on the row — a tonnage missing its
+   *  unpriced bodyweight sets, or who wrote the session. Data, not prose: it
+   *  states why a number is short or whose account of an hour this is. */
+  note?: string | null;
+  hr?: { title: string; startISO: string; durationMin: number };
+  /** A whole session's time in heart-rate zones, drawn as a strip when the row
+   *  is opened. One per SESSION — see src/lib/sessionZones.ts for why this
+   *  cannot be hung off the workout rows themselves. */
+  zones?: ZoneSeconds }
 
-function timeAgo(iso: string) {
-  const ms = Date.now() - Date.parse(iso);
+// `now` is passed, never read from the clock in here. A default argument would
+// have been read at the moment this line happened to run, which on a screen
+// that re-renders only when it is touched is not the moment the reader is
+// looking at it — src/ui/today.ts is the whole argument.
+function timeAgo(iso: string, now: number) {
+  const ms = now - Date.parse(iso);
+  // A negative gap is an instant that has not happened. `Math.round(-604800000
+  // / 60000)` is a large negative, which fell straight through `< 1` and read
+  // as "just now" — so next week's booking sat at the top of the feed stamped
+  // as a moment ago. Nothing future is put in this feed any more, and this is
+  // the second line: a row that somehow gets here says what it is rather than
+  // claiming to have already happened.
+  if (ms < 0) return 'upcoming';
   const mins = Math.round(ms / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
@@ -50,16 +102,55 @@ function timeAgo(iso: string) {
   const days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : `${days}d ago`;
 }
-function timeLabel(iso: string) {
-  const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1} · ${h}${ap}`;
+// This was the whole of the pattern `fmtRelativeDay`'s header says it ended,
+// in one line: a hardcoded English weekday array, `${d.getDate()}/${d.getMonth() + 1}`
+// — which a member in the United States reads month-first, so 9 December
+// arrives as 12 September — and a 12-hour clock hand-built in English on a
+// screen most of whose readers are on a 24-hour locale. All three are the
+// reader's own now, through the shared helpers.
+//
+// `now` is passed for the same reason `timeAgo` takes one. `fmtRelativeDay`
+// defaults it from the clock, and it is what decides "Today" — so a screen left
+// open across midnight went on calling yesterday's session today, on the one
+// screen whose job is to say when things happened.
+function timeLabel(iso: string, now: Date) {
+  return `${fmtRelativeDay(iso, now)} · ${fmtTime(iso)}`;
 }
+
+/** How many rows a tap adds, and how many are drawn to begin with. */
+const FEED_PAGE = 40;
+/** The window the line above the feed reports on. Rolling days of INSTANTS, not
+ *  a run of calendar days — see the header of src/lib/activityFeed.ts. */
+const CATCH_UP_DAYS = 7;
 
 export default function Activity() {
   const t = useTheme();
+  // "Logged Barbell Back Squat" in a German member's own feed, under a library
+  // that calls the same movement Kniebeuge. The stored `e.exercise` is the
+  // identity and is untouched; only the sentence moves.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const [open, setOpen] = useState<number | null>(null);
   const [hrFor, setHrFor] = useState<{ title: string; startISO: string; durationMin: number } | null>(null);
+  // ── the clock ──────────────────────────────────────────────────────────
+  //
+  // Every stamp on this screen and the line that closes the feed to what has
+  // already happened were `Date.now()` read in the render body. That is not
+  // frozen at mount, but it is only right at the instant something else
+  // happens to redraw — and app/(client)/_layout.tsx registers this screen
+  // `href: null`, so it mounts once, is never torn down, and redraws for
+  // nothing while it sits open. A member who left Activity open through their
+  // own session came back to rows still stamped "4m ago" an hour later, and to
+  // a session that had started, finished and been marked while the screen went
+  // on treating it as not yet begun. `useNow` re-reads at the next local
+  // midnight, on every return to the foreground, and on every focus.
+  const now = useNow();
+  const nowMs = now.getTime();
+  // How much of the feed is drawn. A page rather than a ceiling: the list used
+  // to be cut at forty with nothing said, so a member with two years of
+  // training had a history that stopped dead and a heading that called forty
+  // rows the whole of it.
+  const [shown, setShown] = useState(FEED_PAGE);
   const cd = useClientData();
   const wu = useSettings().weightUnit;
   const age = ageFromDob(cd.dob);
@@ -71,10 +162,22 @@ export default function Activity() {
   // training, three check-ins and a session booked for Thursday. `worstStatus`
   // is the status of the feed as a whole: it is only as complete as its least
   // complete source.
-  const { log, status: logStatus } = useWorkoutLog();
-  const { checkins, status: checkinStatus } = useCheckIns();
-  const { sessions, status: sessionStatus } = useSessions();
-  const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus);
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  const { checkins, status: checkinStatus, reload: reloadCheckins } = useCheckIns();
+  const { sessions, status: sessionStatus, refresh: refreshSessions } = useSessions();
+  // Four reads make this feed — the training log, the check-ins, the booked
+  // sessions and the profile — so the gesture asks for all four. Refreshing
+  // some of them would leave one timeline drawn from two different moments.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadLog(); reloadCheckins(); void refreshSessions(); cd.reload();
+  }, [reloadLog, reloadCheckins, refreshSessions, cd.reload]));
+  // Four reads feed this screen, and the fourth was not in the status. The
+  // scans read is what prices a bodyweight PR (`bwHistory` below), so when it
+  // failed every pull-up and dip quietly stopped being a record — the feed
+  // printed "Logged Pull-ups" where "New PR — Pull-ups" belonged, counted
+  // itself complete, and said nothing. A read that changes what the list says
+  // belongs in the status the list reports.
+  const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus, cd.scansStatus);
   // Only a whole log can say that a set was a personal record, for the same
   // reason SessionRunner and the manual-log path in workouts.tsx both check it:
   // `isNewPR` compares against the rest of the log, and a log that is a prefix
@@ -91,62 +194,283 @@ export default function Activity() {
   // screens: a short weight history under-prices the earlier sets and would
   // invent a record out of a failed read.
   const bwHistory = isWhole(cd.scansStatus) ? cd.weightSeries : [];
+  // Whose name may go under a session this member did not write. Null covers
+  // every way of not knowing and reads as "Your Coach", which is true of every
+  // coach-logged row whoever wrote it — see `coachNameFor`.
+  const loggingCoach = useLoggingCoach(cd.id && cd.id !== 'unknown' ? cd.id : null);
 
   const events: Event[] = [];
 
-  // One set, as "8×60kg". `|| null` and the branch on null, because neither is
-  // optional: a set tuple that came back without its load rendered the word
-  // "null" against the reps — a bare interpolation never reaches fig() — and a
-  // set stored at 0 is a bodyweight set, which units.ts says a screen shows as
-  // a dash rather than as "0 kg". The unit goes with the figure and stays off
-  // the dash, so nothing reads "—kg".
-  const setText = (s: number[]): string => {
-    const v = weightIn(s[1] || null, wu);
-    return `${s[0]}×${v == null ? fig(null) : `${v}${wu}`}`;
-  };
+  // One set, through `setChipLabel` — the same function
+  // app/(client)/calendar.tsx now uses, which is what these two files' headers
+  // have always promised of each other.
+  //
+  // What it fixes here is what it fixed there. This read "a set stored at 0 is
+  // a bodyweight set, which units.ts says a screen shows as a dash", which was
+  // the best available reading before `bw` existed and is wrong now: a stored 0
+  // with `bw[i] === true` beside it is a pull-up, and one without is a load
+  // nobody recorded. They were rendered identically, as "8×—", and only the
+  // second of them is a bar with a missing weight. A hold was worse still —
+  // "45×—", forty-five repetitions of nothing, on a plank the app itself
+  // prescribed in seconds.
+  // `liftIn`, not `weightIn`. Both convert a stored kilogram figure and they
+  // round it at different grains, because they are about different things:
+  // `weightIn` is the BODY weight reader and gives whole pounds, `liftIn` is
+  // the LIFTED load reader and gives the 0.5 lb step that plates come in.
+  // src/lib/units.ts argues the half-pound at length — 2.5 kg, the commonest
+  // progression step in this app, is 5.51 lb, and whole pounds cannot say it.
+  //
+  // A load is what goes through here, and it was going through the body
+  // reader. So a pounds reader who logged a 227.5 lb set (stored 103.19 kg)
+  // read it back as 8×227.5 lb on Train and on the calendar, which both go
+  // through `fig(liftIn(kg, wu))`, and as 8×227 lb on this screen — the same
+  // set, disagreeing with itself across two tabs of the same app.
+  const setText = (e: WorkoutEntry, i: number): string =>
+    setChipLabel(e, i, (kg) => fig(liftIn(kg, wu)), wu);
 
-  // Workouts + PR flags
-  for (const e of log) {
+  /* ── a session is one event, not one event per movement ─────────────────
+   *
+   * This loop used to walk `log` — one row per MOVEMENT — so the hour a coach
+   * spent with a member arrived here as five separate "Logged Hip Thrust"
+   * lines, each indistinguishable from five things the member had done alone
+   * on five different occasions, and not one of them saying a coach had
+   * written it. That is the whole of the report: "training sessions logged by
+   * the coach are not displaying what exercises and weights and reps were
+   * done". The exercises, the weights and the reps were all on this screen;
+   * the SESSION was not, so nothing joined them up and nothing was attributed.
+   *
+   * `loggedSessions` puts the rows back together on the two facts that
+   * identify a session — the instant they share and who wrote them. A group of
+   * one is left exactly as it was: a single movement is not a session, and
+   * folding it into one would cost the personal-record heading, the route to
+   * the records screen and the heart-rate window that hang off a single entry.
+   */
+  const trainedSessions = loggedSessions(log);
+  for (const s of trainedSessions.filter((g) => g.entries.length > 1)) {
+    // Every movement of it, with each set as it was performed. `setText` is
+    // the same renderer the single-entry rows use, so a set reads identically
+    // whether it arrived alone or inside a session.
+    const lines = s.entries.map((e) => ({
+      title: movement(e.exercise),
+      sets: e.sets
+        ? e.sets.map((_x, i) => setText(e, i)).join(' · ')
+        : e.cardio
+          ? [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null].filter(Boolean).join(' · ')
+          : '',
+      pr: prsKnown && isNewPR(log, e, bwHistory),
+    }));
+    // The load, through the same converter and the same caveat as every other
+    // tonnage in this app. `tonnageNote` is not decoration: a bodyweight set
+    // this member's weight history cannot price is missing from the figure,
+    // and a total that swallowed it would be a smaller session stated as a
+    // number. Withheld entirely under anything but a whole read, because a
+    // prefix of a session is not a session's load.
+    const ton = tonnage(s.entries, bwHistory);
+    const load = isWhole(feedStatus) && ton.kg > 0 ? `${fig(liftIn(ton.kg, wu))} ${wu}` : null;
+    // The session's own length, when somebody said what it was. Session-scoped,
+    // so every row carries the same number and the first that has one answers
+    // for all of them — see `WorkoutEntry.sessionMins`.
+    const mins = s.entries.reduce<number | null>((acc, e) => acc ?? (
+      typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
+        ? Math.round(e.sessionMins) : null), null);
+    const title = sessionFeedTitle(s, coachNameFor({ loggedBy: s.loggedBy ?? undefined }, loggingCoach));
+    events.push({
+      at: s.at,
+      icon: s.loggedBy ? 'people' : 'dumbbell',
+      title,
+      sub: sessionSummary(s, load),
+      lines,
+      // Only where a figure was actually drawn, and only when it is short.
+      note: load ? tonnageNote(ton) : null,
+      // The member's own record of this hour is on Train, where each row of it
+      // carries the amend and the query their coach can read. That is the
+      // affordance src/lib/coachLogReview.ts exists for and this feed must not
+      // grow a second, weaker copy of.
+      //
+      // The bare path, NOT `trainIntent`. That helper mints a one-shot token
+      // from the clock to mean "somebody pressed Start Workout", and it is
+      // called at the tap on every other caller — minting one here, in the
+      // render body, once per session, would both claim an intent nobody had
+      // and give this row a different route on every redraw.
+      route: '/(client)/workouts',
+      routeLabel: s.loggedBy ? 'Review This Session' : 'View Details',
+      hr: mins == null ? undefined : { title, startISO: s.at, durationMin: mins },
+    });
+  }
+
+  // Workouts + PR flags — the movements that were logged on their own.
+  for (const e of trainedSessions.filter((g) => g.entries.length === 1).map((g) => g.entries[0])) {
     const pr = prsKnown && isNewPR(log, e, bwHistory);
+    // One movement a coach wrote is still a record made about somebody by
+    // somebody else, and it carried nothing saying so. `attributionLine` is the
+    // sentence both apps use for it, and `coachNameFor` decides whether this
+    // app is entitled to use the coach's name or has to say "your coach".
+    const by = attributionLine(e, coachNameFor(e, loggingCoach), true);
     if (e.sets) {
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map(setText).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
+      // The heart-rate window is the member's OWN testimony about how long the
+      // session ran, or there is no window and no chart.
+      //
+      // It used to be `Math.max(20, e.sets.length * 4)` — four minutes a set,
+      // floored at twenty. So a five-set session was exactly twenty minutes and
+      // a twelve-set session exactly forty-eight, whatever actually happened,
+      // and the chart's shape, its peak and its time-in-zone were all about an
+      // interval nobody measured, captioned with the name of a session that
+      // did. src/lib/mockData.ts says it in as many words about this very
+      // field: a strength session's length is otherwise unknowable, and a
+      // nominal figure "would be a fabricated figure sitting in a health
+      // record". `sessionMins` is the member's own answer and is the only one
+      // there is — where it is absent the button is simply not offered, which
+      // is what the app does everywhere else it has no figure.
+      const mins = typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
+        ? Math.round(e.sessionMins) : null;
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR · ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), note: by, route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
     } else if (e.cardio) {
-      events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
+      events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, note: by, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
   }
-  // Streak milestone (as of now)
-  const streak = currentStreak(log);
+
+  // ── Time in zone, once per session ──────────────────────────────────────
+  //
+  // The app has recorded `zones` on every workout it watches a heart rate
+  // through, and then only ever shown them WHILE the member was still
+  // training: <ZoneBoard> renders in the live runner and on the finish screen
+  // and nowhere else. Close the app and the reading was written down and never
+  // read back.
+  //
+  // Its own event rather than something hung off the workout rows, because a
+  // guided session writes the same zone seconds onto EVERY exercise it
+  // produces. A strip per row would show one forty-minute session five times
+  // over, once under each lift, as if the member had spent forty minutes in
+  // zone 4 on the bench and another forty on the squat. `sessionZones` groups
+  // by the session's timestamp and takes one reading per session; its test
+  // puts that duplication back and watches it collapse.
+  for (const sz of sessionZones(log)) {
+    events.push({
+      at: sz.at,
+      icon: 'heart',
+      title: 'Time in Zone',
+      sub: sessionZonesLine(sz),
+      zones: sz.seconds,
+    });
+  }
+  // Streak milestone (as of now), off the ONE streak figure — see
+  // `shownStreak` in src/lib/streaks.ts. The raw chain here meant a member
+  // could pass a milestone on Home and not have it appear in their own feed.
+  const streak = shownStreak(log);
   const milestone = prsKnown ? streakMilestone(streak) : null;
-  if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
+  // Dated to the day the streak was last EXTENDED, not to the instant this
+  // component happened to render. `new Date().toISOString()` here was not
+  // memoised, so the row re-dated itself on every render and always read "just
+  // now" — a milestone passed a fortnight ago sat at the top of the feed
+  // claiming to have just happened, above entries that really had.
+  const lastTrainedMs = log.reduce((acc, e) => {
+    const ms = Date.parse(e.t);
+    return Number.isFinite(ms) && ms > acc ? ms : acc;
+  }, 0);
+  if (milestone && lastTrainedMs > 0) {
+    events.push({ at: new Date(lastTrainedMs).toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
+  }
   // Check-ins
   for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly Check-in Sent', sub: `${fig(weightLabel(c.weightKg, wu))} · Energy ${c.energy}/5 · Sleep ${c.sleep}/5`, route: '/(client)/checkin' });
-  // My sessions
-  for (const s of sessions) {
-    if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session Booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
+  // ── My sessions ────────────────────────────────────────────────────────
+  //
+  // A feed is a record of what has HAPPENED, and this screen used to decide
+  // that with `s.status === 'booked' && Date.parse(s.startsAt) <= nowMs`. Both
+  // halves of that were wrong, and src/lib/activityFeed.ts sets out why at
+  // length:
+  //
+  //   · THE START IS NOT THE END. A member ten minutes into their own session
+  //     read in their history that it had happened.
+  //   · THE OUTCOME WAS NEVER ASKED FOR. `sessions.outcome` has carried
+  //     completed / no_show / cancelled / late_cancelled since part 33, and one
+  //     sentence — "Session Booked" — was printed over all five states. A
+  //     session the coach cancelled on Thursday morning sat in the member's own
+  //     record looking exactly like one they had attended.
+  //
+  // The verdict is read through `pastVerdict`, the same function the session
+  // history screens read it through, so the two cannot come to disagree about
+  // the same hour. 'unknown' is `useClientData`'s placeholder id rather than an
+  // id, and is passed as null so it matches nothing.
+  const pastSessions = sessionFeedRows(sessions, cd.id === 'unknown' ? null : cd.id, nowMs);
+  for (const r of pastSessions) {
+    events.push({
+      at: r.session.startsAt,
+      // The title carries the meaning; the icon only says whether this is an
+      // hour that went as booked or one there is something to read about.
+      icon: r.state === 'delivered' || r.state === 'unmarked' ? 'calendar' : 'info',
+      title: r.title,
+      sub: `${timeLabel(r.session.startsAt, now)} · ${r.session.durationMin} min`,
+      route: '/(client)/bookings',
+    });
   }
 
   events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-  const feed = events.slice(0, 40);
+  const feed = events.slice(0, shown);
+  const more = events.length - feed.length;
+
+  /* ── what the week came to ──────────────────────────────────────────────
+   *
+   * The question a member opening this screen after a week away is asking
+   * before any of the rows answer it. Nothing here answered it: there were
+   * forty rows, newest first, and the reading was left to them.
+   *
+   * Counted from a list built for the purpose and NOT from `events`. One
+   * training session writes one feed row per movement — src/lib/mockData.ts
+   * says it on `WorkoutEntry.id`, "one session writes all its exercises with
+   * the same timestamp" — so tallying rows would tell somebody who trained
+   * three times that they trained eleven. The instant a session's rows share
+   * is its identity, so the sessions are what `loggedSessions` cuts out of the
+   * log rather than the rows themselves.
+   *
+   * Personal records are deliberately not fed in. `catchUp` folds them into
+   * the trained count on the understanding that one row is one workout, which
+   * is true of a per-session list and not of a per-movement one; a session
+   * with three records would come back as three workouts. They are already on
+   * the rows below under a trophy, which is where a record belongs.
+   *
+   * `loggedSessions` is what cuts them, and it is the same cut the rows above
+   * are drawn from, so the line and the list cannot come to disagree about how
+   * many times somebody trained. It was a Set of distinct timestamps, which is
+   * the same answer in every case but one: a coach writing an hour up at the
+   * instant the member logged their own accessory work folded into a single
+   * workout, because a bare timestamp cannot see who wrote the row.
+   */
+  const tally = catchUp([
+    ...trainedSessions.map((g) => ({ at: g.at, kind: 'workout' as FeedKind })),
+    ...checkins.map((c) => ({ at: c.at, kind: 'checkin' as FeedKind })),
+    ...pastSessions.map((r) => ({ at: r.session.startsAt, kind: 'session' as FeedKind })),
+  ], nowMs, CATCH_UP_DAYS);
+  // Only over a whole read. A tally is a claim about a week, and four reads
+  // stand behind it — "2 workouts logged" over a truncated log is a floor
+  // dressed as a count, which is the one thing a figure must never be.
+  const catchLine = isWhole(feedStatus) ? catchUpLine(tally, CATCH_UP_DAYS) : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Everything across your training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Activity</Text>
-          </View>
-        </View>
+        <PageHead title="Activity" subtitle="Everything across your training" />
 
         <Section>
           {/* The count is the size of what this screen managed to assemble, not
-              of what happened. It is shown only when all three reads landed
+              of what happened. It is shown only when all four reads landed
               whole — under anything less it would be a smaller life stated as a
-              number. */}
-          <SectionHead title="Recent" note={isWhole(feedStatus) && feed.length > 0 ? `${feed.length} event${feed.length === 1 ? '' : 's'}` : undefined} />
+              number.
+
+              `events`, not `feed`. `feed` is the page that is drawn, and while
+              the cut was silent this line reported it as the total: a member
+              with two hundred events read "40 events" under a heading that was
+              answering a different question from the one they asked. */}
+          <SectionHead title="Recent" note={isWhole(feedStatus) && events.length > 0 ? `${events.length} Event${events.length === 1 ? '' : 's'}` : undefined} />
+
+          {/* One line for the week, above the rows that make it up. Null when
+              nothing landed in the window — "nothing in the last 7 days" is a
+              sentence about a member, and the empty state below is where a
+              claim like that is made or withheld. */}
+          {catchLine ? (
+            <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{catchLine}</Text>
+          ) : null}
 
           {feedStatus === 'error' || feedStatus === 'partial' ? (
             <Notice
@@ -154,7 +478,7 @@ export default function Activity() {
               kicker="Activity"
               title={feedStatus === 'error' ? 'We couldn’t read everything' : 'Not everything fits in one read'}
               note={feedStatus === 'error'
-                ? 'Your training, check-ins and bookings are read from three places and at least one of them did not answer. What is listed below is real; what is missing is missing from this screen, not from your record.'
+                ? 'Your training, check-ins, bookings and body scans are read from four places and at least one of them did not answer. What is listed below is real; what is missing is missing from this screen, not from your record. If it was the scans, a pull-up or a dip cannot be priced against your own weight, so it is listed as logged rather than as a record.'
                 : 'You have more on record than this screen can read in one go. What is listed below is your most recent, and the rest is on your log rather than gone.'}
             />
           ) : null}
@@ -165,33 +489,95 @@ export default function Activity() {
               {/* "Nothing yet" is a claim about the member's whole record, and
                   it is only true under a whole read. */}
               <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>
-                {feedStatus === 'loading' ? 'Reading…' : feedStatus === 'error' ? 'Nothing we could read' : 'Nothing yet'}
+                {feedStatus === 'loading' ? 'Reading…'
+                  : feedStatus === 'error' ? 'Nothing We Could Read'
+                  // 'partial' had no arm of its own and fell through to "Nothing
+                  // yet", which is the very claim a truncated read cannot
+                  // support. The buttons below were already withheld under it —
+                  // check:whole saw to that — and the sentence above them went
+                  // on saying the opposite.
+                  : feedStatus === 'partial' ? 'Nothing in the Part We Could Read'
+                  : 'Nothing Yet'}
               </Text>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
                 {feedStatus === 'loading' ? 'Your training, check-ins and bookings are on their way.'
-                  : feedStatus === 'error' ? 'This is not an empty record — it is one we could not open. Pull down or come back when you have signal.'
+                  : feedStatus === 'error' ? 'This is not an empty record. It is one we could not open. Pull down or come back when you have signal.'
+                  : feedStatus === 'partial' ? 'You have more on record than we can read in one go, and none of it landed in this page. This is not a claim that nothing has happened. Pull down to ask again.'
                   : 'Log a workout or send a check-in to get started.'}
               </Text>
+              {/* The sentence names two things to do and, until now, offered
+                  neither. Only on the genuinely empty arm: under 'error' this
+                  is a record we could not open, and inviting somebody to add to
+                  it would be answering a question they did not ask; under
+                  'loading' the feed may be about to arrive.
+                  `isWhole`, not "not loading and not error". check:whole caught
+                  the first version of this line, and it was right to: a
+                  'partial' read is a prefix, and offering somebody a first step
+                  over a set we know is incomplete is the same mistake as
+                  calling it empty. */}
+              {isWhole(feedStatus) ? (
+                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                  <Ghost label="Log a Workout" onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
+                  <Ghost label="Weekly Check-in" onPress={() => router.push('/(client)/checkin')} />
+                </View>
+              ) : null}
             </View>
           ) : feed.map((e, i) => {
             const isOpen = open === i;
             return (
               <View key={i}>
                 {i > 0 ? <Rule /> : null}
-                <Pressable onPress={() => setOpen(isOpen ? null : i)} accessibilityRole="button" accessibilityLabel={`${e.title}. ${e.sub}. ${isOpen ? 'Collapse' : 'Tap to expand'}`}
+                <Pressable onPress={() => setOpen(isOpen ? null : i)} accessibilityRole="button" accessibilityLabel={`${e.title}. ${e.sub}.${e.note ? ` ${e.note}` : ''} ${isOpen ? 'Collapse' : 'Tap to expand'}`}
                   style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name={e.icon as any} size={17} color={t.brand} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.title}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.title}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{e.sub}</Text>
+                    {/* Who wrote it, or why a figure on it is short. One line,
+                        beside the thing it qualifies, and drawn shut as well as
+                        open: a record made about somebody by somebody else says
+                        so where they will read it, not one tap further on. */}
+                    {e.note ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.note}</Text>
+                    ) : null}
                     {isOpen ? (
                       <View style={{ marginTop: sp.md }}>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.at)}</Text>
+                        {/* ── what was actually done in the hour ─────────────
+                            The exercises, with every set as reps by load in the
+                            member's own unit, bodyweight and holds honoured —
+                            `setChipLabel` renders them identically here and on
+                            Train. This is the answer to the report: the feed
+                            had the rows and never put them on screen as a
+                            session, so an hour with a coach showed a heading
+                            and nothing under it. */}
+                        {e.lines?.length ? (
+                          <View style={{ marginBottom: sp.md, gap: sp.sm }}>
+                            {e.lines.map((l, j) => (
+                              <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm }}>
+                                {/* A record inside a session keeps its trophy.
+                                    It is a fact about the set and it would
+                                    otherwise be lost to the grouping. */}
+                                <Icon name={l.pr ? 'trophy' : 'dumbbell'} size={13} color={l.pr ? t.brand : t.ink3} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ ...ty.label, color: t.ink }}>{l.title}</Text>
+                                  {l.sets ? (
+                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 1 }}>{l.sets}</Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
+                        {/* The strip carries its own spoken sentence — "zone 3
+                            Cardio, 12 minutes 30 seconds" — so it is not
+                            re-labelled here. */}
+                        {e.zones ? <View style={{ marginBottom: sp.md }}><ZoneStrip seconds={e.zones} /></View> : null}
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.at, now)}</Text>
                         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                           {e.route ? (
-                            <Ghost label="View Details" onPress={() => router.push(e.route as any)} />
+                            <Ghost label={e.routeLabel ?? 'View Details'} onPress={() => router.push(e.route as any)} />
                           ) : null}
                           {e.hr ? (
                             <Ghost label="Heart Rate" icon="heart" onPress={() => setHrFor(e.hr!)} />
@@ -201,15 +587,49 @@ export default function Activity() {
                     ) : null}
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: sp.sm }}>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeAgo(e.at)}</Text>
-                    <View style={{ transform: [{ rotate: isOpen ? '-90deg' : '0deg' }] }}>
-                      <Icon name="chevron" size={14} color={t.ink3} />
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeAgo(e.at, nowMs)}</Text>
+                    <View style={{ transform: [{ rotate: turn(isOpen ? -90 : 0) }] }}>
+                      <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
                     </View>
                   </View>
                 </Pressable>
               </View>
             );
           })}
+
+          {/* The rest of what this screen has already assembled. A true count,
+              whatever the status: these rows are in hand and simply are not
+              drawn yet, which is a different thing from the reads behind them
+              and is why it is not gated on `isWhole`. The banner above still
+              owns the sentence about what was never read. */}
+          {more > 0 ? (
+            <View style={{ marginTop: sp.md, alignItems: 'center' }}>
+              <Ghost label={`Show ${Math.min(more, FEED_PAGE)} More`} onPress={() => setShown((n) => n + FEED_PAGE)} />
+            </View>
+          ) : null}
+        </Section>
+
+
+        {/* ── the other half of catching up ───────────────────────────────
+            This screen is a record of what the MEMBER did. What was done TO
+            them in the same week — a session moved, a class cancelled, a
+            notice that the gym is shut on Monday — lands in two other places,
+            and nothing here has ever said so. A member back after a week has
+            been reading one third of their week and had no way to know it.
+
+            Two links and no counts. An unread figure belongs to the bell,
+            which reads the inbox and knows how the read went; printing one
+            here would be a second, weaker copy of that arithmetic, and a wrong
+            one over a truncated read. */}
+        <Section>
+          <SectionHead title="Also While You Were Away" />
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            This list is what you did. Session changes and anything your gym or your coach posted are kept separately.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+            <Ghost label="Notifications" icon="bell" onPress={() => router.push('/(client)/notifications')} />
+            <Ghost label="Notices" onPress={() => router.push('/(client)/notices')} />
+          </View>
         </Section>
       </ScrollView>
       <SessionHrSheet visible={!!hrFor} onClose={() => setHrFor(null)} title={hrFor?.title || ''} startISO={hrFor?.startISO || new Date().toISOString()} durationMin={hrFor?.durationMin || 45} age={age} />

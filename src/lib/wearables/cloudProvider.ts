@@ -15,7 +15,7 @@ import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts, f
 import { linkFor, noteMetric } from '../wearableLinkLedger';
 import {
   fetchTrainingSleep, fetchTrainingToday, fetchTrainingWorkouts,
-  requestTrainingAccess, trainingReadable,
+  requestTrainingAccess, trainingReadable, fetchTrainingHeartRateSamples,
 } from './healthConnectTraining';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
@@ -34,7 +34,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
    */
   const healthConnectReason = (): string =>
     Platform.OS === 'android'
-      ? 'This build of Repple does not contain the Health Connect reader. It is part of the app itself, so it arrives with a new version rather than in an update — WHOOP and Oura connect here today and are unaffected.'
+      ? 'This build of Repple does not contain the Health Connect reader. It is part of the app itself, so it arrives with a new version rather than in an update. WHOOP and Oura connect here today and are unaffected.'
       : 'Health Connect is Android’s health store, so there is nothing on this phone for it to read. Apple Health above is the equivalent here.';
 
   return {
@@ -238,6 +238,17 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // screen names the device the way the person connected it.
       return { provider: meta.id, status: 'ready', readings: parseVendorSleep(meta.id, res.records, meta.name) };
     },
+    /** Android's half of the session zone rebuild. Health Connect only, and
+     *  absent on a cloud vendor: WHOOP, Oura and Fitbit return day-level
+     *  aggregates, so there are no per-second samples to rebuild anything
+     *  from and offering the method would promise a precision they do not
+     *  have. See `zonesFromSamples` for what the caller does with these. */
+    ...(isHealthConnect ? {
+      async fetchHeartRateSamples(startISO: string, endISO: string) {
+        return fetchTrainingHeartRateSamples(startISO, endISO);
+      },
+    } : {}),
+
     async fetchToday(): Promise<DailyMetrics | null> {
       if (isHealthConnect) {
         // Null for every outcome except a read that worked — which is what the

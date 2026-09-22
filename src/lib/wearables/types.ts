@@ -31,7 +31,21 @@ export interface DailyMetrics {
   totalKcal: number | null;
   steps: number | null;
   heartRateAvg: number | null;  // bpm, mean of today's samples
-  heartRateLatest: number | null; // bpm, most recent sample (live-ish during a workout)
+  heartRateLatest: number | null; // bpm, most recent sample
+  /**
+   * WHEN that sample was taken, ISO, or null when the source cannot say.
+   *
+   * It used to be thrown away, and the comment on the line above used to read
+   * "live-ish during a workout". That hedge was the whole defect: an Apple
+   * Watch only streams heart rate while a workout is running ON THE WATCH, so
+   * away from one this figure can be many minutes old — and with no time
+   * attached, the runner drew a ten-minute-old reading exactly like a
+   * five-second-old one. Reported as the heart rate never updating.
+   *
+   * src/lib/hrFreshness.ts is what reads this and decides what the screen may
+   * call live.
+   */
+  heartRateLatestAt: string | null;
   heartRateResting: number | null;
   heartRateMax: number | null;    // bpm, peak of today's workouts
   /** Seconds per training zone (z1..z5, the Orange-Theory scale in src/lib/hr).
@@ -123,8 +137,20 @@ export interface WearableProvider {
   fetchToday(): Promise<DailyMetrics | null>;
   /** Pull recent completed workouts for import into the training log. Optional — not every provider supports it. */
   fetchWorkouts?(sinceDays?: number): Promise<WorkoutSample[]>;
-  /** Heart-rate samples between two ISO timestamps (for the zone chart). Optional. */
+  /** Heart-rate samples between two ISO timestamps, DOWNSAMPLED for drawing.
+   *  Optional. For a chart this is what you want; for arithmetic it is not —
+   *  see `fetchHeartRateSamples`. */
   fetchHeartRateSeries?(startISO: string, endISO: string): Promise<HrPoint[]>;
+  /**
+   * The same window at FULL RESOLUTION, for rebuilding a zone breakdown.
+   *
+   * Separate from `fetchHeartRateSeries` because that one thins the series to
+   * keep an SVG light, and thinning is fatal to this arithmetic: it keeps every
+   * Nth sample, so a short burst into zone 4 is dropped entirely — and a splat
+   * point is a minute at zone 4 or above. A chart that loses a spike looks
+   * almost the same; a breakdown that loses it is wrong about the session.
+   */
+  fetchHeartRateSamples?(startISO: string, endISO: string): Promise<HrPoint[]>;
   /**
    * Recent nights of sleep. Optional, and it returns a SleepRead rather than a
    * bare list precisely so that "this device recorded nothing" and "we could
@@ -138,5 +164,5 @@ export interface WearableProvider {
 export function emptyMetrics(source: ProviderId): DailyMetrics {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, hrv: null, recoveryPct: null, recoverySource: null, strain: null, updatedAt: d.toISOString(), source };
+  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateLatestAt: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, hrv: null, recoveryPct: null, recoverySource: null, strain: null, updatedAt: d.toISOString(), source };
 }

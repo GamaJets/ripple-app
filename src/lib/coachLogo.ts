@@ -31,6 +31,8 @@
 /* ── the bucket ────────────────────────────────────────────────────────────── */
 
 /** The private bucket from supabase/parts/330. */
+import { num1 } from './format';
+
 export const LOGO_BUCKET = 'coach-logos';
 
 /**
@@ -126,7 +128,7 @@ export function logoRefusal(bytes: number): string | null {
     return 'That file could not be read off your phone, so nothing was uploaded.';
   }
   if (bytes > MAX_LOGO_BYTES) {
-    const mb = (bytes / (1024 * 1024)).toFixed(1);
+    const mb = num1(bytes / (1024 * 1024));
     return `That image is ${mb} MB and the limit is 2 MB. A logo is a small mark rather than a photograph, so a smaller export of it will look the same and fit.`;
   }
   return null;

@@ -24,13 +24,15 @@ export default function TrainerNotifications() {
   return (
     <NotificationInbox
       group="trainer"
-      kicker="Your inbox"
+      kicker="Your Inbox"
       title="Notifications"
       blurb="Coaching requests, bookings, subscriptions and anything your clients or your gym have sent you."
-      emptyTitle="Nothing needs you"
+      emptyTitle="Nothing to Catch Up On"
       // Not "you have no notifications" — that reads as a fault. This says what
-      // the empty list means: nobody has changed anything on you.
-      emptyNote="Someone asking to be coached, a booking, a cancellation, a subscription changing or paperwork accepted — they all appear here. Client messages stay in your threads."
+      // the empty list means: there is nothing waiting. It is word for word the
+      // client's empty title, because one inbox component behind three routes
+      // should not greet a coach in different words than the client it serves.
+      emptyNote="Someone asking to be coached, a booking, a cancellation, a subscription changing or paperwork accepted: they all appear here. Client messages stay in your threads."
     />
   );
 }

@@ -37,13 +37,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Cta } from './kit';
-import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../theme/scale';
 import {
   CURRENT_RELEASE, RELEASES, MY_AUDIENCE, isVersion, releasesFor, unseenReleases,
-  firstRunReleases, type Release,
+  firstRunReleases, stampWasNeverShown, type Release,
 } from '../lib/releaseNotes';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
+// This one call wants `created_at`, not a uid, so it cannot go through
+// `signedInUid` — but the classification is the same classification, and it is
+// imported rather than restated. See src/lib/authReadFate.ts.
+import { authReadFate } from '../lib/authReadFate';
+import { authGateFault } from '../lib/authedUid';
+
 
 /** One key per account. See the header for why this is not one key per device. */
 const seenKey = (userId: string) => `repple.whatsNew.lastSeen:${userId}`;
@@ -64,6 +70,34 @@ async function readSeen(userId: string): Promise<string | null> {
 
 async function writeSeen(userId: string, version: string) {
   try { await AsyncStorage.setItem(seenKey(userId), version); } catch (e) { reportError('whatsNew.seen', e); }
+}
+
+/**
+ * The second fact, beside the first: the release this account actually
+ * DISMISSED, as opposed to the one it was stamped at.
+ *
+ * They were one value, and one value could not tell "read it and closed it"
+ * apart from "the app wrote this on launch without showing anybody anything".
+ * The whole of stampWasNeverShown() in releaseNotes.ts is the reasoning; this
+ * is where the fact gets written down. Nothing erases the old stamp — a
+ * correction here is another row, never a rubbing-out.
+ */
+const readKey = (userId: string) => `repple.whatsNew.read:${userId}`;
+
+async function readRead(userId: string): Promise<string | null> {
+  try {
+    const v = await AsyncStorage.getItem(readKey(userId));
+    return isVersion(v) ? v.trim() : null;
+  } catch {
+    // Unreadable is not "never read". It is unknown, and the caller treats an
+    // unknown as a reason to ask the server how old the account is rather than
+    // as a reason to reopen the sheet.
+    return null;
+  }
+}
+
+async function writeRead(userId: string, version: string) {
+  try { await AsyncStorage.setItem(readKey(userId), version); } catch (e) { reportError('whatsNew.read', e); }
 }
 
 function Body({ releases }: { releases: Release[] }) {
@@ -152,11 +186,11 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
   if (!visible) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View style={[StyleSheet.absoluteFill, elevation.overlay]} pointerEvents="box-none">
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
         {/* News, not a gate: the backdrop dismisses it, and so does the phone's
             own back gesture via onRequestClose. */}
-        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{
           backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md,
           paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xxl, maxHeight: '84%',
@@ -210,9 +244,26 @@ export function useWhatsNew(userId: string | null, hold = false) {
     setDismissed(false);
     let off = false;
     (async () => {
-      const seen = await readSeen(userId);
+      const [seen, read] = await Promise.all([readSeen(userId), readRead(userId)]);
       if (off) return;
-      if (seen === null) {
+      // Two different absences arrive at the same branch, on purpose.
+      //
+      //   seen === null            nothing has ever been written for this
+      //                            account — a new install, or the first run
+      //                            after this feature existed.
+      //   stampWasNeverShown(…)    a position exists and equals the release
+      //                            they are running, but no dismissal was ever
+      //                            recorded beside it. That is the signature
+      //                            of the build that stamped everybody
+      //                            silently, and it is why this sheet has
+      //                            never once appeared in the client or coach
+      //                            apps while appearing normally in Studio.
+      //
+      // Both mean the same thing — we do not know that this reader has been
+      // told anything — and both are answered the same way: ask the server how
+      // old the account is, which is the one fact that separates somebody owed
+      // a changelog from somebody who joined after it shipped.
+      if (seen === null || stampWasNeverShown(seen, read, CURRENT_RELEASE)) {
         // No stored position. That is TWO different people wearing one absence:
         // somebody who signed up this morning, and somebody who has used Repple
         // for months and is simply running the first build that has this
@@ -223,21 +274,57 @@ export function useWhatsNew(userId: string | null, hold = false) {
         // the changelog was the one release nobody was ever shown.
         let createdAt: string | null = null;
         try {
-          const { data } = await supabase.auth.getUser();
+          const { data, error } = await supabase.auth.getUser();
           createdAt = data?.user?.created_at ?? null;
-        } catch {
-          // Unknown age. firstRunReleases treats that as "stamp silently",
-          // which is the harmless direction: the cost is one missed changelog,
-          // and the cost of guessing the other way is a sheet in front of every
-          // new signup.
+          // ── the failure does not arrive in the catch ────────────────────
+          //
+          // The comment that used to sit in the `catch` below said "unknown
+          // age" as though a failed read landed there. It does not, and almost
+          // never did: `getUser()` RESOLVES on a dropped connection, with
+          // `{ data: { user: null }, error }`, so an outage came down the
+          // SUCCESS path, `created_at` was undefined, and `?? null` quietly
+          // put it in the same bucket by accident.
+          //
+          // The outcome of that accident is right, and is left exactly as it
+          // is: `firstRunReleases(null, …)` returns `[]`, and the stamp two
+          // branches below is guarded on `createdAt` being non-null, so
+          // nothing is shown and — the part that matters — nothing is written
+          // down as read. An unanswered question costs one `getUser()` on the
+          // next launch, which is what the note there already says.
+          //
+          // What was missing is the trace. "Nobody in this build ever saw the
+          // changelog" is a report somebody has to diagnose, and an auth host
+          // that was refusing every launch left no mark anywhere. A genuine
+          // sign-out is not a fault and is not reported — though it barely
+          // happens here, since this effect is gated on `userId` above.
+          if (error) {
+            const fault = authGateFault(authReadFate(error));
+            if (fault) reportError('whatsNew.accountAge', fault);
+          }
+        } catch (e) {
+          // A throw from `getUser()` is a non-AuthError — a bug rather than a
+          // network, per authReadFate.ts. Same harmless direction for the
+          // reader, and worth a line in the log.
+          reportError('whatsNew.accountAge', e);
         }
+
         if (off) return;
         const first = firstRunReleases(createdAt, CURRENT_RELEASE, MY_AUDIENCE);
         // Stamped now only when there is nothing to show. When there IS, the
         // stamp waits for the dismissal, exactly as it does on every other
         // run — a sheet recorded as read before it was read is the same bug in
         // a different place.
-        if (first.length === 0) void writeSeen(userId, CURRENT_RELEASE);
+        //
+        // `createdAt` guards the settling. With an answer from the server,
+        // "nothing to show" is a conclusion and gets written down, so this
+        // account stops asking. WITHOUT one it is just a read that failed, and
+        // writing it down would be the original bug rebuilt: a machine
+        // recording, as read, a sheet no human has seen. An unanswered
+        // question costs one getUser() on the next launch.
+        if (first.length === 0 && createdAt) {
+          void writeSeen(userId, CURRENT_RELEASE);
+          void writeRead(userId, CURRENT_RELEASE);
+        }
         setUnseen(first);
         return;
       }
@@ -249,8 +336,12 @@ export function useWhatsNew(userId: string | null, hold = false) {
   const onClose = useCallback(() => {
     setDismissed(true);
     // Stamped on dismissal, not on display: a sheet that appeared behind
-    // something else, or during a force-quit, was not read.
-    if (userId) void writeSeen(userId, CURRENT_RELEASE);
+    // something else, or during a force-quit, was not read. Both facts are
+    // written here and only here — where it was closed by a person.
+    if (userId) {
+      void writeSeen(userId, CURRENT_RELEASE);
+      void writeRead(userId, CURRENT_RELEASE);
+    }
   }, [userId]);
 
   return { visible: !hold && !dismissed && unseen.length > 0, releases: unseen, onClose };

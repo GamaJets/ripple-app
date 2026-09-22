@@ -21,31 +21,61 @@
 // addSession's `{ ok }` shape is untouched — screens destructure it — but it now
 // also carries `saved`, a promise that resolves to whether the row reached the
 // server.
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   overlaps, insideNoticeWindow, noticeHoursOf, lateCancelFee, cancelWarningLine,
-  feeRecordedLine, waitlistLine, type CancellationPolicy,
+  feeRecordedLine, type CancellationPolicy,
 } from '../lib/booking';
+// NOT src/lib/booking.ts's `waitlistLine` any more. See the re-export below.
+import { waitlistLine } from '../lib/sessionWaitlist';
 import { VARIANT } from '../lib/variant';
 import type { TrainingSession } from '../lib/types';
 import type { DisputeKind } from '../lib/sessionDispute';
-import { NOT_MOVED, COACH_NOT_MOVED, type RescheduleRefusal, type RescheduleReport, type CoachMoveRefusal, type CoachMoveReport } from '../lib/reschedule';
+import { NOT_MOVED, COACH_NOT_MOVED, queueLength, type RescheduleRefusal, type RescheduleReport, type CoachMoveRefusal, type CoachMoveReport } from '../lib/reschedule';
 // Named explicitly. Without the import `reportError` resolves to the DOM global
 // of the same name, which takes ONE argument and swallows the context string —
 // so every report from this file would have arrived unattributable.
 import { reportError } from '../lib/reportError';
-import { scheduleLocal, sendPushChecked } from './pushNotifications';
+// `scheduleLocal` is deliberately NOT imported any more. The one local
+// reminder this file used to arm now lives in src/ui/clientReminders.ts, which
+// arms AND cancels off the diary — see the note in `bookSession`.
+import { sendPushChecked } from './pushNotifications';
 import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and — when nobody is — WHICH of the two reasons it was. A
+// bare `getSession()` cannot tell an outage from a sign-out (both arrive as
+// `session: null`), and every hook in this file used to read the first as the
+// second. See src/lib/authReadFate.ts for the library reading that establishes
+// it and src/lib/sessionUidRead.ts for the classification.
+import { sessionUid } from '../lib/sessionUid';
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
+// The three answers `promote_session_waitlist` can give. Shared with the owner
+// console, which reads the same RPC and cannot import this module: it pulls in
+// the React Native client and `USE_SUPABASE`. See the header on `PromoteResult`
+// below for why the second copy of the rule went.
+import { readPromotion, type WaitlistPromotion } from '../lib/waitlistPromotion';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+// A capped page of sessions is up to ROW_CAP uuids, and the approvals lookup
+// used to put all of them into one `.in()`. See the note at that read.
+import { readByIds } from '../lib/idLookup';
+import { readCappedByIds } from '../lib/cappedByIds';
+// The reader's own weekday and the reader's own clock, for the three pushes
+// below. See the note above `at`/`dow` in `cancelBookedSession`.
+import { fmtClock, weekdayNameShort } from '../lib/format';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import { classifyWrite } from '../lib/offlineQueue';
+// Whether the autosaved cancellation policy actually landed. The write here had
+// both of the defects src/lib/profileSave.ts was written for: a discarded
+// outcome, and a debounce cancelled by leaving the screen.
+import { IDLE_SAVE, markPending, afterWrite, type SaveStatus } from '../lib/profileSave';
+import { writeFailure } from '../lib/wroteRows';
 import { useOutbox } from './outbox';
 import { useLive } from './realtime';
+import { useRecoverRead } from './readRefresh';
 
 /** Where this device keeps the calendar. */
 const SESSIONS_SCOPE = 'sessions';
@@ -188,13 +218,32 @@ export interface ServerCancel {
   /** The client the slot went to off its waitlist, or null when nobody was
    *  waiting. An opaque id, exactly as `reofferSlot` already returns. */
   promotedClient: string | null;
-  /** How many are still waiting on that slot after the promotion. */
-  waiting: number;
+  /**
+   * How many are still waiting on that slot after the promotion, and NULL when
+   * nobody counted them.
+   *
+   * The same widening as `RescheduleReport.waiting` and `CoachMoveReport.waiting`
+   * in src/lib/reschedule.ts, against the same defect: this was read as
+   * `toNum(d?.waiting) ?? 0`, which turned an absent key, a null, an empty
+   * string and a NaN alike into a COUNTED zero. A count nobody took is not an
+   * empty queue, and it travels as null so that nothing built from it can say
+   * the queue was empty.
+   *
+   * Nothing renders this field today — `ptCancelLines` words the freed slot off
+   * `promoted` and `offerPushed` and never looks at the count. So this one is
+   * latent at both ends: the server always sends the key (see below) and no
+   * sentence reads it. It is widened anyway, because it is an exported field on
+   * a report two screens already pass around, and the first caller to word it
+   * would inherit the fabricated zero.
+   */
+  waiting: number | null;
 }
 
 const NOT_FREED: ServerCancel = {
   freed: false, late: false, noticeHours: null, policyApplies: false,
-  fee: null, currency: null, charged: false, promotedClient: null, waiting: 0,
+  // Null and not 0: a cancellation that was refused, or never reached the
+  // server, counted nobody. It did not count nobody waiting.
+  fee: null, currency: null, charged: false, promotedClient: null, waiting: null,
 };
 
 const toNum = (v: unknown): number | null => {
@@ -215,7 +264,11 @@ const toServerCancel = (d: any): ServerCancel => ({
   currency: typeof d?.currency === 'string' ? d.currency : null,
   charged: !!d?.charged,
   promotedClient: typeof d?.promoted === 'string' ? d.promoted : null,
-  waiting: toNum(d?.waiting) ?? 0,
+  // `queueLength` and not `toNum(…) ?? 0`. Imported from src/lib/reschedule.ts
+  // rather than written a third time: src/ui/coachMoveAt.ts holds the original
+  // private copy and reschedule.ts the exported one, and the note on the
+  // exported copy asks the next lane in this file to reach for it.
+  waiting: queueLength(d?.waiting),
 });
 
 // `outcome` and `outcome_at` have been on every one of these rows since
@@ -230,10 +283,25 @@ const toServerCancel = (d: any): ServerCancel => ({
 // `pastVerdict` in src/lib/sessionHistory.ts that decides what an outcome this
 // build has never heard of means, and it reads it as unmarked rather than as
 // delivered work.
+// `rate_cents` and `rate_currency` are the same story one column later. Both have
+// been on every row since supabase/parts/33 and /1010 respectively, both arrive
+// on the same `select('*')`, and this mapper dropped the pair — so a member could
+// see that an hour had been booked and delivered and nothing about what it was
+// worth, on a row `sessions_client_read` already lets them read whole.
+//
+// Carried as a PAIR and never separately. The integer is minor units and the
+// factor is a property of the currency (1, 100 or 1000), so `rate_cents` without
+// `rate_currency` names no money — part 1010's comment on the column says so in
+// those words. `sessionRate` in src/lib/sessionRate.ts is the only reader.
+// `toNum` for the amount because PostgREST returns integers as strings often
+// enough that Number(null) === 0 is a live hazard, and a 0 here reads as a
+// session somebody decided was free.
 const rowToSession = (r: any): TrainingSession => ({
   id: String(r.id), trainerId: r.trainer_id, clientId: r.client_id,
   startsAt: r.starts_at, durationMin: r.duration_min, status: r.status, released: !!r.released,
   outcome: r.outcome ?? null, outcomeAt: r.outcome_at ?? null,
+  rateCents: toNum(r.rate_cents),
+  rateCurrency: typeof r.rate_currency === 'string' ? r.rate_currency : null,
 });
 
 const Ctx = createContext<SessionsValue | null>(null);
@@ -265,13 +333,41 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     if (!USE_SUPABASE) return;
     {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // No session is a true answer, not a failed check. Treating "nobody is
+        // signed in" as an error latched this provider into 'error' on the
+        // first tick — before anybody had signed in — where it stayed, because
+        // the effect never ran a second time.
+        //
+        // But "no session" was being read off `sess?.session` with the `error`
+        // beside it discarded, and those are two different answers wearing the
+        // same face. src/lib/authReadFate.ts has the library reading: when the
+        // stored access token has expired and the refresh cannot reach the
+        // server, `getSession()` resolves with `session: null` and an
+        // `AuthRetryableFetchError`. So a member in a basement gym, or anyone
+        // through a captive portal, took this branch — and 'ready' with an
+        // empty `sessions` array is the coach's diary and the client's
+        // upcoming-session card both stating, as a fact, that there is no
+        // training booked. On the screen whose whole subject is training they
+        // have already paid for and are standing there for.
+        //
+        // `sessionUid` keeps the same storage-first call and separates the two.
+        const who = await sessionUid('sessions.hydrate');
         if (cancelled()) return;
-        if (!sess?.session) { setStatus('ready'); return; }
+        // Narrowed on `fate`, not on `!who.uid`: UidRead's signed-in member has
+        // `uid: string`, which includes '', so the falsy check does not
+        // discriminate the union.
+        if (who.fate !== null) {
+          // 'signed-out' keeps the old behaviour, because it was right for the
+          // answer it was given: an empty calendar under 'ready' is the true
+          // state of an account nobody is signed into.
+          //
+          // 'unreadable' is 'error', and under 'error' this provider's empty
+          // list means UNKNOWN rather than none — which is the whole point of
+          // src/ui/loadStatus.ts and the difference between "we could not read
+          // your calendar" and "you have nothing booked".
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
@@ -341,11 +437,31 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           // ceiling and silently dropped approvals off sessions that had them —
           // showing delivered, client-confirmed work as still awaiting sign-off.
           // Scoped this way it cannot exceed the session count, which is capped.
+          //
+          // And CHUNKED, which the sentence above was one limit short of. The
+          // session read directly above ends `.limit(capLimit())`, so `rows` is
+          // up to ROW_CAP = 1000 ids, and all thousand went into one `.in()` —
+          // about 39 bytes of query string per uuid, so a ~39KB request line
+          // against the 8KB nginx and most CDNs allow. The proxy refuses it
+          // before the database sees it, supabase-js does not reject on a 414,
+          // and it arrives as `data: null`. Which is `appr?.length` false, which
+          // is every session on the calendar rendering as awaiting sign-off:
+          // the exact outcome the paragraph above was written to prevent,
+          // reached through the other limit. A coach then chases a month of
+          // clients who have already confirmed. See src/lib/idLookup.ts.
           // no-error-ok: an unread approval leaves the session showing as not-yet-approved, which is what it shows before anyone approves it; the sessions themselves are the point of this screen
-          const { data: appr } = await supabase.from('session_approvals')
-            .select('session_id, approved_at, note, state, disputed_at, dispute_kind')
-            .in('session_id', rows.map((r) => r.id))
-            .limit(capLimit());
+          const appr = await readByIds<any>(
+            rows.map((r) => r.id),
+            // One approval per session (supabase/parts/22), so a chunk of 150
+            // ids is one round trip. `.order('session_id')` is total here for
+            // that reason, and `readAll` requires a total order of every page.
+            (chunk, from, to) => supabase.from('session_approvals')
+              .select('session_id, approved_at, note, state, disputed_at, dispute_kind')
+              .in('session_id', chunk)
+              .order('session_id', { ascending: true })
+              .range(from, to),
+            'which of your sessions have been signed off',
+          );
           if (appr?.length) {
             const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));
             rows = rows.map((r) => {
@@ -457,9 +573,8 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const bookSession: SessionsValue['bookSession'] = async (id, clientId) => {
-    const s = sessions.find((x) => x.id === id);
-    // Drawing the booking and scheduling the reminder are what a CONFIRMED
-    // booking looks like, so neither happens until the server has confirmed one.
+    // Drawing the booking is what a CONFIRMED booking looks like, so it does
+    // not happen until the server has confirmed one.
     //
     // `who` is the id the SERVER booked it for, not the one the caller passed.
     // `book_session` writes `auth.uid()` and can write nothing else, so on the
@@ -473,22 +588,33 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     // confirmed, was on neither the grid nor the day list until the next
     // refresh. Falling back to `clientId` keeps the offline branch below, where
     // there is no `uid` and nothing has been confirmed by anybody, unchanged.
+    // ── the reminder is NOT armed here any more ──────────────────────────
+    //
+    // It used to be: one `scheduleLocal('Session in 1 hour', …)` on this line,
+    // id discarded. A local notification survives the app being closed, so that
+    // one call was a promise the handset kept whatever happened next — and this
+    // is the ONLY moment in a member's relationship with a session at which the
+    // handset is involved at all. Everything else happens on a server:
+    // cancelling (`cancel_my_session`), moving (`reschedule_my_session`), being
+    // handed the slot off a waitlist, the coach booking them in, the nightly job
+    // materialising their standing Tuesday. So the one gesture that could arm a
+    // reminder was also the only one, and not one of the gestures that
+    // INVALIDATE a reminder could take it back.
+    //
+    // What that cost, in the three directions it went: a banner an hour before
+    // a session the member had cancelled; no banner at all for the hour they
+    // moved it to; and no banner ever for a session that arrived any way but
+    // this tap. It also fired on the `!uid` branch below, which returns false
+    // and makes the caller say "Not booked" — a reminder for a booking the
+    // member had just been told they did not have.
+    //
+    // src/ui/clientReminders.ts is the replacement and is a PASS over the
+    // diary rather than a hook on one gesture: it arms what the calendar says
+    // is booked and cancels what it no longer says, whoever changed it and
+    // wherever from. The coach's side has worked that way since
+    // src/lib/coachReminders.ts, whose header states the rule this broke.
     const apply = (who: string = clientId) => {
       setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId: who, released: false } : x)));
-      if (s && s.startsAt) {
-        const start = new Date(s.startsAt);
-        // With a route. Without one this reminder was the only notification in
-        // the app that opened the front door: `addNotificationTapListener`
-        // reads `data.route` and does nothing when there is not one, so an
-        // hour before their session a client tapped "Session in 1 hour" and
-        // landed on the dashboard, with the session they had just been
-        // reminded of one more tap away on the calendar.
-        // Category 'sessions', so the member's own switch decides whether this
-        // arrives — and, deliberately, so quiet hours do NOT move it: they
-        // booked a 6:30am session and the warning has to reach them before the
-        // session does. See CATEGORIES in src/lib/notifyPrefs.ts.
-        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000), { route: '/(client)/calendar' }, 'sessions');
-      }
     };
     if (!USE_SUPABASE || !uid) { apply(); return false; }
     // `book_session` books only a slot that is still 'available' and belongs to
@@ -579,14 +705,42 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const removeSession: SessionsValue['removeSession'] = async (id) => {
+    // Where the row was, so a deletion the server refuses can be undone rather
+    // than leaving a real session invisible until the app is relaunched. The
+    // same shape src/ui/roster.tsx uses for `removeClient`, and every other
+    // optimistic removal in this folder — clientTags, coachExercises, wellness,
+    // invites, programTemplates — restores the same way.
+    //
+    // The count was already checked and the boolean already honest; what was
+    // missing is what the SCREEN does with a refusal. `releaseSession` two
+    // functions above makes the argument for the other half of it: "Painting
+    // the slot open first meant a refused cancellation left the screen showing
+    // a free slot that was still somebody's booked session." A refused DELETE
+    // is the same failure one step further on — PostgREST answers a delete that
+    // matched nothing with a 204 and `error: null`, no rows and no realtime
+    // event, so a stale row or another trainer's slot the policy filters simply
+    // vanished off the calendar and was back at the next launch.
+    const at = sessions.findIndex((x) => x.id === id);
+    const removed = at >= 0 ? sessions[at] : null;
+    const putBack = () => {
+      if (!removed) return;
+      setSessions((p) => (p.some((x) => x.id === id) ? p : [...p.slice(0, at), removed, ...p.slice(at)]));
+    };
     setSessions((p) => p.filter((x) => x.id !== id));
+    // No backend to refuse it: the row is off the calendar and stays off. Still
+    // false, because the documented contract is "true only when the row was
+    // actually deleted server-side" and `releaseSession` above answers the same
+    // question the same way.
     if (!USE_SUPABASE) return false;
     try {
       // Same reason as above: a delete the policy filters out reports no error
       // and removes nothing, leaving the session to reappear on next launch.
       const { data, error } = await supabase.from('sessions').delete().eq('id', id).select('id');
-      return !error && !!data && data.length > 0;
-    } catch { return false; }
+      if (!error && !!data && data.length > 0) return true;
+      if (error) reportError('sessions.remove', error);
+      putBack();
+      return false;
+    } catch (e) { reportError('sessions.remove', e); putBack(); return false; }
   };
 
   const rescheduleMyBooking: SessionsValue['rescheduleMyBooking'] = async (fromId, toId) => {
@@ -606,8 +760,19 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         fee: toNum(r.fee),
         currency: typeof r.currency === 'string' ? r.currency : null,
         promoted: !!r.promoted,
-        waiting: Number(r.waiting) || 0,
+        // `Number(r.waiting) || 0` until tonight, which read an absent key, a
+        // null, an empty string and a NaN alike as a counted zero — and 0 is
+        // what `rescheduleLines` says "nobody was waiting for it" about. A
+        // count nobody took is not an empty queue, so it travels as null.
+        waiting: queueLength(r.waiting),
       };
+      // A move that happened with no count of who is still in line for the hour
+      // it freed. The member's sentence now admits it rather than inventing an
+      // empty queue, and it is recorded here as well, because the report is the
+      // only place the shape of the server's answer can be seen from.
+      if (report.moved && report.waiting == null) {
+        reportError('sessions.reschedule', new Error('reschedule_my_session reported a move with no waiting count'), { session: fromId });
+      }
       // The calendar this device holds is now wrong in two places at once, and
       // both of them are the point of the screen. Re-read rather than patched:
       // the freed slot may already belong to whoever was first in line for it.
@@ -636,8 +801,20 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         reason: (r.reason ?? null) as CoachMoveRefusal | null,
         clientId: typeof r.client === 'string' ? r.client : null,
         promoted: !!r.promoted,
-        waiting: Number(r.waiting) || 0,
+        // The other half of the same defect, on the path the third arm of
+        // `coachMovedLine` was built for and could not be reached from: this
+        // line settled every unknown to 0, so the arm that says "no waitlist
+        // count came back" had no way of ever being taken from `doMove`. Same
+        // reading as `queueLength` in src/ui/coachMoveAt.ts, which is the other
+        // caller of the same server report.
+        waiting: queueLength(r.waiting),
       };
+      // Named rather than left to a support call: a move whose freed hour has
+      // no queue length beside it is the condition under which a coach would
+      // otherwise be told something nobody knows.
+      if (report.moved && report.waiting == null) {
+        reportError('sessions.rescheduleClient', new Error('reschedule_client_session reported a move with no waiting count'), { session: fromId });
+      }
       // Two rows on this device are now wrong at once and both are the point of
       // the screen. Re-read rather than patched: the freed hour may already
       // belong to whoever was first in line for it.
@@ -714,7 +891,75 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   // a stored one would go on saying "4 minutes ago" while the screen stays open.
   const cachedNote = cachedAtLine(cachedAt);
 
-  return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession }}>{children}</Ctx.Provider>;
+  // Re-run this read when the signal comes back, without the member having to
+  // know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('sessions', status, () => { void hydrate(); });
+
+  // ── why this is not an inline object ──────────────────────────────────────
+  //
+  // It was one, and it cost 782 requests in five IDLE minutes on a single
+  // handset — a ~2/second lap of getUser → sessions → session_approvals, read
+  // off this project's own edge logs. An inline literal makes `useSessions()`
+  // return a different value on every render of this provider, and `refresh`
+  // a different function again. A consumer writing the obvious thing —
+  // `useFocusEffect(useCallback(() => { s.refresh(); }, [s]))` — then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, `refresh` re-runs `hydrate`, `hydrate` ends in a `setSessions`
+  // with a freshly-built array, the provider re-renders, and both identities
+  // are new again.
+  //
+  // src/ui/roster.tsx:596 documents this exact defect and fixes it there; the
+  // reasoning is worth reading and is not repeated here. This provider never
+  // got the same treatment, and it is read by more screens than roster is —
+  // app/(client)/calendar.tsx and app/(client)/standing.tsx were both looping
+  // on it.
+  //
+  // The wrappers are created once and read the current implementations out of
+  // a ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze the state they close over with them, which is
+  // the bug one level down.
+  const impl = useRef({
+    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
+  });
+  impl.current = {
+    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
+  };
+
+  const refreshStable = useCallback(() => impl.current.hydrate(), []);
+  const addStable = useCallback<SessionsValue['addSession']>((...a) => impl.current.addSession(...a), []);
+  const bookStable = useCallback<SessionsValue['bookSession']>((...a) => impl.current.bookSession(...a), []);
+  const releaseStable = useCallback<SessionsValue['releaseSession']>((...a) => impl.current.releaseSession(...a), []);
+  const cancelStable = useCallback<SessionsValue['cancelMyBooking']>((...a) => impl.current.cancelMyBooking(...a), []);
+  const removeStable = useCallback<SessionsValue['removeSession']>((...a) => impl.current.removeSession(...a), []);
+  const approveStable = useCallback<SessionsValue['approveSession']>((...a) => impl.current.approveSession(...a), []);
+  const disputeStable = useCallback<SessionsValue['disputeSession']>((...a) => impl.current.disputeSession(...a), []);
+  const rescheduleMineStable = useCallback<SessionsValue['rescheduleMyBooking']>((...a) => impl.current.rescheduleMyBooking(...a), []);
+  const rescheduleClientStable = useCallback<SessionsValue['rescheduleClientSession']>((...a) => impl.current.rescheduleClientSession(...a), []);
+
+  // Identity now changes only when something a consumer can actually see has:
+  // the calendar, how much of it we trust, or whether it came off this device.
+  const value = useMemo<SessionsValue>(() => ({
+    sessions, status, cachedNote,
+    refresh: refreshStable,
+    addSession: addStable,
+    bookSession: bookStable,
+    releaseSession: releaseStable,
+    cancelMyBooking: cancelStable,
+    removeSession: removeStable,
+    approveSession: approveStable,
+    disputeSession: disputeStable,
+    rescheduleMyBooking: rescheduleMineStable,
+    rescheduleClientSession: rescheduleClientStable,
+  }), [
+    sessions, status, cachedNote,
+    refreshStable, addStable, bookStable, releaseStable, cancelStable, removeStable,
+    approveStable, disputeStable, rescheduleMineStable, rescheduleClientStable,
+  ]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {
@@ -792,8 +1037,10 @@ export interface PtCancelOutcome {
   noticeHours: number | null;
   /** Whether the freed slot went straight to somebody on its waitlist. */
   promoted: boolean;
-  /** How many are still waiting on that slot afterwards. */
-  waiting: number;
+  /** How many are still waiting on that slot afterwards, and NULL when nobody
+   *  counted them. Carried straight from `ServerCancel.waiting` — see the note
+   *  there, including the part about nothing wording it yet. */
+  waiting: number | null;
   /** Whether the person who was promoted was told. Null when nobody was. */
   promotedTold: boolean | null;
   /** A credit was actually put back on a pack. False also covers "there was no
@@ -858,16 +1105,26 @@ export async function cancelBookedSession(
   const noticeHours = noticeHoursOf(policy);
   const lateWhenAsked = insideNoticeWindow(session.startsAt, noticeHours, now);
   const start = new Date(session.startsAt);
-  let h = start.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  const mm = start.getMinutes();
-  const at = `${h}${mm ? ':' + String(mm).padStart(2, '0') : ''}${ap}`;
-  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][start.getDay()];
+  // Both of these leave this handset and arrive on somebody else's. The day was
+  // a hardcoded `['Sun', …][getDay()]` and the time was a hand-rolled 12-hour
+  // clock with an English am/pm glued on — so a member whose phone is in
+  // Spanish, Arabic or German was pushed "Thu 7pm", and a member in a 24-hour
+  // locale was pushed a form of the clock their country does not write. Neither
+  // is a formatting nicety: this is the notification that tells somebody when
+  // the session they are being offered actually is, and they act on it.
+  // `weekdayNameShort` and `fmtClock` are the reader's own language and the
+  // reader's own clock, and both fall back to exactly these two English forms
+  // on a Hermes build with no Intl, so nothing regresses where nothing can ask.
+  const at = fmtClock(start.getHours(), start.getMinutes());
+  const dow = weekdayNameShort(start.getDay());
 
   const res = await cancelOnServer(session.id);
   if (!res.freed) {
     return {
       freed: false, late: false, lateWhenAsked, charged: false, policyApplies: false, fee: null, currency: null,
-      noticeHours: null, promoted: false, waiting: 0, promotedTold: null,
+      // Null, for the reason on `NOT_FREED`: the server refused, so nobody was
+      // counted.
+      noticeHours: null, promoted: false, waiting: null, promotedTold: null,
       refunded: false, offeredTo: null, offerPushed: null, coachTold: false, packLeft: null,
     };
   }
@@ -887,17 +1144,34 @@ export async function cancelBookedSession(
     promotedTold = (await sendPushChecked(
       [res.promotedClient],
       'The slot you were waiting for is yours',
-      `${dow} ${at} with your coach just freed up and you were next on the list — it is booked for you.`,
+      `${dow} ${at} with your coach just freed up and you were next on the list, so it is booked for you.`,
       { route: '/(client)/calendar' },
     )).ok;
   } else {
     // Server-side lookup on THIS session's trainer, so no other client's
     // identity reaches the caller beyond opaque ids.
     const others = await reofferSlot(session.id);
-    offeredTo = others.length || null;
-    offerPushed = others.length === 0
+    // null is "we could not ask", and it is NOT an empty roster. Both produce
+    // no push — there is nobody to send one to either way — but they are
+    // different facts about what happened, and the caller reports them apart:
+    // `offeredTo` stays null for both, while `offerPushed` false says a push
+    // was owed and did not go. Reported, because a freed slot that reached
+    // nobody is the coach's problem to know about.
+    if (others == null) reportError('sessions.reofferSlot.unread', 'the roster could not be read, so a freed slot was offered to nobody', { session: session.id });
+    offeredTo = others == null ? null : (others.length || null);
+    offerPushed = others == null
+      ? false
+      : others.length === 0
       ? null
-      : (await sendPushChecked(others, 'A PT slot just opened', `${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
+      // `dow` as well as `at`. This is the one of the three pushes that goes to
+      // the WHOLE roster, and it was the only one that named a time without a
+      // day: "7pm with your coach just opened up — first to book it gets it."
+      // A member reads that on Tuesday evening, assumes tonight, and opens the
+      // app to race for a slot that is on Thursday — or does not open it at all
+      // because tonight is impossible for them, and never learns the slot was
+      // on a day they were free. The other two pushes in this function already
+      // carried the day; this one is the one that most needed it.
+      : (await sendPushChecked(others ?? [], 'A PT slot just opened', `${dow} ${at} with your coach just opened up. First to book it gets it.`, { route: '/(client)/calendar' })).ok;
   }
 
   // `refundSession` answers ok:false both when there is no pack to credit and
@@ -910,7 +1184,7 @@ export async function cancelBookedSession(
   const coachTold = (await sendPushChecked(
     [session.trainerId],
     'Session cancelled',
-    `A client cancelled ${dow} ${at}.${res.promotedClient ? ' It went straight to the next client on its waitlist.' : ' The slot re-opened.'}${res.charged ? ' (Late cancel — fee recorded.)' : ''}`,
+    `A client cancelled ${dow} ${at}.${res.promotedClient ? ' It went straight to the next client on its waitlist.' : ' The slot re-opened.'}${res.charged ? ' (Late cancel, fee recorded.)' : ''}`,
     { route: '/(trainer)/calendar' },
     // 'bookings'. The coach may mute chat and still be told their morning
     // changed — which is the whole point of the categories, and this is the
@@ -952,9 +1226,9 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   // member spent reading the alert, and the credit is not the place to hold
   // them to a rule that changed under them.
   const w = o.noticeHours ?? 24;
-  if (o.lateWhenAsked) lines.push(`Cancelled within ${w} hour${w === 1 ? '' : 's'} — this session is charged from your package.`);
+  if (o.lateWhenAsked) lines.push(`Cancelled within ${w} hour${w === 1 ? '' : 's'}, so this session is charged from your package.`);
   else if (o.refunded) lines.push(`Your ${at} session was cancelled and returned to your package.`);
-  else lines.push(`Your ${at} session was cancelled. Nothing was returned to a session pack — if you booked it with a pack credit, check your package before booking again.`);
+  else lines.push(`Your ${at} session was cancelled. Nothing was returned to a session pack. If you booked it with a pack credit, check your package before booking again.`);
 
   // The fee, and only when a row really exists. `feeRecordedLine` returns null
   // when nothing was charged, so there is no branch on which this app claims a
@@ -965,7 +1239,7 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   // The member was told a fee applied and then none was recorded. That is not
   // silence-worthy: they will be expecting one.
   else if (o.late && o.policyApplies) {
-    lines.push('Your coach’s late-cancellation policy applies to this one, but no fee was recorded — check with them what you owe.');
+    lines.push('Your coach’s late-cancellation policy applies to this one, but no fee was recorded. Check with them what you owe.');
   }
 
   // Where the slot went. One of three, and the waitlist case is the only one
@@ -973,13 +1247,13 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   if (o.promoted) {
     lines.push(o.promotedTold === false
       ? 'The slot went straight to the next client on its waitlist. We couldn’t notify them, so your coach may need to.'
-      : 'The slot went straight to the next client on its waitlist — nobody had to race for it.');
+      : 'The slot went straight to the next client on its waitlist; nobody had to race for it.');
   } else {
     lines.push(o.offerPushed === true ? `The freed slot was offered to your coach's other clients.`
       : o.offerPushed === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
       : `The slot is open again on your coach's calendar.`);
   }
-  if (!o.coachTold) lines.push('We couldn’t notify your coach — message them if this session is soon.');
+  if (!o.coachTold) lines.push('We couldn’t notify your coach. Message them if this session is soon.');
   return lines;
 }
 
@@ -1012,12 +1286,23 @@ export function useCancellationPolicy(): { policy: CancellationPolicy | null; st
     let cancelled = false;
     (async () => {
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        const who = await sessionUid('cancellationPolicy.read');
         if (cancelled) return;
         // Signed out is a true answer, not a failed read. Latching 'error' on
         // the first tick before anybody has signed in is the bug the hydrate
         // above this file was fixed for; it is not repeated here.
-        if (!sess?.session) { setPolicy(null); setStatus('ready'); return; }
+        //
+        // An OUTAGE is not that answer, and it used to come down the same
+        // branch. `policy: null` under 'ready' is the state this hook's own
+        // header calls out: "your coach does not charge one" is a different
+        // sentence from "we could not read your coach's policy", and printing
+        // the second as the first is how somebody comes to believe a
+        // cancellation is free. They then cancel, and are charged.
+        if (who.fate !== null) {
+          setPolicy(null);
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
         const { data, error } = await supabase.rpc('my_cancellation_policy');
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
@@ -1054,6 +1339,23 @@ export interface MyCancellationPolicy {
   setApplies: (v: boolean) => void;
   setNoticeHours: (v: number) => void;
   setFee: (v: number | null) => void;
+  /** Read the `trainers` columns and the gym's currency again. Under 'error'
+   *  the policy on screen is the empty default and NOT the coach's own, so a
+   *  screen stating a fee needs a way to ask a second time. */
+  reload: () => void;
+  /**
+   * Whether the last edit actually reached the server.
+   *
+   * The write here ended `.then(() => {}, () => {})` — both arms empty, both
+   * outcomes discarded — behind a 600 ms debounce whose cleanup was
+   * `clearTimeout`. React runs that cleanup on unmount as well as on every
+   * dependency change, so a coach who typed a fee and tapped Back inside half a
+   * second had the write CANCELLED: never attempted, with nothing on screen
+   * having suggested anything was in flight. src/ui/coachProfile.tsx had both
+   * defects and src/lib/profileSave.ts is the answer it grew; this is the same
+   * answer for the one setting in this app a client can be held to.
+   */
+  save: SaveStatus;
 }
 
 export function useMyCancellationPolicy(): MyCancellationPolicy {
@@ -1066,6 +1368,10 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
   // Nothing is written back before the server copy has been read for this uid,
   // or the empty defaults above would clobber a policy the coach already has.
   const [synced, setSynced] = useState(false);
+  // Bumped by `reload`. `synced` is cleared with it, which is what keeps the
+  // debounced write below from firing the empty defaults at the server while
+  // the re-read is in flight — the same guard the first read already relies on.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     // Not issued at all off the coach app. These are the SIGNED-IN user's own
@@ -1075,11 +1381,34 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
     let cancelled = false;
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
+        const who = await signedInUid('myCancellationPolicy.read');
         if (cancelled) return;
-        const id = auth?.user?.id ?? null;
-        setUid(id);
-        if (!id) { setStatus('ready'); setSynced(true); return; }
+        setUid(who.uid);
+        if (who.fate !== null) {
+          // ── the two answers that used to be one ───────────────────────────
+          //
+          // 'signed-out' keeps what was here: ready, synced, and the empty
+          // defaults on screen, because there is no coach whose policy could
+          // have been read.
+          //
+          // 'unreadable' must not. The defaults are `applies: false, fee: null`
+          // — the profile screen renders that as this coach charging NOTHING
+          // for a late cancellation, which is a statement about their own
+          // business terms, made to them, over a read that never arrived. And
+          // `synced: true` is the flag that says "the server copy is now in
+          // these fields"; setting it over an outage is the same false claim
+          // stated to the write path instead of to the coach.
+          //
+          // The write itself is safe on both branches and it is worth saying
+          // why, because it is not by accident: `flushPolicy` and the debounce
+          // effect both gate on `uid`, which is null here, so nothing is sent
+          // and the empty defaults cannot clobber a policy the coach already
+          // has. What was wrong was only ever what the screen said.
+          if (who.fate === 'signed-out') { setStatus('ready'); setSynced(true); return; }
+          setStatus('error');
+          return;
+        }
+        const id = who.uid;
         const { data, error } = await supabase.from('trainers')
           .select('late_cancel_applies, late_cancel_notice_hours, late_cancel_fee, tenant_id')
           .eq('id', id).maybeSingle();
@@ -1100,6 +1429,12 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
+  }, [nonce]);
+
+  const reloadPolicy = useCallback(() => {
+    setSynced(false);
+    setStatus(USE_SUPABASE && VARIANT === 'trainer' ? 'loading' : 'ready');
+    setNonce((n) => n + 1);
   }, []);
 
   // The database refuses `applies` without an amount, so the same rule is stated
@@ -1107,24 +1442,71 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
   // accepts what a coach types and silently drops it is the failure mode this
   // screen family already has a rule about.
   const blocker = applies && (fee == null || !(fee > 0))
-    ? 'Set an amount before switching the policy on — a fee of nothing is a policy that does not apply.'
+    ? 'Set an amount before switching the policy on. A fee of nothing is a policy that does not apply.'
     : null;
+
+  const [save, setSave] = useState<SaveStatus>(IDLE_SAVE);
+  // The values the next write should carry, in a ref so the unmount flush can
+  // fire without being in anybody's dependency array.
+  const latest = useRef({ applies, noticeHours, fee, uid });
+  latest.current = { applies, noticeHours, fee, uid };
+  /** An edit that has not reached the server. Cleared only by a write that came
+   *  back confirmed, so a refused one stays dirty and is flushed again. */
+  const dirty = useRef(false);
+
+  /**
+   * Write the policy, and count what the server changed.
+   *
+   * `{ count: 'exact' }`, because a PostgREST update that matched no rows is not
+   * an error — it is the state a coach whose `trainers` row an RLS policy
+   * refuses actually gets, and `!error` said it saved. This is the fee a coach
+   * charges somebody for not turning up, and the profile screen quoting it tells
+   * them Repple records it and never collects it. Over a value that may never
+   * have been sent, that sentence is worse than nothing.
+   */
+  const flushPolicy = useCallback(async (): Promise<void> => {
+    const v = latest.current;
+    if (!USE_SUPABASE || VARIANT !== 'trainer' || !v.uid) return;
+    try {
+      const r = await supabase.from('trainers').update({
+        late_cancel_applies: v.applies,
+        late_cancel_notice_hours: v.noticeHours,
+        late_cancel_fee: v.fee,
+      }, { count: 'exact' }).eq('id', v.uid);
+      const why = writeFailure('Your cancellation policy', r);
+      if (why) {
+        if (r.error) reportError('cancellationPolicy.persist', r.error);
+        // Left dirty: the policy is still only on this handset, and the next
+        // edit or the unmount flush should try it again.
+        setSave((prev) => afterWrite(prev, false, Date.now(), why));
+        return;
+      }
+      dirty.current = false;
+      setSave((prev) => afterWrite(prev, true, Date.now()));
+    } catch (e) {
+      reportError('cancellationPolicy.persist', e);
+      setSave((prev) => afterWrite(prev, false, Date.now(), null));
+    }
+  }, []);
 
   useEffect(() => {
     if (!USE_SUPABASE || VARIANT !== 'trainer' || !uid || !synced || blocker) return;
-    const timer = setTimeout(() => {
-      try {
-        supabase.from('trainers').update({
-          late_cancel_applies: applies,
-          late_cancel_notice_hours: noticeHours,
-          late_cancel_fee: fee,
-        }).eq('id', uid).then(() => {}, () => {});
-      } catch { /* the next edit tries again */ }
-    }, 600);
+    dirty.current = true;
+    setSave(markPending);
+    const timer = setTimeout(() => { void flushPolicy(); }, 600);
     return () => clearTimeout(timer);
-  }, [applies, noticeHours, fee, uid, synced, blocker]);
+  }, [applies, noticeHours, fee, uid, synced, blocker, flushPolicy]);
 
-  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee };
+  // ── the write that used to be cancelled on the way out ────────────────────
+  //
+  // Mount-only, so its cleanup runs ONLY on unmount and cannot defeat the
+  // debounce above. Not awaited, because a component coming apart cannot be held
+  // open; the request outlives it either way, and `dirty` means this is reached
+  // only when there is something that has genuinely not landed. The same shape
+  // src/ui/coachProfile.tsx uses, for the same gesture: type a fee, tap Back.
+  useEffect(() => () => { if (dirty.current) void flushPolicy(); }, [flushPolicy]);
+
+  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee, reload: reloadPolicy, save };
 }
 
 /* ── The waitlist, from the client's side ──────────────────────────────────
@@ -1144,29 +1526,87 @@ export interface TakenSlot {
   sessionId: string;
   startsAt: string;
   durationMin: number;
-  waiting: number;
-  /** 1-based. 0 means this member is not on that queue. */
-  myPosition: number;
+  /**
+   * How many are in the queue for it, and NULL when nobody counted them.
+   *
+   * `toNum(r.waiting) ?? 0` until tonight, and 0 is the value `waitlistLine`
+   * says "Nobody is waiting for this slot yet." about — a claim about other
+   * people, made from an unknown, to a member deciding whether it is worth
+   * waiting. The widened `waitlistLine` in src/lib/sessionWaitlist.ts has the
+   * third sentence; this is the value that reaches it.
+   */
+  waiting: number | null;
+  /**
+   * 1-based. 0 means this member is not on that queue; NULL means nobody read
+   * their position, which is not the same claim and must not be flattened into
+   * one.
+   *
+   * Widened tonight, alongside `waiting`. `toNum(r.my_position) ?? 0` read an
+   * unread position as "you are not on this queue", and 0 is what reaches
+   * `waitlistLine`, which says "Nobody is waiting for this slot yet." The
+   * widening had been deferred once because app/(client)/calendar.tsx tested
+   * `k.myPosition > 0` and `number | null` was a type error in a file that lane
+   * did not own. That consumer is null-tolerant now, so the reason is spent and
+   * is recorded here spent rather than deleted. Do not restore the `?? 0`.
+   *
+   * Test null FIRST wherever this is read: `null > 0` is `false`, so a null
+   * placed after a `> 0` test falls silently into the "not queued" arm — the
+   * same arm an absent count would wrongly claim.
+   */
+  myPosition: number | null;
 }
 export interface MyWaitlistRow {
   sessionId: string;
   startsAt: string;
   durationMin: number;
   trainerId: string;
-  position: number;
-  waiting: number;
+  /** 1-based, and NULL when nobody read it. Widened with `TakenSlot.myPosition`
+   *  and for a stronger reason: this row EXISTS because the member is on that
+   *  queue, so a settled 0 here was a contradiction — `toNum(r.queue_position)
+   *  ?? 0` told a member who is demonstrably queued that they are not. Null
+   *  first, always: `null > 0` is `false`. */
+  position: number | null;
+  /** The queue length, and NULL when nobody counted it. Same widening and same
+   *  reason as `TakenSlot.waiting` above; app/(client)/bookings.tsx renders it
+   *  through the same sentence. */
+  waiting: number | null;
   /** Whether the slot is still somebody else's. False means it freed and did
    *  not come to this member — the queue moved past them, or the session was
    *  opened up rather than promoted. */
   stillTaken: boolean;
 }
 
+/**
+ * The ceiling `waitlistable_slots()` takes, mirrored here because nothing on
+ * this side can see it.
+ *
+ * `limit 500` is inside the function body
+ * (supabase/parts/126-the-late-fee-and-the-waitlist.sql), so src/lib/rowCap.ts
+ * cannot find it: `capped()` detects a cut by asking for one row more than it
+ * will accept, and the server will never answer with 501.
+ *
+ * It is reachable, which is the part that matters. The function returns one
+ * coach's booked hours over the whole window this hook asks for — sixty days by
+ * default — so a coach running eight or nine sessions a day passes five hundred
+ * inside it. And the order is `starts_at asc`, so what a cut list loses is the
+ * FAR END: app/(client)/calendar.tsx draws "Nothing on this day" from
+ * `selDayTaken.length === 0`, and under a silent cut that sentence is printed
+ * over a day that is really full, to a member who would have joined the
+ * waitlist for it.
+ *
+ * `>= cap` and not `> cap`, as in src/lib/challenges.ts: five hundred rows back
+ * from a `limit 500` is already the ceiling and there is no probe row to find.
+ */
+const SLOTS_ROW_CAP = 500;
+
 export function useSlotWaitlist(daysAhead: number = 60): {
   taken: TakenSlot[];
   mine: MyWaitlistRow[];
   status: LoadStatus;
   reload: () => Promise<void>;
-  join: (sessionId: string) => Promise<{ ok: boolean; position?: number; waiting?: number; error?: string }>;
+  /** `waiting` is present on every `ok` answer and is null when the server sent
+   *  no count — never absent-meaning-unknown and never a fabricated 0. */
+  join: (sessionId: string) => Promise<{ ok: boolean; position?: number; waiting?: number | null; error?: string }>;
   leave: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
 } {
   const authRev = useAuthRevision();
@@ -1177,12 +1617,33 @@ export function useSlotWaitlist(daysAhead: number = 60): {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setTaken([]); setMine([]); setStatus('ready'); return; }
+      const who = await sessionUid('slotWaitlist.read');
+      // An outage used to land here as "no session" and set BOTH lists empty
+      // under 'ready'. `taken: []` is app/(client)/calendar.tsx drawing
+      // "Nothing on this day" over a day that is really full — the exact
+      // sentence SLOTS_ROW_CAP above exists to stop a silent cut from printing
+      // — and `mine: []` tells somebody who is third in a queue that they are
+      // waiting for nothing. Two false facts about a member's own booking, on
+      // the read that is most likely to be made from a gym with no signal.
+      if (who.fate !== null) {
+        setTaken([]); setMine([]);
+        setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        return;
+      }
       const from = new Date().toISOString();
       const to = new Date(Date.now() + daysAhead * 86_400_000).toISOString();
       const [slots, queue] = await Promise.all([
         supabase.rpc('waitlistable_slots', { p_from: from, p_to: to }),
+        // sql-cap-ok: my_waitlist() ends `limit 500` on the caller's OWN
+        // waitlist entries — the queues one member has personally joined. The
+        // slots read above shares that ceiling and is checked against it,
+        // because it covers a whole coach's diary over sixty days and gets
+        // there; this one would need one person to be waiting on five hundred
+        // separate hours, and joining a queue is a deliberate act taken one
+        // slot at a time. The two figures on each row, `queue_position` and
+        // `waiting`, are counted server-side over the full table rather than
+        // over this page, so neither is a total taken from a prefix; and
+        // app/(client)/bookings.tsx lists these rows without counting them.
         supabase.rpc('my_waitlist'),
       ]);
       // Either read failing makes this a fragment, and a fragment must not be
@@ -1192,19 +1653,30 @@ export function useSlotWaitlist(daysAhead: number = 60): {
         sessionId: String(r.session_id),
         startsAt: r.starts_at,
         durationMin: toNum(r.duration_min) ?? 60,
-        waiting: toNum(r.waiting) ?? 0,
-        myPosition: toNum(r.my_position) ?? 0,
+        // `queueLength`, not `toNum(…) ?? 0`. See `TakenSlot.waiting`: a 0 here
+        // is the sentence "Nobody is waiting for this slot yet."
+        waiting: queueLength(r.waiting),
+        // `toNum` and no `?? 0`: an unread position is null, not "you are not
+        // on this queue". See the field's note — the calendar consumer that
+        // blocked this now takes null.
+        myPosition: toNum(r.my_position),
       })));
       setMine(((queue.data as any[]) ?? []).map((r) => ({
         sessionId: String(r.session_id),
         startsAt: r.starts_at,
         durationMin: toNum(r.duration_min) ?? 60,
         trainerId: String(r.trainer_id),
-        position: toNum(r.queue_position) ?? 0,
-        waiting: toNum(r.waiting) ?? 0,
+        position: toNum(r.queue_position),
+        waiting: queueLength(r.waiting),
         stillTaken: !!r.still_taken,
       })));
-      setStatus('ready');
+      // The slots read has a ceiling of its own, below PostgREST's, and it had
+      // never been looked at — see SLOTS_ROW_CAP above. 'partial' rather than
+      // 'ready', so the screens gate their emptiness sentences on it.
+      //
+      // `my_waitlist` on the line above is capped too and is deliberately not
+      // tested: see the sql-cap-ok note on its call.
+      setStatus(((slots.data as any[]) ?? []).length >= SLOTS_ROW_CAP ? 'partial' : 'ready');
     } catch { setStatus('error'); }
   }, [daysAhead]);
 
@@ -1220,7 +1692,12 @@ export function useSlotWaitlist(daysAhead: number = 60): {
       if (error) return { ok: false, error: error.message };
       await load();
       const d = data as any;
-      return { ok: true, position: toNum(d?.position) ?? undefined, waiting: toNum(d?.waiting) ?? undefined };
+      // Null and not undefined when the count did not come back, so the unknown
+      // is a value the caller can branch on rather than an absent key.
+      // (app/(client)/calendar.tsx still writes `res.waiting ?? 1` at the one
+      // call site that alerts off this, inventing a queue of one out of the
+      // unknown. That file belongs to another lane tonight; it is reported.)
+      return { ok: true, position: toNum(d?.position) ?? undefined, waiting: queueLength(d?.waiting) };
     } catch (e: any) { return { ok: false, error: e?.message || 'Could not reach the server.' }; }
   }, [load]);
 
@@ -1256,7 +1733,12 @@ export function cancelWarningFor(
 
 /** A member's place in a queue, in words. Re-exported through this module so a
  *  screen importing the waitlist hook does not also have to reach into
- *  src/lib/booking.ts for the sentence that goes with it. */
+ *  src/lib/booking.ts for the sentence that goes with it.
+ *
+ *  It is now the WIDENED one in src/lib/sessionWaitlist.ts, which takes the
+ *  queue length as `number | null` and has a third sentence for the null; the
+ *  two counted arms are still src/lib/booking.ts's, delegated to. Both screens
+ *  that draw this import it from here, so neither had to change. */
 export { waitlistLine };
 
 /* ── The coach's side of both ──────────────────────────────────────────────
@@ -1267,7 +1749,16 @@ export { waitlistLine };
  *
  * Both go through RLS rather than an RPC because both are already the coach's
  * own rows to read: `session_waitlist_trainer_r` scopes the queue to sessions
- * they own, and `charges_trainer_rw` scopes charges to their own clients.
+ * they own, and `charges_trainer_read` scopes charges to the fees they recorded
+ * plus the fees against their current clients. (It said `charges_trainer_rw`,
+ * which part 189 dropped when it split that one `for all` policy into four —
+ * the read had to widen to survive a client leaving, and widening a `for all`
+ * would have widened its WITH CHECK with it.)
+ *
+ * "Their own rows" is a statement about the POLICY and not about the caller.
+ * The second of these hooks is also mounted by a client screen, where the same
+ * policy answers a different question, and `ChargesAudience` below is what
+ * keeps those two apart — see the note on the read itself.
  */
 export function useSessionWaitlistCounts(sessionIds: string[]): {
   counts: Map<string, number>;
@@ -1285,19 +1776,36 @@ export function useSessionWaitlistCounts(sessionIds: string[]): {
     const ids = key ? key.split(',') : [];
     if (!ids.length) { setCounts(new Map()); setStatus('ready'); return; }
     try {
-      const { data, error } = await supabase.from('session_waitlist')
-        .select('session_id').in('session_id', ids).limit(capLimit());
+      // Chunked, and the ceiling being argued about is the REQUEST LINE.
+      // `sessionIds` is one id per booked session the calendar is drawing, off
+      // a `capLimit()` read with no date window on it — so a full-time coach
+      // crosses two hundred inside a few months and up to a thousand arrive. A
+      // uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list, so
+      // that is a ~39KB query string against the 8KB request line nginx and
+      // most CDNs enforce by default. The refusal is a 414, supabase-js does
+      // not reject on it, and it lands as `data: null` — which means
+      // `setStatus('error')` never fires and every session on the calendar
+      // reports an empty waiting list. A coach with people queued for a slot is
+      // told nobody wants it.
+      //
+      // `readCappedByIds` and not `readByIds`: the cap is what 'partial' is
+      // reported off, and a queue counted off a fraction of the rows must
+      // render as a dash rather than as a smaller number.
+      const { rows, truncated, error } = await readCappedByIds<any>(
+        ids,
+        (chunk) => supabase.from('session_waitlist')
+          .select('session_id').in('session_id', chunk).limit(capLimit()),
+      );
       if (error) { setStatus('error'); return; }
-      const page = capped(data ?? []);
       const m = new Map<string, number>();
-      for (const r of page.rows as any[]) {
+      for (const r of rows) {
         const id = String(r.session_id);
         m.set(id, (m.get(id) ?? 0) + 1);
       }
       setCounts(m);
       // A truncated read undercounts every queue in it. The screen must not
       // print "2 waiting" off a fraction of the rows, so it goes to a dash.
-      setStatus(page.truncated ? 'partial' : 'ready');
+      setStatus(truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
   }, [key]);
 
@@ -1316,9 +1824,53 @@ export interface LateCancelCharge {
   /** When the coach forgave it. The row stays either way — a waived fee is a
    *  fact about what happened, not an absence. */
   waivedAt: string | null;
+  /**
+   * `charges.reason`, verbatim.
+   *
+   * Free text in the table — `reason text not null`, no CHECK — and it was
+   * never selected here at all, on either audience. The member's list filtered
+   * on the literal 'late_cancellation' and then rendered a heading that said so,
+   * which made the filter invisible: a charge under any other word was in the
+   * database, readable by the member under `charges_client_r`, on their coach's
+   * screen, and missing from theirs with nothing on screen to suggest anything
+   * had been left out.
+   *
+   * Carried raw rather than narrowed to a union. src/lib/chargeReasons.ts turns
+   * it into words, and its whole argument is that a reason from a build ahead of
+   * this one must reach the member as itself.
+   */
+  reason: string;
+  /**
+   * Who recorded it — `charges.coach_id`, snapshotted at the moment the fee was
+   * raised (supabase/parts/189), NOT a join to the live coaching relationship.
+   *
+   * Null on a row raised before that part whose client had already moved on,
+   * which part 189 records as unrecoverable. An opaque id: this hook resolves no
+   * names, and a screen that wants one has to read it from somewhere a member is
+   * actually allowed to read names from.
+   */
+  coachId: string | null;
 }
 
-export function useLateCancelCharges(): {
+/**
+ * Whose late-cancellation fees a caller is asking for.
+ *
+ * There is no default and there deliberately cannot be one. Both answers are
+ * real, they are drawn under opposite headings, and the read that produces them
+ * is the same table — so the only thing that can keep them apart is the caller
+ * saying which it means. A default would be a fourth call site's chance to
+ * forget, which is the argument `registerForPush` and `notifyInbox` both make
+ * about gates that live at the call site.
+ *
+ *   'mine'       — the fees charged to THE SIGNED-IN PERSON, under
+ *                  "What this member has actually been charged".
+ *   'my-clients' — every fee this coach has recorded against their clients,
+ *                  under "Late cancellations" on the coach's own screens, where
+ *                  they are the person collecting and the person who may waive.
+ */
+export type ChargesAudience = 'mine' | 'my-clients';
+
+export function useLateCancelCharges(audience: ChargesAudience): {
   charges: LateCancelCharge[];
   status: LoadStatus;
   reload: () => Promise<void>;
@@ -1329,26 +1881,96 @@ export function useLateCancelCharges(): {
   const [charges, setCharges] = useState<LateCancelCharge[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
-  // Not gated on the app variant, and deliberately so: RLS already decides
-  // WHICH rows come back, and the two answers are both wanted. On the coach app
-  // `charges_trainer_rw` returns the fees their own clients owe them; on the
-  // client app `charges_client_r` returns the member's own. A record only the
-  // person collecting can see is half a record — the member has to be able to
-  // look up what they were told they owe, after the alert has gone.
+  // ── why RLS is not the scope, and why `charges` being empty is not a reason
+  //    to leave this ────────────────────────────────────────────────────────
   //
-  // `waive` is the coach's, and on the client app it simply changes nothing:
-  // the update falls outside their policy, returns zero rows, and is reported
-  // as the failure it is rather than as a success.
+  // This used to be one unscoped read for both apps, on the reasoning that "RLS
+  // already decides WHICH rows come back". That reasoning was half right and
+  // the half it got wrong is the whole of the bug.
+  //
+  // It IS true that a member reading this table sees only their own rows:
+  // `charges_client_r` (part 142) is `client_id = auth.uid()` and there is
+  // nothing else a member's grants let through. What is not true is that the
+  // person on a client screen is always a member. `charges_trainer_read` (part
+  // 189) is
+  //
+  //     coach_id = auth.uid()
+  //     or exists (select 1 from clients c
+  //                 where c.id = charges.client_id and c.trainer_id = auth.uid())
+  //
+  // — correlated, so it is NOT the whole table, but it is every fee this coach
+  // has ever recorded against anybody. And this codebase's documented shape is
+  // that trainers self-track ON THE CLIENT HOOKS: there is no client→trainer
+  // promotion, `my-training.tsx` and `my-progress.tsx` are built exactly that
+  // way, and a coach who trains through the client app opens
+  // app/(client)/calendar.tsx like anyone else. Under the heading "What this
+  // member has actually been charged" they would have been shown every late
+  // fee owed to them by every client on their roster, as their own debts. Not a
+  // leak — those are rows they may read, and do read, two screens away — but an
+  // ATTRIBUTION, and a screen that attributes a hundred people's fees to one
+  // person is saying something false about money.
+  //
+  // `charges` holds 0 rows today, so nobody has seen this. That is not a reason
+  // to leave it, and the reason it is not is specific rather than dutiful: the
+  // first row this table ever gets is written by `cancel_my_session`, on a
+  // member's phone, at the moment a coach's own cancellation policy starts
+  // biting — and the first person likely to be running the client app with a
+  // roster behind them is the coach who has just switched their policy on to
+  // test it. An empty table means the defect is unobserved, not absent, and it
+  // means the fix can be made now for free instead of after somebody has been
+  // told they owe four hundred pounds.
+  //
+  // `waive` is the coach's act and it is refused outright under 'mine' — see
+  // `setWaived`.
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setCharges([]); setStatus('ready'); return; }
-      const { data, error } = await supabase.from('charges')
-        .select('id, client_id, session_id, amount, currency, created_at, waived_at')
-        .eq('reason', 'late_cancellation')
-        .order('created_at', { ascending: false })
-        .limit(capLimit());
+      const who = await sessionUid('charges.read');
+      // `charges: []` under 'ready' is the sentence "you have never been
+      // charged a late-cancellation fee", shown to the member it would be
+      // about. Under an outage that is a claim about somebody's money made
+      // from a read that did not happen, and the direction it is wrong in is
+      // the reassuring one — which is worse, because nobody goes looking.
+      if (who.fate !== null) {
+        setCharges([]);
+        setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        return;
+      }
+      const uid = who.uid;
+      // Two literal reads rather than one conditionally-extended builder, for
+      // the reason `setWaived` below writes two literal updates: a chain
+      // assembled behind an `if` is opaque to scripts/check-schema.mjs and to
+      // anybody grepping for which column scopes this read, and an unreadable
+      // scope is a scope nothing checks.
+      //
+      // ── why 'mine' no longer filters on a reason ─────────────────────────
+      //
+      // Because the member is entitled to the whole of their own ledger, and
+      // the filter hid the rest of it from them alone. `charges_client_r` (part
+      // 142) is `client_id = auth.uid()` with no clause about `reason`, so every
+      // row this filter dropped was one the database was already willing to hand
+      // them. `reason` is free text — part 243 turned down a 'late_reschedule'
+      // fee explicitly because "both screens that read this table filter on the
+      // literal string […] a fee neither party can see is worse than no fee" —
+      // and part 189's subject is a fee that outlives the coaching, which is a
+      // charge raised for something other than a late cancellation.
+      //
+      // 'my-clients' KEEPS the filter. It feeds two coach screens whose headings
+      // and whose waive control are about late cancellations specifically, and
+      // widening the rows under an unchanged heading would put a charge of
+      // another kind behind a button labelled for this one. That is a decision
+      // for those screens to make, on their own terms, with their own copy.
+      const { data, error } = audience === 'mine'
+        ? await supabase.from('charges')
+          .select('id, client_id, coach_id, session_id, amount, currency, reason, created_at, waived_at')
+          .eq('client_id', uid)
+          .order('created_at', { ascending: false })
+          .limit(capLimit())
+        : await supabase.from('charges')
+          .select('id, client_id, coach_id, session_id, amount, currency, reason, created_at, waived_at')
+          .eq('reason', 'late_cancellation')
+          .order('created_at', { ascending: false })
+          .limit(capLimit());
       if (error) { setStatus('error'); return; }
       const page = capped(data ?? []);
       setCharges((page.rows as any[]).map((r) => ({
@@ -1357,20 +1979,51 @@ export function useLateCancelCharges(): {
         sessionId: r.session_id ? String(r.session_id) : null,
         amount: toNum(r.amount),
         currency: typeof r.currency === 'string' ? r.currency : null,
+        // Verbatim, and an empty string where the column came back as nothing.
+        // NOT defaulted to 'late_cancellation': that default is the whole defect
+        // restated inside the mapper, and it would print a specific, wrong
+        // explanation over a charge whose reason simply did not arrive.
+        reason: typeof r.reason === 'string' ? r.reason : '',
+        coachId: r.coach_id ? String(r.coach_id) : null,
         createdAt: r.created_at,
         waivedAt: r.waived_at ?? null,
       })));
       setStatus(page.truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
-  }, []);
+  }, [audience]);
 
   useEffect(() => { load(); }, [authRev, load]);
 
   const setWaived = useCallback(async (id: string, waived: boolean): Promise<boolean> => {
     if (!USE_SUPABASE) return false;
+    // Refused rather than attempted under 'mine'. Forgiving a fee is the act of
+    // the person collecting it, and the caller asking for their OWN charges has
+    // said they are not that person. Left to RLS it would be right for a member
+    // — zero rows, reported as the failure it is — and WRONG for the coach who
+    // is self-tracking on this hook, whose `charges_trainer_update` would take
+    // the write and quietly waive one of their clients' fees from a screen that
+    // never meant to offer it.
+    if (audience === 'mine') return false;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id ?? null;
+      // ── the one site in this file that WROTE on a false sign-out ─────────
+      //
+      // This read was `const { data: auth } = await supabase.auth.getUser()`
+      // with the error dropped, and `uid` fell through as null. The write below
+      // does not gate on it: it went ahead and stamped `waived_by: null` on the
+      // row. So an auth outage did not stop a coach forgiving a fee — it
+      // recorded the forgiveness with NOBODY's name against it, on a money row
+      // whose whole purpose is to say who decided a client no longer owed
+      // something. Unattributable, and indistinguishable afterwards from a
+      // waiver the database itself had produced.
+      //
+      // A waiver is a correction, and a correction is a second recorded fact.
+      // A fact with no author is not one, so the write is refused rather than
+      // attempted — and refused on BOTH fates, because a coach who is genuinely
+      // signed out cannot author it either. `false` is already this function's
+      // "it did not land", and every caller reports it as that.
+      const who = await signedInUid('charges.waive');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // An update the policy filters out is not an error in PostgREST — it
       // changes zero rows and reports success. The rows it returns are what is
       // counted, or a coach is told they forgave a fee that still stands.
@@ -1388,7 +2041,7 @@ export function useLateCancelCharges(): {
       await load();
       return true;
     } catch { return false; }
-  }, [load]);
+  }, [load, audience]);
 
   return {
     charges, status, reload: load,
@@ -1397,16 +2050,60 @@ export function useLateCancelCharges(): {
   };
 }
 
+/**
+ * What became of one promotion — three answers, where there used to be one.
+ *
+ *  'promoted' — the server handed the slot to `clientId`. It has an owner.
+ *  'nobody'   — the server ran and handed it to nobody. This is the only answer
+ *               that licenses broadcasting the hour to the rest of the book.
+ *  'failed'   — the call was refused or did not come back. NOTHING is known
+ *               about the queue, and least of all that it is empty.
+ *
+ * The distinction is the one `classifyWrite` draws in src/lib/offlineQueue.ts
+ * and `readState` draws in src/lib/staleRead.ts — a call that did not happen is
+ * not an empty result — and it is worth more here than in either of those. The
+ * caller's next act on a wrongly-empty answer is to tell the whole roster the
+ * hour is first-come-first-served, which is precisely the race this waitlist
+ * exists to replace, run against a person who may already own the slot.
+ *
+ * 'nobody' is deliberately "the server promoted nobody" rather than "the queue
+ * is empty": `_promote_session_waitlist` also returns null when the row is no
+ * longer available or has already started, and every one of those means the
+ * same thing to the caller — no client is holding this hour.
+ *
+ * ── why this is now an alias, and the reading a name ─────────────────────
+ *
+ * The type was declared here and the rule was written here, and then part 2610
+ * gave the owner console the same RPC. It cannot import this module — this one
+ * pulls in the React Native supabase client and `USE_SUPABASE` — so
+ * src/lib/waitlistPromotion.ts holds the pure half, and a second copy of a
+ * three-way rule about somebody's booking is exactly the thing that drifts.
+ *
+ * It had already drifted by one character. The line below used to be `data ==
+ * null ? PROMOTE_NOBODY : PROMOTE_FAILED`, and loose equality reads `undefined`
+ * as the function's null — that is, reads a result object with no `data` on it
+ * at all, which is a call that did not come back the way this expects, as a
+ * queue PROVEN empty. `readPromotion` is `=== null` and fails safe, and an empty
+ * or blank string is 'failed' there too rather than a client id nobody holds.
+ * Converging on it is the fix, not just the tidy-up.
+ */
+export type PromoteResult = WaitlistPromotion;
+
+const PROMOTE_NOBODY: PromoteResult = { outcome: 'nobody', clientId: null };
+const PROMOTE_FAILED: PromoteResult = { outcome: 'failed', clientId: null };
+
 /** Hand a freed slot to the head of its waitlist, as the COACH. The client's
  *  own cancellation does this inside the same transaction that frees the slot;
  *  a coach frees their slot with a direct RLS-owned update, so for them it is
- *  this explicit second step. Resolves to the client it went to, or null when
- *  nobody was waiting. */
-export async function promoteWaitlist(sessionId: string): Promise<string | null> {
-  if (!USE_SUPABASE) return null;
+ *  this explicit second step.
+ *
+ *  With no backend there is no queue to read and no read to fail — the local
+ *  store is the source of truth and it holds no waitlist at all, which is the
+ *  same reason `useSessionWaitlistCounts` reports 'ready' rather than 'error'
+ *  in that mode. So that case is a real 'nobody', not a 'failed'. */
+export async function promoteWaitlist(sessionId: string): Promise<PromoteResult> {
+  if (!USE_SUPABASE) return PROMOTE_NOBODY;
   try {
-    const { data, error } = await supabase.rpc('promote_session_waitlist', { p_session: sessionId });
-    if (error) return null;
-    return typeof data === 'string' ? data : null;
-  } catch { return null; }
+    return readPromotion(await supabase.rpc('promote_session_waitlist', { p_session: sessionId }));
+  } catch { return PROMOTE_FAILED; }
 }

@@ -27,6 +27,23 @@
 // clinician, a hospital number and findings about things that have nothing to
 // do with training, and nobody consented to that by disclosing an injury. The
 // screen says so out loud, because a promise the user cannot see is not one.
+//
+// ── AND WHY THE MEMBER IS ASKED BEFORE IT LEAVES ──────────────────────────
+//
+// This screen used to print, thirty pixels above the upload button:
+//
+//     "The document stays in your account and only you can open it."
+//
+// and then send the whole page to OCR.space with no question asked. The private
+// bucket was real; the sentence was not. Reading a document MEANS sending it.
+//
+// So there is now a question, per document, before anything leaves — it names
+// OCR.space, says the whole page goes, and says what happens if the answer is
+// no — and the standing notice above says the true thing instead. The argument
+// for every word of it, the four states a stored document can be described in,
+// and why a decline is a working route rather than an error are all in
+// src/lib/injuryDocConsent.ts. The record of the answer is a row the member can
+// read back (supabase/parts/1000-*.sql), and the send waits for it.
 import { useCallback, useEffect, useState } from 'react';
 // No `Linking`. It used to be here, for the Open button, and handing a signed
 // URL to a medical document to whatever app owns http on this device is the
@@ -42,9 +59,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { INJURY_AREAS, areaLabel, newInjuryId, type InjurySeverity } from '../../src/lib/injuries';
 import {
@@ -52,9 +70,18 @@ import {
   type Extraction, type InjuryCandidate,
 } from '../../src/lib/injuryExtract';
 import {
-  readInjuryDocument, listInjuryDocs, deleteInjuryDoc,
+  readInjuryDocument, listInjuryDocs, listInjuryDocConsents, deleteInjuryDoc, signInjuryDoc,
+  INJURY_DOC_LIST_CAP,
   type InjuryDocFile, type InjuryDocRead,
 } from '../../src/ui/injuryDocs';
+import {
+  docSendLine, docSendState, SCREEN_PROMISE, ADD_IT_MYSELF_LABEL,
+  CONSENT_TITLE, CONSENT_WHO, CONSENT_WHAT, CONSENT_RETENTION, CONSENT_IF_YOU_DECLINE,
+  CONSENT_SEND_LABEL, CONSENT_KEEP_LABEL, CONSENT_CANCEL_LABEL,
+  CONSENT_SEND_A11Y, CONSENT_KEEP_A11Y, CONSENT_CANCEL_A11Y,
+  REFUSED_TITLE, REFUSED_NOTE, RECORD_FAILED_TITLE, RECORD_FAILED_NOTE,
+  type OcrAnswer,
+} from '../../src/lib/injuryDocConsent';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 // Not `import * as DocumentPicker from 'expo-document-picker'`. That package's
 // entry point is a bare requireNativeModule call at module scope, so on an
@@ -81,12 +108,14 @@ type Verdict = 'open' | 'added' | 'rejected';
  *  picks one. */
 interface Draft { area: string; severity: InjurySeverity | null; note: string; verdict: Verdict }
 
+// Twelve English month names written out by hand, on a screen a member in
+// Berlin reads. `fmtFullDay` is the app's own resolver (src/lib/locale.ts) and
+// carries the same null-for-unparseable guard this had.
 const dayLabel = (iso: string | null): string | null => {
   if (!iso) return null;
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return null;
-  const d = new Date(ms);
-  return `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getFullYear()}`;
+  return fmtFullDay(new Date(ms).toISOString());
 };
 
 export default function InjuryDoc() {
@@ -94,19 +123,38 @@ export default function InjuryDoc() {
   const router = useRouter();
   const c = useClientData();
 
-  const [busy, setBusy] = useState<null | 'preparing' | 'reading'>(null);
+  // 'keeping' is not 'reading' with a different word. It is the branch where
+  // the member said no: the document is being saved to their account and
+  // nothing is being sent, and telling them we are "reading" it would be the
+  // original defect happening in the progress line.
+  const [busy, setBusy] = useState<null | 'preparing' | 'reading' | 'keeping'>(null);
   const [result, setResult] = useState<InjuryDocRead | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [docs, setDocs] = useState<InjuryDocFile[]>([]);
   const [docsStatus, setDocsStatus] = useState<LoadStatus>('loading');
+  // What the member answered about each stored document, and whether we could
+  // find out. Held apart from `docs` because they are two reads that fail
+  // separately: a listing that worked and a consent read that did not must not
+  // print "never sent" under every row.
+  const [consents, setConsents] = useState<Record<string, OcrAnswer>>({});
+  const [consentStatus, setConsentStatus] = useState<LoadStatus>('loading');
   // The document currently being read, full-screen, inside this app. Null is
   // the ordinary state; there is no route out of this screen to a browser.
   const [viewing, setViewing] = useState<InjuryDocFile | null>(null);
+  // Whether the image in the viewer failed to draw. Without this the modal has
+  // no way to say anything: <Image> that cannot load renders as nothing at all.
+  const [viewErr, setViewErr] = useState(false);
+  // A document the member has chosen and NOT yet answered the question about.
+  // Nothing has been uploaded and nothing has been sent while this is set; it
+  // is the whole gate. Dismissing the sheet clears it and does neither.
+  const [pending, setPending] = useState<null | { uri: string; name?: string | null; mimeType?: string | null }>(null);
 
   const refreshDocs = useCallback(async () => {
-    const r = await listInjuryDocs();
+    const [r, cs] = await Promise.all([listInjuryDocs(), listInjuryDocConsents()]);
     setDocs(r.docs);
     setDocsStatus(r.status);
+    setConsents(cs.byPath);
+    setConsentStatus(cs.status);
   }, []);
 
   useEffect(() => { refreshDocs(); }, [refreshDocs]);
@@ -120,17 +168,35 @@ export default function InjuryDoc() {
     backgroundColor: on ? t.brand : t.surface2,
   });
   const chipText = (on: boolean) => ({
-    ...ty.label, fontWeight: (on ? '600' : '500') as '600' | '500', color: on ? t.brandInk : t.ink2,
+    ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2,
   });
 
   // Shared by all three ways in, so a PDF chosen from Files and a photo taken
   // of the same page land in exactly the same state machine.
-  const readFrom = async (file: { uri: string; name?: string | null; mimeType?: string | null }) => {
+  //
+  // It does NOT start the read. It raises the question, because the question is
+  // about the document the member has just chosen and has to be answered before
+  // anything about that document leaves this device. `runRead` below is the
+  // only thing that uploads, and it cannot be reached without an answer.
+  const readFrom = (file: { uri: string; name?: string | null; mimeType?: string | null }) => {
+    setResult(null);
+    setDrafts({});
+    setPending(file);
+  };
+
+  // The answer, and everything that follows from it. `answer` is required by
+  // `readInjuryDocument` itself, so there is no path from a picker to a POST
+  // that skips this function.
+  const runRead = async (
+    file: { uri: string; name?: string | null; mimeType?: string | null },
+    answer: OcrAnswer,
+  ) => {
+    setPending(null);
     setBusy('preparing');
     setResult(null);
     setDrafts({});
-    setBusy('reading');
-    const r = await readInjuryDocument(file);
+    setBusy(answer === 'granted' ? 'reading' : 'keeping');
+    const r = await readInjuryDocument(file, answer);
     setBusy(null);
     setResult(r);
     const seeded: Record<string, Draft> = {};
@@ -149,16 +215,16 @@ export default function InjuryDoc() {
     // the second lock on that door — and it says which of the two silences it
     // is rather than leaving the screen looking as though the tap missed.
     if (res.outcome === 'unavailable') {
-      Alert.alert('This version cannot open your files', `${DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page works in the meantime and is read the same way.`);
+      Alert.alert('This Version Cannot Open Your Files', `${DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page works in the meantime and is read the same way.`);
       return;
     }
     if (res.outcome === 'error') {
-      Alert.alert('That file could not be opened', 'Nothing was read and nothing was saved. Try it again, or photograph the page instead.');
+      Alert.alert('That File Could Not Be Opened', 'Nothing was read and nothing was saved. Try it again, or photograph the page instead.');
       return;
     }
     if (res.outcome === 'cancelled') return;
     const a = res.file;
-    await readFrom({ uri: a.uri, name: a.name, mimeType: a.mimeType });
+    readFrom({ uri: a.uri, name: a.name, mimeType: a.mimeType });
   };
 
   const pick = async (fromCamera: boolean) => {
@@ -168,7 +234,7 @@ export default function InjuryDoc() {
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.9 });
     if (res.canceled || !res.assets?.[0]) return;
 
-    await readFrom({ uri: res.assets[0].uri, name: res.assets[0].fileName, mimeType: res.assets[0].mimeType });
+    readFrom({ uri: res.assets[0].uri, name: res.assets[0].fileName, mimeType: res.assets[0].mimeType });
   };
 
   const setDraft = (key: string, patch: Partial<Draft>) =>
@@ -206,30 +272,71 @@ export default function InjuryDoc() {
    */
   const openDoc = async (doc: InjuryDocFile) => {
     if (!doc.url) return;
-    if (injuryDocRoute(injuryDocKind(doc.name)) === 'in-app-viewer') {
-      setViewing(doc);
+    // Re-signed at the moment of opening, never opened on the link the list was
+    // handed. Those links last an hour and this is a screen people leave open,
+    // so the stale one was the ordinary case rather than the edge one — and an
+    // expired signature does not fail loudly, it renders as a black rectangle
+    // with the member's own filename over it.
+    const fresh = await signInjuryDoc(doc.path);
+    if (!fresh) {
+      Alert.alert(
+        'Could Not Open It Just Now',
+        'Your document is still stored. This is a problem getting a link to it, not a missing file. Pull the list down to refresh and try again.',
+      );
       return;
     }
-    const opened = await openInAppBrowser(doc.url);
+    const current: InjuryDocFile = { ...doc, url: fresh };
+    // The list keeps the fresh link too, so a second tap on the same row does
+    // not have to ask again and the row's Open button cannot go stale behind
+    // the one that just worked.
+    setDocs((prev) => prev.map((d) => (d.path === doc.path ? current : d)));
+    if (injuryDocRoute(injuryDocKind(doc.name)) === 'in-app-viewer') {
+      setViewErr(false);
+      setViewing(current);
+      return;
+    }
+    const opened = await openInAppBrowser(current.url!);
     // Only the open's own answer decides what we say happened, and the two
     // silences are different sentences: a build with no in-app browser cannot
     // be fixed by tapping again, and must not fall through to the system one.
     if (!opened) {
-      Alert.alert('Could not open it privately', IN_APP_BROWSER_UNAVAILABLE_NOTE);
+      Alert.alert('Could Not Open It Privately', IN_APP_BROWSER_UNAVAILABLE_NOTE);
     }
   };
 
+  // One row, defined once: the truncated arm below draws the same list under a
+  // different sentence, and two copies of a row that carries a Delete button
+  // beside a medical record is two places for them to drift apart.
+  const renderDoc = (doc: InjuryDocFile, idx: number) => (
+    <View key={doc.path} style={{ paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{doc.name}</Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+        {dayLabel(doc.createdAt) ?? 'Date unknown'}
+        {doc.url === null ? ' · cannot be opened right now' : ''}
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+        {docSendLine(docSendState(consentStatus, consents[doc.path]))}
+      </Text>
+      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+        {doc.url ? (
+          <Ghost label="Open" onPress={() => { void openDoc(doc); }} />
+        ) : null}
+        <Ghost label="Delete" onPress={() => removeDoc(doc)} />
+      </View>
+    </View>
+  );
+
   const removeDoc = (doc: InjuryDocFile) => {
     Alert.alert(
-      'Delete this document?',
-      'The file is removed from your account. Any injuries you already confirmed from it stay — they are yours now, not the document\'s.',
+      'Delete This Document?',
+      'The file is removed from your account. Any injuries you already confirmed from it stay. They are yours now, not the document\'s.',
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Delete', style: 'destructive', onPress: async () => {
             const gone = await deleteInjuryDoc(doc.path);
             // Only the delete's own answer decides what we say happened.
-            if (!gone) { Alert.alert('It is still there', 'That document could not be deleted just now, so it has not been. Try again in a moment.'); return; }
+            if (!gone) { Alert.alert('It Is Still There', 'That document could not be deleted just now, so it has not been. Try again in a moment.'); return; }
             refreshDocs();
           },
         },
@@ -242,17 +349,41 @@ export default function InjuryDoc() {
   const openCount = Object.values(drafts).filter((d) => d.verdict === 'open').length;
   const addedCount = Object.values(drafts).filter((d) => d.verdict === 'added').length;
 
-  /* ── one proposal ────────────────────────────────────────────────────── */
-  const Proposal = ({ cand }: { cand: InjuryCandidate }) => {
+  /* ── one proposal ──────────────────────────────────────────────────────
+     A PLAIN FUNCTION, called as `proposal(cand)`, and not a component
+     rendered as `<Proposal cand={…} />`. That distinction is the whole of a
+     defect, and it is not a style preference.
+
+     A component declared inside this body is a NEW function object on every
+     render of this screen. React compares element types by identity, so it
+     does not update the card — it unmounts the old one and mounts a fresh
+     one. The card holds a <TextInput>, and a remounted TextInput is a new
+     native view: it is not the one holding the keyboard.
+
+     So the Note field — the one field on this screen the member has to write
+     themselves, deliberately seeded EMPTY a few lines below so the report's
+     own sentence is never put in their mouth — dismissed the keyboard and
+     lost the caret after every single character typed into it. `setDraft`
+     sets state on this screen; this screen re-renders; `Proposal` is a
+     different function; the card is torn down and rebuilt around whatever
+     had been typed so far. The chips did it too, less visibly.
+
+     app/(client)/report.tsx already states the rule about its own
+     `narrativeBlock`: "written as a plain call and not a component so it does
+     not remount the text — and therefore does not interrupt a screen reader —
+     every time this screen redraws." Same rule. The `key` moves onto the
+     returned elements, because there is no longer an element above them to
+     carry one. */
+  const proposal = (cand: InjuryCandidate) => {
     const d = drafts[cand.key];
     if (!d) return null;
 
     if (d.verdict !== 'open') {
       return (
-        <View style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+        <View key={cand.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <Icon name={d.verdict === 'added' ? 'check' : 'minus'} size={16} color={t.ink3} />
           <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
-            {areaLabel(d.area)} — {d.verdict === 'added' ? 'added to your injuries' : 'not added'}
+            {areaLabel(d.area)} · {d.verdict === 'added' ? 'added to your injuries' : 'not added'}
           </Text>
           {d.verdict === 'rejected'
             ? <Ghost label="Undo" onPress={() => setDraft(cand.key, { verdict: 'open' })} />
@@ -262,7 +393,7 @@ export default function InjuryDoc() {
     }
 
     return (
-      <Card style={{ marginTop: sp.md }}>
+      <Card key={cand.key} style={{ marginTop: sp.md }}>
         {/* What we matched on and the line it came from. The client is being
             asked to agree with a reading of their own document, so they get to
             see the reading. */}
@@ -302,10 +433,19 @@ export default function InjuryDoc() {
           </Flag>
         ) : null}
 
+        {/* Empty, and deliberately. `candidateNote` used to seed this with the
+            line quoted above, so one tap on "Add This" sent the report's own
+            sentence to the coach as though the member had written it — under a
+            notice at the top of this screen promising the opposite. The
+            evidence is still on the card, four rows up; putting any of it here
+            is now something the member does. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Note</Text>
         <TextInput value={d.note} onChangeText={(v) => setDraft(cand.key, { note: v })}
           placeholder="In your own words" placeholderTextColor={t.ink3} multiline
           style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+          Your coach reads this note. Nothing else off the document reaches them, so it starts empty.
+        </Text>
 
         {cand.movements.length ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -325,35 +465,37 @@ export default function InjuryDoc() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Read a Document</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+        <PageHead title="Read a Document" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>
           Photograph a physio report, a scan result or a doctor's note. We suggest what to disclose; you decide what goes in.
         </Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
+        <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice"
           note="Nothing here reads, checks or corrects a diagnosis. For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
-        {/* The second sentence is new and it is not decoration. The screen has
-            always promised the file is private, and the Open button used to
-            break that promise by handing the document to the phone's web
-            browser. It now opens in the app, so the promise and the button
-            agree — and the member is told which, because a privacy property
-            nobody can see is one they have no reason to believe. */}
+        {/* This notice used to say "The document stays in your account and only
+            you can open it", above a button that posted the whole page to
+            OCR.space. The bucket was private and the sentence was false, which
+            is the worst combination: a real guarantee described in a way that
+            covers something it does not cover.
+
+            What is unconditionally true is here — the coach never gets the
+            file, and it opens inside the app rather than in a browser. What is
+            conditional is `SCREEN_PROMISE`, which says that reading means
+            sending, names who to, and says the member is asked first. The
+            per-document truth is printed against each document in the list
+            below, once there is an answer to print. */}
         <Notice tone={t.brand} kicker="Private" title="Your coach never sees the file"
-          note={`The document stays in your account and only you can open it. ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below — the area, how bad it is and your note — the same as if you had typed it in yourself.`} />
+          note={`${SCREEN_PROMISE} ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below (the area, how bad it is and your note), the same as if you had typed it in yourself.`} />
 
         {busy ? (
           <Card style={{ marginTop: sp.md }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
               <ActivityIndicator color={t.brand} />
               <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
-                {busy === 'preparing' ? 'Preparing your document…' : 'Saving it privately, then reading it…'}
+                {busy === 'preparing' ? 'Preparing your document…'
+                  : busy === 'keeping' ? 'Saving it to your account. Nothing is being sent…'
+                  : 'Saving it privately, then sending it to be read…'}
               </Text>
             </View>
           </Card>
@@ -392,16 +534,85 @@ export default function InjuryDoc() {
             letters — and be reported as a photograph we could not make out, so
             the member was told to re-photograph a page that had been read fine.
             The sentence comes from `outcomeMessage` like the other three. */}
-        {result && result.read === 'error' ? (
+        {/* The member said no. Not an error, not styled as one, and its own
+            `read` state so it cannot fall into the panel below: the document is
+            in their account, nothing was sent, and the next step is the one the
+            question told them about before they chose it. "Add It Myself" is
+            the primary action here rather than a fallback, because for somebody
+            who has just declined the read it is the whole remaining route. */}
+        {result && result.read === 'not-asked' ? (
           <View>
             <Rule />
             <Section>
-              <Notice tone={t.warn} kicker={result.stored === 'ready' ? 'Saved, not read' : 'Nothing saved'}
+              <Notice tone={t.brand} kicker="Sent Nowhere" title={REFUSED_TITLE} note={REFUSED_NOTE}>
+                {!result.recorded ? (
+                  // Said out loud rather than swallowed. Nothing was sent — the
+                  // refusal is honoured by not acting — but the note under this
+                  // document in the list below will read "no record either way"
+                  // rather than "you kept this one private", and somebody who
+                  // came back to check would otherwise find that inexplicable.
+                  <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                    Nothing was sent. We could not write down that you said no, so this document will show as having no record either way until you answer again.
+                  </Flag>
+                ) : null}
+                <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+                  <Cta label={ADD_IT_MYSELF_LABEL} onPress={() => router.replace('/(client)/injuries')} />
+                  <Ghost label="Choose Another" onPress={() => pick(false)} />
+                </View>
+              </Notice>
+            </Section>
+          </View>
+        ) : null}
+
+        {/* They said yes and the agreement did not reach the server, so the
+            document was NOT sent. Separated from the panel below because "we
+            could not read that" would be false — nobody tried — and because the
+            reason is one the member is owed: we declined to send a medical
+            document on an agreement we could not show them afterwards.
+
+            `result.stored === 'ready'` is the condition that was missing, and
+            without it this panel stole every pre-upload failure from the honest
+            one below. `readInjuryDocument`'s early exit is
+            `fail(error) => ({ stored: 'error', path: null, consent, recorded:
+            false, sent: false, read: 'error', … })` — so a member who is signed
+            out, whose photo could not be prepared, whose file read back empty,
+            or whose upload to the bucket failed, satisfied `read === 'error' &&
+            consent === 'granted' && !recorded` exactly. What they were then
+            shown was RECORD_FAILED_NOTE: "Your document is saved, and it has not
+            been sent anywhere. We could not write down that you agreed to it
+            being read…" Both halves false. Nothing was saved — `stored` is
+            'error' and `path` is null, and the document does not appear in the
+            list below — and the consent ledger was blamed for a write nobody
+            attempted. The real sentence, `result.error` ("Sign in to add a
+            document.", "That image could not be prepared for reading."), was
+            thrown away, because the panel underneath is guarded on the exact
+            complement of this one. This branch is only for the case its own
+            title describes: the file IS in their account, and the agreement to
+            read it is what did not land. */}
+        {result && result.read === 'error' && result.stored === 'ready' && result.consent === 'granted' && !result.recorded ? (
+          <View>
+            <Rule />
+            <Section>
+              <Notice tone={t.warn} kicker="Saved, Not Sent" title={RECORD_FAILED_TITLE} note={RECORD_FAILED_NOTE}>
+                <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
+                  <Ghost label="Try Another Photo" onPress={() => pick(true)} />
+                  <Ghost label={ADD_IT_MYSELF_LABEL} onPress={() => router.replace('/(client)/injuries')} />
+                </View>
+              </Notice>
+            </Section>
+          </View>
+        ) : null}
+
+        {result && result.read === 'error' && !(result.stored === 'ready' && result.consent === 'granted' && !result.recorded) ? (
+          <View>
+            <Rule />
+            <Section>
+              <Notice tone={t.warn} kicker={result.stored === 'ready' ? 'Saved, Not Read' : 'Nothing Saved'}
                 title="We could not read that"
                 note={result.error ?? 'Something went wrong reading that document.'}>
                 <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
                   <Ghost label="Try Another Photo" onPress={() => pick(true)} />
-                  <Ghost label="Add It Myself" onPress={() => router.replace('/(client)/injuries')} />
+                  <Ghost label={ADD_IT_MYSELF_LABEL} onPress={() => router.replace('/(client)/injuries')} />
                 </View>
               </Notice>
             </Section>
@@ -418,13 +629,13 @@ export default function InjuryDoc() {
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{msg.note}</Text>
 
               {extraction.outcome === 'candidates'
-                ? extraction.candidates.map((cand) => <Proposal key={cand.key} cand={cand} />)
+                ? extraction.candidates.map((cand) => proposal(cand))
                 : (
                   // Not an empty list. An empty list on this screen reads as
                   // "you have no injuries", and the app has no idea whether
                   // that is true — it only knows it could not find one here.
                   <View style={{ marginTop: sp.lg, flexDirection: 'row', gap: sp.sm }}>
-                    <Cta label="Add It Myself" onPress={() => router.replace('/(client)/injuries')} />
+                    <Cta label={ADD_IT_MYSELF_LABEL} onPress={() => router.replace('/(client)/injuries')} />
                     {HAS_NATIVE_DOCUMENT_PICKER ? <Ghost label="Try a File Instead" onPress={pickFile} /> : null}
                     <Ghost label="Try Another Photo" onPress={() => pick(true)} />
                   </View>
@@ -440,7 +651,7 @@ export default function InjuryDoc() {
                   </Text>
                   {c.saveFailed ? (
                     <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-                      Your last profile change has not reached the server yet, so your coach may not see this one. It will retry — check the list before you rely on it.
+                      Your last profile change has not reached the server yet, so your coach may not see this one. It will retry. Check the list before you rely on it.
                     </Flag>
                   ) : null}
                   <View style={{ marginTop: sp.md }}>
@@ -455,8 +666,15 @@ export default function InjuryDoc() {
         {/* ── the documents themselves ────────────────────────────────────
             Shown because they are being kept. A medical document stored out of
             sight is the kind of thing people are right to object to, so it is
-            listed, openable and deletable by the only person who can read it. */}
-        <Rule />
+            listed, openable and deletable by the only person who can read it.
+
+            Each one now also carries where it has BEEN. That is the point of
+            recording the answer at all: a consent the member cannot go back and
+            look at is one they have to take the app's word for, and this app's
+            word on this exact subject was wrong until today. Four states, four
+            sentences — and the two that must never merge are "you kept this one
+            private", which is a decision on file, and "no record either way",
+            which is every document uploaded before the question existed. */}
         <Section>
           <SectionHead title="Your Documents"
             note={docsStatus === 'ready' ? String(docs.length) : undefined} />
@@ -464,27 +682,86 @@ export default function InjuryDoc() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Checking…</Text>
           ) : docsStatus === 'error' ? (
             <Flag tone={t.warn}>
-              We could not check what you have stored, so this is not a list of nothing — it is a list we could not read. Pull back in a moment.
+              We could not check what you have stored, so this is not a list of nothing. It is a list we could not read. Pull back in a moment.
             </Flag>
-          ) : docs.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing stored yet. Anything you add here stays private to you.</Text>
-          ) : docs.map((doc, idx) => (
-            <View key={doc.path} style={{ paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{doc.name}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                {dayLabel(doc.createdAt) ?? 'Date unknown'}
-                {doc.url === null ? ' · cannot be opened right now' : ''}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                {doc.url ? (
-                  <Ghost label="Open" onPress={() => { void openDoc(doc); }} />
-                ) : null}
-                <Ghost label="Delete" onPress={() => removeDoc(doc)} />
-              </View>
+          ) : docsStatus === 'partial' ? (
+            /* Its own sentence, and the list is still drawn under it: these
+               documents are real, there are simply more of them. The count in
+               the heading stays hidden, because a count over a prefix is not a
+               smaller number, it is a wrong one. */
+            <View>
+              <Flag tone={t.warn}>
+                You have more than {INJURY_DOC_LIST_CAP} documents stored, so this shows your {INJURY_DOC_LIST_CAP} most recent. The older ones are still here. They are just not on this list.
+              </Flag>
+              {docs.map((doc, idx) => renderDoc(doc, idx))}
             </View>
-          ))}
+          ) : docs.length === 0 ? (
+            /* This said "Nothing stored yet. Anything you add here stays
+               private to you." — the removed sentence, put back in a second
+               place. The notice at the top of this screen was rewritten
+               precisely because "stays private" is not true of a document the
+               member says yes to reading: a copy of it goes to OCR.space. The
+               empty state is the FIRST thing a member reads on this screen,
+               before they have uploaded anything, which makes it the sentence
+               that sets their expectation for the consent sheet they are about
+               to be shown — and it was contradicting it thirty pixels below.
+               It now says the half that is unconditional (nobody else can open
+               what is stored) and refuses to speak for the half that is the
+               member's own decision, which `SCREEN_PROMISE` above has already
+               explained and `docSendLine` answers per document once there is
+               an answer. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing stored yet. Anything you add is stored where only you can open it. If you choose to have one read, this screen asks you first and then says, against that document, where it went.</Text>
+          ) : docs.map((doc, idx) => renderDoc(doc, idx))}
         </Section>
       </ScrollView>
+
+      {/* ── the question, asked before anything leaves ─────────────────────
+          Nothing has been uploaded and nothing has been sent at the moment this
+          is on screen. `pending` holds the file the member chose and no more,
+          so every way out of this sheet is a real answer:
+
+            Send It to Be Read   upload, record the agreement, then post
+            Keep It Private      upload, record the refusal, post nothing
+            Cancel / back        nothing at all happens to the file
+
+          Dismissing it — the Android back button, a tap on the backdrop — is
+          Cancel and not a quiet yes, which is the whole difference between a
+          consent question and a notification.
+
+          A sheet rather than an Alert. Alert.alert cannot show four paragraphs,
+          truncates its buttons on Android and renders them in an order the
+          platform chooses; this is the one question on this screen where the
+          member has to be able to read all of it and where "Send" must not be
+          the button their thumb is already resting on. */}
+      <Modal visible={pending != null} transparent animationType="slide"
+        onRequestClose={() => setPending(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          accessibilityRole="button" accessibilityLabel={CONSENT_CANCEL_A11Y}
+          onPress={() => setPending(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={{ ...ty.title, color: t.ink }}>{CONSENT_TITLE}</Text>
+            {/* Four paragraphs, in the order somebody decides in: who it goes
+                to, what actually goes, what we cannot promise once it has gone,
+                and what happens if the answer is no. The last one is not a
+                consolation at the bottom — it is the half of the question that
+                makes "no" an answer somebody can afford to give. */}
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{CONSENT_WHO}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{CONSENT_WHAT}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{CONSENT_RETENTION}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{CONSENT_IF_YOU_DECLINE}</Text>
+
+            <View style={{ marginTop: sp.xl, gap: sp.sm }}>
+              <Cta label={CONSENT_SEND_LABEL} a11yLabel={CONSENT_SEND_A11Y} wide
+                onPress={() => { const f = pending; if (f) void runRead(f, 'granted'); }} />
+              <Ghost label={CONSENT_KEEP_LABEL} a11yLabel={CONSENT_KEEP_A11Y}
+                onPress={() => { const f = pending; if (f) void runRead(f, 'refused'); }} />
+              <Ghost label={CONSENT_CANCEL_LABEL} a11yLabel={CONSENT_CANCEL_A11Y}
+                onPress={() => setPending(null)} />
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* ── the document, full-screen, still inside this app ───────────────
           The whole point of item 46. A photographed report is drawn here by
@@ -505,7 +782,7 @@ export default function InjuryDoc() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top', 'bottom']}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingVertical: sp.md }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: '#fff' }} numberOfLines={1}>
+              <Text style={{ ...ty.body, ...font('500'), color: '#fff' }} numberOfLines={1}>
                 {viewing?.name ?? ''}
               </Text>
               {/* Repeated here rather than assumed from the screen behind it.
@@ -518,10 +795,10 @@ export default function InjuryDoc() {
             <Pressable onPress={() => setViewing(null)} hitSlop={12}
               accessibilityRole="button" accessibilityLabel="Close this document"
               style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: '#fff' }}>Close</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: '#fff' }}>Close</Text>
             </Pressable>
           </View>
-          {viewing?.url ? (
+          {viewing?.url && !viewErr ? (
             <Image
               source={{ uri: viewing.url }}
               // Contain, never cover. A report cropped to fill the screen has
@@ -529,10 +806,50 @@ export default function InjuryDoc() {
               // and the clinician's name are.
               resizeMode="contain"
               style={{ flex: 1, width: '100%' }}
+              // An <Image> that cannot load draws NOTHING — no icon, no border,
+              // no message. On this screen that is a black rectangle with the
+              // member's own filename above it, which reads as the app having
+              // lost a medical record. Every reason it can fail gets a sentence.
+              onError={() => setViewErr(true)}
               accessible
               accessibilityRole="image"
               accessibilityLabel={`Your document, ${viewing.name}`}
             />
+          ) : viewing ? (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.xl, gap: sp.md }}>
+              <Text style={{ ...ty.body, ...font('500'), color: '#fff', textAlign: 'center' }}>
+                This document did not open
+              </Text>
+              <Text style={{ ...ty.label, color: '#fff', opacity: 0.8, textAlign: 'center' }}>
+                Your file is still stored. This is a problem loading it, not a missing document. Try again, or close this and pull the list down to refresh.
+              </Text>
+              {/* A failed re-signature used to `return` with nothing said, so
+                  the one button on a black screen over somebody's medical
+                  record did visibly nothing when it did not work — which reads
+                  as the app having stopped responding, on the screen where it
+                  has just failed to show them their own document. `openDoc`
+                  alerts on exactly this failure and says the same thing: the
+                  file is still stored, the link is what could not be minted.
+                  Silence is never the answer here; it is the shape of "we tried
+                  and said nothing" the rest of this screen refuses. */}
+              <Ghost label="Try Again" onPress={() => {
+                const doc = viewing;
+                if (!doc) return;
+                void (async () => {
+                  const fresh = await signInjuryDoc(doc.path);
+                  if (!fresh) {
+                    Alert.alert(
+                      'Still Could Not Open It',
+                      'Your document is still stored. This is a problem getting a link to it, not a missing file. Close this and pull the list down to refresh, then try again.',
+                    );
+                    return;
+                  }
+                  setViewErr(false);
+                  setViewing({ ...doc, url: fresh });
+                  setDocs((prev) => prev.map((d) => (d.path === doc.path ? { ...d, url: fresh } : d)));
+                })();
+              }} />
+            </View>
           ) : null}
         </SafeAreaView>
       </Modal>

@@ -35,6 +35,10 @@
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import { BRAND } from './brands';
+// PostgREST stops at a thousand rows and says nothing. This file's whole
+// subject is a record that is short without saying so.
+import { capLimit, capped } from './rowCap';
+import { exportFileStores, type ExportFileStore } from './dataExport';
 
 /**
  * What the export is called on the member's phone.
@@ -109,6 +113,24 @@ const TABLES = [
   // Paperwork they signed or accepted.
   'liability_waivers',                       // part 84  · liability_waivers_own_r
   'coach_document_acceptances',              // part 135 · coach_doc_accept_own_r
+  // The gym's own paperwork, and the signatures the member put on it: the
+  // waiver, the PAR-Q, the photo consent and the membership contract that
+  // app/(client)/agreements.tsx writes. These were missing, and they are the
+  // STRONGEST legal record a member creates in this app — supabase/parts/185
+  // makes a signature irreversible, and web/delete-account.html tells the
+  // member to export before requesting erasure, so this file is the last copy
+  // they will ever have of it. The gym's own console already pulls them
+  // (studio-web/app/export/page.tsx), so the member's own export was the one
+  // place they did not appear.
+  //
+  // The signatures narrow to the member (gym_agreement_sig_own_r, part 520).
+  // The agreements themselves are the tenant's documents, opened to the whole
+  // tenant by part 185 on the grounds that a document somebody has to sign and
+  // cannot read before signing is not consent — so this exports the WORDING
+  // beside the signature, which is the half that makes the signature mean
+  // anything a year later.
+  'gym_agreement_signatures',                // part 520 · gym_agreement_sig_own_r
+  'gym_agreements',                          // part 185 · gym_agreements_tenant_r
 ];
 
 /**
@@ -254,10 +276,15 @@ export interface ExportFile {
   at: string | null;
 }
 
-/**
- * Where a member's own files live, and what to call each kind.
+/* Where a member's own files live, and what to call each kind, now lives in
+ * src/lib/dataExport.ts as `EXPORT_FILE_STORES` — a pure module, so the list is
+ * assertable under `npm test` against `COACH_DELETION_FILES_NOTE`, the sentence
+ * that promises it. It was four buckets here and is seven there; the three that
+ * were missing are the three only a coach ever has, and the note telling coaches
+ * to "export and save your files first" named all three. See the block above
+ * `EXPORT_FILE_STORES` for the whole account.
  *
- * INJURY DOCUMENTS ARE THE ONE THAT MATTERS MOST HERE. They are private to the
+ * INJURY DOCUMENTS ARE THE ONE THAT MATTERS MOST. They are private to the
  * client by design — own-folder policies with no trainer branch
  * (supabase/parts/91), a note kept out of the model (src/lib/coachShare.ts), a
  * viewer that never hands the file to another app (src/lib/injuryDocView.ts) —
@@ -265,17 +292,12 @@ export interface ExportFile {
  * rule. A file nobody else may see is still theirs, and a subject access
  * request is the one place it must appear.
  *
- * Every prefix below is the member's own uid. For `message-media` that is the
- * THREAD key, which for a client is their own id (part 124), and the objects
- * sit one level deeper under the uid of whoever sent them — so both halves of
- * the conversation's files are theirs to have, and neither is anybody else's
+ * Every prefix is the person's own uid. For `message-media` that is the THREAD
+ * key, which for a client is their own id (part 124), and the objects sit one
+ * level deeper under the uid of whoever sent them — so both halves of the
+ * conversation's files are theirs to have, and neither is anybody else's
  * folder.
  */
-const FILE_STORES: { bucket: string; what: string; depth: 1 | 2 }[] = [
-  { bucket: 'photos', what: 'A progress photograph you took', depth: 1 },
-  { bucket: 'injury-docs', what: 'An injury document you uploaded. Only you can see this one.', depth: 1 },
-  { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
-];
 
 /** How many objects to ask for per folder. Storage's own default is 100, which
  *  would silently truncate a year of progress photographs — and a manifest that
@@ -289,13 +311,21 @@ const FILE_PAGE = 1000;
  * from a failed read looks identical to a member who has never uploaded
  * anything, and this is the file they will use to decide whether it is safe to
  * delete their account.
+ *
+ * `coach` adds the three stores only a coach's account can hold — their logo,
+ * their published documents and their exercise clips. It is the caller's
+ * existing `{ coach: true }`, not a guess made here, for the same reason
+ * `COACH_TABLES` is opted into rather than sniffed.
  */
-export async function listMyFiles(uid: string): Promise<{ files: ExportFile[]; failed: { table: string; reason: string }[] }> {
+export async function listMyFiles(
+  uid: string,
+  coach = false,
+): Promise<{ files: ExportFile[]; failed: { table: string; reason: string }[] }> {
   const files: ExportFile[] = [];
   const failed: { table: string; reason: string }[] = [];
   if (!USE_SUPABASE || !uid) return { files, failed };
 
-  for (const store of FILE_STORES) {
+  for (const store of exportFileStores(coach)) {
     try {
       const { data: top, error: topErr } = await supabase.storage.from(store.bucket)
         .list(uid, { limit: FILE_PAGE });
@@ -332,7 +362,7 @@ export async function listMyFiles(uid: string): Promise<{ files: ExportFile[]; f
   return { files, failed };
 }
 
-function toExportFile(store: { bucket: string; what: string }, path: string, entry: any): ExportFile {
+function toExportFile(store: ExportFileStore, path: string, entry: any): ExportFile {
   const size = entry?.metadata?.size;
   return {
     bucket: store.bucket,
@@ -394,7 +424,7 @@ export interface ExportOptions {
 export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<ExportResult> {
   const out: Record<string, unknown> = { app: BRAND.label, exportedAt: new Date().toISOString() };
   if (!USE_SUPABASE) {
-    out.note = `Not connected to ${BRAND.label} — nothing of yours is stored on a server to export.`;
+    out.note = `Not connected to ${BRAND.label}, so nothing of yours is stored on a server to export.`;
     out.complete = true;
     return { json: JSON.stringify(out, null, 2), complete: true, failed: [], files: [] };
   }
@@ -409,16 +439,39 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
 
   for (const tbl of TABLES) {
     try {
-      const { data, error } = await supabase.from(tbl).select('*');
+      // `capLimit()`, and then `capped()`. This was a bare `select('*')` with
+      // no limit and no truncation check, on a loop over every table a member
+      // has rows in — so PostgREST's configured maximum cut `workouts` and
+      // `messages` for anybody with a real history, and nothing on the way out
+      // noticed. `complete` below is computed from `failed` alone, so the file
+      // that reached the member was missing years of their own record with a
+      // field in it asserting that it was not. `listMyFiles` a few lines down
+      // already says why that is the worst shape this file can take: "a
+      // manifest that is short without saying so is the exact failure this
+      // whole file is about" — and web/delete-account.html has already told
+      // them to rely on this before they erase the original.
+      const { data, error } = await supabase.from(tbl).select('*').limit(capLimit());
       // The check that was missing. Without it a refusal becomes [].
       if (error) throw error;
-      out[tbl] = data ?? [];
+      const page = capped(data ?? []);
+      if (page.truncated) {
+        // An OBJECT, not an array, for the same reason a failed table is one:
+        // an array of a thousand rows cannot be told from the whole set by
+        // anybody opening this file in a year. The rows that did come back are
+        // kept inside it — nothing is thrown away — but they cannot be read as
+        // "this is all of them".
+        const reason = `only the first ${page.rows.length} rows could be read; there are more`;
+        failed.push({ table: tbl, reason });
+        out[tbl] = { error: 'INCOMPLETE: this table has more rows than could be read in one go', reason, rows: page.rows };
+      } else {
+        out[tbl] = page.rows;
+      }
     } catch (e: any) {
       const reason = e?.message ? String(e.message) : 'could not be read';
       failed.push({ table: tbl, reason });
       // Never `[]`. An object cannot be mistaken for "you had none of these",
       // and it survives into the file somebody opens in a year.
-      out[tbl] = { error: 'NOT EXPORTED — this table could not be read', reason };
+      out[tbl] = { error: 'NOT EXPORTED: this table could not be read', reason };
     }
   }
 
@@ -437,13 +490,22 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
       // not go out at all — an unscoped one would succeed and return other
       // people's rows.
       if (!myId) throw new Error('nobody is signed in, so this could not be narrowed to your own rows');
-      const { data, error } = await supabase.from(c.table).select('*').eq(c.column, myId);
+      const { data, error } = await supabase.from(c.table).select('*').eq(c.column, myId).limit(capLimit());
       if (error) throw error;
-      out[c.table] = data ?? [];
+      // Same rule as the member's half. A coach's invoices and sessions are the
+      // two tables in this app most likely to pass a thousand rows.
+      const page = capped(data ?? []);
+      if (page.truncated) {
+        const reason = `only the first ${page.rows.length} rows could be read; there are more`;
+        failed.push({ table: c.table, reason });
+        out[c.table] = { error: `INCOMPLETE: ${c.what} has more rows than could be read in one go`, reason, rows: page.rows };
+      } else {
+        out[c.table] = page.rows;
+      }
     } catch (e: any) {
       const reason = e?.message ? String(e.message) : 'could not be read';
       failed.push({ table: c.table, reason });
-      out[c.table] = { error: `NOT EXPORTED — ${c.what} could not be read`, reason };
+      out[c.table] = { error: `NOT EXPORTED: ${c.what} could not be read`, reason };
     }
   }
   if (opts.coach) out.coachingNote = COACH_OMISSION_NOTE;
@@ -460,7 +522,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   // nothing, and this is the file somebody uses to decide whether it is safe to
   // delete their account.
   const uid = auth?.user?.id ?? '';
-  const fileRead = await listMyFiles(uid);
+  const fileRead = await listMyFiles(uid, !!opts.coach);
   failed.push(...fileRead.failed);
   out.files = fileRead.files;
   out.filesNote =
@@ -473,7 +535,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   out.complete = complete;
   if (!complete) {
     out.warning =
-      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + coachTables.length + FILE_STORES.length) +
+      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + coachTables.length + exportFileStores(!!opts.coach).length) +
       ' parts of your record could not be read. Tables are marked with an "error" object rather than data; ' +
       'a file store that could not be listed means the list of your files above is short and you cannot ' +
       'tell by how much. ' +
@@ -484,12 +546,12 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   return { json: JSON.stringify(out, null, 2), complete, failed, files: fileRead.files };
 }
 
-/** Back-compatible wrapper: the JSON only. Prefer exportMyDataDetailed, which
- *  can tell the caller the file is partial — a screen that cannot say so will
- *  hand somebody an incomplete record and call it their data. */
-export async function exportMyData(): Promise<string> {
-  return (await exportMyDataDetailed()).json;
-}
+/* `exportMyData()` — the back-compatible wrapper that returned the JSON alone —
+ * used to sit here and is gone. Its own doc told callers to prefer
+ * `exportMyDataDetailed`, because a wrapper that drops `complete` and `failed`
+ * hands somebody an incomplete record and calls it their data; all three
+ * Settings screens took that advice, so it had no callers at all.
+ * scripts/check-dead-exports.mjs is what noticed. */
 
 /** Flag the account for erasure. Returns true if the request was recorded. */
 export async function requestAccountDeletion(): Promise<boolean> {

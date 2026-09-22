@@ -15,7 +15,12 @@
 // says why — it never reports 0, which would tell a gym its class cannot run.
 
 import { assertWrote } from './wroteRows';
-import { assertWhole, capLimit } from './rowCap';
+import { isoDay } from './weekStart';
+import { readAll } from './rowCap';
+// One reader for a typed money box, which asks the currency how many decimal
+// places it has and refuses `12,50` rather than guessing which side of the
+// Channel typed it. /costs reads its own box through the same function.
+import { readMinorAmount, type TypedAmount } from './coachMoney';
 
 type Queryable = { from: (table: string) => any };
 
@@ -62,6 +67,13 @@ function addDays(iso: string, days: number): string | null {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + days);
+  // utc-day-ok: nobody's calendar day is being read out of an instant here.
+  // A day string goes in at UTC midnight, the shift is `setUTCDate`, and the
+  // same day string comes back out — UTC is the carrier and it cancels, which
+  // is the property the line above wants and the reason it says so. Using a
+  // local day at either end would reintroduce the shift this exists to avoid:
+  // "ninety days after the last service" must be the same date for the owner
+  // reading it in Sydney and the technician reading it in Denver.
   return d.toISOString().slice(0, 10);
 }
 
@@ -168,8 +180,8 @@ export function capacityFor(
   return {
     limit, usable, down, supported: false,
     note: down > 0
-      ? `${down} of ${usable + down} ${category} out of action — this class seats ${limit}, not ${statedCapacity}.`
-      : `Only ${usable} ${category} registered — this class seats ${limit}, not ${statedCapacity}.`,
+      ? `${down} of ${usable + down} ${category} out of action, so this class seats ${limit}, not ${statedCapacity}.`
+      : `Only ${usable} ${category} registered, so this class seats ${limit}, not ${statedCapacity}.`,
   };
 }
 
@@ -355,15 +367,34 @@ export function needsAttention(items: Equipment[], today: string): { item: Equip
 
 /* ── reads ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * Every piece of kit this gym holds.
+ *
+ * Paged, and it was not bounded at all — no `capLimit()`, no `assertWhole`, no
+ * `readAll`. PostgREST answers an unbounded request with a thousand rows and
+ * says nothing, and these rows are not only a list: /equipment pairs them
+ * against the timetable on capacity, so a gym past a thousand items would have
+ * been told a class it can seat is oversubscribed, and told it in a red banner.
+ * A silent prefix feeding a capacity figure is the exact case src/lib/rowCap.ts
+ * calls strictly worse than a failed read.
+ *
+ * `category` and `name` both tie freely — a rack of twenty identical dumbbells
+ * is twenty rows with the same two values — so `id` supplies the total order
+ * `readAll` requires.
+ */
 export async function fetchEquipment(sb: Queryable, tenantId: string): Promise<Equipment[]> {
-  const { data, error } = await sb
-    .from('gym_equipment')
-    .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note, out_of_service_reason, out_of_service_since')
-    .eq('tenant_id', tenantId)
-    .order('category', { ascending: true })
-    .order('name', { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_equipment')
+      .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note, out_of_service_reason, out_of_service_since')
+      .eq('tenant_id', tenantId)
+      .order('category', { ascending: true })
+      .order('name', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's equipment",
+  );
+  return rows.map((r: any) => ({
     id: r.id,
     name: r.name,
     category: r.category ?? null,
@@ -432,6 +463,14 @@ export async function setStatus(
   status: EquipmentStatus,
   note?: string | null,
   reason?: string | null,
+  /**
+   * The GYM's calendar day, `YYYY-MM-DD` — what both console screens already
+   * compute as `gymDay(Date.now(), tenants.timezone)` and already hand to
+   * `recordService`. Passing it here is what keeps the two date columns on one
+   * row in ONE calendar; the fallback below is the reading device's day, which
+   * is the same answer only while the device is at the gym.
+   */
+  todayAtGym?: string | null,
 ): Promise<void> {
   const patch: Record<string, unknown> = { status };
   if (note !== undefined) patch.note = note;
@@ -441,7 +480,28 @@ export async function setStatus(
     // machine reported again by a second member of staff must not have its
     // clock reset to today, because the number this column exists to produce is
     // how long it has been broken.
-    patch.out_of_service_since = new Date().toISOString().slice(0, 10);
+    // The reader's own day, not UTC's. This was
+    // `new Date().toISOString().slice(0, 10)`, which is the same defect
+    // app/(owner)/equipment.tsx carries a written note about having removed
+    // from ITS half — a machine taken out of service at 5pm in Los Angeles was
+    // stamped tomorrow, and the number this column exists to produce is how
+    // many days a machine has been out. Reported on the evening of the 3rd it
+    // read as broken since the 4th, so "out of service 2 days" was 1 the
+    // morning after, and the register the gym answers an injury claim with
+    // disagreed with the day the staff member remembers standing there. The
+    // service date written a few lines down goes in as the local day too, and
+    // two columns of one row in two different calendars is its own bug.
+    //
+    // ── and that last sentence is why this now takes the gym's day ────────
+    //
+    // `recordService` stopped taking the reader's day: both console screens
+    // pass it `gymDay(Date.now(), tenants.timezone)`. This line did not move
+    // with it, so the two columns went back into two calendars — an owner
+    // taking a Dubai treadmill out of action from London stamped `since` on
+    // London's day and `last_serviced_on` on Dubai's. `daysSince(since, today)`
+    // on the console then compares a reader-day against a gym-day and reads
+    // "out of action −1 days" the evening it is reported.
+    patch.out_of_service_since = todayAtGym || isoDay(new Date());
   } else {
     // Back in service, or retired. Both clear the reason and the clock —
     // leaving them would make a working machine read as out of action on every
@@ -499,7 +559,13 @@ export async function recordService(
     recordedBy?: string | null;
   },
 ): Promise<void> {
-  const day = onIso ?? new Date().toISOString().slice(0, 10);
+  // The same correction as `setStatus` above, on the default. Callers that know
+  // the day pass `onIso` — app/(owner)/equipment.tsx passes its own `todayIso`,
+  // which is local for the reasons its header sets out — and this is what a
+  // caller that does not gets. It was UTC's day, so a service logged on a
+  // weekday evening west of Greenwich was filed on the following day and the
+  // next-due date derived from it came out a day late on every screen.
+  const day = onIso ?? isoDay(new Date());
 
   if (entry) {
     await addLogEntry(sb, entry.tenantId, {
@@ -567,44 +633,108 @@ export interface LogEntry {
   createdAt: string;
 }
 
+/**
+ * The cost box read once, by the reader the blocker and the write both use.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * The screen stripped commas and spaces out of the box — `cost.trim()
+ * .replace(/[,\s]/g, '')` — and then multiplied by a hardcoded hundred, and
+ * `logBlocker` tested the SAME stripped string against `/^\d+(\.\d{1,2})?$/`.
+ * So a front desk in Europe typing `12,50` for a repair produced `1250`, which
+ * passed the guard cleanly and was written as 125,000 minor units: a
+ * hundredfold overstatement in the gym's maintenance and incident record,
+ * entered by a receptionist doing nothing unusual, with the only check on the
+ * screen agreeing with it.
+ *
+ * The hundred was the second half of the same bug. A yen has no minor unit and
+ * a Kuwaiti dinar has a thousand of them, so ×100 is wrong in both directions
+ * before any comma is typed.
+ *
+ * `readMinorAmount` refuses the ambiguity instead of resolving it: in a
+ * two-place currency `12,50` is either twelve and a half or one thousand two
+ * hundred and fifty depending on where the person typing it grew up, and
+ * neither reading may be chosen on their behalf. It also asks the currency how
+ * many places it has. /costs reads its own money box through the same function.
+ *
+ * ONE reader, called by the blocker and by the write, because two readers over
+ * one box is exactly how the screen came to agree with a figure it was about to
+ * get wrong.
+ */
+export function logCost(cost: string, currency: string | null): TypedAmount | { ok: true; minorUnits: null } {
+  if (!cost.trim()) return { ok: true, minorUnits: null };
+  if (!currency) {
+    return { ok: false, reason: 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.' };
+  }
+  // NOT a charge. This is what a repair already cost, off the invoice of the
+  // engineer who did it, and Stripe has no opinion about that figure. Refusing
+  // a Bahraini or Kuwaiti 82.505 would put a hole in the maintenance record
+  // rather than a safety on it.
+  return readMinorAmount(cost, currency, false);
+}
+
 /** Why an entry cannot be recorded, or null when it can. */
 export function logBlocker(
   kind: LogKind, equipmentId: string | null, findings: string, cost: string, currency: string | null,
 ): string | null {
   if (!equipmentId && !findings.trim()) {
-    return 'An entry has to be about something. With no machine chosen, say what happened — otherwise this is a blank row in an accident book.';
+    return 'An entry has to be about something. With no machine chosen, say what happened. Otherwise this is a blank row in an accident book.';
   }
   if (kind === 'incident' && !findings.trim()) {
     return 'An incident with no account of it is not a record of anything. Write what happened while it is fresh.';
   }
-  if (cost.trim()) {
-    if (!/^\d+(\.\d{1,2})?$/.test(cost.trim().replace(/[,\s]/g, ''))) {
-      return 'Enter the cost as a number — 240, or 87.50. Leave it empty where there was none to record.';
-    }
-    if (!currency) {
-      return 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.';
-    }
-  }
+  const money = logCost(cost, currency);
+  if (!money.ok) return money.reason;
   return null;
 }
 
+/**
+ * The gym's maintenance and incident log.
+ *
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole` over the gym's WHOLE history,
+ * on the one list in this product that only ever grows. Nothing here is ever
+ * deleted — it is the accident book — so at a thousand entries the entire
+ * Maintenance and incidents section went behind an error and stayed there, for
+ * a statutory record, at a gym whose only fault was having been open a while.
+ *
+ * `assertWhole` was the right instinct and the wrong shape. src/lib/rowCap.ts
+ * sets out where throwing is wrong: it is for a read that feeds a FIGURE, and
+ * this one feeds a list. Nothing computes an average or a total off these rows;
+ * refusing them protects no number and takes away a screen somebody needs in
+ * front of an inspector.
+ *
+ * And what a truncated read would have dropped is the OLDEST entries, which are
+ * the ones the log exists to answer for — so a silent prefix was never
+ * acceptable either. `readAll` is the third answer: the read is simply
+ * finished, and `PAGE_CEILING` still refuses past fifty thousand entries, which
+ * is a sentence about the size of the read rather than about the gym.
+ *
+ * `happened_on` is a DATE and `created_at` alone can tie on a bulk import, so
+ * `id` closes the total order `readAll` requires. Without it, pages of a tied
+ * ordering drop and repeat rows silently — which in an accident book is an
+ * incident that stops being in it.
+ */
 export async function fetchLog(
   sb: Queryable, tenantId: string, equipmentId?: string,
 ): Promise<LogEntry[]> {
-  let q = sb
-    .from('gym_equipment_log')
-    .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, currency, reported_to, recorded_by, created_at')
-    .eq('tenant_id', tenantId);
-  if (equipmentId) q = q.eq('equipment_id', equipmentId);
-  const { data, error } = await q
-    .order('happened_on', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  // Capped and refusing. A truncated maintenance history is one that has
-  // silently lost its OLDEST entries — the ones that answer "how often has this
-  // needed looking at", which is the whole question the log exists for.
-  return assertWhole(data, "this gym's maintenance and incident log").map((r: any) => ({
+  const rows = await readAll<any>(
+    (from, to) => {
+      let q = sb
+        .from('gym_equipment_log')
+        .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, currency, reported_to, recorded_by, created_at')
+        .eq('tenant_id', tenantId);
+      if (equipmentId) q = q.eq('equipment_id', equipmentId);
+      return q
+        .order('happened_on', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+    },
+    "this gym's maintenance and incident log",
+  );
+  return rows.map((r: any) => ({
     id: r.id,
     equipmentId: r.equipment_id ?? null,
     equipmentLabel: r.equipment_label ?? null,

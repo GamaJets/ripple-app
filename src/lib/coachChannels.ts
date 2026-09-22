@@ -176,7 +176,7 @@ export function spendAgainstReturn(status: LoadStatus, sum: ChannelSum): Against
     return {
       statable: false,
       why: 'cost-unknown',
-      note: `${num(sum.costUnknown)} of your ${num(sum.codes)} ${sum.codes === 1 ? 'code has' : 'codes have'} no cost recorded, so no figure is stated. That is not a cost of nothing — counting it as nothing would make your advertising look cheaper than it was, which is the mistake that costs you money. Record what each one cost and this becomes a real number.`,
+      note: `${num(sum.costUnknown)} of your ${num(sum.codes)} ${sum.codes === 1 ? 'code has' : 'codes have'} no cost recorded, so no figure is stated. That is not a cost of nothing. Counting it as nothing would make your advertising look cheaper than it was, which is the mistake that costs you money. Record what each one cost and this becomes a real number.`,
     };
   }
   if (sum.paidUnknown > 0) {
@@ -305,7 +305,7 @@ export function channelReachLine(status: LoadStatus, sum: ChannelSum): string {
   if (status !== 'ready') return '';
   if (sum.codes === 0) return '';
   if (sum.clients === 0) {
-    return `Nobody has come in on ${sum.codes === 1 ? 'it' : 'any of them'} yet. These are the only people this list can see — anyone who found you another way is on your roster and in none of these figures.`;
+    return `Nobody has come in on ${sum.codes === 1 ? 'it' : 'any of them'} yet. These are the only people this list can see. Anyone who found you another way is on your roster and in none of these figures.`;
   }
   const people = `${num(sum.clients)} ${sum.clients === 1 ? 'person' : 'people'}`;
   const still = sum.stayed === sum.clients

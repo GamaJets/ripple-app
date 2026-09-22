@@ -3,12 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Delete your account — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/delete-account">
   <meta name="robots" content="noindex, follow">
 <meta name="description" content="How to request deletion of your Repple, Repple Coach or Repple Studio account, what is deleted, what is kept, and how long it takes.">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:title" content="Delete your Repple account">
+<meta property="og:description" content="How to ask for deletion, what is removed, what is kept, and how long it takes.">
+<meta property="og:url" content="https://www.repplefitness.com/delete-account">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="legal-redesign.css?v=3d893352c2">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -18,10 +43,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -35,26 +78,37 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="legal-page legal-delete">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".38"/><circle cx="50" cy="50" r="21" opacity=".65"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -65,14 +119,23 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main class="wrap page prose">
+<main id="main" tabindex="-1" class="wrap page prose">
   <h1>Delete your account</h1>
-  <p class="updated">Updated 25 August 2026</p>
+  <p class="updated">Updated 14 September 2026</p>
 
   <p>This page covers the three apps published by Washateria LLC — <strong>Repple</strong>, <strong>Repple Coach</strong> and <strong>Repple Studio</strong>. They share one account and one database. Deleting the account deletes it in all three; there is no way to leave one and keep another.</p>
 
+  <!-- "…the link to you is emptied, and it no longer names you." That is what
+       the last clause of this callout said until 14 September 2026, and it is
+       the false half of the same sentence Lane 99 took off web/studio.html and
+       Lane 111 took off the middle bar of the chart on web/security.html.
+       Detached is not anonymous: the link is emptied, and on several of those
+       rows the name is deliberately left behind. This page's own "What is kept"
+       section explained that already, three screens further down, so the
+       summary at the top contradicted the detail at the bottom — and the
+       summary is the part that gets read on its own. -->
   <div class="callout">
-    <p><strong>The short version.</strong> Ask in the app, or email us from the address on the account. Your account is removed from sign-in and the records that are yours go with it. A short list of gym business records survives with you detached from them — the row stays, the link to you is emptied, and it no longer names you. Requests are actioned within 30 days and can be withdrawn until they are. Nothing happens on a timer, though, so email as well as tapping the button.</p>
+    <p><strong>The short version.</strong> Ask in the app, or email us from the address on the account. Your account is removed from sign-in and the records that are yours go with it. A short list of gym business records survives with you detached from them — the row stays and the link to you is emptied. Detached is not anonymous: several of those rows keep your name in a column of their own, on purpose, and this page names every one of them. Requests are actioned within 30 days and can be withdrawn until they are. Nothing happens on a timer, though, so email as well as tapping the button.</p>
   </div>
 
   <h2>How to request deletion</h2>
@@ -107,51 +170,203 @@ addEventListener('DOMContentLoaded', function () {
     <li>Afterwards the account no longer exists at sign-in. The email address is free again — signing up with it creates a new, empty account, not your old one.</li>
   </ul>
 
-  <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer. Tapping the button records the request; a person then has to carry it out, and the database only lets your gym's owner do it. The Repple Studio screen that shows an owner the requests waiting on them is new and is not in every gym&rsquo;s build yet, so an in-app request can sit unseen — and if you are not a member of any gym, there is no owner to see it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
+  <p><strong>If you are a coach and somebody has accepted one of your documents.</strong> A coach can publish a document in Repple Coach &mdash; a waiver, a PAR-Q, a studio policy &mdash; and clients accept it or are sent it. An acceptance is deliberately locked to the document it is an acceptance of, so that neither can be altered afterwards without the other. That lock still refuses every ordinary route to removing an acceptance &mdash; no admin screen, no cleanup, no policy. There is now exactly one thing that can release one, and it is the erasure of the coach who owns the document. So the deletion runs to completion on its own; you do not have to ask us for anything. It used to be the other way round: until that route was built the attempt raised a database error and rolled back, taking even the record that it had been attempted with it. The consequence is stated here rather than discovered afterwards &mdash; when your account is erased, the record that your clients accepted your document goes with it. The alternative was keeping your name, your file and your paperwork indefinitely because somebody once ticked a box, and that is not retention.</p>
+
+  <!--
+    WHAT THIS PARAGRAPH USED TO SAY, AND WHY IT WAS CHANGED — 13 Sep 2026.
+
+    It read: "The Repple Studio screen that shows an owner the requests waiting
+    on them is new and is not in every gym's build yet, so an in-app request can
+    sit unseen."
+
+    That was a claim about WHICH BINARY A GYM IS HOLDING, and nothing in this
+    repository knows that — no build is on a store (checked again on 13 Sep:
+    resultCount 0 on all three Apple ids, 404 on all three Play pages), owners
+    are on TestFlight, and no table records which install anybody has. So the
+    page was resting a disclosure about a statutory deadline on a fact it could
+    not establish, and it carried a second cost: it was written to go stale the
+    day the listings publish, which is precisely the kind of sentence that stops
+    being true without anything failing. It was on the launch checklist as a
+    thing to remember to reword.
+
+    What replaces it is the same warning resting on something that CAN be shown
+    from the code, and that will still be true after the listings publish:
+
+      · No cron job actions a deletion. `delete from auth.users` — the whole of
+        what erasing an account is here — appears in exactly two places in
+        supabase/parts, and they are the same function: 41-account-deletion.sql
+        and its restatement in 2370-a-permanent-record-of-deleting-nobody.sql.
+        None of the fifteen `cron.schedule` call sites reaches it; the purge
+        that IS scheduled (48-photo-purge-schedule.sql, and 1120 for the files an
+        erasure leaves behind) drains FILES after an erasure rather than
+        performing one. Nothing runs on a timer.
+      · action_account_deletion() in supabase/parts/41-account-deletion.sql,
+        restated in 2370-a-permanent-record-of-deleting-nobody.sql, raises
+        42501 unless is_owner_of(subject's tenant_id). One person per gym, and
+        no other in-app route exists: grep finds the RPC called from exactly one
+        screen.
+      · is_owner_of() (28-fix-profiles-recursion.sql) compares
+        `p.tenant_id = t`, so a subject with a NULL tenant_id can satisfy it for
+        nobody. An account attached to no gym cannot be actioned in the app by
+        any signed-in user at all — which is the sentence below, and it is a
+        property of the SQL rather than of anybody's release schedule.
+
+    The advice is unchanged and deliberately errs the same way it always did:
+    email as well, because the email route does not depend on somebody else
+    opening a screen.
+  -->
+  <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer &mdash; no scheduled job carries out deletions, and nothing happens unattended. Tapping the button records the request and flags the account; a person then has to carry it out. From inside the apps the database allows exactly one person to do that, the owner of the gym your account belongs to, so an in-app request waits on that one person opening the deletion queue in Repple Studio and working through it. If your account is not attached to a gym there is no such person, and the in-app route cannot finish it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
 
   <h2>What is deleted</h2>
-  <p>Deleting the account removes it from authentication. Every table holding your records hangs off it — forty-two of them as the database stands today — and they go with it:</p>
+  <!--
+    THE FIGURES BELOW, AND WHAT THIS PARAGRAPH SAID BEFORE — 14 September 2026.
+
+    It read: "Every table holding your records hangs off it — sixty-six
+    directly, and a hundred and six once the chain is followed all the way
+    down, as the database stands today — and they go with it".
+
+    Three separate faults, kept on the record because a member who read the old
+    page was given a different promise from the one below.
+
+      · BOTH NUMBERS HAD DRIFTED. 66 is now 68; 106 is now 108. "As the
+        database stands today" carried no date, so nothing could tell a fresh
+        count from a stale one — which is how the 39 in part 41's header
+        survived on five surfaces for as long as it did.
+      · NEITHER SAID WHICH ROW IT WAS COUNTED FROM, and the two roots give
+        different answers. The closure from `profiles` is 108 besides
+        `profiles` itself; the closure from `auth.users` — the row
+        action_account_deletion() actually deletes — is 129. Three lanes have
+        now been caught by that difference, so the paragraph below names the
+        root beside each figure.
+      · "AND THEY GO WITH IT" WAS SAID OF THE WHOLE FAN-OUT. True of the 68
+        that cascade. False of the 59 that are `on delete set null`: those rows
+        stay, and they are the whole of the "What is kept" section.
+
+    Re-measured against the live catalogue (project phgfwzpkkwdysftlgkoq) on
+    14 September 2026, from pg_constraint — never from a parse of
+    supabase/setup.sql, because part 184 drops and recreates three of these
+    keys as `on delete set null` long after `create table` wrote `cascade`, and
+    file parses have given 120, 122 and 125 against a live 118. Both queries
+    are in the header of supabase/parts/41-account-deletion.sql, whose `do $`
+    block is the pin that check O of scripts/check-site-claims.mjs holds this
+    page and every other carrier of the figure against.
+  -->
+  <p>Deleting the account removes it from authentication, and that sign-in row is what everything else hangs from. Counted from the live catalogue on 14 September 2026, erasing it reaches 118 tables in <span class="mono">public</span> and 11 more inside Supabase&rsquo;s own <span class="mono">auth</span> schema &mdash; 129 in all. Counted instead from your profile row, which is what a gym&rsquo;s own records point at, 68 tables are destroyed outright and a further 59 keep their rows with the link to you emptied. Which row a figure is counted from matters, because the two answers are not the same. These are the ones that go:</p>
   <ul>
     <li><strong>Your identity</strong> — name, email address, profile photo.</li>
     <li><strong>Training</strong> — workouts, logged sets, cardio and calorie entries, personal records.</li>
     <li><strong>Body data</strong> — InBody scans, body measurements and progress photos, including the image files themselves.</li>
     <li><strong>Check-ins, habit logs and food logs.</strong></li>
     <li><strong>Messages with a coach.</strong> The thread belongs to the member's account, so deleting a member account removes the thread from the coach's side too.</li>
-    <li><strong>Coaching links and programmes</strong> — the link to your coach, and any programme assigned to you.</li>
+    <li><strong>Coaching links and programs</strong> — the link to your coach, and any program assigned to you.</li>
     <li><strong>Class bookings.</strong></li>
-    <li><strong>Your gym membership record and any invoices issued to you.</strong> Payments the gym recorded are handled differently — see below.</li>
+    <!-- INVERTED UNTIL 14 SEPTEMBER 2026, and the most serious thing this page
+         has said. This bullet read "Your gym membership record and any invoices
+         issued to you. Payments the gym recorded are handled differently — see
+         below." — naming them among what is DESTROYED. They are not destroyed.
+         supabase/parts/184-an-erasure-that-does-not-unbalance-the-books.sql
+         drops memberships_member_id_fkey, gym_invoices_member_id_fkey and
+         gym_payments_member_id_fkey and recreates all three as `on delete set
+         null`, and trg_profiles_retain_financial_record copies the member's
+         name onto each row in the moment before the profile goes. So all three
+         survive the erasure, and all three survive it still carrying a name.
+         The identical sentence was wrong on web/security.html and was
+         corrected there on the same day. It is replaced in place rather than
+         quietly dropped, because a member who read the old page was promised
+         the destruction of records that were never going to be destroyed, and
+         this bullet is where they will come back to look. -->
+    <li><strong>Not your gym membership, and not the invoices raised against you.</strong> Until 14 September 2026 this page listed both here, among what is destroyed. That was the wrong way round: those rows stay with the gym, the link to you is emptied, and the name they were billed to is kept on purpose. They are in <strong>What is kept</strong> below, together with the payments the gym recorded, for the same reason.</li>
     <li><strong>Push notification tokens</strong>, so notifications stop.</li>
-    <li><strong>Connected-service tokens</strong> for WHOOP, Oura, Fitbit, Garmin and Spotify. Those connections end.</li>
+    <li><strong>Injuries you recorded</strong>, and the record of any document you uploaded about one, including the record of your answer when we asked whether it could be sent to be read as text.</li>
+    <li><strong>Connected-service tokens</strong> for WHOOP, Oura and Spotify. Those connections end. Fitbit and Garmin cannot be connected yet, so there is no token for either.</li>
   </ul>
-  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it. A file we could not remove stays visibly outstanding rather than being quietly written off.</p>
+  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it: a reply that does not say the object has gone leaves the entry outstanding rather than closing it.</p>
 
-  <p>Nobody else can see them. Your coach cannot: progress photos are the one thing in Repple a coach has no read access to, deliberately and at both layers &mdash; the record and the file are locked separately. If sharing with a coach is ever offered it will be something you switch on for a specific photo, not something that is already true.</p>
+  <p><strong>And an alarm fires when an entry stops moving.</strong> A scheduled run reporting that it ran is not the same as reporting that it removed something, so a second job reads the queue once a day and fails on purpose if anything has been sitting in it for more than a day. A job that fails is a red line in the log of scheduled runs, naming the file and the last thing the storage service said about it. That is the honest size of it: a signal in a place we look, not a message that wakes somebody at three in the morning. What it rules out is the failure this queue had already had once &mdash; a drain reporting success every five minutes for three days while one entry, a test row as it turned out, never moved.</p>
+
+  <p><strong>The other files are on that mechanism now.</strong> Injury documents you uploaded, anything sent as an attachment in a message and your profile photo are recorded and queued the moment your account goes, exactly as a progress photograph is, and a scheduled job sends a delete for each of them within minutes. If you coach through Repple Coach, so are your logo, any document you published and any exercise clip you recorded. The same rule holds for all of them: an entry is closed only when the storage service confirms the object is no longer there. A file that has been asked for is not yet a file that has gone, and we record the second of those, not the first. Both apps say so on their own deletion screens at the moment you ask.</p>
+
+  <!-- This paragraph said "the document no longer names you in our database"
+       until 14 September 2026. Emptying a link cannot deliver that.
+       public.gym_documents (supabase/parts/185-the-paperwork-a-gym-has-to-keep.sql)
+       has member_id `on delete set null` and no name snapshot — but it also has
+       `title` and `note`, free text a member of staff typed, which this
+       software neither wrote nor can read the meaning of. It is the same
+       over-claim as the two the rest of this page carried, one layer further
+       out: a detached row is not an anonymised one, and a row with free text on
+       it is not even a row we can make that promise about. -->
+  <p><strong>One store is deliberately not on it: your gym&rsquo;s own filing cabinet.</strong> A gym can file a document against a member &mdash; a signed contract, an incident report, a photograph &mdash; and those are stored under the gym rather than under you. Deleting your account empties the link to you, so nothing in our database joins the document to your account any more &mdash; but the file itself stays, and so does whatever a member of staff typed on the row. A title or a note can still carry your name: a gym wrote those, not us, and detaching a row does not go into free text. That is not an oversight and it is not settled either: how long a gym must keep a record about a former member has a different answer in each country, and until that is decided per gym we would rather keep a file a gym may be legally required to hold than destroy it. If you want to know what your gym holds about you, ask them before you delete &mdash; afterwards the link that would find it is the thing the deletion emptied.</p>
+
+  <p>Nobody sees them unless you share that photo. Progress photos are the one thing in Repple a coach has no standing access to. There is no permission that comes with being your coach; there is a grant you make for one photograph at a time, which you can withdraw, and which ends by itself when the coaching link does. It is enforced at both layers &mdash; the record and the file are locked separately, and the rule on the file is written in terms of the rule on the record so the two cannot come apart. Sharing a photo also shares the weight and body-fat figure stored alongside it.</p>
 
   <p>Apple Health is a permission held on your iPhone, not data we store a key for. Deleting the account does not touch it. Revoke it in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>, or by removing the app. Anything imported from Health into your training log is deleted with the log.</p>
 
   <h2>What is kept</h2>
-  <p>A few records survive, with you detached from them. The row stays; the column that pointed at your account is emptied. After that it carries no name, no email and no profile — it is a line in a gym's books, not a record of a person. A gym has to keep financial and attendance records for tax and legal reasons, and cannot do that if removing a member erases them.</p>
+  <!-- "…and after that it holds no email, no profile and nothing you logged —
+       it is a line in a gym's books, not a record of a person." That is what
+       this paragraph said until 14 September 2026, and it is the same false
+       reading Lane 99 removed from web/studio.html and Lane 111 removed from
+       the middle bar of the chart on web/security.html: detached is not
+       anonymous. The link goes; the name often does not — and the very next
+       paragraph on this page already said so, which made the page contradict
+       itself within three paragraphs. What replaces it keeps the half that is
+       true (an emptied link reaches nothing) and states the half that was
+       missing, in the same words the other two surfaces now use. -->
+  <p>A few records survive, with you detached from them. The row stays; the column that pointed at your account is emptied, and nothing else on the row is changed. That emptied link no longer reaches your email, your profile or anything you logged. <strong>But detached is not anonymous.</strong> Several of these rows keep your name in a column of their own, written there deliberately, and the next paragraph says which. A gym has to keep financial and attendance records for tax and legal reasons, and cannot do that if removing a member erases them.</p>
 
-  <div class="scroll">
+  <!-- This paragraph opened "One exception, and it is about your name." It was
+       not an exception: it was the correction to the paragraph above it, which
+       had just told the reader the opposite. It also said the kept name was on
+       "the three financial records" and, four paragraphs down, "nowhere else".
+       Both were wrong. Confirmed present in the schema on 14 September 2026:
+       gym_invoices.billed_name, gym_payments.payer_name and
+       memberships.member_label (all three written by
+       trg_profiles_retain_financial_record in supabase/parts/184), plus
+       gym_passes.holder_name (part 31), gym_agreement_signatures.signed_name
+       and .guardian_name (part 185), staff_grants.subject_name, .actor_name
+       and .revoked_by_name (part 711), and gym_events.summary (part 105),
+       which is composed at write time so a feed entry does not change when
+       somebody is renamed or erased.
+
+       NO TOTAL IS GIVEN FOR THAT SET, deliberately, and one should not be
+       added. Which text column on a surviving row amounts to "the person's
+       name" is a judgement, not a count — and the nearest number in this repo,
+       "17 columns / 13 tables" in part 41's header, is the OLD direct set-null
+       fan-out from a much smaller schema and is not a count of names at all.
+       A figure nobody can re-derive is how the 39 started. -->
+  <p><strong>Which records keep your name, and why.</strong> On the three financial records &mdash; an invoice, a payment and a membership &mdash; the name it was billed to, taken from or held by is copied onto the row in the moment before your profile goes, because an invoice made out to nobody does not balance a gym&rsquo;s books and an auditor cannot reconcile a payment from an unnamed party. Three more keep a name that was never a copy of your profile to begin with: the holder&rsquo;s name written on a guest pass at the desk; the name signed on a gym&rsquo;s own paperwork &mdash; a waiver, a PAR-Q, a policy, a guardian&rsquo;s consent &mdash; because a waiver nobody signed is not evidence of anything; and the names on a staff role a gym granted, so its own record of who let whom in stays readable. A gym&rsquo;s activity feed is the last of them: each entry&rsquo;s wording is composed when it is written, so an entry that named you still reads the same afterwards. In every one of these the name is a name on a record and nothing more &mdash; it points at no account, opens nothing and is attached to nothing you did in the app. It is on this page because finding it out afterwards would be worse.</p>
+
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-kept">
   <table class="data">
-    <thead><tr><th>What stays</th><th>Why</th></tr></thead>
+    <caption class="vh" id="tbl-kept">What is kept after an account is deleted, and why</caption>
+    <thead><tr><th scope="col">What stays</th><th scope="col">Why</th></tr></thead>
     <tbody>
-      <tr><td><strong>Payments a gym recorded</strong></td><td>Money actually received. Gyms must keep it for tax and accounting.</td></tr>
-      <tr><td><strong>Door-log visits</strong></td><td>Attendance and capacity records the gym relies on and may be required to hold.</td></tr>
-      <tr><td><strong>Guest passes issued or redeemed</strong></td><td>They were paid for and have to reconcile against takings.</td></tr>
-      <tr><td><strong>Training packages you bought</strong></td><td>A purchase record. Kept for the same accounting reasons as a payment, with your name removed.</td></tr>
-      <tr><td><strong>Feedback you submitted</strong></td><td>Kept so it still counts, no longer attributed to you.</td></tr>
-      <tr><td><strong>Crash and error reports</strong></td><td>Diagnostics we use to fix faults. They were never tied to your name.</td></tr>
+      <tr><th scope="row"><strong>Payments a gym recorded</strong></th><td>Money actually received. Gyms must keep it for tax and accounting.</td></tr>
+      <tr><th scope="row"><strong>Door-log visits</strong></th><td>Attendance and capacity records the gym relies on and may be required to hold.</td></tr>
+      <tr><th scope="row"><strong>Guest passes issued or redeemed</strong></th><td>They were paid for and have to reconcile against takings. Kept with the holder&rsquo;s name as it was written at the desk &mdash; that name was never a copy of your profile, so there is nothing on the row for the erasure to empty.</td></tr>
+      <tr><th scope="row"><strong>Invoices a gym raised</strong></th><td>What you were billed and whether it was settled. Kept with the name it was billed to, for the reason above.</td></tr>
+      <tr><th scope="row"><strong>Memberships you held</strong></th><td>Which plan, from when, and in what state — the line the payments above reconcile against. Kept with the name that was on it.</td></tr>
+      <tr><th scope="row"><strong>Paperwork you signed for a gym</strong></th><td>A waiver, a PAR-Q, a policy, a guardian&rsquo;s consent. Nothing cascades into these on purpose: a gym has to be able to produce what was signed, and the name that signed it is the signature. Kept with that name, and with a guardian&rsquo;s where there was one. This is a gym&rsquo;s own paperwork; a document a <em>coach</em> published and you accepted is a different record, and that one goes when the coach&rsquo;s account does.</td></tr>
+      <tr><th scope="row"><strong>Training packages you bought</strong></th><td>A purchase record. Kept for the same accounting reasons as a payment, with your name removed.</td></tr>
+      <tr><th scope="row"><strong>Feedback you submitted</strong></th><td>Kept so it still counts, no longer attributed to you.</td></tr>
+      <tr><th scope="row"><strong>Crash and error reports</strong></th><td>Diagnostics we use to fix faults. The row stays and the pointer to your account is emptied, so what is left is the fault and not the person. While your account exists these are readable by your gym&rsquo;s owner and not by you, which is why they are not in your export.</td></tr>
     </tbody>
   </table>
   </div>
 
-  <p>Alongside these, a handful of administrative traces survive the same way &mdash; who wrote a gym announcement, who sent or accepted an invitation, which coach was named on a nutrition plan or an assigned programme. In every case the row stays and the pointer to your account is emptied, so it no longer names you.</p>
+  <!-- This sentence used to finish "…so it no longer names you — the name kept
+       above is on the three financial records and nowhere else." The first
+       clause is the detached-is-anonymous reading again; the second was simply
+       untrue, and it was the sentence that made the two halves of this page
+       disagree. A guest pass, a signed waiver, a staff grant and a gym feed
+       entry each keep a name too, and all four are enumerated in the comment
+       above the "Which records keep your name" paragraph. -->
+  <p>Alongside these, a handful of administrative traces survive the same way &mdash; who wrote a gym announcement, who sent or accepted an invitation, which coach was named on a nutrition plan or an assigned program. In each of those the row stays and the pointer to your account is emptied. Whether a name is left behind with it is a property of the row rather than a rule: the records named above keep one, and the rest are left holding a pointer that now points at nothing.</p>
 
   <p>We apply no additional retention period on top of these. They are kept for as long as the gym's own accounting and legal obligations require, and are held under the same terms as everything else in <a href="/privacy">Privacy</a>. <a href="/security">Security &amp; data</a> shows how far the deletion reaches through the database, and why the files in storage have to be chased separately from the rows.</p>
 
   <h2>Take a copy first</h2>
-  <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programmes, class bookings, referrals and feedback. It does not reach the gym-side records — membership, invoices, payments and door-log visits — so ask us if you want those too. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
+  <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programs, class bookings, referrals and feedback. It now reaches the gym-side records too — membership, invoices, payments, charges, passes and door-log visits. Four things it does not carry: any note a coach wrote about you while you were a lead of theirs; the notifications the app has sent you; the push tokens that identify your handset; and the files themselves. The bundle lists every file held for you, and you save those one at a time from the same screen. Crash reports are not in it either, for the reason given in the table above &mdash; while your account exists they are not yours to read. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
 
   <h2>Two things deletion does not do</h2>
   <ul>
@@ -166,13 +381,66 @@ addEventListener('DOMContentLoaded', function () {
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
-    <span>
-      <a href="/support">Support</a> ·
-      <a href="/privacy">Privacy</a> ·
-      <a href="/delete-account">Delete account</a> ·
-      <a href="/terms">Terms</a>
-    </span>
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          One connected fitness platform for members, coaches and gyms.
+        </p>
+      </div>
+      <div>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/support">Support</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
   </div>
 </footer>
 

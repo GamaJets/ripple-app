@@ -87,28 +87,35 @@
 // the money has, and ZERO_DECIMAL and THREE_DECIMAL are the two answers that
 // are not two.
 //
-// adMatch.centsFromAmount multiplies a major-unit figure by 100 FLATLY anyway,
-// for every currency, and this file follows it deliberately rather than being
-// cleverer:
+// This section used to argue the opposite, at length, and it was wrong.
 //
-//   · A JPY account reporting ¥1,234 stores 123400 and renders as "JPY
-//     1,234.00" — the right amount of money with a decimal place nobody in
-//     Japan uses. Dividing by 1 instead of 100 for the sixteen ZERO_DECIMAL
-//     currencies would store 1234, which `money()` would then render as "JPY
-//     12.34". A hundredfold error on a coach's own spend, in the currencies
-//     where nobody reviewing it would have caught it.
-//   · A KWD account reporting 12.340 stores 1234 and renders as "KWD 12.340",
-//     because minorMoney pads to the three places THREE_DECIMAL asks for and
-//     1234 hundredths is 12.34 dinars. The third decimal place is where this
-//     convention actually costs something: a figure of 12.345 rounds to 1234
-//     and loses half a fils. That is bounded, it is per ad rather than
-//     compounding, and it is the same rounding `client_purchases` already
-//     makes on the revenue side — so spend and revenue agree, which is the
-//     comparison part 98 exists to make. Changing it here alone would make
-//     them disagree by a hundredfold and nothing on screen would say so.
+// It said adMatch.centsFromAmount multiplied by 100 FLATLY for every currency,
+// that this file followed it deliberately, and that a JPY account reporting
+// ¥1,234 therefore stored 123400 and rendered as "JPY 1,234.00" — the right
+// amount with a decimal place nobody in Japan uses. That render has not been
+// true since `money()` started delegating to `minorMoney`: 123400 minor units
+// in a currency with no minor unit is ¥123,400, and a coach in Tokyo was shown
+// their advertising spend, and their cost per client, at a hundred times what
+// they had actually spent. The KWD paragraph was the same error inverted —
+// 12.340 stored as 1234 reads back as KWD 1.234, a tenth of it.
 //
-// One conversion, one place, and the reasoning written down rather than
-// rediscovered by whoever adds the fourth channel.
+// The paragraph's own premise is what gave it away: it correctly stated that
+// `minorMoney` asks `currencyDecimals` how many places the money has, and then
+// concluded that the writer should ignore the answer. A writer and a renderer
+// that disagree about the unit produce a figure that is wrong in both
+// directions depending on which end you read it from.
+//
+// So there is no flat hundred anywhere in this chain now. adMatch.
+// centsFromAmount takes the ad account's currency and scales by 10^places on
+// the digits, and the revenue side it is compared against — client_purchases.
+// amount_cents, written from what Stripe actually charged — has always been
+// true minor units. The two agree for the first time in the twenty-one
+// currencies where they did not.
+//
+// What `majorFromMicros` below does is unchanged and was never part of the
+// error: it moves Google's decimal point six places and hands on the same
+// major-unit decimal string Meta and TikTok already report. One conversion,
+// one place, and the currency question asked exactly once, downstream of it.
 
 /** The channels a coach can connect. Order is the order they are shown in. */
 export const AD_CHANNELS = ['meta', 'google', 'tiktok'] as const;
@@ -318,9 +325,9 @@ export function combineRefusalNote(c: Combined): string {
     case 'channel-unread':
       return `${channelList(c.missing)} could not be read, so there is no total: what the other channels reported is not all of your ad spend, and printing it as though it were would make every channel look cheaper than it is. Each channel's own figure is below. Check ${channelList(c.missing)} again, and the total comes back on its own.`;
     case 'currency-clash':
-      return `Your ad accounts bill in ${c.currencies.join(' and ')}, and those do not add together — the result would not be an amount of any money. Each channel's own figure is below, in its own currency. Repple will not convert one into the other, because the rate would be one nobody chose.`;
+      return `Your ad accounts bill in ${c.currencies.join(' and ')}, and those do not add together. The result would not be an amount of any money. Each channel's own figure is below, in its own currency. Repple will not convert one into the other, because the rate would be one nobody chose.`;
     case 'no-currency':
-      return 'Every connected channel was read and none of them has any ads in it, so there is nothing to total and no currency to total it in. A code you promote without paying for it will never appear here — no ad spend is unknown, not free.';
+      return 'Every connected channel was read and none of them has any ads in it, so there is nothing to total and no currency to total it in. A code you promote without paying for it will never appear here. No ad spend is unknown, not free.';
   }
 }
 
@@ -331,7 +338,7 @@ export function channelStateNote(c: AdChannel, state: ChannelRunState): string {
     case 'never':
       return `${name} is connected and has never been checked, so what you have spent there is unknown rather than nothing. Press Check Now and it will be counted.`;
     case 'failed':
-      return `The last ${name} check failed, so what you have spent there is unknown. Nothing was recorded from it — a failed check knows no figures, so it writes none.`;
+      return `The last ${name} check failed, so what you have spent there is unknown. Nothing was recorded from it: a failed check knows no figures, so it writes none.`;
     case 'ok':
       return `${name} answered, and what it reported is counted below.`;
   }
@@ -352,24 +359,33 @@ export const NO_TOTAL_NOTE =
  */
 export function coverageNote(channels: readonly AdChannel[]): string {
   if (!channels.length) return 'No ad account is connected, so this covers nothing that was spent on ads.';
-  return `This covers ${channelList(channels)}. Money you spent anywhere else — a boosted post paid for on somebody else's card, a gym noticeboard, a flyer — is not in it and never will be, so a code with nothing against it here is a code whose cost is unknown rather than nought.`;
+  return `This covers ${channelList(channels)}. Money you spent anywhere else (a boosted post paid for on somebody else's card, a gym noticeboard, a flyer) is not in it and never will be, so a code with nothing against it here is a code whose cost is unknown rather than nought.`;
 }
 
 /**
  * What a human has to obtain before a channel can read anything at all.
  *
  * Kept in the source rather than only in a README because the screen shows it:
- * a coach who taps Connect on a channel the owner has not set up gets this
- * sentence instead of a browser that opens onto an error page, and the owner
- * gets a list of exactly what is missing rather than "not configured".
+ * app/(trainer)/ad-spend.tsx draws this in place of the channel's Connect
+ * button, so a coach reads what is missing BEFORE tapping rather than after,
+ * and the owner gets a list of exactly what to obtain rather than "not
+ * configured". `connectAdChannel` still returns it as a refusal, for the case
+ * where an id is present and the sign-in is refused anyway.
+ *
+ * It says "here", not "in this build", and no sentence in it mentions a
+ * version. Nothing is missing from any binary: an app id and a Supabase secret
+ * are, and neither arrives in an update. That distinction is the whole subject
+ * of scripts/check-inlined-env.mjs — a coach told to wait for a build that
+ * could never carry the thing they were waiting for checks for updates, twice,
+ * and then asks support.
  */
 export function channelSetupNote(c: AdChannel): string {
   switch (c) {
     case 'meta':
-      return 'Connecting a Meta ad account is not set up in this build — the owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
+      return 'Connecting a Meta ad account is not set up here. The owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
     case 'google':
-      return 'Connecting a Google Ads account is not set up in this build — the owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
+      return 'Connecting a Google Ads account is not set up here. The owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
     case 'tiktok':
-      return 'Connecting a TikTok ad account is not set up in this build — the owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
+      return 'Connecting a TikTok ad account is not set up here. The owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
   }
 }

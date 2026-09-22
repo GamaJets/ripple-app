@@ -51,6 +51,55 @@
 // pass that through `fig()` to get a dash. A weight of 0 kg is not a light
 // client, it is a client nobody has weighed, and this module will not turn an
 // empty text field into one.
+//
+// ── The one number in this app that is read AND typed ──────────────────────
+//
+// `plain()` at the top of the file is not the same kind of formatter as `num`,
+// `num1`, `num2` and `numUpTo` in src/lib/format.ts, and the difference is the
+// reason it exists rather than an accident. Those four print a figure for
+// somebody to READ. `plain` prints a figure that this app may be handed BACK:
+// the load box on the log sheet, the weight box on the check-in, the tape
+// boxes, the profile sheet — every one of them is a <TextInput value=…> filled
+// from `plain` and read out again by `readNumber` fifty lines below it.
+//
+// That is why `plain` may not simply become `numUpTo(n, 3)`, which was the
+// obvious fix and is wrong twice:
+//
+//   · `numUpTo` GROUPS. A 1,204.5 kg figure written back through `readNumber`
+//     — which takes a comma as a decimal separator, because a German decimal
+//     pad has no full stop on it — reads as 1.204. A thousands separator in a
+//     box somebody edits is a factor-of-a-thousand error waiting for the next
+//     save, and `scripts/check-numbers.mjs` exempts `<TextInput value=…>` from
+//     the separator rule for exactly this reason.
+//   · `numUpTo` writes the locale's own DIGITS. `Intl` formats 16.5 as "١٦٫٥"
+//     on an Egyptian handset, and `readNumber` is `parseFloat` — it cannot read
+//     that back. A member who opened Edit profile on an Arabic phone would find
+//     their weight had become null.
+//
+// So `plain` keeps ASCII digits and never groups, and takes only the half of
+// localisation that survives the round trip: the reader's own DECIMAL
+// SEPARATOR. A member whose language writes 3,42 now sees 3,42 in the box, in
+// the "82,4 kg" beside it, and in the movement underneath — `deltaLabel` prints
+// its magnitude through this same function so that one row cannot show two
+// decimal conventions.
+//
+// Nothing `plain` is ever handed reaches four digits, so no grouping is due at
+// any of its call sites: `readLift` refuses anything over 600 kg / 1300 lb and
+// `readBodyWeight` anything over 400 kg / 880 lb, and every other caller is a
+// body weight, a tape measurement, a lifted load or a difference between two of
+// them. A tonnage — the one figure here that runs to six digits — goes through
+// `volumeIn` and out to `num()`, which groups.
+//
+// CSV and the export bundle do not come through here at all. src/lib/gymExport.ts
+// does its own string arithmetic on integer minor units, to the decimal places
+// the row's own currency has, precisely so a re-importable figure never depends
+// on whose phone wrote the file.
+//
+// The one import this module has. It was written to depend on nothing, and that
+// is still nearly true — `appLocale()` resolves a BCP-47 tag from a string and
+// imports nothing itself, react-native least of all, so the sweep tests in
+// units.test.ts still run under plain node.
+import { appLocale } from './locale';
 
 export type WeightUnit = 'kg' | 'lb';
 export type LengthUnit = 'cm' | 'in';
@@ -74,9 +123,124 @@ const roundTo = (n: number, dp: number) => {
   return Math.round((n + Number.EPSILON) * f) / f;
 };
 
-/** A number the way a person writes it: 82, not 82.0; 82.4, not 82.40. */
-export function plain(n: number): string {
-  return String(roundTo(n, 3));
+/**
+ * A figure that is ASCII digits and nothing else, with the reader's own decimal
+ * separator — no grouping, ever.
+ *
+ * Split out from `plain` because rounding a reading and spelling one are two
+ * different operations and the callers need them apart: `deltaLabel` has
+ * already rounded, by magnitude, deliberately differently from `roundTo` (it
+ * refuses the +EPSILON nudge on a difference, which would send +0.05 out to 0.1
+ * and −0.05 in to −0.0), and re-rounding its answer here would undo that.
+ *
+ * The two guards are not decoration. `Intl` is a Hermes build flag rather than
+ * a guarantee, so the constructor is wrapped — and a runtime that ACCEPTED the
+ * constructor while ignoring `numberingSystem` would hand back digits
+ * `readNumber` cannot parse, which is worse than a wrong separator and would be
+ * silent. So the answer is checked for the shape it is allowed to have, and
+ * anything else falls back to what this function printed before it could ask.
+ *
+ * The sign is put back by hand rather than left to `Intl`, which writes U+2212
+ * MINUS in some locales (sv-SE among them) — a character `parseFloat` does not
+ * read as a sign.
+ */
+const ASCII_FIGURE = /^\d+(?:[.,]\d+)?$/;
+function spell(n: number, dp: number, minDp = 0): string {
+  const mag = Math.abs(n);
+  let body = minDp > 0 ? mag.toFixed(Math.min(dp, minDp)) : String(mag); // locale-ok: the fallback when Intl throws; String(mag) beside it is ASCII too.
+  try {
+    const out = new Intl.NumberFormat(appLocale(), {
+      maximumFractionDigits: Math.min(20, Math.max(0, Math.trunc(dp) || 0)),
+      minimumFractionDigits: Math.min(Math.max(0, Math.trunc(dp) || 0), Math.max(0, Math.trunc(minDp) || 0)),
+      useGrouping: false,
+      // Cast because `numberingSystem` landed in the ES2023 lib and this file is
+      // compiled against ES2020 for the test runner. Every runtime this ships to
+      // honours it; the ASCII_FIGURE test below is what covers one that does not.
+      numberingSystem: 'latn',
+    } as Intl.NumberFormatOptions).format(mag);
+    if (ASCII_FIGURE.test(out)) body = out;
+  } catch {
+    // Left as String(mag) — the spelling this function had before it could ask.
+  }
+  return n < 0 ? `-${body}` : body;
+}
+
+/**
+ * A number the way a person writes it: 82, not 82.0; 82.4, not 82.40 — and
+ * 82,4 where that is how the reader writes it. See the header for why this is
+ * not `numUpTo`, and why it may never grow a thousands separator.
+ *
+ * `places` exists so `deltaLabel` can print at the precision it judged "nothing
+ * moved" at, rather than at three and disagreeing with its own sign.
+ */
+export function plain(n: number, places = 3): string {
+  return spell(roundTo(n, places), places);
+}
+
+/**
+ * The reader's decimal separator — "." or "," or U+066B on an Arabic locale —
+ * asked once per locale rather than once per figure.
+ *
+ * Latched on the tag rather than unconditionally, because `appLocale()` is
+ * itself a latch that is seeded on first use: caching the separator before the
+ * tag has resolved would pin every figure in the app to the fallback.
+ *
+ * A separator is one character and is never a digit. Anything else — a runtime
+ * that hands back something surprising, or no `Intl` at all — falls through to
+ * the full stop this app printed before it could ask, which is the same
+ * contract `spell` above works to.
+ */
+let sepTag: string | null = null;
+let sepChar = '.';
+function decimalSeparator(): string {
+  const tag = appLocale();
+  if (tag === sepTag) return sepChar;
+  let found = '.';
+  try {
+    const parts = new Intl.NumberFormat(tag, {
+      numberingSystem: 'latn',
+    } as Intl.NumberFormatOptions).formatToParts(1.1);
+    const d = parts.find((p) => p.type === 'decimal')?.value;
+    if (d && d.length === 1 && !/[\d.]/.test(d)) found = d;
+  } catch {
+    // Left as '.'.
+  }
+  sepTag = tag;
+  sepChar = found;
+  return found;
+}
+
+/**
+ * The digits `String(n)` would have written, with the reader's own decimal
+ * separator in place of the ASCII full stop. Nothing else changes: no
+ * rounding, no grouping, no locale digits, no sign of its own.
+ *
+ * ── why this is not `plain` ────────────────────────────────────────────────
+ *
+ * `plain` is a spelling AND a rounding — three decimal places by default — and
+ * it is right for the boxes and labels that call it, every one of which is a
+ * body weight, a load or a tape measurement whose grain is known. This is for
+ * the two GENERIC printers this app has, `fig` in src/ui/kit.tsx and `figure`
+ * in src/lib/progressExport.ts, which between them stand in front of 190-odd
+ * call sites carrying values whose grain they do not know. Rounding there would
+ * be this function deciding the precision of a figure it has never seen, and
+ * rounding for display and rounding for storage are different operations that
+ * have to stay separable. So this one takes only the half of the job that is
+ * unambiguously wrong today — the separator — and leaves the digits alone.
+ *
+ * Only a bare decimal is touched: `-12.5` yes, `12` no (there is nothing to
+ * separate), `1e-7` and `1.5e+21` no (an exponent form is not a figure a
+ * separator belongs in, and `String` only produces one outside the range any
+ * reading here occupies), `NaN`/`Infinity` no. Everything it declines to
+ * rewrite it returns exactly as `String` gave it, so this can never make a
+ * value that was printable unprintable.
+ */
+const BARE_DECIMAL = /^-?\d+\.\d+$/;
+export function plainExact(n: number): string {
+  const s = String(n);
+  if (!BARE_DECIMAL.test(s)) return s;
+  const sep = decimalSeparator();
+  return sep === '.' ? s : s.replace('.', sep);
 }
 
 /**
@@ -135,10 +299,24 @@ export function weightIn(kg: number | null | undefined, unit: WeightUnit): numbe
   return unit === 'lb' ? Math.round(kgToLb(kg)) : roundTo(kg, 1);
 }
 
-/** The same figure with its unit attached, for a line of prose. */
+/** The same figure with its unit attached, for a line of prose. A kilogram
+ *  weight always carries its one decimal, 74.0 kg, so a list of them lines up
+ *  (owner, 21 Sep 2026); a pound is whole, so it never has one. */
 export function weightLabel(kg: number | null | undefined, unit: WeightUnit): string | null {
   const v = weightIn(kg, unit);
-  return v == null ? null : `${plain(v)} ${unit}`;
+  return v == null ? null : `${weightFigure(v, unit)} ${unit}`;
+}
+
+/** `weightIn`, spelled: "74.0" in kilograms, "163" in pounds, or null. */
+export function weightShown(kg: number | null | undefined, unit: WeightUnit): string | null {
+  const v = weightIn(kg, unit);
+  return v == null ? null : weightFigure(v, unit);
+}
+
+/** A body weight ALREADY in the reader's unit, spelled for display: one fixed
+ *  decimal in kilograms, whole in pounds. */
+export function weightFigure(v: number, unit: WeightUnit): string {
+  return unit === 'kg' ? spell(roundTo(v, 1), 1, 1) : plain(v);
 }
 
 /**
@@ -421,9 +599,54 @@ export function readLift(text: string | number | null | undefined, unit: WeightU
   if (n == null) return { ok: false, reason: 'That load is not a number. Leave it empty for a bodyweight set.' };
   if (n < 0) return { ok: false, reason: 'A load cannot be negative.' };
   if (n > LIFT_MAX[unit]) {
-    return { ok: false, reason: `${plain(n)} ${unit} is heavier than anyone has lifted — check that figure.` };
+    return { ok: false, reason: `${plain(n)} ${unit} is heavier than anyone has lifted. Check that figure.` };
   }
   return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, LIFT_STORED_DP) };
+}
+
+/**
+ * The range a human body weighs, stated separately in each unit for the reason
+ * `LIFT_MAX` is: 20–400 kg converts to 44–882 lb, and quoting a metric range to
+ * somebody typing pounds is refusing their number in a unit they do not use.
+ *
+ * The same 20/400 the check-in sheet and onboarding have always held. What was
+ * missing is the sheet in between them — app/(client)/profile.tsx, the main
+ * place a member edits their own weight — which clamped nothing at all.
+ */
+const BODY_MIN: Record<WeightUnit, number> = { kg: 20, lb: 44 };
+const BODY_MAX: Record<WeightUnit, number> = { kg: 400, lb: 880 };
+
+/** Either the body weight in kilograms, or the sentence to show whoever typed
+ *  it. A blank box is `kg: null` — no weight typed is not a refusal. */
+export type BodyWeightRead = { ok: true; kg: number | null } | { ok: false; reason: string };
+
+/**
+ * Read a BODY weight, with the bounds stated in the unit being typed.
+ *
+ * `weightToKg` below has no bound of any kind, and the sheet that is a member's
+ * main way of editing their own weight used it raw. A slipped keypress — 1800
+ * for 180 — went onto the health record permanently: it feeds the macro
+ * calculator, the goal projection, every weight chart, the pricing of every
+ * bodyweight set in the training log, and the coach's view of the member. There
+ * is no delete on that series, so the member's only clue was a calorie target
+ * that suddenly made no sense.
+ *
+ * Checked against the number AS TYPED, before any conversion — the figure being
+ * judged has to be the figure on screen. Checking a converted number against a
+ * metric range would wave 180 lb through as 180 kg, which is how this class of
+ * bug got into the check-in sheet before it was fixed there.
+ */
+export function readBodyWeight(text: string | number | null | undefined, unit: WeightUnit): BodyWeightRead {
+  if (text == null || String(text).trim() === '') return { ok: true, kg: null };
+  const n = parse(text);
+  if (n == null) return { ok: false, reason: 'That weight is not a number.' };
+  if (n < BODY_MIN[unit] || n > BODY_MAX[unit]) {
+    return {
+      ok: false,
+      reason: `Weight should be between ${plain(BODY_MIN[unit])} and ${plain(BODY_MAX[unit])} ${unit}. Check that figure. It is what your calorie targets and your whole weight history are built from.`,
+    };
+  }
+  return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, STORED_DP) };
 }
 
 /**
@@ -485,6 +708,6 @@ export const lengthUnitLabel = (unit: LengthUnit) => unit;
 export function convertedNote(unit: WeightUnit | LengthUnit): string | null {
   if (unit === 'kg' || unit === 'cm') return null;
   return unit === 'lb'
-    ? 'Converted from the kilograms on your record — shown to the nearest pound.'
+    ? 'Converted from the kilograms on your record, shown to the nearest pound.'
     : 'Converted from the centimetres on your record.';
 }

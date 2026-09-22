@@ -1,4 +1,9 @@
 import { capLimit, assertWhole } from './rowCap';
+import { assertWrote } from './wroteRows';
+// Two whole-day counts in one tree is how the two screens disagreed. This one
+// is the calendar-day version, built on local midnights; see `daysApart` below.
+// Pure, no client, no React — safe to import at the top level here.
+import { daysApart as calendarDaysApart } from './photoTimeline';
 // Progress photos — the persistence layer that app/(client)/scans.tsx was
 // missing. Until now that screen kept photos in useState: no upload, no
 // bucket, no row, gone at unmount. It said so out loud ("N on screen") because
@@ -121,11 +126,43 @@ export function rowToPhoto(row: ProgressPhotoRow, url: string | null): ProgressP
   };
 }
 
-/** Whole days between two photos, however they are ordered. */
+/**
+ * Whole CALENDAR days between two photos, however they are ordered.
+ *
+ * ── what this used to count, and why it was the wrong quantity ────────────
+ *
+ * It was `Math.abs(Math.round((b - a) / 86400000))` over two instants, which
+ * is elapsed 24-hour periods. Everything printed beside it counts calendar
+ * days: `fmtFullDay` prints each photo's own LOCAL day under it on both
+ * app/(client)/scans.tsx and app/(client)/compare.tsx, and `readingOn` pairs a
+ * scan to a photo on the LOCAL day. So the one line saying how far apart the
+ * two photographs are was measuring a different thing from the two lines
+ * directly above it, and it was visibly wrong in both directions:
+ *
+ *   22:00 and 00:30 the next night — two hours elapsed, so "Same day",
+ *   printed under two captions reading 10 Aug and 11 Aug.
+ *   08:00 Monday and 20:00 Tuesday — 36 hours elapsed, so "2 days apart",
+ *   printed under two captions exactly one day apart.
+ *
+ * It travelled further than the screen, too: `comparePair().days` is what
+ * `compareSummary` puts in the heading of the text a member shares with their
+ * coach, beside the same two dates.
+ *
+ * `photoTimeline.daysApart` is this arithmetic done properly — both sides
+ * through `dateParts` to LOCAL midnight, so a bare date is not dragged a day
+ * west and a daylight-saving boundary costs exactly the days it is. It is the
+ * version this tree already trusts for a photo timeline, so this is now one
+ * implementation rather than two answers to one question.
+ *
+ * Signed there, absolute here: the callers of this one pass a pair in whatever
+ * order the member tapped them, and "how far apart" has no direction.
+ *
+ * Still null — never 0 — when either date will not read. "Same day" and
+ * "cannot say" are different sentences and `spanLabel` prints them differently.
+ */
 export function daysApart(aISO: string, bISO: string): number | null {
-  const a = Date.parse(aISO), b = Date.parse(bISO);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  return Math.abs(Math.round((b - a) / 86400000));
+  const d = calendarDaysApart(aISO, bISO);
+  return d == null ? null : Math.abs(d);
 }
 
 /**
@@ -347,6 +384,19 @@ export async function deleteProgressPhoto(photo: { id: string; path: string }): 
     }
   }
 
-  const { error: delErr } = await sb.from('progress_photos').delete().eq('id', photo.id);
-  if (delErr) throw delErr;
+  // COUNTED, and this is the write in this file where a silent zero costs the
+  // most. The storage object is ALREADY gone by the time this runs — that
+  // ordering is deliberate — so a DELETE that matches no row leaves a
+  // `progress_photos` row pointing at nothing: the photo stays in the client's
+  // history as a tile that will never load, and every `progress_photo_shares`
+  // grant hanging off it stays live, because those cascade FROM the row that
+  // was not deleted. The client is told the photograph is gone and their coach
+  // can still open the record of it.
+  //
+  // PostgREST reports that as a 204 with `error: null`, so `if (delErr) throw`
+  // never fired. `{ count: 'exact' }` is the only thing that can tell it from a
+  // delete that landed.
+  const del = await sb.from('progress_photos').delete({ count: 'exact' }).eq('id', photo.id);
+  if (del.error) throw del.error;
+  assertWrote('That photo', del);
 }

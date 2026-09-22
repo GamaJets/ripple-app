@@ -13,6 +13,12 @@
 // bordered boxes, three weights, no raw type sizes. Every route, hook,
 // conditional and handler is unchanged.
 //
+// Opened the approved board's way (client page 18): a centred title, then
+// the six plain rows — Profile, Goals, Notifications, Privacy, Connected
+// Apps, Help & Support — on the ground with a hairline between, and only
+// then the cards of controls this screen has always held, in their old
+// order. The rows are the same six Me carries and go to the same places.
+//
 // Removed in the migration: a hardcoded "What's new" changelog claiming
 // v2.2 / v2.1 / v2.0 and a footer reading "v2.2". The app's real version is
 // 1.0.0 (app.json) — those numbers came from nowhere and sat directly above
@@ -36,7 +42,9 @@
 // its complexity — a failed read rendered as "no request" would tell somebody who
 // asked to be erased that they never asked, which is the one wrong answer here.
 import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { View, Text, Pressable, ScrollView, Alert, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -45,14 +53,14 @@ import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, PageHead, fig } from '../../src/ui/kit';
 import { RepdbAttribution } from '../../src/ui/Attribution';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { deviceUnitNote } from '../../src/lib/unitPreference';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock, LOCK_PLATFORM } from '../../src/ui/appLock';
 import { openLegalDoc } from '../../src/ui/legal';
 import { lockSettingNote, lockMethodsLabel, lockSettingsLabel, defaultLockLabel } from '../../src/lib/appLock';
@@ -73,6 +81,7 @@ import {
 } from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { appLocale } from '../../src/lib/locale';
+import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Which phone the rest-timer sound note is about.
@@ -107,7 +116,7 @@ function Toggle({ t, on, onPress, label }: { t: Theme; on: boolean; onPress: () 
       accessibilityLabel={label}
       hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
       style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
-      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
+      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: on ? t.brandInk : t.ink3, alignSelf: on ? 'flex-end' : 'flex-start' }} />
     </Pressable>
   );
 }
@@ -117,7 +126,7 @@ function Line({ t, label, value, first }: { t: Theme; label: string; value: stri
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -125,8 +134,8 @@ function Line({ t, label, value, first }: { t: Theme; label: string; value: stri
 function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: string; right: React.ReactNode; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
-      <View style={{ flex: 1, paddingRight: sp.md }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+      <View style={{ flex: 1, paddingEnd: sp.md }}>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{label}</Text>
         {sub ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text> : null}
       </View>
       {right}
@@ -145,9 +154,14 @@ function Units<T extends string>({ options, value, onPick, t }: { options: reado
       {options.map((u) => {
         const on = value === u;
         return (
+          // A ty.label at 7 top and bottom is about 32pt — under MIN_TARGET, on
+          // the control that decides whether every weight in this app is read
+          // as kilograms or pounds. A mis-tap reinterprets the member's whole
+          // history, so the target gets the slop the helper exists to give it.
           <Pressable key={u} onPress={() => onPick(u)} accessibilityRole="radio" accessibilityState={{ selected: on }}
+            hitSlop={hitSlopFor(32)}
             style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{u}</Text>
           </Pressable>
         );
       })}
@@ -171,6 +185,12 @@ export default function Settings() {
   const reach = useReachability();
   const st = useSettings();
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('clientSettings');
   const lock = useAppLock();
   // The row's own name. `lock.label` is the real device word once the hardware
   // has answered; before that, and when there is no hardware, it is the neutral
@@ -185,14 +205,14 @@ export default function Settings() {
       // one section down in the same file: an Android member sent looking for
       // an Apple feature inside an Apple settings app. The vocabulary is the
       // handset's now; see src/lib/appLock.ts.
-      Alert.alert('Not available on this device',
+      Alert.alert('Not Available on This Device',
         `Set up ${lockMethodsLabel(LOCK_PLATFORM)} in ${lockSettingsLabel(LOCK_PLATFORM)}, then this can be turned on.`);
       return;
     }
     const want = !lock.enabled;
     const ok = await lock.setEnabled(want);
     if (!ok && want) {
-      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+      Alert.alert('Not Turned On', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
   // ── The notification switches ─────────────────────────────────────────────
@@ -222,12 +242,12 @@ export default function Settings() {
     const res = await st.setPushEnabled(want);
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
-      Alert.alert('Not on this build yet',
-        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+      Alert.alert('Not on This Build Yet',
+        'This version of the app cannot receive push notifications at all. That needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
-      Alert.alert('Turned off on your phone',
+      Alert.alert('Turned Off on Your Phone',
         // Not "…switched off for Repple". This is a white-label build and the
         // app on this phone may not be called Repple at all.
         "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
@@ -236,19 +256,30 @@ export default function Settings() {
     // 'off-pending'. Said out loud rather than hoped over: somebody who has just
     // turned notifications off and then gets one needs to have been told it
     // might happen.
-    Alert.alert('Saved, but not confirmed',
-      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+    Alert.alert('Saved, but Not Confirmed',
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list. You may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const signOut = () => {
-    Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
+    Alert.alert('Sign Out', 'You will need your email and password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
       // Sent back to the sign-in screen explicitly. The only auth gate is the
       // one in app/index.tsx, which redirects when !authed — and that route is
       // not on screen when somebody signs out from Settings. Without this the
       // session ends and the screen simply stays put, showing dashes where the
       // name and email were. Seen in the simulator, not in a test.
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
+      // `auth.signOut()` is not awaited on purpose, and it is not fire-and-
+      // forget either: it clears the user from the tree synchronously and then
+      // finishes the teardown — revoking this handset's push registration while
+      // the session is still alive, cancelling the reminders the phone itself
+      // is holding, and clearing the notification categories, quiet hours and
+      // biometric lock that used to be inherited by the next person to sign in
+      // here. That work used to be absent entirely: this screen had
+      // `revokePushToken` a scroll away in the provider it reads and signed out
+      // without it, so the previous member's coach could still reach this
+      // handset. It lives in src/ui/auth.tsx now rather than on this screen,
+      // because the coach and owner apps sign out too.
+      { text: 'Sign Out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
   // Said under the picker rather than left implied. Repple records weight in
@@ -305,8 +336,29 @@ export default function Settings() {
   }, []);
   useEffect(() => { void loadDeletion(); }, [loadDeletion]);
 
+  // Whether this account has an open deletion request is the one thing on this
+  // screen read from the server — everything else is the session, this device's
+  // lock and this device's preferences. It is also the one worth being current:
+  // the 30-day clock it reports is the whole of what the screen promises.
+  const pull = usePullToRefresh(loadDeletion);
+
   const exportData = async () => {
     if (dataBusy) return; setDataBusy(true);
+    // `try { … } finally { … }` with no catch, which is not the same shape as
+    // the careful handling inside src/lib/gdpr.ts and does not inherit it.
+    //
+    // That module catches PER TABLE, so a refused table becomes an `error`
+    // object in the file rather than a throw. Two awaits sit OUTSIDE every one
+    // of those catches — `supabase.auth.getUser()` and `listMyFiles()` — and
+    // `shareTextFile` is a third await out here. Any of them rejecting on a
+    // basement connection took this handler down: the row went back from
+    // "Preparing Export…" to "Export My Data", no sheet appeared, no sentence
+    // appeared, and the member was left to conclude the button does nothing.
+    //
+    // On the screen that also holds Delete My Account, a data export that
+    // silently did not happen is the worst possible silence. So it is caught,
+    // reported, and said out loud — and `retryLine` separates a refusal from a
+    // basement, exactly as the deletion handlers below already do.
     try {
       const res = await exportMyDataDetailed();
       // The filename comes from the brand, not from a literal. A member of a
@@ -314,7 +366,7 @@ export default function Settings() {
       // named after a company they do not deal with, and it is the name they
       // will search for in two years — the argument is in src/lib/gdpr.ts and
       // this screen was the one place still ignoring it.
-      await shareTextFile(res.json, MY_DATA_FILENAME, 'application/json', 'Export my data');
+      await shareTextFile(res.json, MY_DATA_FILENAME, 'application/json', 'Export My Data');
       // The manifest, so the files can be saved from the row below. Kept
       // whether or not the export was complete, along with WHETHER it was —
       // a count over a short read is the same defect as an empty table over a
@@ -327,10 +379,19 @@ export default function Settings() {
         // parts are NAMED rather than counted, because "3 parts" tells nobody
         // whether their payments are in the file.
         Alert.alert(
-          'That copy is incomplete',
+          'That Copy Is Incomplete',
           incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail),
         );
       }
+    } catch (e) {
+      reportError('settings.exportData', e);
+      // Nothing is set from a failed export — `files` stays whatever it was, so
+      // a previous good manifest is not replaced by the wreckage of this one.
+      // "Not exported", not "something went wrong": the member needs to know
+      // that no copy of their data was made, because the next thing this screen
+      // offers them is deleting it.
+      Alert.alert('Not Exported',
+        `We couldn't put your data together just now, so no copy has been made. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
     } finally { setDataBusy(false); }
   };
 
@@ -351,13 +412,13 @@ export default function Settings() {
     setSavingPath(f.path);
     try {
       const b64 = await readMyFile(f.bucket, f.path);
-      if (!b64) { Alert.alert('Not saved', saveFileFailure(fileShareBlocker())); return; }
+      if (!b64) { Alert.alert('Not Saved', saveFileFailure(fileShareBlocker())); return; }
       // The object key's last segment. It is the name this app chose at upload
       // and is already safe on every platform (see `injuryDocObjectPath` and
       // `messageAttachmentPath`), so nothing here has to invent one.
       const name = f.path.split('/').pop() || 'file';
-      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
-      if (!ok) Alert.alert('Not saved', saveFileFailure(fileShareBlocker()));
+      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save This File');
+      if (!ok) Alert.alert('Not Saved', saveFileFailure(fileShareBlocker()));
     } finally { setSavingPath(null); }
   };
   const deleteAccount = () => {
@@ -366,17 +427,17 @@ export default function Settings() {
     // somebody deleting their account had no reason to think their
     // physiotherapy report was anywhere but gone with it.
     Alert.alert(
-      'Delete your account?',
+      'Delete Your Account?',
       'This requests permanent deletion of your account and all your data. This cannot be undone.\n\n'
       + DELETION_FILES_NOTE,
       [
-      { text: 'Keep my account', style: 'cancel' },
+      { text: 'Keep My Account', style: 'cancel' },
       // The failure branch used to say "We've recorded your request", which was a
       // claim the app could not stand behind — request_account_deletion() had
       // just refused. It now says nothing was scheduled, and does NOT sign the
       // person out, because being signed out of a retry is the last thing you
       // want when the request did not land.
-      { text: 'Request deletion', style: 'destructive', onPress: async () => {
+      { text: 'Request Deletion', style: 'destructive', onPress: async () => {
         const ok = await requestAccountDeletion();
         await loadDeletion();
         // "Check your connection" was printed here whatever had happened, and
@@ -384,28 +445,34 @@ export default function Settings() {
         // request the server READ and declined is a policy answer, and sending
         // somebody to their router over it means they try again, and again,
         // with no idea why. `retryLine` says which — src/lib/reachability.ts.
-        if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`); return; }
-        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch { /* ignore */ } } }]);
+        // `BRAND.supportEmail`, not the literal. This screen already does it
+        // properly fifty lines up, in `incompleteExportLine` — and the address
+        // it hardcoded here is the SUPPLIER'S. A member of a white-label gym,
+        // at the one moment they most need an escalation that works, was sent
+        // to a company they have never heard of, that cannot act for their gym,
+        // and whose existence they were never told about.
+        if (!ok) { Alert.alert('Not Requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
+        Alert.alert('Deletion Requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned. Sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
       } },
       ],
     );
   };
   const withdrawDeletion = () => {
-    Alert.alert('Withdraw your deletion request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
-      { text: 'Leave it pending', style: 'cancel' },
-      { text: 'Withdraw request', onPress: async () => {
+    Alert.alert('Withdraw Your Deletion Request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
+      { text: 'Leave It Pending', style: 'cancel' },
+      { text: 'Withdraw Request', onPress: async () => {
         if (withdrawBusy) return; setWithdrawBusy(true);
         try {
           const ok = await withdrawAccountDeletion();
           if (!ok) {
             reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
-            Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`);
+            Alert.alert('Not Withdrawn', `Your deletion request is still in place. Nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
             return;
           }
           // Re-read rather than assume: what the screen shows next comes from the
           // profile row, not from the fact that a call returned.
           await loadDeletion();
-          Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+          Alert.alert('Request Withdrawn', 'Your account will be kept and nothing has been deleted.');
         } finally { setWithdrawBusy(false); }
       } },
     ]);
@@ -413,21 +480,46 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Preferences, legal & version</Text>
+        {/* The board's page head — back at the leading edge, the title on
+            the centre line — board page 18. */}
+        <PageHead title="Settings" />
 
-        <Rule />
+        {/* ── the board's six rows ───────────────────────────────────────
+            Page 18 opens Settings on a plain list — a round icon, a name, a
+            chevron, a hairline between — and nothing boxed. The six are the
+            same six Me carries (app/(client)/profile.tsx), routed to the same
+            places, because the board draws them on both screens and a member
+            who arrives here from Me has not left the app's map. Profile goes
+            to the Me tab, which is where the photo and the body details are
+            edited; there is no second editor to open from here.
 
+            Round five: the list is a card like every other on the grey ground,
+            and each row wears the toned plate it wears on Me, so the same six
+            destinations look the same in both places. The hue is decoration;
+            the row says what it is. */}
         <Section>
-          <SectionHead title="Signed in as" />
+          <ListRow icon="me" tone="brand" title="Profile" note="Your photo, name and body details" onPress={() => router.push('/(client)/profile')} />
+          <ListRow icon="target" tone="purple" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
+          <ListRow icon="bell" tone="amber" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
+          <ListRow icon="lock" tone="blue" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
+          <ListRow icon="heart" tone="pink" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
+          <ListRow icon="message" tone="teal" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
+        </Section>
+
+
+        {/* ── the order from here down ─────────────────────────────────────
+            The data-layout review's order for account screens: who you are, then
+            what you are sent and how the app looks, then security, your data's
+            documents and the build, and the way out LAST. Sign Out used to sit in
+            the second card on the page, directly under the email address, and
+            Delete My Account was in the middle of the list between Appearance
+            and Legal — two controls that end something, each a thumb's width
+            from rows people open every week. Every section is the one it was;
+            only the sequence changed. */}
+        <Section>
+          <SectionHead title="Signed In As" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.email)} />
           {/* The middle ground this section did not have. It offered sign-out
@@ -437,28 +529,10 @@ export default function Settings() {
               had not forgotten, and there was nothing at all they could do
               about an email address they no longer had access to. Which is the
               address every route back into the account goes to. */}
-          <ListRow icon="settings" title="Password & Email" note="Change your password or the address you sign in with"
+          <ListRow icon="lock" tone="blue" title="Password & Email" note="Change your password or the address you sign in with"
             onPress={() => router.push('/(client)/account')} />
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign Out" onPress={signOut} />
-          </View>
         </Section>
 
-        <Rule />
-
-        <Section>
-          <SectionHead title="Security" />
-          {/* The unavailable label was 'Require Face ID' on every handset. An
-              Android phone has no Face ID, so the row named a feature the
-              member could not have and the note under it told them to go and
-              find it in iOS Settings. */}
-          <Row t={t} first
-            label={lockRowLabel}
-            sub={lockSettingNote(lock.available, lock.enabled, lock.label, LOCK_PLATFORM, BRAND.label)}
-            right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
-        </Section>
-
-        <Rule />
 
         <Section>
           <SectionHead title="Notifications" />
@@ -480,7 +554,6 @@ export default function Settings() {
             right={<Toggle t={t} on={st.restSound} label="Rest Timer Sound" onPress={() => st.set({ restSound: !st.restSound })} />} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Units" />
@@ -492,82 +565,26 @@ export default function Settings() {
           } />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Appearance" />
-          <ListRow icon="palette" title="Theme & Accent Colour" note="10 palettes, applied live"
+          <ListRow icon="palette" tone="purple" title="Theme & Accent Colour" note="10 palettes, applied live"
             onPress={() => router.push('/(client)/appearance')} />
         </Section>
 
-        <Rule />
 
         <Section>
-          <SectionHead title="Your Data" />
-          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data">
-            {/* The note names the money and the bookings, because the whole
-                defect was that it had neither and nobody could tell. It promises
-                a LIST of files rather than the files: those are saved one at a
-                time from the row below, and a JSON bundle cannot carry them. */}
-            <Row t={t} first label={dataBusy ? 'Preparing Export…' : 'Export My Data'} sub={EXPORT_ROW_NOTE}
-              right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
-          </Pressable>
-          {/* Only after an export, because the manifest is what the export
-              produced and this row must list exactly what that file says the
-              member has. `filesRowNote` refuses to state a count over a read
-              that came back short. */}
-          {files !== null ? (
-            <Pressable onPress={() => setFilesOpen(true)} accessibilityRole="button"
-              accessibilityLabel="Save my files" disabled={files.length === 0}
-              accessibilityState={{ disabled: files.length === 0 }}>
-              <Row t={t} label="Save My Files" sub={filesRowNote(files.length, filesComplete)}
-                right={files.length > 0 ? <Icon name="chevron" size={15} color={t.ink3} /> : undefined} />
-            </Pressable>
-          ) : null}
-          {deletion === null ? (
-            // Not read yet. Deliberately not pressable: requesting again would
-            // reset deletion_requested_at, restarting somebody's 30 days.
-            <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name="chevron" size={15} color={t.ink3} />} />
-          ) : deletion === 'failed' ? (
-            <>
-              <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
-                <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
-                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
-                </Pressable>
-              } />
-              <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
-                <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                    <Icon name="chevron" size={15} color={t.ink3} />
-                  </View>
-                } />
-              </Pressable>
-            </>
-          ) : pendingAt ? (
-            <>
-              <Row t={t} label="Deletion Requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-              } />
-              <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
-                <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw My Deletion Request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
-                  right={<Icon name="chevron" size={15} color={t.ink3} />} />
-              </Pressable>
-            </>
-          ) : (
-            <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
-              <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                  <Icon name="chevron" size={15} color={t.ink3} />
-                </View>
-              } />
-            </Pressable>
-          )}
+          <SectionHead title="Security" />
+          {/* The unavailable label was 'Require Face ID' on every handset. An
+              Android phone has no Face ID, so the row named a feature the
+              member could not have and the note under it told them to go and
+              find it in iOS Settings. */}
+          <Row t={t} first
+            label={lockRowLabel}
+            sub={lockSettingNote(lock.available, lock.enabled, lock.label, LOCK_PLATFORM, BRAND.label)}
+            right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
-        <Rule />
 
         {/* ── Legal ──────────────────────────────────────────────────────
             The four sentences below are a SUMMARY, and they used to be the only
@@ -583,32 +600,31 @@ export default function Settings() {
         <Section>
           <SectionHead title="Legal" />
           <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
-            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : '›'}</Text>} />
+            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : FORWARD_CHAR}</Text>} />
           </Pressable>
           {legal === 'privacy' ? (
             <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>In short: we store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The policy you agreed to is the full document.</Text>
               <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
+                <Ghost label="Read the Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
               </View>
             </View>
           ) : null}
           <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
-            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
+            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : FORWARD_CHAR}</Text>} />
           </Pressable>
           {legal === 'terms' ? (
             <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>In short: {BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The terms you agreed to are the full document.</Text>
               <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Terms Of Service" onPress={() => { void openLegalDoc('terms'); }} />
+                <Ghost label="Read the Terms of Service" onPress={() => { void openLegalDoc('terms'); }} />
               </View>
             </View>
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── Credits ────────────────────────────────────────────────────────
             Its own section above Build, not a grey line beneath it. Every
@@ -622,7 +638,6 @@ export default function Settings() {
           <RepdbAttribution />
         </Section>
 
-        <Rule />
 
         {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
         <Section>
@@ -633,7 +648,84 @@ export default function Settings() {
           </Text>
         </Section>
 
-        <Rule />
+
+        <Section>
+          <SectionHead title="Your Data" />
+          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export My Data">
+            {/* The note names the money and the bookings, because the whole
+                defect was that it had neither and nobody could tell. It promises
+                a LIST of files rather than the files: those are saved one at a
+                time from the row below, and a JSON bundle cannot carry them. */}
+            <Row t={t} first label={dataBusy ? 'Preparing Export…' : 'Export My Data'} sub={EXPORT_ROW_NOTE}
+              right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
+          </Pressable>
+          {/* Only after an export, because the manifest is what the export
+              produced and this row must list exactly what that file says the
+              member has. `filesRowNote` refuses to state a count over a read
+              that came back short. */}
+          {files !== null ? (
+            <Pressable onPress={() => setFilesOpen(true)} accessibilityRole="button"
+              accessibilityLabel="Save My Files" disabled={files.length === 0}
+              accessibilityState={{ disabled: files.length === 0 }}>
+              <Row t={t} label="Save My Files" sub={filesRowNote(files.length, filesComplete)}
+                right={files.length > 0 ? <Icon name={FORWARD_ICON} size={15} color={t.ink3} /> : undefined} />
+            </Pressable>
+          ) : null}
+          {deletion === null ? (
+            // Not read yet. Deliberately not pressable: requesting again would
+            // reset deletion_requested_at, restarting somebody's 30 days.
+            <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
+          ) : deletion === 'failed' ? (
+            <>
+              <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer. It does not mean you have none." right={
+                <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
+                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
+                </Pressable>
+              } />
+              <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete My Account">
+                <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                    <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+                  </View>
+                } />
+              </Pressable>
+            </>
+          ) : pendingAt ? (
+            <>
+              <Row t={t} label="Deletion Requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+              } />
+              <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityState={{ disabled: withdrawBusy }} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
+                <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw My Deletion Request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
+                  right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
+              </Pressable>
+            </>
+          ) : (
+            <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete My Account">
+              <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+                </View>
+              } />
+            </Pressable>
+          )}
+        </Section>
+
+
+        {/* ── leaving ─────────────────────────────────────────────────────────
+            At the bottom, under everything a member comes here to change. The
+            confirmation, and the sentence about what a failed sign-out means, are
+            in `signOut` and are unchanged — app/(client)/profile.tsx still points
+            here for it. */}
+        <Section>
+          <View style={{ flexDirection: 'row' }}>
+            <Ghost label="Sign Out" onPress={signOut} />
+          </View>
+        </Section>
+
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{BRAND.label} · made for coaches &amp; their clients</Text>
       </ScrollView>
@@ -649,9 +741,10 @@ export default function Settings() {
           them, because that is the promise the rest of the product makes about
           them and this is the one screen where the member gets them back. */}
       <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Your Files</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
             {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
           </Text>
@@ -673,7 +766,7 @@ export default function Settings() {
             <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
               accessibilityLabel="Close your files"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Done</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Done</Text>
             </Pressable>
           </ScrollView>
         </View>

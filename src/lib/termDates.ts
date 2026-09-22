@@ -42,8 +42,27 @@ export function parts(iso: string | null | undefined): [number, number, number] 
   return m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : null;
 }
 
-/** A UTC date back as a bare ISO day. */
-export const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+/**
+ * A UTC date back as a bare ISO day.
+ *
+ * Named `utcDay` and not `isoDay`, which is what it was called until the name
+ * turned out to be taken. src/lib/weekStart.ts exports an `isoDay(d: Date):
+ * string` built from the LOCAL getters, and this one is built from
+ * `toISOString()`, so the tree carried two exported functions with one name,
+ * one signature and different answers — and nothing at all stopped a screen
+ * importing whichever one autocomplete offered first. On a phone in Los Angeles
+ * they disagree for the last seven hours of every day.
+ *
+ * The obvious repair — import the local one and delete this — is not available
+ * here, and the reason is at the top of this file: this module is imported by
+ * edge functions and MUST be a leaf, with no relative imports. It is also
+ * deliberately, wholly UTC: everything in it is built on `Date.UTC` and the
+ * days it produces are the days those instants are stored under. So the fix is
+ * the name. `utcDay` says which calendar it means, which is the one thing
+ * `isoDay` could not, and check-utc-day.mjs takes a line that names UTC at its
+ * word for exactly that reason.
+ */
+export const utcDay = (d: Date): string => d.toISOString().slice(0, 10);
 
 /** How many days there are in a given month, in UTC. */
 export const lastDayOf = (y: number, mIndex: number): number => new Date(Date.UTC(y, mIndex + 1, 0)).getUTCDate();
@@ -54,7 +73,7 @@ export function addDays(day: string | null | undefined, days: number): string | 
   if (!p) return null;
   const d = new Date(Date.UTC(p[0], p[1], p[2]));
   d.setUTCDate(d.getUTCDate() + days);
-  return isoDay(d);
+  return utcDay(d);
 }
 
 /**
@@ -90,10 +109,10 @@ export function termEnd(startsOn: string | null | undefined, interval: PlanInter
   const ty = y + Math.floor(total / 12);
   const tm = ((total % 12) + 12) % 12;
   const last = lastDayOf(ty, tm);
-  if (d > last) return isoDay(new Date(Date.UTC(ty, tm, last)));
+  if (d > last) return utcDay(new Date(Date.UTC(ty, tm, last)));
   const end = new Date(Date.UTC(ty, tm, d));
   end.setUTCDate(end.getUTCDate() - 1);
-  return isoDay(end);
+  return utcDay(end);
 }
 
 /** A whole term: the two dates that go on the order and then on the
@@ -126,7 +145,7 @@ export function expiryFor(issuedOn: string, validDays: number | null | undefined
   const d = new Date(`${issuedOn}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + validDays);
-  return d.toISOString().slice(0, 10);
+  return utcDay(d);
 }
 
 /** Does this renewal carry straight on from the term it renews?

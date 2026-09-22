@@ -48,18 +48,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, KpiRow, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { useNow } from '../../src/ui/today';
+import {
+  cacheForAccount, cacheHydrated, mayWriteCache, type DeviceCache,
+} from '../../src/lib/deviceAccountCache';
+import { monthNamesShort } from '../../src/lib/format';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv, statementFileStem,
-  statementShareBlurb, periodSentence, fiscalYear, fiscalQuarter, customRange,
+  statementShareBlurb, periodSentence, fiscalYear, fiscalQuarter, calendarMonth, customRange,
   isCalendarStart, CALENDAR_YEAR_START, YEAR_START_IS_YOURS,
   STATEMENT_NOT, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD, PERIOD_IS_YOURS,
   type Statement, type StatementInput, type StatementPeriod, type YearStart,
 } from '../../src/lib/coachStatement';
+import {
+  statementLines, LINES_ARE_NOT_EVERYTHING, LINES_ARE_NOT_NETTED,
+} from '../../src/lib/statementLines';
 import { fetchStatementInput } from '../../src/ui/coachStatement';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { MIN_TARGET } from '../../src/lib/a11y';
 
 /**
  * A whole year, one quarter of it, or two dates the coach types.
@@ -78,7 +90,7 @@ import { fetchStatementInput } from '../../src/ui/coachStatement';
  * document they hand to an accountant is the kind of wrong that is not noticed
  * until it matters. `YEAR_START_IS_YOURS` says so on the page.
  */
-type Span = 'year' | 1 | 2 | 3 | 4 | 'custom';
+type Span = 'year' | 1 | 2 | 3 | 4 | 'month' | 'custom';
 
 const SPANS: { key: Span; label: string }[] = [
   { key: 'year', label: 'Whole Year' },
@@ -86,10 +98,28 @@ const SPANS: { key: Span; label: string }[] = [
   { key: 2, label: 'Q2' },
   { key: 3, label: 'Q3' },
   { key: 4, label: 'Q4' },
+  // ── one month ──────────────────────────────────────────────────────────
+  // The span this screen was missing, and the only one a coach reaches for
+  // MONTHLY rather than once a year. Reconciling against a bank statement is
+  // done a month at a time; so is answering "what did I take in August"; so is
+  // handing a bookkeeper the period they asked for. Without it the only route
+  // was Any Dates and typing both ends by hand, which is two chances to be a
+  // day out on a document that goes to somebody else.
+  //
+  // `calendarMonth` in src/lib/coachStatement.ts has been written, tested and
+  // locale-aware — it labels the period in the reader's own language — since
+  // the file was written, and no screen in this app had ever called it.
+  { key: 'month', label: 'One Month' },
   { key: 'custom', label: 'Any Dates' },
 ];
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// The twelve month names for the year-start PICKER, in the reader's own
+// language. A row of pills is the shape `monthNamesShort` exists for — there is
+// no date to format, only twelve names — and it was a hardcoded English array,
+// so a coach whose phone is in French set their financial year from twelve
+// English abbreviations. `appLocale()` is resolved at launch and does not change
+// while the app runs, so this is read once at module scope.
+const MONTH_NAMES = monthNamesShort();
 
 /**
  * Where the coach's own year start is kept.
@@ -106,7 +136,42 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
  * coach's tax affairs that this app stores and could be read as having
  * verified. It has not verified it and cannot.
  */
-const YEAR_START_KEY = 'repple.coach.statementYearStart';
+/**
+ * The prefix, and it carries the ':' that `accountCacheKey` requires — so the
+ * legacy key below cannot be mistaken for a member of this family.
+ *
+ * This was a bare `'repple.coach.statementYearStart'`, with no account in it.
+ * The paragraph above argues that the preference belongs on the DEVICE rather
+ * than in a column, and that argument still stands; it says nothing about WHOSE
+ * device preference it is, and that was the half that was wrong. A gym handset
+ * on the desk is signed in and out all day (src/lib/deviceAccountCache.ts opens
+ * on exactly that), and one unqualified key is a key the next account inherits:
+ * a coach whose year runs 6 April to 5 April sets it, signs out, and the coach
+ * who signs in next opens Statement and is handed a period they never chose.
+ * The heading says which period it is, so this is not a silent number — but it
+ * is somebody else's tax year on a document about their money, offered as the
+ * default, on the screen whose output goes to an accountant.
+ */
+const YEAR_START_PREFIX = 'repple.coach.statementYearStart:';
+
+/**
+ * The unqualified key this screen used to write, removed UNREAD.
+ *
+ * Never migrated into the signed-in account. Nothing on the device says whose
+ * year start it is — this coach's from last month, or the previous coach's from
+ * this morning — so reading it in is the guess that produces the defect above,
+ * performed once, deliberately. The cost of dropping it is one coach re-picking
+ * a date from a six-item sheet; the cost of guessing wrong is a statement built
+ * over a stranger's fiscal year.
+ */
+const LEGACY_YEAR_START_KEY = 'repple.coach.statementYearStart';
+
+/** The statement's tiles, by `StatementSection.key`. In, then out and landed.
+ *  The three takings strands keep the hues they have on Payments and Analytics. */
+const TILE_ROWS: { key: string; label: string; tone: Tone }[][] = [
+  [{ key: 'packs', label: 'Packs Sold', tone: 'brand' }, { key: 'subscriptions', label: 'Renewals', tone: 'blue' }, { key: 'receipts', label: 'Recorded by You', tone: 'amber' }],
+  [{ key: 'payoutsPaid', label: 'Reached Your Bank', tone: 'teal' }, { key: 'refunds', label: 'Given Back', tone: 'pink' }, { key: 'costs', label: 'Costs', tone: 'orange' }],
+];
 
 export default function StatementOfRecord() {
   const t = useTheme();
@@ -115,27 +180,107 @@ export default function StatementOfRecord() {
 
   // The three most recent calendar years, from the device's own clock. A coach
   // doing last year's paperwork in January is the whole point of this screen.
-  const thisYear = new Date().getFullYear();
+  //
+  // `useNow`, not a bare `new Date()` in the render body. This screen is
+  // registered `href: null` inside <Tabs>, so it mounts once and is never torn
+  // down, and a render body is only re-read when something else happens to
+  // redraw — which, on a screen a coach leaves sitting on a figure, is nothing.
+  // A coach who opened this on 30 December and came back to it on 2 January was
+  // offered 2025, 2024 and 2023: the year they are now IN is not in the row at
+  // all, and January's month pill would build a period in a year the pills
+  // cannot name. `useNow` moves on the local day rolling over, on the app
+  // returning to the foreground, and on this screen being focused.
+  const thisYear = useNow().getFullYear();
   const years = [thisYear, thisYear - 1, thisYear - 2];
 
   const [year, setYear] = useState(thisYear);
   const [span, setSpan] = useState<Span>('year');
+  /**
+   * Which month, 1 to 12, when the span is one month.
+   *
+   * Starts on the month the DEVICE is in, which is where a coach reconciling
+   * is standing, and it is a starting value rather than a claim: the period is
+   * printed in full above the figures and on every file this screen produces.
+   * A month held across a year change stays put on purpose — a coach comparing
+   * August to August taps the year and expects August.
+   */
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState<YearStart>(CALENDAR_YEAR_START);
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
+  /** Which end of a custom period has the month sheet open, if either.
+   *
+   *  One tri-state rather than two booleans, and that is the point: two
+   *  booleans can both be true, and two modals presented at once from the same
+   *  parent is the defect scripts/check-runtime-traps.mjs was written for — iOS
+   *  presents one and silently drops the other. A value that can only name one
+   *  end cannot get into that state. */
+  const [pick, setPick] = useState<null | 'from' | 'to'>(null);
   const [input, setInput] = useState<StatementInput | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Read once on mount, and a value that will not parse is ignored rather than
-  // half-applied: a stored `{ month: 4 }` with no day would otherwise produce a
-  // year starting on the first of April for a coach whose starts on the sixth,
-  // which is a whole statement for the wrong five days at each end.
+  /**
+   * The account this screen's stored preference belongs to, and whether a read
+   * of that key has come back.
+   *
+   * `cacheForAccount` returns `hydrated: false` and there is no way to build one
+   * of these with it true — that is the flag-survives-a-key-change trap closed
+   * by construction rather than by remembering to clear it. Reset on the way IN,
+   * before the read: this screen is registered `href: null` inside <Tabs>
+   * (app/(trainer)/_layout.tsx), so it mounts once and is never torn down, and
+   * the departing coach's `start` would otherwise still be in React state under
+   * the next coach's name while their read was in flight — or forever, if it
+   * failed.
+   */
+  const [cache, setCache] = useState<DeviceCache>(() => cacheForAccount(YEAR_START_PREFIX, null));
+
+  // Who is signed in, asked once. `signedInUid` classifies the two ways there
+  // can be no answer; neither of them is an account, and `accountCacheKey`
+  // refuses both along with the literal 'unknown'.
   useEffect(() => {
     let live = true;
     void (async () => {
+      const me = await signedInUid('coachStatement.whoami');
+      if (!live) return;
+      setCache(cacheForAccount(YEAR_START_PREFIX, me.uid));
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // The unqualified key, removed unread, once per mount. Not migrated — see
+  // LEGACY_YEAR_START_KEY.
+  useEffect(() => {
+    void AsyncStorage.removeItem(LEGACY_YEAR_START_KEY).catch(() => {});
+  }, []);
+
+  /* Read when the account's key is known, and a value that will not parse is
+   * ignored rather than half-applied: a stored `{ month: 4 }` with no day would
+   * otherwise produce a year starting on the first of April for a coach whose
+   * starts on the sixth, which is a whole statement for the wrong five days at
+   * each end.
+   *
+   * The start is set back to the calendar year BEFORE the read, every time the
+   * key changes. An empty store for this account is a coach who has never
+   * picked one, and the calendar year is what that means; leaving the previous
+   * account's April sitting there would be the whole defect, merely re-keyed. */
+  useEffect(() => {
+    const key = cache.key;
+    if (!key) return;
+    let live = true;
+    setStart(CALENDAR_YEAR_START);
+    void (async () => {
+      let raw: string | null = null;
       try {
-        const raw = await AsyncStorage.getItem(YEAR_START_KEY);
-        if (!raw || !live) return;
+        raw = await AsyncStorage.getItem(key);
+      } catch {
+        // A read that THREW is not a read that landed, so the cache stays
+        // un-hydrated and nothing is written over bytes nobody managed to read.
+        return;
+      }
+      if (!live) return;
+      setCache((c) => (c.key === key ? cacheHydrated(c) : c));
+      if (!raw) return;
+      try {
         const v = JSON.parse(raw) as Partial<YearStart>;
         if (Number.isFinite(v?.month) && Number.isFinite(v?.day)) {
           setStart({ month: Number(v.month), day: Number(v.day) });
@@ -143,15 +288,21 @@ export default function StatementOfRecord() {
       } catch { /* a preference that cannot be read is the calendar year, which is stated on the page either way */ }
     })();
     return () => { live = false; };
-  }, []);
+  }, [cache.key]);
 
   const chooseStart = useCallback((next: YearStart) => {
     setStart(next);
+    // `mayWriteCache`, not `if (key)`. Nobody signed in means there is no
+    // account to file this under and the unqualified key is not a fallback; a
+    // read that has not come back means this session's pick would be written on
+    // top of bytes nobody has seen. In both cases the choice stands for this
+    // sitting and is not kept, which is the smaller loss.
+    //
     // Failing to persist a display preference changes nothing about the
-    // document, so it is swallowed rather than reported: the period is printed
-    // in full on everything this screen produces.
-    void AsyncStorage.setItem(YEAR_START_KEY, JSON.stringify(next)).catch(() => {});
-  }, []);
+    // document, so a rejected write is swallowed rather than reported: the
+    // period is printed in full on everything this screen produces.
+    if (mayWriteCache(cache)) void AsyncStorage.setItem(cache.key, JSON.stringify(next)).catch(() => {});
+  }, [cache]);
 
   /**
    * The period, or the fallback when the coach has typed half a custom range.
@@ -164,8 +315,14 @@ export default function StatementOfRecord() {
    */
   const period: StatementPeriod = useMemo(() => {
     if (span === 'custom') return customRange(fromText.trim(), toText.trim()) ?? fiscalYear(year, start);
+    // A CALENDAR month, and it does not move with the coach's own year start.
+    // A year beginning on 6 April does not make August run from the 6th to the
+    // 5th: an accountant's month, a bank statement's month and a bookkeeper's
+    // month are all the calendar's, and a period that quietly disagreed with
+    // all three would be five days wrong at each end with nothing saying so.
+    if (span === 'month') return calendarMonth(year, month);
     return span === 'year' ? fiscalYear(year, start) : fiscalQuarter(year, span, start);
-  }, [year, span, start, fromText, toText]);
+  }, [year, span, start, month, fromText, toText]);
 
   const rangeProblem = span === 'custom' && !customRange(fromText.trim(), toText.trim())
     ? 'Type both dates as YYYY-MM-DD, with the earlier one first. Until they read as a period, the figures below are for your own year and the heading says which.'
@@ -173,7 +330,7 @@ export default function StatementOfRecord() {
 
   /* The period whose figures are allowed to land.
    *
-   * `fetchStatementInput` is seven paged reads, so the answers do not come back
+   * `fetchStatementInput` is a dozen paged reads, so the answers do not come back
    * in the order the taps went out — and a coach comparing quarters taps
    * straight down the pill row. With `setInput` unconditional, tapping Q1 and
    * then Q2 and having Q1 resolve second put Q1's takings, sessions and
@@ -196,7 +353,7 @@ export default function StatementOfRecord() {
     // a calendar year — a coach who changed their year start, or typed a second
     // custom range while the first was still reading, would have had the older
     // answer land under the newer heading at full confidence.
-    const key = `${year}:${String(span)}:${start.month}-${start.day}:${period.from}:${period.to}`;
+    const key = `${year}:${String(span)}:${month}:${start.month}-${start.day}:${period.from}:${period.to}`;
     wanted.current = key;
     setInput(null);
     const next = await fetchStatementInput(period, appName || null);
@@ -204,11 +361,39 @@ export default function StatementOfRecord() {
     // it: the read for the period now selected is the one that may set state.
     if (wanted.current !== key) return;
     setInput(next);
-  }, [period, appName, year, span, start]);
+  }, [period, appName, year, span, month, start]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // One read, and it is the whole statement: `fetchStatementInput` composes
+  // the period in one call, which is what keeps every figure on the page from
+  // the same moment. The year-start preference is not re-read — it lives on
+  // this handset and this screen is the only thing that writes it, so there is
+  // no other copy for a refresh to go and find.
+  const pull = usePullToRefresh(load);
 
   const statement: Statement | null = useMemo(() => (input ? coachStatement(input) : null), [input]);
+
+  /**
+   * The rows behind the third button, drawn on the screen that sends them.
+   *
+   * "Share the Line Items as CSV" has been on this page since the file was
+   * written and the page had never shown a single line it contains. So the one
+   * artefact here that names a client, a date and an individual amount left the
+   * phone unread: a coach could not check, before it reached an accountant,
+   * that the invoice to the client who disputed it was in there, that a cost
+   * they thought they had deleted was not, or that a refund is on the day they
+   * remember. First sight of the contents was somebody else's inbox.
+   *
+   * `statementLines` is the same reader as the file — same splits, same
+   * accessors, same order, same converters — and src/lib/statementLines.test.ts
+   * parses the CSV `statementItemsCsv` actually builds and asserts cell for cell
+   * that these lines are its item rows. That test is what licenses drawing them
+   * twice at all: src/lib/coachSettlements.ts's doctrine is that a document
+   * about money shows its own snapshot, and a screen that filtered even
+   * slightly differently would have the coach vouching for lines that were
+   * never sent.
+   */
+  const lines = useMemo(() => (input ? statementLines(input) : null), [input]);
 
   // Only when EVERY read landed whole. A "nothing here" reassurance drawn over
   // a refused read is the one sentence this screen must never say to a
@@ -221,14 +406,14 @@ export default function StatementOfRecord() {
     const doc = statementDoc(statement);
     setBusy(false);
     Alert.alert(
-      'Send this statement',
+      'Send This Statement',
       statementShareBlurb(statement) + '\n\n'
       + (pdfExportAvailable()
         ? 'It goes as a PDF through your phone’s share sheet.'
         : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every line and every caveat is in the text.'),
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, `Statement of record — ${period.label}`); } },
+        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, `Statement of record · ${period.label}`); } },
       ],
     );
   };
@@ -237,13 +422,23 @@ export default function StatementOfRecord() {
     if (!statement || busy) return;
     setBusy(true);
     const text = items
-      ? statementItemsCsv(statement, input?.invoices.rows ?? [], input?.lateCancellations.rows ?? [])
+      // Every row-bearing part of the record, not two of them. The file used to
+      // carry invoices and fees only, so an accountant working line by line saw
+      // every document the coach issued and no refund, no chargeback and no
+      // cost — the three that make the figures beside them untrue.
+      ? statementItemsCsv(statement, {
+        invoices: input?.invoices.rows ?? [],
+        fees: input?.lateCancellations.rows ?? [],
+        refunds: input?.refunds.rows ?? [],
+        disputes: input?.disputes.rows ?? [],
+        costs: input?.costs.rows ?? [],
+      })
       : statementCsv(statement);
     const name = `${statementFileStem(statement)}${items ? '-line-items' : ''}.csv`;
     setBusy(false);
     const blocker = fileShareBlocker();
     Alert.alert(
-      items ? 'Send the line items' : 'Send the summary file',
+      items ? 'Send the Line Items' : 'Send the Summary File',
       statementShareBlurb(statement) + (blocker ? '\n\n' + blocker : ''),
       [
         { text: 'Cancel', style: 'cancel' },
@@ -253,6 +448,16 @@ export default function StatementOfRecord() {
   };
 
   const G = layout.gutter;
+  /** One section as a tile's figure. Reads the section's finished lines; it
+   *  adds nothing and formats nothing. */
+  const periodTile = (key: string): { value: string; unit?: string } => {
+    const sec = statement?.sections.find((x) => x.key === key);
+    if (!sec || sec.withheld) return { value: fig(null) };
+    if (sec.lines.length === 1) return { value: sec.lines[0].amount };
+    if (sec.lines.length === 0) return { value: 'None' };
+    return { value: String(sec.lines.length), unit: 'currencies' };
+  };
+
   const pill = (active: boolean) => ({
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -260,26 +465,32 @@ export default function StatementOfRecord() {
     backgroundColor: active ? t.brand : t.surface2,
   });
 
+  /** The two ends of a custom period, as boxes that open a month. `MIN_TARGET`
+   *  tall rather than padded to roughly that: the number is the reachability
+   *  floor and this control is used one-handed. */
+  const dayBox = {
+    flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const,
+    minHeight: MIN_TARGET, paddingHorizontal: 12,
+    backgroundColor: t.surface2, borderRadius: radius.sm,
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>For your accountant</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Statement of Record</Text>
-          </View>
-        </View>
-
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="What this app recorded, and only that"
-            note="It calculates no tax and it is not a tax document — it says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it."
-          />
-        </View>
-
-        <Rule />
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("For your accountant") was a line of prose above the title; what it said is
+            still said by the first card below. */}
+        <PageHead title="Statement of Record" />
 
         {/* ── the period, which the coach chooses ───────────────────────── */}
         <Section>
@@ -289,7 +500,7 @@ export default function StatementOfRecord() {
               {years.map((y) => (
                 <Pressable key={y} onPress={() => setYear(y)} accessibilityRole="button"
                   accessibilityLabel={`Show ${y}`} style={pill(y === year)}>
-                  <Text style={{ ...ty.label, ...numeric, color: y === year ? '#fff' : t.ink2 }}>{y}</Text>
+                  <Text style={{ ...ty.label, ...numeric, color: y === year ? t.brandInk : t.ink2 }}>{y}</Text>
                 </Pressable>
               ))}
             </View>
@@ -299,7 +510,7 @@ export default function StatementOfRecord() {
               {SPANS.map((s) => (
                 <Pressable key={String(s.key)} onPress={() => setSpan(s.key)} accessibilityRole="button"
                   accessibilityLabel={`Show ${s.label}`} style={pill(s.key === span)}>
-                  <Text style={{ ...ty.label, color: s.key === span ? '#fff' : t.ink2 }}>{s.label}</Text>
+                  <Text style={{ ...ty.label, color: s.key === span ? t.brandInk : t.ink2 }}>{s.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -310,7 +521,36 @@ export default function StatementOfRecord() {
               region, the gym's currency or the device timezone to guess a tax
               year: every one of those is a proxy, and the coach who has moved
               country is exactly the person it would be wrong about. */}
-          {span !== 'custom' ? (
+          {/* ── which month ──────────────────────────────────────────────
+              Twelve pills in the reader's own language, from the same
+              `monthNamesShort` the year-start picker uses. The year pills above
+              still choose the year, so August of two years ago is two taps.
+
+              The coach's own year start is deliberately NOT offered here and
+              does not apply: a month is a calendar month wherever somebody's
+              financial year begins, because the bank statement it is being
+              reconciled against is a calendar month. */}
+          {span === 'month' ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
+                One calendar month, whichever day your own year starts on.
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                  {MONTH_NAMES.map((m, i) => (
+                    <Pressable key={m} onPress={() => setMonth(i + 1)}
+                      accessibilityRole="button" accessibilityLabel={`Show ${m} ${year}`}
+                      accessibilityState={{ selected: month === i + 1 }}
+                      style={pill(month === i + 1)}>
+                      <Text style={{ ...ty.label, color: month === i + 1 ? t.brandInk : t.ink2 }}>{m}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {span !== 'custom' && span !== 'month' ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
                 {isCalendarStart(start)
@@ -324,13 +564,13 @@ export default function StatementOfRecord() {
                       accessibilityRole="button" accessibilityLabel={`Start the year in ${m}`}
                       accessibilityState={{ selected: start.month === i + 1 }}
                       style={pill(start.month === i + 1)}>
-                      <Text style={{ ...ty.label, color: start.month === i + 1 ? '#fff' : t.ink2 }}>{m}</Text>
+                      <Text style={{ ...ty.label, color: start.month === i + 1 ? t.brandInk : t.ink2 }}>{m}</Text>
                     </Pressable>
                   ))}
                 </View>
               </ScrollView>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>Starting on day</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Starting on Day</Text>
                 <TextInput
                   value={String(start.day)}
                   onChangeText={(v) => {
@@ -347,25 +587,50 @@ export default function StatementOfRecord() {
                 />
                 {!isCalendarStart(start) ? (
                   <Pressable onPress={() => chooseStart(CALENDAR_YEAR_START)} hitSlop={8}
-                    accessibilityRole="button" accessibilityLabel="Use the calendar year">
-                    <Text style={{ ...ty.label, color: t.brand }}>Use the calendar year</Text>
+                    accessibilityRole="button" accessibilityLabel="Use the Calendar Year">
+                    <Text style={{ ...ty.label, color: t.brand }}>Use the Calendar Year</Text>
                   </Pressable>
                 ) : null}
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{YEAR_START_IS_YOURS}</Text>
             </View>
-          ) : (
+          ) : null}
+
+          {/* Its own condition rather than the `else` of the year-start block.
+              It used to be one — everything that was not Any Dates showed the
+              year start, and Any Dates showed these two boxes — and a third
+              span turns an `else` into "every span that is not the first one",
+              which would have drawn two date boxes under One Month. */}
+          {span === 'custom' ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
                 Any two dates, for a period neither a calendar year nor your own year covers.
               </Text>
+              {/* ── two boxes that open a month, not two keyboards ────────
+                  Both were `TextInput`s and both were the reported fault: on a
+                  phone the soft keyboard comes up over the bottom of the window
+                  and sits on the field being typed into. They are now buttons
+                  and neither raises a keyboard; typing a period is still
+                  possible and lives inside the sheet, behind its own "Type a
+                  Date", so a coach pasting an accountant's two dates has a way
+                  in that does not cover the field. */}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={fromText} onChangeText={setFromText} autoCapitalize="none" autoCorrect={false}
-                  placeholder="From YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period start"
-                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
-                <TextInput value={toText} onChangeText={setToText} autoCapitalize="none" autoCorrect={false}
-                  placeholder="To YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period end"
-                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
+                <Pressable onPress={() => setPick('from')}
+                  accessibilityRole="button"
+                  accessibilityLabel={fromText
+                    ? 'The day the period starts. Currently ' + fromText + '. Opens a calendar.'
+                    : 'The day the period starts. Not set yet. Opens a calendar.'}
+                  style={dayBox}>
+                  <Text style={{ ...ty.body, color: fromText ? t.ink : t.ink3, flex: 1 }}>{fromText || 'From'}</Text>
+                </Pressable>
+                <Pressable onPress={() => setPick('to')}
+                  accessibilityRole="button"
+                  accessibilityLabel={toText
+                    ? 'The day the period ends. Currently ' + toText + '. Opens a calendar.'
+                    : 'The day the period ends. Not set yet. Opens a calendar.'}
+                  style={dayBox}>
+                  <Text style={{ ...ty.body, color: toText ? t.ink : t.ink3, flex: 1 }}>{toText || 'To'}</Text>
+                </Pressable>
               </View>
               {/* Never a silently corrected range. A statement built over a
                   period the coach did not ask for looks exactly like one they
@@ -373,12 +638,11 @@ export default function StatementOfRecord() {
                   anybody notices. */}
               {rangeProblem ? <Flag style={{ marginTop: sp.sm }}>{rangeProblem}</Flag> : null}
             </View>
-          )}
+          ) : null}
 
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_IS_YOURS}</Text>
         </Section>
 
-        <Rule />
 
         {!statement ? (
           <Section>
@@ -386,10 +650,31 @@ export default function StatementOfRecord() {
           </Section>
         ) : (
           <>
+            {/* ── the period at a glance ─────────────────────────────────
+                Round five: six of the statement's sections as tiles, on the
+                ground under the period that chose them — what came in on the
+                first row, what reached the bank and what went back or out on
+                the second. Each tile is that section's OWN line and nothing
+                is computed here: the money where the section has one
+                currency, the number of currencies where it has several
+                (a tile holds one figure, and two moneys are not one), "None"
+                under a whole read with nothing in it, and the dash where the
+                section was withheld — its card below says why. */}
+            {TILE_ROWS.map((row) => (
+              <KpiRow key={row[0].key} tiles items={row.map((k) => ({ label: k.label, tone: k.tone, ...periodTile(k.key) }))} />
+            ))}
+
+            {/* The card of prose that opened the page, behind a fold. */}
+            <Expandable title="What This Is" note="What this app recorded, and only that">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                It calculates no tax and it is not a tax document. It says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it.
+              </Text>
+            </Expandable>
+
             {/* ── what could not be read, above every figure ────────────── */}
             {!statement.complete ? (
               <>
-                <Notice tone={t.crit} kicker="Not the whole picture" title="Parts of your record could not be read"
+                <Notice tone={t.crit} kicker="Not the Whole Picture" title="Parts of Your Record Could Not Be Read"
                   note="What is missing is named below. Nothing on this screen that is blank is a statement that you recorded nothing." />
                 <Section>
                   {statement.caveats.map((c, i) => (
@@ -409,9 +694,9 @@ export default function StatementOfRecord() {
             {nothingRecorded ? (
               <>
                 <Notice
-                  kicker="Nothing recorded"
-                  title="This Period Has Nothing In It"
-                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it — money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
+                  kicker="Nothing Recorded"
+                  title="This Period Has Nothing in It"
+                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it. Money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
                 />
                 <Rule />
               </>
@@ -426,7 +711,7 @@ export default function StatementOfRecord() {
                     <Flag style={{ marginTop: sp.sm }}>{sec.withheld}</Flag>
                   ) : (
                     <>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: sp.sm }}>
+                      <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: sp.sm }}>
                         {sec.count} {sec.countLabel}
                       </Text>
                       {sec.lines.map((l) => (
@@ -457,7 +742,7 @@ export default function StatementOfRecord() {
                     statement.salesTotal.lines.map((l) => (
                       <View key={l.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
                         <Text style={{ ...ty.label, color: t.ink2 }}>{l.label}</Text>
-                        <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>{l.amount}</Text>
+                        <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>{l.amount}</Text>
                       </View>
                     ))
                   ) : (
@@ -486,6 +771,72 @@ export default function StatementOfRecord() {
 
             <Rule />
 
+            {/* ── the lines the third button sends ───────────────────────
+                Every row this app holds itself, one line each, in the order
+                and the wording the file carries them in. Sales and renewals
+                are absent from both for the reason `LINES_ARE_NOT_EVERYTHING`
+                gives, and that is said here rather than left to be inferred
+                from a list that looks short.
+
+                Nothing in this block is added up, and there is no signed
+                amount: money in and money back out are in one list and the
+                heading above each says which way, so no column of it totals to
+                anything. The per-currency totals are the sections above. */}
+            <Section>
+              <SectionHead title="The Lines in This Period"
+                note={lines && lines.total != null ? String(lines.total) : undefined} />
+              {lines?.withheld ? (
+                <Flag style={{ marginTop: sp.sm }}>{lines.withheld}</Flag>
+              ) : (
+                <>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{LINES_ARE_NOT_NETTED}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{LINES_ARE_NOT_EVERYTHING}</Text>
+                </>
+              )}
+            </Section>
+
+            <Rule />
+
+            {(lines?.groups ?? []).map((g) => (
+              <View key={g.part}>
+                <Section>
+                  {/* The count is stated only under a whole read. Null is
+                      unknown and is drawn as nothing rather than as a zero —
+                      the withheld sentence below says which. */}
+                  <SectionHead title={g.title} note={g.count != null ? String(g.count) : undefined} />
+                  {g.withheld ? <Flag style={{ marginTop: sp.sm }}>{g.withheld}</Flag> : null}
+                  {/* Only under a WHOLE read may this page say a part is
+                      empty. Under any other status the rows below are what came
+                      back and not what there is, and "nothing here" over a
+                      refused read is the worst sentence this screen can print
+                      about somebody's own income. */}
+                  {g.lines.length === 0 && g.count === 0 ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                      Nothing of this kind is on record in this period. Every read behind it came back in full, so this is your record rather than a failure.
+                    </Text>
+                  ) : null}
+                  {g.lines.map((l) => (
+                    <View key={l.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: 6 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.label, color: t.ink }}>{l.who ? `${l.who} · ${l.what}` : l.what}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{l.when} · {l.status}</Text>
+                        {/* On the line, beside the empty figure, rather than
+                            once at the top: a row is read on its own, and a
+                            missing currency shown as a dash reads as nothing
+                            charged. */}
+                        {l.note ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{l.note}</Text> : null}
+                      </View>
+                      {/* Never a bare number. `money` is null exactly where the
+                          file's amount cell is empty, and the dash stands with
+                          the sentence above it rather than alone. */}
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{l.money ?? '—'}</Text>
+                    </View>
+                  ))}
+                </Section>
+                <Rule />
+              </View>
+            ))}
+
             {/* ── what it is not, on the screen as well as on the file ──── */}
             <Section>
               <SectionHead title="What This Is Not" />
@@ -509,6 +860,52 @@ export default function StatementOfRecord() {
           </>
         )}
       </ScrollView>
+
+      {/* ── the two ends of a custom period ──────────────────────────────────
+          Siblings of the ScrollView rather than children of it, and mutually
+          exclusive by construction — see `pick`.
+
+          ── why the second one opens on the first one's month ──
+          A custom period is chosen left to right in one sitting, and it is
+          usually a few months long. A coach who has just set the period to run
+          from 6 April 2025 is choosing its end somewhere near April 2025, and a
+          sheet that opened on the handset's own month would make them step back
+          seventeen times to reach it. `fallback` is symmetric because the coach
+          may fill either box first, and it costs nothing when the period is
+          recent: it only ever applies when the box being opened is empty.
+
+          ── and why only the END is bounded ──
+          `customRange` returns null for a backwards pair, refusing rather than
+          swapping — a statement for a period nobody asked for looks exactly
+          like one they did, and it is in an accountant's inbox by the time
+          anybody notices. So the To sheet greys out everything before From,
+          which is the same refusal made visible before the tap.
+
+          The From sheet is deliberately NOT bounded by To. A coach moving a
+          whole period later — April-to-June becoming July-to-September — sets
+          the new start first, and a ceiling at the old end would grey out
+          exactly the month they were reaching for. An out-of-order pair made
+          that way is caught by `rangeProblem` below the boxes, which is where a
+          mistake in the SECOND half of a decision belongs. */}
+      <DateSheet
+        visible={pick === 'from'}
+        value={fromText}
+        fallback={toText}
+        heading="Period Start"
+        note="The first day the statement covers."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setFromText(iso); setPick(null); }}
+      />
+      <DateSheet
+        visible={pick === 'to'}
+        value={toText}
+        fallback={fromText}
+        range={{ min: fromText.trim() || null }}
+        heading="Period End"
+        note="The last day the statement covers. It cannot fall before the day it starts."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setToText(iso); setPick(null); }}
+      />
     </SafeAreaView>
   );
 }

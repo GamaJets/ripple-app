@@ -34,7 +34,7 @@
 //
 // Pure. No supabase, no React. src/ui/photoPublish.ts does the talking.
 
-import type { LoadStatus } from '../ui/loadStatus';
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 
 /** One permission: this photo, from this client, to this coach. */
 export interface PublishGrant {
@@ -78,10 +78,21 @@ export function publishConsentOf(
   grants: readonly PublishGrant[] | null,
   status: LoadStatus,
 ): PublishConsent {
+  // whole-ok: 'partial' is admitted on purpose and only in ONE direction. A
+  // grant that came back is a row the client wrote, and a prefix of a set still
+  // proves every row in it — so 'granted' is sayable off a truncated read and
+  // the picker keeps working. The reverse is not: not finding a row in a prefix
+  // is not finding it, and the two answers below the fall-through are different
+  // sentences to a coach, which is the whole reason this function has three.
   if (status === 'loading' || status === 'error') return 'unknown';
   if (grants == null) return 'unknown';
   if (!photoId || !coachId) return 'absent';
-  return grants.some((g) => g.photoId === photoId && g.coachId === coachId) ? 'granted' : 'absent';
+  if (grants.some((g) => g.photoId === photoId && g.coachId === coachId)) return 'granted';
+  // 'absent' sends the coach to ask their client. Off a truncated read that is
+  // exactly the errand the docstring above says must never be sent: the row
+  // saying yes may be on the other side of the page, and the coach goes and
+  // asks somebody who already agreed. Absence is a claim about the whole set.
+  return isWhole(status) ? 'absent' : 'unknown';
 }
 
 /**
@@ -104,7 +115,15 @@ export function publishablePhotos<T extends { id: string }>(
   status: LoadStatus,
 ): T[] | null {
   if (!coachId || visible == null || grants == null) return null;
-  if (status === 'loading' || status === 'error') return null;
+  // `isWhole`, and not the three-status enumeration that stood here. This
+  // function's return type is a bare array with nowhere to carry "and there may
+  // be more" — the caller draws it as THE set of photos the client agreed to.
+  // Filtering `visible` by a prefix of the grants silently drops photos that
+  // were agreed to, so the coach sees a shorter picker with nothing saying it is
+  // short: the same wrong as a movement the coach has already filmed being
+  // counted as still to film. Null is a state app/(trainer)/share-kit.tsx
+  // already draws a sentence for. A quietly incomplete list is not.
+  if (!isWhole(status)) return null;
   return visible.filter((p) => grants.some((g) => g.photoId === p.id && g.coachId === coachId));
 }
 

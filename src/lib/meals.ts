@@ -9,6 +9,7 @@
 import type { Diet, BodyStats } from './types';
 import { macrosFor, applyCoachAdjust, type CoachAdjust } from './nutrition';
 import type { EnergyPlan } from './goalEnergy';
+import { isCupboard, packFor, roundNeed } from './groceryPacks';
 
 export type Slot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 export const DEPTS = [
@@ -29,10 +30,16 @@ interface Comp {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const forDiet = (arr: Comp[], diet: Diet) => arr.filter((x) => x.d.includes(diet));
 
-export type Allergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy';
+export type Allergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy' | 'pork';
 export const ALLERGENS: { id: Allergen; label: string }[] = [
   { id: 'dairy', label: 'Dairy' }, { id: 'gluten', label: 'Gluten' }, { id: 'nuts', label: 'Nuts' },
   { id: 'shellfish', label: 'Shellfish' }, { id: 'egg', label: 'Egg' }, { id: 'soy', label: 'Soy' },
+  // Not an allergen but kept out the same way, never relaxed: for many members
+  // it is religious (owner, 21 Sep 2026). LAST in this list on purpose: stored
+  // meal indices are positions in pools filtered by the first six, and the
+  // digest in src/lib/mealAllergens.test.ts walks exactly those six. Screens
+  // sort it alphabetically for display.
+  { id: 'pork', label: 'Pork' },
 ];
 /**
  * Compound names whose head word is not the thing it looks like.
@@ -57,105 +64,165 @@ export const ALLERGENS: { id: Allergen; label: string }[] = [
  * being flagged rather than towards being fed to somebody.
  */
 const DAIRY_LOOKALIKE = /\b(peanut|almond|cashew|hazelnut|pistachio|pecan|walnut|macadamia|nut|seed|sunflower|sesame|coconut|soy|soya|oat|rice|hemp|pea|cocoa|shea)[\s-]+(butters?|milks?|creams?|yogurts?|yoghurts?|cheeses?)\b/g;
+/**
+ * Foods whose NAME contains none of the words above and which are made of the
+ * thing anyway.
+ *
+ * The tests above are word tests, and a word test only finds an allergen that
+ * is spelled out. Four components in this very file are not:
+ *
+ *   · `halloumi` and `paneer` are cheeses. Both sit in the vegetarian and keto
+ *     protein pools, both list their ingredient under the "Dairy & Eggs"
+ *     department — so the record already knew — and neither the name nor the
+ *     ingredient contains "cheese" or "milk". A member who ticked Dairy was
+ *     served "Harissa halloumi with roast potatoes & kale" as a plate the
+ *     planner had filtered FOR them, with no mark on the row, because
+ *     `mealAllergens` reads the same words and found none either.
+ *   · `seitan` is wheat gluten. Not a food that contains gluten — the word is
+ *     a synonym for it — and it is in the vegan and vegetarian protein pools,
+ *     which is exactly where somebody avoiding gluten does most of their
+ *     eating.
+ *   · `pesto` is basil, olive oil, garlic, PARMESAN and PINE NUTS. Its own
+ *     `d:` list excludes vegan, so this file already treats it as containing
+ *     dairy; nothing said so to the member.
+ *   · `teriyaki` is a soy-sauce glaze. Soy is the base ingredient, not a trace.
+ *   · `Katsu curry` is a roux. Japanese curry sauce is thickened with a
+ *     wheat-flour roux — every commercial block sold as one lists wheat and
+ *     most carry a gluten warning — and this component's single ingredient is
+ *     "Curry sauce", which no word test can tell from a gluten-free one. It is
+ *     a softer call than seitan, which IS gluten, and it is made the same way
+ *     the paragraph below says to make it.
+ *
+ * Same conservative direction as `DAIRY_LOOKALIKE` above, pointing the other
+ * way: that strip removes a false flag from something safe, this adds the flag
+ * to something that was reading as safe. Over-flagging costs a member one
+ * option out of a pool of a dozen. Under-flagging is what this whole section
+ * of the file exists to stop.
+ *
+ * Anchored with `\b` on both ends so a longer word cannot match by accident.
+ */
+const NAMED_DAIRY = /\b(halloumi|paneer|pesto)\b/;
+const NAMED_GLUTEN = /\b(seitan|katsu)\b/;
+const NAMED_NUTS = /\bpesto\b/;
+const NAMED_SOY = /\bteriyaki\b/;
 function componentAllergens(comp: Comp): Allergen[] {
   const text = (comp.n + ' ' + comp.ing.map((i) => i[0]).join(' ')).toLowerCase();
   const out: Allergen[] = [];
   // `buttermilk` is named because the boundaries that save `butternut` would
   // otherwise lose it: it is one word, and neither `\bbutter\b` nor `\bmilk\b`
   // is inside it.
-  if (/\b(milk|buttermilk|yogurt|yoghurt|cheese|whey|butter|creamy?|greek)\b/.test(text.replace(DAIRY_LOOKALIKE, ' ')))
+  if (/\b(milk|buttermilk|yogurt|yoghurt|cheese|whey|butter|creamy?|greek)\b/.test(text.replace(DAIRY_LOOKALIKE, ' '))
+    || NAMED_DAIRY.test(text))
     out.push('dairy');
-  if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)) out.push('gluten');
-  if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)) out.push('nuts');
+  if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)
+    || NAMED_GLUTEN.test(text)) out.push('gluten');
+  if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)
+    || NAMED_NUTS.test(text)) out.push('nuts');
   if (/prawn|shrimp|crab|lobster|scallop|mussel|oyster|shellfish/.test(text)) out.push('shellfish');
   if (/\begg/.test(text)) out.push('egg');
-  if (/tofu|tempeh|edamame|\bsoy|miso/.test(text)) out.push('soy');
+  if (/tofu|tempeh|edamame|\bsoy|miso/.test(text) || NAMED_SOY.test(text)) out.push('soy');
+  if (/\bpork|bacon|\bham\b|salami|chorizo|prosciutto|pancetta|pepperoni|\blard\b|gelatin|sausage/.test(text)) out.push('pork');
   return out;
 }
 /**
- * The components of a pool that honour the exclusions — and the fallback, said
- * out loud instead of buried.
+ * The components of a pool that honour the exclusions. Possibly none.
  *
- * ── What was wrong ────────────────────────────────────────────────────────
+ * This used to fall back to the UNFILTERED pool when the exclusions emptied
+ * it, on the argument that a meal built from nothing would crash `mealAt` and
+ * a crash tells the member less than a warning. That was never the choice. The
+ * fallback served a member with a declared allergy a generated meal containing
+ * it, with a red "Your plan still contains ..." over the top, and people skim
+ * warnings. The safe option was always to serve NO meal in a slot that cannot
+ * be made safely and to say so: `mealAt` returns an empty, named slot for it
+ * (`unfillable`), and `allergenGapNote` says which slot, which allergen and
+ * what to do instead.
  *
- * This was `return filtered.length ? filtered : pool;` and nothing anywhere
- * told the member. On the one screen where a quiet failure is least acceptable,
- * an allergen that emptied a required pool was silently abandoned and the
- * planner went on building meals out of the very components it had been asked
- * to leave out. A member who ticked Dairy got a plan with dairy in it, drawn
- * and priced and shopped for, with nothing on screen to suggest anything had
- * happened.
- *
- * ── Why the fallback survives ─────────────────────────────────────────────
- *
- * Because the alternative is worse in a way that is harder to see. The pools
- * are mixed-radix dimensions and every slot needs one component from each; an
- * empty dimension means there is NO meal in this diet and this slot that
- * honours every exclusion. Returning nothing would make `mealAt` build a meal
- * out of nulls — it reads `base.step`, `pr.n`, `a.ico` straight off the parts —
- * and a screen that crashes tells the member even less than one that lies.
- *
- * So the pool still falls back AND `poolGaps` names exactly which exclusions
- * could not be honoured, `mealAllergens` says which of them are actually in a
- * given meal, and app/(client)/nutrition.tsx prints both. The plan is drawn,
- * and it is drawn with a warning on it rather than as though nothing were
- * wrong.
+ * Only the EMPTY case changed. A pool with anything left in it is filtered
+ * exactly as before, so every stored index into a catalogue that could be
+ * built still names the same meal (pinned in src/lib/mealAllergens.test.ts).
  */
 function poolFilter(pool: Comp[], avoid: Allergen[]): Comp[] {
   if (!avoid.length) return pool;
-  const filtered = pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
-  return filtered.length ? filtered : pool;
+  return pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
+}
+
+/** Per slot, per dimension: the pool used only when the ordinary one is
+ *  emptied by the exclusions. See BREK_BASE_FALLBACK for why it is separate. */
+function fallbackPools(slot: Slot): (Comp[] | null)[] {
+  return slot === 'Breakfast' ? [BREK_BASE_FALLBACK, null, null, null] : [];
+}
+
+/** The component pools a slot draws one of each from, before any diet. */
+function slotPools(slot: Slot): Comp[][] {
+  return slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
+    : slot === 'Snack' ? [SNACK_A, SNACK_B, SNACK_PREP]
+    : [PROTEINS, CARBS, VEGS, FLAVORS];
 }
 
 /**
- * The exclusions this diet and slot cannot honour, because honouring them would
- * leave a required component pool with nothing in it.
+ * Why this diet and slot cannot be made without an excluded allergen, or [] when
+ * it can. Non-empty means the slot is UNFILLABLE: every option for some
+ * required part of the meal carries one of these, so no meal is generated.
  *
- * Per allergen rather than per pool, because that is the sentence a member
- * needs: "we could not keep dairy out of your breakfasts" is actionable and
- * "component dimension 2 is empty" is not. An allergen is reported when
- * removing it ALONE would empty a pool, so a member excluding four things is
- * told which of the four is the problem rather than being handed all four back.
+ * Named per allergen, because that is the sentence a member acts on: "every
+ * breakfast has soy in it" rather than "component dimension 2 is empty". The
+ * names are a smallest set of their exclusions that still empties the slot, so
+ * a vegan avoiding dairy and soy hears "soy" (dairy was never the problem) and
+ * a meat-eater avoiding dairy, gluten, egg and shellfish hears the three that
+ * fail together and not the one that has nothing to do with it.
+ *
+ * A pool the diet itself empties is not an exclusion's doing and is skipped:
+ * that is a dimension with nothing in it, which `mealAt` already closes around.
  */
 export function poolGaps(diet: Diet, slot: Slot, avoid: Allergen[] = []): Allergen[] {
   if (!avoid.length) return [];
-  const pools = slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
-    : slot === 'Snack' ? [SNACK_A, SNACK_B, SNACK_PREP]
-    : [PROTEINS, CARBS, VEGS, FLAVORS];
-  const out: Allergen[] = [];
+  // A dimension with a fallback is blocked only if its fallback is blocked too.
+  const fb = fallbackPools(slot);
+  const pools = slotPools(slot).map((pool, i) => forDiet(pool, diet).concat(fb[i] ? forDiet(fb[i]!, diet) : []))
+    .filter((pool) => pool.length);
+  const blocks = (list: Allergen[]) => list.length > 0
+    && pools.some((pool) => pool.every((cp) => componentAllergens(cp).some((a) => list.includes(a))));
+  if (!blocks(avoid)) return [];
+  let named = [...avoid];
   for (const a of avoid) {
-    const empties = pools.some((pool) => {
-      const forThisDiet = forDiet(pool, diet);
-      if (!forThisDiet.length) return false;   // the diet already empties it; not this allergen's doing
-      return !forThisDiet.some((cp) => !componentAllergens(cp).includes(a));
-    });
-    if (empties) out.push(a);
+    const without = named.filter((x) => x !== a);
+    if (blocks(without)) named = without;
   }
-  return out;
+  return named;
 }
 
-/** Every exclusion that cannot be honoured across a whole day's slots. */
-export function planGaps(diet: Diet, slots: Slot[], avoid: Allergen[] = []): Allergen[] {
-  const seen = new Set<Allergen>();
-  for (const slot of slots) for (const a of poolGaps(diet, slot, avoid)) seen.add(a);
-  return [...seen];
+/** One slot of a day that has no generated meal, and the allergens that are why. */
+export interface EmptySlot { slot: Slot; allergens: Allergen[] }
+
+/** Every slot of a day that cannot be made without an excluded allergen, once
+ *  per slot, in the day's order. */
+export function emptySlots(diet: Diet, slots: readonly Slot[], avoid: Allergen[] = []): EmptySlot[] {
+  const out: EmptySlot[] = [];
+  for (const slot of new Set(slots)) {
+    const allergens = poolGaps(diet, slot, avoid);
+    if (allergens.length) out.push({ slot, allergens });
+  }
+  return out;
 }
 
 /**
  * Which of the excluded allergens are actually present in a generated meal.
  *
- * The per-meal half of the same honesty. `poolGaps` says the filter could not
- * be honoured somewhere in the slot; this says whether THIS meal, the one on
- * screen with a name and a picture, contains the thing the member asked to
- * avoid. A member is owed the flag on the row they are about to cook, not only
- * a warning at the top of the screen.
+ * A generated meal never does any more (`poolFilter`, and the sweep in
+ * src/lib/mealAllergens.test.ts). This is still the reader for everything that
+ * is NOT generated from the pools, a real recipe above all, and the second
+ * lock on the ones that are. A member is owed the flag on the row they are
+ * about to cook, not only a warning at the top of the screen.
  *
  * Read off the meal's own name and ingredients with the same matcher the
  * components go through, so a meal assembled from parts is tested as the dish
  * it became.
  */
-export function mealAllergens(meal: { n: string; ing: Ing[] }, avoid: Allergen[] = []): Allergen[] {
-  if (!avoid.length) return [];
+export function mealAllergens(meal: { n: string; ing: Ing[]; unfillable?: readonly Allergen[] }, avoid: Allergen[] = []): Allergen[] {
+  // An empty slot's NAME is the allergen ("No breakfast we can make without
+  // soy") and its plate holds nothing. Read as a dish, it would be marked as
+  // containing the one thing it was left empty to keep out.
+  if (!avoid.length || meal.unfillable?.length) return [];
   const found = componentAllergens({ n: meal.n, k: 0, p: 0, c: 0, f: 0, ing: meal.ing, d: [] });
   return avoid.filter((a) => found.includes(a));
 }
@@ -167,20 +234,263 @@ export function allergenLabel(a: Allergen): string {
 }
 
 /**
- * What to say when an exclusion could not be honoured, or null when they all
- * were.
+ * The whole of one meal-plan row, as a screen reader has to hear it.
  *
- * The wording has one job: make it unmistakable that the plan below contains
- * something the member asked to keep out, and say which. It does not apologise
- * and it does not hedge — somebody with a real allergy has to be able to read
- * this once and know.
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * The per-row allergen mark exists because a warning at the top of the screen
+ * does not tell you WHICH DISH — that is the argument `mealAllergens` above
+ * makes, and app/(client)/nutrition.tsx draws the mark on all three of its meal
+ * lists accordingly. Every one of those rows is a `<Pressable>`, and a
+ * Pressable in React Native renders `accessible={true}`: it is ONE
+ * accessibility element, and an `accessibilityLabel` on it REPLACES everything
+ * its children say rather than adding to it.
+ *
+ * All three carried `accessibilityLabel={m.n}`. So the row a sighted member
+ * reads as
+ *
+ *     Lunch · Coach's pick
+ *     Harissa halloumi
+ *     ● Contains dairy
+ *     520 kcal
+ *
+ * was announced, to the member who cannot see the mark, as "Harissa halloumi,
+ * button" — the dish name and nothing else. The exclusion they ticked was on
+ * the screen and not in the sentence, and the mark, the dot and the calorie
+ * count went with it. That is the same defect the visible mark was added to
+ * fix, surviving on the one channel where nobody could see it had.
+ *
+ * ── Why the phrase lives here ─────────────────────────────────────────────
+ *
+ * Three call sites draw this row — today's plan, the week grid and the snack
+ * list — and the fix is only worth anything if all three say it. Written out
+ * by hand at each of the three it is one hand away from being wrong again,
+ * which is the argument src/lib/bestSet.ts makes at length about a phrase that
+ * was right in two places out of three.
+ *
+ * The allergens are passed IN rather than read here: the caller already has
+ * them from `mealAllergens(m, avoid)` for the visible mark, and reading them a
+ * second time is how the sentence and the mark come to disagree.
  */
-export function allergenGapNote(gaps: Allergen[]): string | null {
+export function mealRowSpoken(row: {
+  /** 'Breakfast', 'Lunch' — omitted on the snack list, which has no slot. */
+  slot?: string | null;
+  /** Whether the row wears the "Coach's pick" kicker. */
+  coachPick?: boolean;
+  name: string;
+  /** What `mealAllergens` returned for this meal — the same array the mark on
+   *  the row was drawn from. */
+  allergens?: readonly Allergen[];
+  /** The calorie figure as the row PRINTS it, formatted by the caller. Null
+   *  where the row prints none. */
+  kcal?: string | null;
+}): string {
+  const found = row.allergens ?? [];
+  return [
+    row.slot?.trim() || null,
+    row.coachPick ? "Coach's pick" : null,
+    row.name.trim() || null,
+    // Third, where the eye meets it: after the name of the dish and before the
+    // figure, so it cannot be heard as a fact about some other row.
+    found.length ? `Contains ${found.map(allergenLabel).join(' and ')}` : null,
+    row.kcal?.trim() ? `${row.kcal.trim()} kcal` : null,
+  ].filter(Boolean).join('. ');
+}
+
+/** "dairy", "dairy or soy", "dairy, gluten or egg". `or`, because each
+ *  option has at least one of them, not necessarily all. */
+function orList(names: readonly string[]): string {
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/** What an empty slot is called on its row: which meal, and why, in one line. */
+export function unfillableName(slot: Slot, allergens: readonly Allergen[]): string {
+  return `No ${slot.toLowerCase()} we can make without ${orList(allergens.map(allergenLabel))}`;
+}
+
+/**
+ * What to say about the slots that have no generated meal, or null when every
+ * slot has one.
+ *
+ * Addressed to the member, and written to be acted on: which meal is empty,
+ * which allergen is why, and the three things they can do about it. It does
+ * not say the plan contains anything, because it does not: the slot was left
+ * empty precisely so that it would not.
+ */
+export function allergenGapNote(empty: readonly EmptySlot[]): string | null {
+  if (!empty.length) return null;
+  const lines = empty.map(({ slot, allergens }) => {
+    const s = slot.toLowerCase();
+    return `There is no ${s} in your plan. Every ${s} we can build for your diet has ${orList(allergens.map(allergenLabel))} in it, so we left it empty rather than give you something you avoid.`;
+  });
+  return `${lines.join(' ')} Search real recipes for ${empty.length === 1 ? 'that meal' : 'those meals'}, choose one you know is safe and log it yourself, or ask your coach to plan ${empty.length === 1 ? 'it' : 'them'}.`;
+}
+
+// ── whose exclusions, and how many of them were read ────────────────────────
+//
+// `clients.avoid` is the member's own list and only the member may change it
+// (supabase/parts/3240-a-members-allergens-are-theirs-and-a-coach-can-add-not-erase.sql).
+// `clients.coach_avoid` is what the member told their coach, recorded by the
+// coach. What is kept away from the member is the UNION of the two, in every
+// place that decides what food reaches them. A coach can add a restriction
+// this way and has no way to subtract one.
+
+/**
+ * One allergen column off a row that was read, or null when it was not.
+ *
+ * `undefined` is a column the read never returned (not selected, not there):
+ * unknown. A SQL `null` is a column that was read and holds nothing: nobody has
+ * recorded anything, which is an answer. Anything else is unreadable, and an
+ * unreadable list is unknown, never empty.
+ */
+export function readAllergenColumn(v: unknown): Allergen[] | null {
+  if (v === undefined) return null;
+  if (v === null) return [];
+  if (!Array.isArray(v)) return null;
+  return ALLERGENS.map((a) => a.id).filter((id) => v.includes(id));
+}
+
+/**
+ * Everything kept away from a member: their own list and their coach's notes.
+ *
+ * Null when EITHER list is unread. The coach's notes failing to load is not a
+ * coach who noted nothing, and a union with an unread half is not the whole
+ * list. Every caller already refuses to plan, search or mark against an unread
+ * `avoid`; this makes the same refusal cover an unread `coach_avoid`.
+ */
+export function excludedAllergens(
+  own: readonly Allergen[] | null, coach: readonly Allergen[] | null,
+): Allergen[] | null {
+  if (own == null || coach == null) return null;
+  return ALLERGENS.map((a) => a.id).filter((id) => own.includes(id) || coach.includes(id));
+}
+
+// ── dislikes: a preference, never a safety fact ─────────────────────────────
+//
+// `clients.dislikes` is ingredient words. An ALLERGEN filters the component
+// pools themselves (`poolFilter`), which defines the catalogue's index space.
+// A DISLIKE never touches that space: it only steers which index is picked
+// (`dislikeFreeIndex`) and which rows are listed (`preferNotDisliked`), inside
+// pools the allergens have already filtered. So relaxing a dislike can only
+// ever hand back something the allergen filter already allowed, and when a
+// dislike cannot be honoured it is relaxed and said so (`dislikeGapNote`)
+// rather than leaving a slot with nothing to serve.
+
+/** The longest word kept. A dislike is an ingredient, not a paragraph. */
+export const DISLIKE_MAX = 40;
+
+/** A typed dislike as it is stored and matched: trimmed, lower case, or null
+ *  when there is nothing left of it. */
+export function normaliseDislike(word: string): string | null {
+  const w = word.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, DISLIKE_MAX);
+  return w ? w : null;
+}
+
+/** The `dislikes` column off a row that was read. Same null rule as
+ *  `readAllergenColumn`: missing is unknown, SQL null is none. */
+export function readDislikes(v: unknown): string[] | null {
+  if (v === undefined) return null;
+  if (v === null) return [];
+  if (!Array.isArray(v)) return null;
+  const out: string[] = [];
+  for (const x of v) {
+    const w = typeof x === 'string' ? normaliseDislike(x) : null;
+    if (w && !out.includes(w)) out.push(w);
+  }
+  return out;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** "mushrooms" finds "mushroom", "olives" finds "olive", "tomato" finds
+ *  "tomatoes". Whole words only, so "ham" is not found in "hummus". */
+function dislikeRe(word: string): RegExp {
+  const stems = new Set([word, word.replace(/s$/, ''), word.replace(/es$/, '')].filter((s) => s.length > 1));
+  return new RegExp(`\\b(${[...stems].map(escapeRe).join('|')})(s|es)?\\b`);
+}
+
+/** Which of `dislikes` a piece of text names. */
+export function textDislikes(text: string, dislikes: readonly string[]): string[] {
+  if (!dislikes.length) return [];
+  const t = text.toLowerCase();
+  return dislikes.filter((w) => dislikeRe(w).test(t));
+}
+
+const compText = (cp: { n: string; ing: readonly (readonly [string, ...unknown[]])[] }) =>
+  cp.n + ' ' + cp.ing.map((i) => i[0]).join(' ');
+
+/** Which of `dislikes` a meal or recipe contains, by name and ingredients
+ *  (a recipe's unmeasured ones too). */
+export function mealDislikes(
+  meal: { n: string; ing: readonly (readonly [string, ...unknown[]])[]; unmeasured?: readonly string[] },
+  dislikes: readonly string[],
+): string[] {
+  if (!dislikes.length) return [];
+  return textDislikes(compText(meal) + ' ' + (meal.unmeasured ?? []).join(' '), dislikes);
+}
+
+/**
+ * The nearest index to `idx` whose meal contains none of `dislikes`, moving
+ * each component to the next one in ITS OWN allergen-filtered pool that is not
+ * disliked. A pool in which every option is disliked keeps its component: the
+ * dislike is relaxed there (and `dislikeGaps` says so). It can never reach a
+ * component `poolFilter` removed, because it only walks what `dims` returned.
+ */
+export function dislikeFreeIndex(
+  diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = [], dislikes: readonly string[] = [],
+): number {
+  const pools = dims(diet, slot, avoid);
+  const sizes = pools.map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  let r = ((idx % total) + total) % total;
+  if (!dislikes.length) return r;
+  const digits: number[] = [];
+  for (let i = sizes.length - 1; i >= 0; i--) { digits[i] = r % sizes[i]; r = Math.floor(r / sizes[i]); }
+  for (let i = 0; i < pools.length; i++) {
+    const pool = pools[i];
+    if (!pool.length || !textDislikes(compText(pool[digits[i]]), dislikes).length) continue;
+    for (let k = 1; k < pool.length; k++) {
+      const j = (digits[i] + k) % pool.length;
+      if (!textDislikes(compText(pool[j]), dislikes).length) { digits[i] = j; break; }
+    }
+  }
+  return digits.reduce((acc, d, i) => acc * sizes[i] + d, 0);
+}
+
+/** The dislikes this diet and these slots cannot honour, because every option
+ *  in some required pool (after the allergens) contains one. Asked alone and
+ *  together, the way `poolGaps` asks it. */
+export function dislikeGaps(diet: Diet, slots: Slot[], avoid: Allergen[] = [], dislikes: readonly string[] = []): string[] {
+  if (!dislikes.length) return [];
+  const out = new Set<string>();
+  for (const slot of new Set(slots)) {
+    for (const pool of dims(diet, slot, avoid)) {
+      if (!pool.length) continue;
+      for (const w of dislikes) if (pool.every((cp) => textDislikes(compText(cp), [w]).length)) out.add(w);
+      if (pool.every((cp) => textDislikes(compText(cp), dislikes).length)) for (const w of dislikes) out.add(w);
+    }
+  }
+  return dislikes.filter((w) => out.has(w));
+}
+
+/** What to say when a dislike had to be relaxed, or null when none was. Plain,
+ *  and plainly a preference: it is not the allergen warning. */
+export function dislikeGapNote(gaps: readonly string[]): string | null {
   if (!gaps.length) return null;
-  const names = gaps.map(allergenLabel);
-  const list = names.length === 1 ? names[0]
-    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Your plan still contains ${list}. There are not enough ${list.includes('and') ? 'suitable components' : `${list}-free components`} in this diet to build every meal without ${names.length === 1 ? 'it' : 'them'}, so the meals below have been built anyway and are marked where ${names.length === 1 ? 'it appears' : 'they appear'}. Check every dish before you cook it.`;
+  const list = gaps.length === 1 ? gaps[0] : `${gaps.slice(0, -1).join(', ')} and ${gaps[gaps.length - 1]}`;
+  return `Some meals still have ${list} in them. Every option for part of those meals has ${gaps.length === 1 ? 'it' : 'one of them'}, so rather than leave a meal empty we kept it in. Swap any you do not want.`;
+}
+
+/**
+ * Rows without a disliked ingredient, or every row when that would leave none.
+ * `relaxed` is true when it had to hand the disliked ones back. Allergens are
+ * never decided here: the rows passed in have already been filtered for them.
+ */
+export function preferNotDisliked<T extends { n: string; ing: readonly (readonly [string, ...unknown[]])[]; unmeasured?: readonly string[] }>(
+  rows: readonly T[], dislikes: readonly string[],
+): { rows: T[]; relaxed: boolean } {
+  if (!dislikes.length) return { rows: [...rows], relaxed: false };
+  const kept = rows.filter((m) => !mealDislikes(m, dislikes).length);
+  return kept.length || !rows.length ? { rows: kept, relaxed: false } : { rows: [...rows], relaxed: true };
 }
 
 // ── LUNCH / DINNER components ──
@@ -248,15 +558,29 @@ const FLAVORS: Comp[] = [
 // ── BREAKFAST components ──
 const BREK_BASE: Comp[] = [
   { n: 'oats', ico: '🥣', k: 240, p: 8, c: 44, f: 5,  ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Milk', 200, 'ml', 'Dairy & Eggs']], step: 'Cook the oats with milk.', d: ['meat', 'vegetarian'] },
-  { n: 'overnight oats', ico: '🥣', k: 250, p: 9, c: 45, f: 6, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], step: 'Soak the oats overnight.', d: ['vegetarian', 'vegan', 'meat'] },
+  { n: 'overnight oats', ico: '🥣', k: 250, p: 9, c: 45, f: 6, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Soy milk', 200, 'ml', 'Pantry & Other']], step: 'Soak the oats overnight.', d: ['vegetarian', 'vegan', 'meat'] },
   { n: 'Greek yogurt bowl', ico: '🥣', k: 200, p: 20, c: 14, f: 6, ing: [['Greek yogurt', 200, 'g', 'Dairy & Eggs']], step: 'Spoon the yogurt into a bowl.', d: ['vegetarian', 'meat'] },
   { n: 'omelette', ico: '🍳', k: 230, p: 19, c: 2, f: 16, ing: [['Eggs', 3, '', 'Dairy & Eggs']], step: 'Whisk and cook the eggs into an omelette.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'tofu scramble', ico: '🍳', k: 190, p: 20, c: 6, f: 10, ing: [['Firm tofu', 150, 'g', 'Pantry & Other'], ['Turmeric', 1, 'pinch', 'Pantry & Other']], step: 'Scramble the tofu with turmeric.', d: ['vegan', 'vegetarian'] },
-  { n: 'chia pudding', ico: '🍮', k: 220, p: 8, c: 20, f: 12, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], step: 'Set the chia in milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo'] },
+  { n: 'chia pudding', ico: '🍮', k: 220, p: 8, c: 20, f: 12, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Soy milk', 200, 'ml', 'Pantry & Other']], step: 'Set the chia in milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo'] },
   { n: 'protein pancakes', ico: '🥞', k: 280, p: 24, c: 30, f: 6, ing: [['Oat flour', 50, 'g', 'Grains & Bread'], ['Egg', 1, '', 'Dairy & Eggs'], ['Whey protein', 1, 'scoop', 'Pantry & Other']], step: 'Blend and griddle the pancake batter.', d: ['vegetarian', 'meat'] },
   { n: 'cottage cheese bowl', ico: '🥣', k: 180, p: 22, c: 8, f: 6, ing: [['Cottage cheese', 200, 'g', 'Dairy & Eggs']], step: 'Spoon the cottage cheese into a bowl.', d: ['vegetarian', 'meat', 'keto'] },
   { n: 'avocado & eggs', ico: '🥑', k: 320, p: 15, c: 8, f: 26, ing: [['Avocado', 1, '', 'Fruits'], ['Eggs', 2, '', 'Dairy & Eggs']], step: 'Serve sliced avocado with the eggs.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'shakshuka', ico: '🍳', k: 260, p: 16, c: 12, f: 16, ing: [['Eggs', 2, '', 'Dairy & Eggs'], ['Tomato passata', 150, 'g', 'Pantry & Other']], step: 'Poach the eggs in spiced tomato sauce.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
+];
+/**
+ * Breakfast bases used ONLY when every ordinary base is excluded for this
+ * diet: a vegan avoiding soy had no breakfast at all (every vegan base is tofu
+ * or soy milk). Never mixed into BREK_BASE, because a meal is a stored index
+ * into the filtered pools and a longer base pool would move every stored
+ * breakfast. A catalogue that could be built before draws nothing from here,
+ * so nothing stored changes (see `usesFallback` and the digest test).
+ */
+const BREK_BASE_FALLBACK: Comp[] = [
+  { n: 'oat-milk overnight oats', ico: '🥣', k: 250, p: 7, c: 46, f: 5, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Oat milk', 200, 'ml', 'Pantry & Other']], step: 'Soak the oats in oat milk overnight.', d: ['vegan', 'vegetarian', 'meat'] },
+  { n: 'coconut chia pudding', ico: '🍮', k: 260, p: 6, c: 12, f: 21, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Coconut milk', 200, 'ml', 'Pantry & Other']], step: 'Set the chia in coconut milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo', 'meat'] },
+  { n: 'fruit & seed bowl', ico: '🍓', k: 250, p: 9, c: 30, f: 12, ing: [['Mixed fruit', 200, 'g', 'Fruits'], ['Pumpkin seeds', 25, 'g', 'Nuts & Seeds']], step: 'Chop the fruit into a bowl and scatter the seeds.', d: ['vegan', 'vegetarian', 'paleo', 'meat'] },
+  { n: 'chickpea-flour scramble', ico: '🍳', k: 240, p: 13, c: 34, f: 4, ing: [['Chickpea flour', 60, 'g', 'Pantry & Other'], ['Spinach', 50, 'g', 'Vegetables']], step: 'Whisk the chickpea flour with water and scramble it with the spinach.', d: ['vegan', 'vegetarian', 'meat'] },
 ];
 const BREK_TOP: Comp[] = [
   { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 10, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
@@ -288,7 +612,7 @@ const SNACK_A: Comp[] = [
   { n: 'Greek yogurt', ico: '🥣', ing: [['Greek yogurt', 150, 'g', 'Dairy & Eggs']], k: 130, p: 15, c: 9, f: 4, d: ['vegetarian', 'meat', 'keto'] },
   { n: 'cottage cheese', ico: '🧀', ing: [['Cottage cheese', 150, 'g', 'Dairy & Eggs']], k: 130, p: 17, c: 6, f: 4, d: ['vegetarian', 'meat', 'keto'] },
   { n: 'protein shake', ico: '🥤', ing: [['Whey protein', 1, 'scoop', 'Pantry & Other'], ['Milk', 200, 'ml', 'Dairy & Eggs']], k: 230, p: 32, c: 14, f: 4, d: ['vegetarian', 'meat'] },
-  { n: 'pea-protein shake', ico: '🥤', ing: [['Pea protein', 1, 'scoop', 'Pantry & Other'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], k: 210, p: 28, c: 14, f: 3, d: ['vegan', 'vegetarian'] },
+  { n: 'pea-protein shake', ico: '🥤', ing: [['Pea protein', 1, 'scoop', 'Pantry & Other'], ['Soy milk', 200, 'ml', 'Pantry & Other']], k: 210, p: 28, c: 14, f: 3, d: ['vegan', 'vegetarian'] },
   { n: 'hummus', ico: '🫓', ing: [['Hummus', 80, 'g', 'Pantry & Other']], k: 180, p: 6, c: 14, f: 11, d: ['vegan', 'vegetarian', 'meat'] },
   { n: 'boiled eggs', ico: '🥚', ing: [['Eggs', 2, '', 'Dairy & Eggs']], k: 140, p: 12, c: 1, f: 10, d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'edamame', ico: '🫛', ing: [['Edamame', 120, 'g', 'Vegetables']], k: 120, p: 11, c: 9, f: 5, d: ['vegan', 'vegetarian'] },
@@ -326,28 +650,98 @@ const SNACK_B: Comp[] = [
 
 export interface GeneratedMeal {
   n: string; slot: Slot; ico: string;
+  /** The component the dish is photographed by: a breakfast's base, a snack's
+   *  first item, a main's protein ("overnight oats", "salmon"). The Meals list
+   *  shows that dish type's photo (src/ui/mealPhotos.ts); it is a picture of
+   *  the kind of dish, not of this exact plate. */
+  pic?: string;
   k: number; p: number; c: number; f: number;
   ing: Ing[]; steps: string[]; diet: Diet; idx: number;
+  /** Set, and non-empty, when this slot cannot be made without one of these
+   *  excluded allergens. The meal is then EMPTY: no ingredients, no macros, no
+   *  method, and `n` says why (`unfillableName`). Never cook, log or shop it. */
+  unfillable?: Allergen[];
 }
 export interface PlannedMeal extends GeneratedMeal {
   pos: number; servings: number; K: number; P: number; C: number; F: number;
+  /** On an `unfillable` slot only: the calories this slot would have carried,
+   *  so a recipe put in it is portioned to the slot's share rather than to 0. */
+  slotKcal?: number;
 }
 
 /** Component pools for a given diet + slot (mixed-radix dimensions). */
 function dims(diet: Diet, slot: Slot, avoid: Allergen[] = []): Comp[][] {
-  const f = (arr: Comp[]) => poolFilter(forDiet(arr, diet), avoid);
-  if (slot === 'Breakfast') return [f(BREK_BASE), f(BREK_TOP), f(BREK_BOOST), f(BREK_STYLE)];
-  if (slot === 'Snack')     return [f(SNACK_A), f(SNACK_B), f(SNACK_PREP)];
-  return [f(PROTEINS), f(CARBS), f(VEGS), f(FLAVORS)];
+  const fb = fallbackPools(slot);
+  return slotPools(slot).map((arr, i) => {
+    const own = forDiet(arr, diet);
+    const kept = poolFilter(own, avoid);
+    // Only when exclusions emptied a pool the diet has: see BREK_BASE_FALLBACK.
+    return !kept.length && own.length && fb[i] ? poolFilter(forDiet(fb[i]!, diet), avoid) : kept;
+  });
 }
 
-/** Number of distinct meals available for a diet + slot. */
+/** Whether this catalogue draws on a fallback pool, i.e. it could not be built
+ *  before the fallbacks existed. Such catalogues hold no stored meals. */
+export function usesFallback(diet: Diet, slot: Slot, avoid: Allergen[] = []): boolean {
+  const fb = fallbackPools(slot);
+  return slotPools(slot).some((arr, i) => {
+    const own = forDiet(arr, diet);
+    return !!fb[i] && own.length > 0 && poolFilter(own, avoid).length === 0;
+  });
+}
+
+/** Number of distinct meals available for a diet + slot. Zero when the slot
+ *  cannot be made without an excluded allergen (`poolGaps`). */
 export function catalogSize(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  if (poolGaps(diet, slot, avoid).length) return 0;
   return dims(diet, slot, avoid).reduce((a, p) => a * Math.max(1, p.length), 1);
+}
+
+/**
+ * A generated meal's name without its style: "Berry oats (warm)" and "Berry
+ * oats (chilled)" are one dish. Reads the old form too, "Berry oats — warm",
+ * because names are stored: a coach's plan snapshots them (`PlanMeal.n`) and
+ * a food log keeps what was logged. Nothing stored is rewritten; it is read.
+ */
+export function mealDish(name: string): string {
+  return name.replace(LEGACY_STYLE, '').replace(/ \([^()]*\)$/, '');
+}
+/** The em dash a breakfast's style was once joined with. Read, never written. */
+const LEGACY_STYLE = / \u2014 .*$/;
+/**
+ * Whether a style only repeats what the dish already says: "with cinnamon" on
+ * "Apple & cinnamon oats". Judged by the style's last word, the one that
+ * names a flavour. "warm" and "chilled" never repeat a dish, so they are kept.
+ */
+function redundantStyle(dish: string, style: string): boolean {
+  const key = style.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
+  return key.length > 2 && dish.toLowerCase().includes(key);
+}
+
+/** Whether two names are the same generated meal. Either side may be in the
+ *  old dashed form, and either may carry a style that only repeats its dish,
+ *  which is printed today and was not always: "Apple & cinnamon oats (with
+ *  cinnamon)" and "Apple & cinnamon oats" are one meal, so a coach's plan
+ *  written before that change is not flagged stale over it. A style that says
+ *  something new still counts: "Berry oats (warm)" is not "(chilled)". */
+export function sameMealName(a: string, b: string): boolean {
+  const canon = (n: string) => {
+    const bracketed = n.replace(/ \u2014 (.*)$/, ' ($1)');
+    const m = bracketed.match(/^(.*) \(([^()]*)\)$/);
+    return m && redundantStyle(m[1], m[2]) ? m[1] : bracketed;
+  };
+  return canon(a) === canon(b);
 }
 
 /** Deterministic index → concrete meal (macros, ingredients, method). */
 export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = []): GeneratedMeal {
+  // A slot that cannot be made safely is served EMPTY, never as the nearest
+  // thing. `idx` is handed back untouched: it may be a stored pick that means
+  // something again once the exclusions change, and nothing here rewrites it.
+  const unfillable = poolGaps(diet, slot, avoid);
+  if (unfillable.length) {
+    return { n: unfillableName(slot, unfillable), slot, ico: '🚫', k: 0, p: 0, c: 0, f: 0, ing: [], steps: [], diet, idx, unfillable };
+  }
   const pools = dims(diet, slot, avoid);
   const sizes = pools.map((p) => Math.max(1, p.length));
   const total = sizes.reduce((a, b) => a * b, 1);
@@ -360,28 +754,54 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
   }
   const sum = (k: 'k' | 'p' | 'c' | 'f') => parts.reduce((a, p) => a + (p?.[k] ?? 0), 0);
   const ing = parts.flatMap((p) => p?.ing ?? []);
-  let n: string, ico: string, steps: string[];
+  // ── a dimension with nothing in it ──────────────────────────────────────
+  //
+  // `parts[i]` is null when a component pool is empty for this diet, and every
+  // branch below reads `.n` straight off the tuple — so the whole nutrition
+  // screen threw a TypeError out of render. It is reachable: `diet` is a plain
+  // text column cast to a five-member union, and a row holding anything else
+  // (an older vocabulary, an import, a typo) has no pools at all. That ingress
+  // is closed by `readDiet` in src/lib/types.ts; this is the second lock, and
+  // it is the one that matters, because a crash inside render takes the tab bar
+  // with it.
+  //
+  // An empty component contributes no name, no icon, no macros and no
+  // ingredients — which is exactly what a dimension with nothing in it means —
+  // and the sentences below are written to close up around a blank.
+  const EMPTY: Comp = { n: '', k: 0, p: 0, c: 0, f: 0, ing: [], d: [] };
+  const at = (i: number): Comp => parts[i] ?? EMPTY;
+  let n: string, ico: string, steps: string[], pic = '';
   if (slot === 'Breakfast') {
-    const [base, top, boost, style] = parts as Comp[];
-    n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' — ' + style.n : ''}`;
+    const [base, top, boost, style] = [at(0), at(1), at(2), at(3)];
+    // The style in brackets, the way a snack's prep already is. It was joined
+    // with an em dash, which a tester read as the app being written by a
+    // machine. `mealDish` strips either form.
+    const dish = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}`;
+    // A style that only repeats the dish is left off: "Apple & cinnamon oats
+    // (with cinnamon)" says cinnamon twice. The style is still part of the
+    // index, so nothing stored moves; only the words printed change.
+    n = `${dish}${style.n && !redundantStyle(dish, style.n) ? ' (' + style.n + ')' : ''}`;
     ico = base.ico ?? '🍽️';
+    pic = base.n;
     steps = [
       base.step ?? `Prepare the ${base.n}.`,
       `Top with ${top.n}${boost.n ? ` and stir in the ${boost.n.replace('+ ', '')}` : ''}.`,
-      `Finish${style.n ? ` — ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
+      `Finish${style.n ? `, ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
     ];
   } else if (slot === 'Snack') {
-    const [a, b, prep] = parts as Comp[];
+    const [a, b, prep] = [at(0), at(1), at(2)];
     n = `${cap(a.n)} & ${b.n}${prep.n ? ' (' + prep.n + ')' : ''}`;
     ico = a.ico ?? '🍎';
+    pic = a.n;
     steps = [
       `Portion the ${a.n} into a bowl or container.`,
-      `Add the ${b.n} alongside${prep.n ? ` — ideal ${prep.n}` : ''}, then enjoy.`,
+      `Add the ${b.n} alongside${prep.n ? ` (ideal ${prep.n})` : ''}, then enjoy.`,
     ];
   } else {
-    const [pr, cb, vg, fl] = parts as Comp[];
+    const [pr, cb, vg, fl] = [at(0), at(1), at(2), at(3)];
     n = `${fl.n} ${pr.n} with ${cb.n} & ${vg.n}`;
     ico = pr.ico ?? '🍽️';
+    pic = pr.n;
     const cookTime = /salmon|fish|cod|prawn/i.test(pr.n) ? ' (about 3–4 min per side)' : /chicken|turkey|beef|steak/i.test(pr.n) ? ' (about 5–7 min per side)' : ' until cooked through';
     steps = [
       `Season the ${pr.n} with the ${fl.n.toLowerCase()} flavouring and rest 5 min while you prep.`,
@@ -391,7 +811,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
       `Plate the ${cb.n}, top with the ${pr.n} and ${vg.n}, spoon over any pan juices, and serve.`,
     ];
   }
-  return { n, slot, ico, k: sum('k'), p: sum('p'), c: sum('c'), f: sum('f'), ing, steps, diet, idx };
+  return { n, slot, ico, ...(pic ? { pic } : {}), k: sum('k'), p: sum('p'), c: sum('c'), f: sum('f'), ing, steps, diet, idx };
 }
 
 // ── Client shape the planner needs (subset of the full client) ──
@@ -401,7 +821,13 @@ export interface PlanInput extends BodyStats {
   mealsPerDay: 3 | 4 | 5;
   mealOverride?: Record<number, number>;
   coachAdjust?: CoachAdjust;
+  /** Everything kept away from them: `excludedAllergens(avoid, coach_avoid)`,
+   *  never the member's own list alone. */
   avoid?: Allergen[];
+  /** Ingredient words they would rather not eat. Steers the seeded meals and
+   *  the synthetic week; an explicit pick (their swap, their coach's written
+   *  day) is served as chosen. See `dislikeFreeIndex`. */
+  dislikes?: readonly string[];
   /**
    * The goal-date energy plan, when the member has a target weight and a date.
    *
@@ -427,28 +853,101 @@ function mealSeed(c: PlanInput, slotIdx: number): number {
 }
 
 /** Build a day's plan scaled toward the client's calorie target. */
-export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnType<typeof macrosFor>; tot: { K: number; P: number; C: number; F: number } } {
+export function buildPlan(c: PlanInput): {
+  plan: PlannedMeal[]; target: ReturnType<typeof macrosFor>; tot: { K: number; P: number; C: number; F: number };
+  /** The calories the served plates are sized to: the target, less an equal
+   *  share for each slot left empty. Equal to `target.kcal` on a full day. */
+  aim: number;
+} {
   const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const override = c.mealOverride ?? {};
   const avoid = c.avoid ?? [];
+  // `+ i * variantStep` for the same reason the week steps by it: `mealSeed`
+  // spaces the slots by 7, which is a FINE dimension, so Lunch and Dinner —
+  // which draw from the same pools — came out as the same protein twice a
+  // day with a different sauce on it. The seed is where a fresh pick STARTS;
+  // `freshPicks` chooses near it with the day's protein in mind.
+  const picks = freshPicks(c, slots, 0, (i) => mealSeed(c, i) + i * variantStep(c.diet, slots[i], avoid), override, newPickMemory());
   let plan: PlannedMeal[] = slots.map((slot, i) => {
     const size = catalogSize(c.diet, slot, avoid);
-    const idx = (override[i] != null ? override[i] : mealSeed(c, i)) % size;
+    const raw = picks[i];
+    // An unfillable slot has no catalogue to take the index modulo; its pick
+    // is carried through as it was (see `mealAt`).
+    const idx = size ? raw % size : raw;
     const meal = mealAt(c.diet, slot, idx, avoid);
-    return { ...meal, pos: i, servings: 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
+    return { ...meal, pos: i, servings: meal.unfillable ? 0 : 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
   });
+  // ── an empty slot is not a smaller day ───────────────────────────────────
+  //
+  // The plates below are sized to land the day on its target. With a slot left
+  // empty, sizing the rest to the WHOLE target would pile the missing meal onto
+  // the others, so the member who then eats their own breakfast eats it twice,
+  // and the day's total would read as a full day. The served plates aim at
+  // their slots' share instead, one equal share per slot (the same weight the
+  // day-wide multiplier has always given each), and the total says what is
+  // actually served.
+  const served = plan.filter((x) => !x.unfillable).length;
+  const aim = served === plan.length ? target.kcal : target.kcal * served / plan.length;
+  const share = plan.length ? Math.round(target.kcal / plan.length) : 0;
   const base = plan.reduce((a, x) => a + x.k, 0) || 1;
-  const scale = target.kcal / base;
-  plan = plan.map((x) => {
-    const s = Math.max(0.5, Math.round(scale * 4) / 4);
-    return { ...x, servings: s, K: Math.round(x.k * s), P: Math.round(x.p * s), C: Math.round(x.c * s), F: Math.round(x.f * s) };
+  // ── portions, per plate rather than per day ──────────────────────────────
+  //
+  // This was ONE multiplier for the whole day, `Math.round(scale * 4) / 4`
+  // applied to every plate. A day-wide quarter step is a quarter of the WHOLE
+  // day, so the only totals reachable were multiples of `base / 4` — around
+  // 250 kcal apart on a three-meal day — and the plan landed wherever the
+  // nearest one happened to be. Measured against the live engine that was
+  // −7% to −9% on real bodies: a client following the plan exactly ate two
+  // hundred calories away from the figure the same screen showed them as
+  // their target.
+  //
+  // So: start from that day-wide multiplier, then move ONE plate at a time by
+  // a quarter serving, each time onto whichever plate brings the day's total
+  // nearest the target, and stop when no single move improves it. A quarter of
+  // one plate is 40–150 kcal instead of 250–500, so the reachable totals are
+  // several times finer, and the step stays a quarter serving because that is
+  // the portion a person can actually measure out.
+  //
+  // It closes CALORIES and only calories. Protein is not a lever here and
+  // cannot be made into one: scaling multiplies every macro by the same
+  // number, so the plan's protein-per-calorie is whatever the meals that were
+  // chosen happen to contain, and no portion size moves it toward the target.
+  // That gap belongs to meal SELECTION, which `freshPicks` below now does for
+  // every slot nobody has picked. What it cannot close, `planProteinNote` in
+  // ./mealPlan.ts says on the screen rather than letting a meter disagree with
+  // the number printed above it in silence.
+  const QUARTER = 0.25;
+  const MIN_SERVING = 0.5;
+  const serv = plan.map((x) => x.unfillable ? 0 : Math.max(MIN_SERVING, Math.round((aim / base) * 4) / 4));
+  let running = plan.reduce((a, x, i) => a + x.k * serv[i], 0);
+  // At most four quarter-steps per plate, which is the whole span a residual
+  // smaller than one day-wide quarter can need. Bounded so this cannot spin.
+  for (let pass = 0; pass < plan.length * 4; pass++) {
+    const dir = aim > running ? QUARTER : -QUARTER;
+    let best = -1;
+    let bestErr = Math.abs(aim - running);
+    for (let i = 0; i < plan.length; i++) {
+      if (plan[i].unfillable || serv[i] + dir < MIN_SERVING) continue;
+      const err = Math.abs(aim - (running + plan[i].k * dir));
+      // Strictly better, so a move that only ties is not taken and the loop
+      // cannot oscillate between two plates forever.
+      if (err < bestErr) { bestErr = err; best = i; }
+    }
+    if (best < 0) break;
+    running += plan[best].k * dir;
+    serv[best] += dir;
+  }
+  plan = plan.map((x, i) => {
+    const s = serv[i];
+    const out: PlannedMeal = { ...x, servings: s, K: Math.round(x.k * s), P: Math.round(x.p * s), C: Math.round(x.c * s), F: Math.round(x.f * s) };
+    return x.unfillable ? { ...out, slotKcal: share } : out;
   });
   const tot = {
     K: plan.reduce((a, x) => a + x.K, 0), P: plan.reduce((a, x) => a + x.P, 0),
     C: plan.reduce((a, x) => a + x.C, 0), F: plan.reduce((a, x) => a + x.F, 0),
   };
-  return { plan, target, tot };
+  return { plan, target, tot, aim };
 }
 
 /**
@@ -482,7 +981,7 @@ export function snackIdeas(c: PlanInput, count = 3): PlannedMeal[] {
   const seed = mealSeed(c, SNACK_SEED_SLOT);
   const out: PlannedMeal[] = [];
   for (let i = 0; i < Math.min(count, size); i++) {
-    const meal = mealAt(c.diet, 'Snack', (seed + i * 37) % size, avoid);
+    const meal = mealAt(c.diet, 'Snack', dislikeFreeIndex(c.diet, 'Snack', (seed + i * 37) % size, avoid, c.dislikes), avoid);
     const servings = Math.max(0.5, Math.round((want / Math.max(1, meal.k)) * 4) / 4);
     out.push({
       ...meal,
@@ -502,21 +1001,150 @@ export const SNACK_SHARE = 0.125;
 /** A slot index no real plan uses, so snack seeds never track a meal's. */
 const SNACK_SEED_SLOT = 97;
 
-/** Next meal in the catalog for a slot (the "swap" action). */
-export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
-  return (currentIdx + 1) % catalogSize(diet, slot, avoid);
+/**
+ * ONE index step, for every place that moves along the catalogue.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * `mealAt` decomposes an index mixed-radix with the LAST pool varying fastest,
+ * and the last pool is the least substantial thing about a meal: FLAVORS for a
+ * main, and for Breakfast and Snack it is BREK_STYLE / SNACK_PREP, which carry
+ * no calories and no ingredients at all. Three callers stepped by exactly 1 —
+ * the week (`planWeek`), the coach's seed week (`seedPlan`) and the member's
+ * "swap this meal" (`swapIndex`) — so a generated week was one dinner with
+ * seven spice rubs, and swapping a breakfast moved you from "with cinnamon" to
+ * "with vanilla".
+ *
+ * The step is the SUM of every dimension's stride, which advances all of them
+ * at once: one step is a different protein AND a different carb AND a
+ * different vegetable AND a different flavouring. Stepping only the slowest
+ * dimension would fix the spice-rub week and leave seven days of jasmine rice
+ * and kale behind it, which is the same complaint one pool along.
+ *
+ * It lives here, once, because three callers stepping by their own arithmetic
+ * is how this happened. A pool with one member in it simply contributes
+ * nothing to move — there is no second dish in this diet and slot to move to.
+ */
+export function variantStep(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  const sizes = dims(diet, slot, avoid).map((p) => Math.max(1, p.length));
+  // stride[i] — how far one step of dimension i moves the index.
+  return sizes.reduce((sum, _, i) => sum + sizes.slice(i + 1).reduce((a, b) => a * b, 1), 0);
 }
 
-/** Search a slot's catalog by name (used by the "choose a meal" picker). */
-export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = []): GeneratedMeal[] {
+/**
+ * After how many days the synthetic horizon comes back to a meal this slot has
+ * already served.
+ *
+ * Day `d` of the horizon is `idx + d * variantStep` modulo the catalogue, so
+ * the days repeat with period `size / gcd(size, step)` and nothing before it.
+ * Measured across every diet, slot and exclusion set: with no exclusions
+ * nothing repeats inside 31 days anywhere. 24 of the 1,280 combinations do —
+ * all of them keto with several exclusions, the tightest being keto snacks
+ * without dairy or nuts, which has 100 meals and a stride of 25 and so serves
+ * its fourth snack again on day four.
+ *
+ * A horizon that reaches this number is showing a member the same food twice,
+ * and the screen says which day it starts rather than serving it in silence.
+ */
+export function catalogRepeatDay(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
   const size = catalogSize(diet, slot, avoid);
-  const scan = Math.min(size, 800);
-  const q = (query || '').toLowerCase();
-  const rows: GeneratedMeal[] = [];
-  for (let i = 0; i < scan && rows.length < limit; i++) {
-    const m = mealAt(diet, slot, i, avoid);
-    if (!q || m.n.toLowerCase().includes(q)) rows.push(m);
+  // An empty slot serves nothing, so nothing in it can come round again.
+  if (!size) return Infinity;
+  const step = variantStep(diet, slot, avoid) % size;
+  // A stride that is a whole number of catalogues over is no stride at all:
+  // every day is day zero, and the repeat is on day one.
+  let a = size;
+  let b = step || size;
+  while (b) { const r = a % b; a = b; b = r; }
+  return Math.max(1, Math.round(size / a));
+}
+
+/** Next meal in the catalog for a slot (the "swap" action). */
+export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = [], dislikes: readonly string[] = []): number {
+  const size = catalogSize(diet, slot, avoid);
+  // Nothing to swap to in a slot that cannot be made safely; the pick stays.
+  if (!size) return currentIdx;
+  const step = variantStep(diet, slot, avoid);
+  // The next step whose dislike-free meal is not the one being swapped away
+  // from. Bounded: a slot whose every option collapses to one meal swaps to
+  // the plain next step, which is the dislike relaxed rather than a dead tap.
+  for (let k = 1; k <= 16 && dislikes.length; k++) {
+    const idx = dislikeFreeIndex(diet, slot, currentIdx + k * step, avoid, dislikes);
+    if (idx !== ((currentIdx % size) + size) % size) return idx;
   }
+  const next = currentIdx + step;
+  return ((next % size) + size) % size;
+}
+
+/** How far a name-less search will walk the catalogue for a query that spans
+ *  two components. Bounded because this runs on every keystroke. */
+const SEARCH_SWEEP = 1200;
+/** Alternatives shown per matching component, so "beef" is not one beef. */
+const SEARCH_VARIANTS = 6;
+
+/**
+ * Search a slot's catalog by name (used by the "choose a meal" picker).
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * This scanned the first 800 CONSECUTIVE indices. The catalogue is mixed-radix
+ * with the protein as the SLOWEST dimension: for meat/Dinner it changes every
+ * 1,560 indices, so 0–799 are entirely protein #0. An empty query returned
+ * forty grilled chickens, and "beef", "salmon", "tofu" and "lentils" — all of
+ * them in the pool, all of them on the screen that says the slot holds 10,920
+ * meals — each returned nothing at all.
+ *
+ * So the query is matched against the component POOLS and the indices are
+ * COMPOSED from the hits, rather than hoping a match falls in the first 800.
+ * The composed name is still the final filter, so a row that comes back really
+ * does contain what was typed.
+ */
+export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = [], dislikes: readonly string[] = []): GeneratedMeal[] {
+  // Dislikes filter the finished list and give way when nothing is left, so a
+  // member who searches for the very thing they said they dislike still finds
+  // it. Allergens were settled by `dims` before any row existed.
+  if (dislikes.length) return preferNotDisliked(searchMeals(diet, slot, query, limit * 3, avoid), dislikes).rows.slice(0, limit);
+  if (!catalogSize(diet, slot, avoid)) return [];
+  const pools = dims(diet, slot, avoid);
+  const sizes = pools.map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  // stride[i] is how far one step of dimension i moves the index.
+  const stride = sizes.map((_, i) => sizes.slice(i + 1).reduce((a, b) => a * b, 1));
+  const q = (query || '').trim().toLowerCase();
+  const step = variantStep(diet, slot, avoid);
+
+  const rows: GeneratedMeal[] = [];
+  const seen = new Set<number>();
+  const take = (raw: number) => {
+    if (rows.length >= limit) return;
+    const idx = ((raw % total) + total) % total;
+    if (seen.has(idx)) return;
+    seen.add(idx);
+    const m = mealAt(diet, slot, idx, avoid);
+    if (q && !m.n.toLowerCase().includes(q)) return;
+    rows.push(m);
+  };
+
+  // No query: walk a substantive component at a time, so the list opens on
+  // dishes that differ rather than on one dish seasoned forty ways.
+  if (!q) {
+    for (let n = 0; n < total && rows.length < limit; n++) take(n * step);
+    return rows;
+  }
+  // Every component whose own name matches, with the other dimensions varied.
+  for (let i = 0; i < pools.length && rows.length < limit; i++) {
+    for (let j = 0; j < pools[i].length && rows.length < limit; j++) {
+      if (!pools[i][j].n.toLowerCase().includes(q)) continue;
+      for (let v = 0; v < SEARCH_VARIANTS && rows.length < limit; v++) {
+        let idx = 0;
+        for (let k = 0; k < sizes.length; k++) idx += (k === i ? j : v % sizes[k]) * stride[k];
+        take(idx);
+      }
+    }
+  }
+  // A query that spans two components ("cajun chicken") matches no single one.
+  // ponytail: bounded sweep, not an index — build one if the catalogue grows.
+  for (let n = 0; n < Math.min(total, SEARCH_SWEEP) && rows.length < limit; n++) take(n * step);
   return rows;
 }
 
@@ -549,49 +1177,249 @@ export const PLAN_WEEK_DAYS = 7;
 export function planWeek(
   c: PlanInput,
   coachDay?: (d: number) => Record<number, number> | null,
+  days: number = PLAN_WEEK_DAYS,
 ): PlannedMeal[][] {
   // Day zero of the synthetic week is the plan as it stands, overrides and
-  // swaps included — `idx + d` steps from what is on screen rather than from a
+  // swaps included — the week steps from what is on screen rather than from a
   // seed nobody can see.
   const today = buildPlan(c).plan;
+  const slots = today.map((m) => m.slot);
+  const avoid = c.avoid ?? [];
+  const memory = newPickMemory();
   const out: PlannedMeal[][] = [];
-  for (let d = 0; d < PLAN_WEEK_DAYS; d++) {
-    const written = coachDay ? coachDay(d) : null;
+  // `days` is how far ahead the member is looking — one day, a week, a month
+  // (src/lib/mealHorizon.ts). It was seven and only seven, and a horizon longer
+  // than the week it was hard-coded to would have drawn the same seven days
+  // over and over. The synthetic step below is taken by `d`, so day 30 is 30
+  // steps along the catalogue and not day 2 again — but the catalogue is
+  // finite and DOES wrap: see `catalogRepeatDay`, which is what says so on
+  // screen rather than letting the same dinner arrive twice unannounced.
+  //
+  // The coach's week is a REPEATING week, so its day is asked for modulo the
+  // week — here rather than in each caller, because a caller that forgot would
+  // ask `planDayOverride` for a day nobody has written.
+  const span = Number.isInteger(days) && days > 0 ? days : PLAN_WEEK_DAYS;
+  for (let d = 0; d < span; d++) {
+    const written = coachDay ? coachDay(d % PLAN_WEEK_DAYS) : null;
+    // Day zero is left alone: it is today, including a meal they picked by
+    // hand. Every later day STARTS from today's meal `d * variantStep` along
+    // (not `+ d`, see its comment: day 3 is a different protein, not the same
+    // chicken under a different sauce) and `freshPicks` chooses near there
+    // with the day's protein, and the week so far, in mind.
+    if (d === 0) remember(c, today, 0, memory);
+    const ov = d === 0 ? null
+      : freshPicks(c, slots, d, (i) => today[i].idx + d * variantStep(c.diet, slots[i], avoid), {}, memory);
+    // The generated week is chosen as if the coach had written nothing, so a
+    // day they left blank is the same generated day whichever days they did
+    // write. `freshPicks` has already remembered it; a written day replaces it
+    // on screen and nothing else.
     if (written) { out.push(buildPlan({ ...c, mealOverride: written }).plan); continue; }
-    const ov: Record<number, number> = {};
-    today.forEach((m) => { ov[m.pos] = m.idx + d; });
-    out.push(buildPlan({ ...c, mealOverride: ov }).plan);
+    out.push(ov ? buildPlan({ ...c, mealOverride: ov }).plan : today);
   }
   return out;
 }
 
-export interface GroceryItem { item: string; qty: number; unit: string; }
-export interface GroceryData { byDept: Partial<Record<Dept, GroceryItem[]>>; mealCount: number; }
+// ── choosing a fresh meal, with protein in mind ─────────────────────────────
+//
+// `buildPlan` sizes plates to hit CALORIES, and a portion multiplies every
+// macro alike, so a day's protein-per-calorie is decided by WHICH meals are on
+// it. Choosing by the seed alone put a day wherever its meals happened to
+// land: measured over a sweep of bodies, goals and diets, two days in three
+// sat more than 10% over their protein target, a fifth of them more than 80%
+// over, with a note on screen saying so and nothing that could fix it.
+//
+// So a fresh pick looks at a few meals along the variety walk and takes the
+// one that brings the day's protein share nearest the target's; portioning
+// then closes calories exactly as before. This changes which index is CHOSEN
+// for a slot nobody has picked. It never changes what an index MEANS: every
+// candidate is an ordinary index into the same pools, and a pick that is
+// stored (a swap, a coach's day) is served as stored and never re-chosen.
+//
+// Protein never outranks anything that filters: the candidates are drawn
+// through `dims` (the diet and allergens) and `dislikeFreeIndex`, and an
+// empty slot is not a meal to pick.
+//
+// And it must not undo the variety fix. Asked only about protein, a week
+// would be the leanest chicken seven nights running. So a candidate that
+// repeats a meal already served in this horizon, or the lead component
+// (the protein, the breakfast base, the snack) of one served in the last
+// few days, loses to one that does not, and protein decides among the rest.
+
+/** How many meals along the walk a fresh pick chooses among. */
+const PICK_CANDIDATES = 16;
+/** Candidates sit this many days' steps apart, the longest horizon a member
+ *  can look at (src/lib/mealHorizon.ts), so no candidate is another day's
+ *  starting point inside it. */
+const PICK_SPREAD = 31;
+/** How many days back a lead component's servings are counted. */
+const LEAD_WINDOW = 7;
+
+interface PickMemory { meals: Set<string>; lead: Map<string, number[]> }
+const newPickMemory = (): PickMemory => ({ meals: new Set(), lead: new Map() });
+
+/** Lunch and Dinner draw from the same pools, so the same index is the same meal. */
+const poolGroup = (slot: Slot) => (slot === 'Lunch' || slot === 'Dinner' ? 'main' : slot);
+
+/** The meal's key and its lead component's key, for the repeat checks. */
+function pickKeys(diet: Diet, slot: Slot, idx: number, avoid: Allergen[]): [string, string] {
+  const sizes = dims(diet, slot, avoid).map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  const i = ((idx % total) + total) % total;
+  return [`${poolGroup(slot)}:${i}`, String(Math.floor(i / (total / sizes[0])))];
+}
+
+function served(mem: PickMemory, slot: Slot, lead: string, d: number): void {
+  for (const k of [`${slot}#${lead}`, `${poolGroup(slot)}#${lead}`]) mem.lead.set(k, [...(mem.lead.get(k) ?? []), d]);
+}
+
+function remember(c: PlanInput, day: readonly PlannedMeal[], d: number, mem: PickMemory): void {
+  for (const m of day) {
+    if (m.unfillable) continue;
+    const [meal, lead] = pickKeys(c.diet, m.slot, m.idx, c.avoid ?? []);
+    mem.meals.add(meal);
+    served(mem, m.slot, lead, d);
+  }
+}
+
+/**
+ * One day's indices: `pinned` positions as given, every other position chosen
+ * from `PICK_CANDIDATES` meals along the walk from `base(i)`. Candidate 0 is
+ * the walk's own meal and wins every tie, so a day already on target is the
+ * day it always was.
+ *
+ * Two passes. The first chooses in slot order against what is already on the
+ * day; the second chooses each slot again against the WHOLE rest of the day,
+ * because breakfast chosen first cannot know that dinner will be salmon.
+ */
+function freshPicks(
+  c: PlanInput, slots: readonly Slot[], d: number, base: (i: number) => number,
+  pinned: Record<number, number>, mem: PickMemory,
+): Record<number, number> {
+  // Every position pinned (a coach's day, a week day already chosen) is
+  // nothing to choose, and `buildPlan` is called that way on every day of a
+  // horizon.
+  if (slots.every((_, i) => pinned[i] != null)) return { ...pinned };
+  const avoid = c.avoid ?? [];
+  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
+  const want = target.kcal > 0 ? target.protein / target.kcal : 0;
+  type Pick = { idx: number; p: number; k: number; meal: string; lead: string } | null;
+  const at = (i: number, idx: number): Pick => {
+    const m = mealAt(c.diet, slots[i], idx, avoid);
+    if (m.unfillable) return null;
+    const [meal, lead] = pickKeys(c.diet, slots[i], idx, avoid);
+    return { idx, p: m.p, k: m.k, meal, lead };
+  };
+  const idxs: number[] = [];
+  const day: Pick[] = [];
+  // An empty slot has nothing to choose between, and without a target there
+  // is nothing to choose by: the walk's own meal, as it always was.
+  const free = slots.map((slot, i) => pinned[i] == null && !!want && catalogSize(c.diet, slot, avoid) > 0);
+  slots.forEach((slot, i) => {
+    idxs[i] = pinned[i] != null ? pinned[i] : dislikeFreeIndex(c.diet, slot, base(i), avoid, c.dislikes);
+    // What is pinned is on the plate whatever is chosen, so it counts first.
+    day[i] = free[i] ? null : at(i, idxs[i]);
+  });
+  const candidates = slots.map((slot, i) => {
+    if (!free[i]) return [];
+    const step = variantStep(c.diet, slot, avoid);
+    return Array.from({ length: PICK_CANDIDATES }, (_, j) =>
+      at(i, dislikeFreeIndex(c.diet, slot, base(i) + j * PICK_SPREAD * step, avoid, c.dislikes))!);
+  });
+  for (let pass = 0; pass < 2; pass++) {
+    slots.forEach((slot, i) => {
+      if (!free[i]) return;
+      const others = slots.flatMap((s2, o) => (o !== i && day[o] ? [{ ...day[o]!, group: poolGroup(s2) }] : []));
+      const P = others.reduce((a, x) => a + x.p, 0);
+      const K = others.reduce((a, x) => a + x.k, 0);
+      let best: Pick = null, bestScore = Infinity;
+      for (const cand of candidates[i]) {
+        // A meal already served in this horizon or on this day, then how
+        // often its lead component was served in the window: per SLOT, so
+        // each slot's week rotates on its own, plus today's same-pool plate
+        // (lunch's chicken, for dinner). The least-served lead wins, so the
+        // leads rotate rather than the leanest one coming back as soon as
+        // the window lets it.
+        const repeat = mem.meals.has(cand.meal) || others.some((x) => x.meal === cand.meal);
+        const recent = (mem.lead.get(`${slot}#${cand.lead}`) ?? []).filter((x) => d - x < LEAD_WINDOW).length
+          + others.filter((x) => x.lead === cand.lead && x.group === poolGroup(slot)).length;
+        const off = Math.abs((P + cand.p) / Math.max(1, K + cand.k) - want) / want;
+        // Repeats first, then protein. Strictly less, so candidate 0 keeps a tie.
+        const score = (repeat ? 100 : 0) + recent * 10 + off;
+        if (score < bestScore) { bestScore = score; best = cand; }
+      }
+      day[i] = best;
+      idxs[i] = best!.idx;
+    });
+  }
+  const out: Record<number, number> = {};
+  slots.forEach((slot, i) => {
+    out[i] = idxs[i];
+    const x = day[i];
+    if (x) { mem.meals.add(x.meal); served(mem, slot, x.lead, d); }
+  });
+  return out;
+}
+
+export interface GroceryItem {
+  item: string;
+  /** Exactly what the plan needs, rounded only as far as anybody measures. */
+  qty: number; unit: string;
+  /** What to put in the basket for it, whole packs rounded up ("1 kg bag"),
+   *  or null where there is no honest pack and `qty` is the line
+   *  (src/lib/groceryPacks.ts). */
+  buy: string | null;
+}
+export interface GroceryData {
+  byDept: Partial<Record<Dept, GroceryItem[]>>;
+  /** The small flavourings, a store-cupboard check rather than a shop. Out of
+   *  `byDept`, never out of the list. */
+  cupboard: GroceryItem[];
+  mealCount: number;
+  /** Things a real recipe names without an amount — "salt, to taste", "butter,
+   *  for greasing". They belong on the list, because they are shopping; they do
+   *  not belong in `byDept`, because a department row prints a quantity and
+   *  there is no honest one. `src/lib/recipes.ts` keeps them out of `ing` for
+   *  exactly that reason; this is where they come back. Never for a generated
+   *  dish, every one of whose ingredients is measured. */
+  unmeasured: string[];
+}
+
+/** What the list is aggregated FROM. `unmeasured` is optional because only a
+ *  recipe has one — a `PlannedRecipe` satisfies this and so does a plain
+ *  `PlannedMeal`, which is how a week may hold both. */
+type GroceryRow = PlannedMeal & { unmeasured?: readonly string[] };
 
 /** Aggregate an already-built week into a department-grouped shopping list. */
-export function groceryFromWeek(week: readonly (readonly PlannedMeal[])[]): GroceryData {
+export function groceryFromWeek(week: readonly (readonly GroceryRow[])[]): GroceryData {
   const agg: Record<string, number> = {};
   const meals = new Set<string>();
+  const loose = new Set<string>();
   for (const day of week) {
     for (const meal of day) {
+      // An empty slot is not a meal and has nothing to buy.
+      if (meal.unfillable?.length) continue;
       meals.add(meal.n);
-      meal.ing.forEach(([item, qty, unit, dept]) => {
+      meal.ing.forEach(([name, qty, unit, dept]) => {
+        // One box of eggs, not an "Egg" line under an "Eggs" line.
+        const item = name === 'Egg' ? 'Eggs' : name;
         const key = `${dept}||${item}||${unit}`;
         agg[key] = (agg[key] || 0) + qty * meal.servings;
       });
+      for (const u of meal.unmeasured ?? []) { const s = u.trim(); if (s) loose.add(s); }
     }
   }
   const byDept: Partial<Record<Dept, GroceryItem[]>> = {};
+  const cupboard: GroceryItem[] = [];
   Object.entries(agg).forEach(([key, q]) => {
     const [dept, item, unit] = key.split('||') as [Dept, string, string];
-    let qty: number;
-    if (unit === 'g' || unit === 'ml') qty = Math.round(q / 10) * 10;
-    else if (['', 'piece', 'slice', 'clove', 'rasher', 'scoop', 'cup', 'pinch'].includes(unit)) qty = Math.ceil(q);
-    else qty = Math.round(q * 10) / 10;
-    (byDept[dept] = byDept[dept] || []).push({ item, qty, unit });
+    // Packed from the unrounded sum, so a pack is never a rounding short.
+    const row: GroceryItem = { item, qty: roundNeed(q, unit), unit, buy: packFor(item, q, unit) };
+    if (isCupboard(item)) cupboard.push(row);
+    else (byDept[dept] = byDept[dept] || []).push(row);
   });
-  (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort((a, b) => a.item.localeCompare(b.item)));
-  return { byDept, mealCount: meals.size };
+  const byName = (a: GroceryItem, b: GroceryItem) => a.item.localeCompare(b.item);
+  (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort(byName));
+  return { byDept, cupboard: cupboard.sort(byName), mealCount: meals.size, unmeasured: [...loose].sort((a, b) => a.localeCompare(b)) };
 }
 
 /** The shopping list for the week this client is shown. */

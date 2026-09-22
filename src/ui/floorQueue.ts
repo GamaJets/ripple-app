@@ -16,24 +16,34 @@
 // account, which is the one thing a provider would have given for free and is
 // the one thing that MUST NOT be got wrong on a shared gym phone.
 //
-// ── The two rules, and where each is enforced ──────────────────────────────
+// ── The three rules, and where each is enforced ────────────────────────────
 //
 // 1. A queued write is never reported as saved. `send` below returns the
-//    `WriteOutcome` unchanged and the screens branch on all three arms.
+//    `WriteOutcome` unchanged and the screens branch on every arm — four of
+//    them now, because `attempt` also has to be able to say that the device
+//    itself would not keep the write (`FLOOR_CAP`), which is neither a refusal
+//    by a server nor a promise that anything is on its way.
 // 2. A queue that has not been read is not an empty queue. `readable` latches
 //    false when `readFloorQueue` says `read: false`, and `persist` refuses to
 //    write while it is false — otherwise the first enqueue after an unreadable
 //    read overwrites a phone full of somebody's morning with one entry.
+// 3. What is on the device and what is in memory may not disagree across an
+//    await. `flushAll` writes the device as each act settles rather than once
+//    at the end; see the note there for what a kill in that window did to a
+//    client's training history.
 import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { classifyWrite, registerFlush, type WriteOutcome } from '../lib/offlineQueue';
+// The register, read back to prove an attendance write actually matched a row.
+// See the 'class-attendance' arm of `send`.
+import { classRoster } from '../lib/classAttendance';
 import { entryToRow } from '../lib/workoutRow';
 import type { WorkoutEntry } from '../lib/mockData';
 import {
-  dropSent, enqueueAct, floorQueueKey, readFloorQueue,
+  dropSent, enqueueAct, floorQueueKey, readFloorQueue, singleFlight,
   type FloorAct, type QueuedAct,
 } from '../lib/floorQueue';
 
@@ -100,17 +110,71 @@ export async function loadFloorQueue(uid: string | null): Promise<void> {
   announce();
 }
 
+/**
+ * A load that did not finish, and what that means about this phone.
+ *
+ * `loadFloorQueue` handles the failure it expects — a device that will not
+ * answer `getItem` — and latches `readable` false itself. What reaches here is
+ * everything above and below that: a listener that threw out of `announce`, or
+ * any step a later change adds. Before this, both callers dropped the load
+ * promise on the floor with `void` and chained a bare `.then`, so such a
+ * rejection was an unhandled promise rejection: silent, and the `.then` never
+ * ran, so the flush it exists to trigger never ran either — for the life of the
+ * process,
+ * because `loaded` stayed false and the module's own registration in
+ * `registerFlush` above is gated on it. A coach's attendance sat on the phone
+ * and the three screens said nothing was waiting.
+ *
+ * ── What a failed load is allowed to SAY ──────────────────────────────────
+ *
+ * Not "the queue is empty". This module's second rule is that a queue which has
+ * not been read is not an empty one, and the sentences for it already exist:
+ * with `readable` false the three screens print "What this phone is still
+ * carrying could not be read … Nothing has been lost — it is not being written
+ * over either", and `registerVisibilityLine` says the same to a coach reading
+ * the register. So the state chosen here is exactly the state an unreadable
+ * device already produces, and it is chosen rather than defaulted:
+ *
+ *   · `readable` false — `persist` writes nothing, so whatever is really on the
+ *     device survives to a launch that can read it, and the screens withhold
+ *     "nothing waiting" instead of claiming it.
+ *   · `acts` empty — nothing may be flushed or shown as pending, because
+ *     nothing about the queue is known.
+ *   · `loaded` TRUE — the attempt is over. Left false it would not mean "still
+ *     loading", it would mean "waiting forever", and the app's flush registry
+ *     would skip this queue on every reconnect and every foreground from here
+ *     on.
+ */
+function loadFailed(uid: string | null, e: unknown): void {
+  reportError('floorQueue.load', e);
+  // A later account has taken this module over since the read began. Its state
+  // is not this failure's to latch — the same rule `resetFor` and the flusher
+  // keep, and for the same reason.
+  if (owner !== uid) return;
+  acts = [];
+  readable = false;
+  loaded = true;
+  announce();
+}
+
 /* ── the three senders ──────────────────────────────────────────────────── */
 
 /**
  * Send one act, and say what became of it.
  *
- * Every arm counts the rows it wrote. A write PostgREST narrows to zero rows
- * under RLS does not fail — it succeeds having done nothing — and
- * `classifyWrite` reads `rows <= 0` as a refusal, which is what stops a tick
- * nobody was entitled to make being reported as saved.
+ * Every arm establishes what it wrote rather than assuming it. A write PostgREST
+ * narrows to zero rows under RLS does not fail — it succeeds having done nothing
+ * — and `classifyWrite` reads `rows <= 0` as a refusal, which is what stops a
+ * tick nobody was entitled to make being reported as saved.
  *
- * `rows: null` is the offline case and the only one that queues.
+ * The two table writes count the rows they got back. The RPC cannot: an UPDATE
+ * inside a `returns void` function that matches nothing raises nothing and
+ * returns nothing, so that arm establishes it by reading the register back. Its
+ * own note says why, and why the answer is not simply assumed.
+ *
+ * A write nobody answered queues. So does one whose outcome could not be
+ * established, which is the same fact about a different step and gets the same
+ * treatment for the same reason: an unproven write may not be reported as saved.
  */
 async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
   if (!USE_SUPABASE) return 'unsent';
@@ -122,7 +186,19 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         // logged_by = auth.uid()`, so a queue flushed by a different account
         // must be refused rather than filed under the wrong name — and it is,
         // by the database, which is the only place that cannot be bypassed.
-        const rows = (a.entries as WorkoutEntry[]).map((e) => ({ ...entryToRow(a.clientId, e), logged_by: uid }));
+        //
+        // `session_id` is spread in the same way and for the same reason it is
+        // not part of `entryToRow`: it is a fact about THIS write, not about a
+        // workout entry, and putting it on the entry type would have every
+        // client-side log carrying a field it can never fill. Omitted entirely
+        // when there is no session, so the column is left null rather than
+        // written as one — supabase/parts/890 refuses a session that is not
+        // this client's, and an explicit null would be a value to check.
+        const rows = (a.entries as WorkoutEntry[]).map((e) => ({
+          ...entryToRow(a.clientId, e),
+          logged_by: uid,
+          ...(a.sessionId ? { session_id: a.sessionId } : {}),
+        }));
         const { data, error } = await supabase.from('workouts').insert(rows).select('id');
         const out = classifyWrite(error as never, data ? data.length : 0);
         // A partial insert is not a success. `logForClient` says the same thing
@@ -132,18 +208,78 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         return out;
       }
       case 'class-attendance': {
-        // An RPC, so there are no rows to count — the function either ran or it
-        // did not. `rows: 1` tells classifyWrite to judge on the error alone.
-        const { error } = await supabase.rpc('set_class_attendance',
+        /* ── the tick that updated nothing and was reported as stored ────────
+         *
+         * This said "an RPC, so there are no rows to count — the function either
+         * ran or it did not", and passed `rows: 1` to make `classifyWrite` judge
+         * on the error alone. That is exactly the shape `classifyWrite`'s own
+         * header warns about, arriving through an RPC instead of through
+         * PostgREST: `set_class_attendance` is `returns void` and its last
+         * statement is
+         *
+         *     update class_bookings set attended_at = …
+         *      where class_id = p_class and user_id = p_user
+         *
+         * — and an UPDATE that matches no row is not an error. It succeeds,
+         * having done nothing, and the function returns nothing to say so.
+         *
+         * The row goes missing in the ordinary way: `cancel_class` DELETES the
+         * booking. The register is read when the screen opens, a member cancels
+         * at 06:58, the coach ticks them in at 07:01, and the phone was told
+         * 'stored'. The row moved to ticked, the failure banner cleared, and the
+         * footnote under the register told the coach their gym owner sees this
+         * attendance for payroll. The gym had nothing, and per-attendee pay is
+         * settled from what the gym has.
+         *
+         * ── how it is proven, without a schema change ──────────────────────
+         *
+         * By reading the register back. `class_roster` carries the same guard as
+         * `set_class_attendance` — part 2320 made the two identical, and says
+         * why: "the register you may MARK and the register you may READ have to
+         * be the same register" — so a roster that comes back is an answer about
+         * exactly the rows this write was allowed to touch. The member being in
+         * it means the UPDATE's `where` matched; the member being absent means it
+         * matched nothing, which is a write the server read and did not apply.
+         *
+         * Preferred over waiting on SQL because it is true on the handset
+         * tonight, on the function as it is deployed today. The cost is one extra
+         * read per tick on the screen with the worst signal in the building, and
+         * it is worth it: the alternative is a number a gym pays wages from,
+         * asserted by a client that never checked.
+         *
+         * A roster that will not READ proves nothing either way, so the tick is
+         * kept rather than claimed — 'unsent', queued, tried again. Re-sending it
+         * is safe for the reason `flushAll` already relies on below: this is an
+         * RPC that SETS a state, so saying it twice says what it said the first
+         * time.
+         *
+         * supabase/parts/2330 is the durable fix and is UNAPPLIED: it makes the
+         * function report whether it matched, at which point `data` is a boolean
+         * and the read below never runs. Until it is applied `data` is null,
+         * which is the void function answering, and null is not evidence.
+         */
+        const { data, error } = await supabase.rpc('set_class_attendance',
           { p_class: a.classId, p_user: a.userId, p_present: a.present });
-        return classifyWrite(error as never, 1);
+        // The error arm is unchanged; `classifyWrite` does not consult the row
+        // count when there is an error to read.
+        if (error) return classifyWrite(error as never, null);
+        if (typeof data === 'boolean') return data ? 'stored' : 'refused';
+        const seen = await classRoster(a.classId);
+        if (seen === null) return 'unsent';
+        return seen.some((m) => m.userId === a.userId) ? 'stored' : 'refused';
       }
       case 'session-outcome': {
+        // `a.outcome` is null for a RETRACTION, and this is the same statement
+        // `clearMyOutcome` makes — the update is matched on the session and the
+        // coach, so it touches the row whether or not an outcome is currently
+        // on it, and a retraction that arrives after its own mark was never sent
+        // is answered 'stored' rather than refused.
         const patch: Record<string, unknown> = { outcome: a.outcome };
         // `undefined` means "do not touch the rate", which is not null, which
         // clears it. A coach with no rate set must not have a zero written in —
-        // `markMyOutcome` draws the same distinction and this must not flatten
-        // it on the way through a queue.
+        // This is where that distinction now lives: `markMyOutcome` drew it in
+        // src/lib/trainerSessions.ts and has been removed in favour of this
+        // sender, so nothing may flatten it on the way through the queue.
         if (a.rateCents !== undefined) patch.rate_cents = a.rateCents;
         const { data, error } = await supabase.from('sessions').update(patch)
           .eq('id', a.sessionId).eq('trainer_id', uid).select('id');
@@ -158,26 +294,103 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
   }
 }
 
-/** Send everything queued for this account. Returns what happened, so a screen
- *  can say "3 went up" rather than refreshing silently. */
-async function flushAll(uid: string): Promise<{ sent: number; refused: number; kept: number }> {
+interface FlushResult { sent: number; refused: number; kept: number }
+
+/**
+ * The latch. See `singleFlight` in src/lib/floorQueue.ts for what ran twice
+ * without it, and why joining is the right answer rather than booking a second
+ * pass.
+ */
+const flight = singleFlight<FlushResult>();
+
+/**
+ * Send everything queued for this account, or join the pass already doing it.
+ *
+ * SINGLE FLIGHT, and it has to be. There are four ways in — the app's flush
+ * registry (src/lib/offlineQueue.ts), `FloorQueueSync`, the effect inside
+ * `useFloorQueue` on each of the four screens that own this queue, and the
+ * coach's own send button — and two of them fire in the SAME commit on an
+ * ordinary cold launch into the trainer app, because the layout mounts
+ * `FloorQueueSync` and the screen under it mounts `useFloorQueue`. Nothing
+ * comes out of `acts` until after the first await, so two concurrent passes
+ * take the same batch and send every act in it twice.
+ *
+ * Returns what happened, so a screen can say "3 went up" rather than refreshing
+ * silently. A joined caller gets the running pass's answer, which is the true
+ * one: it is the pass that is actually emptying the queue.
+ */
+function flushAll(uid: string): Promise<FlushResult> {
+  if (!owner || owner !== uid) return Promise.resolve({ sent: 0, refused: 0, kept: 0 });
+  return flight.run(uid, () => drain(uid));
+}
+
+/** One pass. Only ever entered through `flushAll`, which is what stops two of
+ *  these running over the same queue.
+ *
+ *  ── Why the device is written after every act and not at the end ──────────
+ *
+ *  This used to `await persist()` once, after the loop, and that is a gap the
+ *  length of the whole drain in which memory and disk disagree — memory has
+ *  dropped what went up, disk still holds it. Nothing in that window is
+ *  hypothetical on a phone: iOS suspends a backgrounded app and kills it
+ *  whenever it likes, and the flush's own triggers are the reconnect and the
+ *  foreground, so "the coach walks upstairs, the queue starts draining, and the
+ *  app is put away again" is the ORDINARY case rather than an unlucky one.
+ *
+ *  A kill in that window means the next launch reads a queue that still
+ *  contains acts the server already has, and re-offers them. Two of the three
+ *  survive that: a class tick is an RPC that sets a state, and a session outcome
+ *  is an UPDATE matched on the session — sending either twice says the same
+ *  thing it said the first time. A SESSION LOG does not. It is an INSERT of
+ *  rows the server keys itself, with no client-minted id and nothing to conflict
+ *  on, so a replay files a second copy of an hour of somebody's training on a
+ *  day they trained once. src/lib/floorQueue.ts · `supersedeKey` closed exactly
+ *  that harm on the way IN and named it: "what a client ends up with is the
+ *  session in their history twice … and the client cannot delete either: their
+ *  coach typed them." This is the same harm on the way out.
+ *
+ *  So the disk is caught up as each act settles. One AsyncStorage write per act
+ *  rather than one per pass is the cost, and it is bounded by the length of the
+ *  queue and paid only while a queue is actually draining.
+ *
+ *  `announce` moves with it for the same reason it does anywhere else: the count
+ *  a coach is reading should be what is actually still on the phone, not what
+ *  was on it when the drain started.
+ */
+async function drain(uid: string): Promise<FlushResult> {
   if (!owner || owner !== uid) return { sent: 0, refused: 0, kept: 0 };
   let sent = 0, refused = 0, kept = 0;
   // Snapshotted, because a tap during the flush appends to `acts` and iterating
   // the live array would try to send something the coach is still typing.
-  for (const q of [...acts]) {
+  const batch = [...acts];
+  for (let i = 0; i < batch.length; i++) {
+    const q = batch[i];
     const out = await send(q.act, uid);
-    if (out === 'stored') { acts = dropSent(acts, q.id); sent++; continue; }
-    if (out === 'refused') {
-      // Dropped rather than kept. The same bytes will be refused every time
-      // they are offered, so keeping it means retrying forever and counting it
-      // as "waiting to send" for the life of the install.
-      acts = dropSent(acts, q.id); refused++; continue;
+    if (out === 'unsent') {
+      // Nobody answered. Everything after this one would meet the same silence,
+      // so the pass stops here — the same rule src/ui/outbox.tsx keeps, and it
+      // matters more from this file than from that one. `flushAll` in
+      // src/lib/offlineQueue.ts runs the registered flushers SERIALLY and awaits
+      // each; a coach's phone holding forty acts in a basement would otherwise
+      // spend forty sequential fetch timeouts in here, holding the single-flight
+      // latch, and the outbox, the workout log, the food log, habits and
+      // check-ins would not be tried at all before the app was put away again.
+      //
+      // The rest are counted as kept, which is what they are: still on this
+      // phone, still counted, tried again on the next reconnect.
+      kept += batch.length - i;
+      break;
     }
-    kept++;
+    // 'stored' and 'refused' both come out. A refusal offered again gets the
+    // same refusal, so keeping it means retrying forever and counting it as
+    // "waiting to send" for the life of the install.
+    acts = dropSent(acts, q.id);
+    if (out === 'stored') sent++; else refused++;
+    // Before the next act is attempted, so a kill between the two cannot leave
+    // this one on the device to be sent a second time.
+    await persist();
+    announce();
   }
-  await persist();
-  announce();
   return { sent, refused, kept };
 }
 
@@ -222,10 +435,20 @@ registerFlush('floorQueue', () => (owner && loaded ? flushAll(owner) : undefined
 export function FloorQueueSync({ uid }: { uid: string | null }): null {
   useEffect(() => {
     let live = true;
-    void loadFloorQueue(uid).then(() => {
+    // Written as an awaited sequence rather than `.then(…).catch(…)` so that the
+    // two failures stay separable: a load that did not finish must not go on to
+    // flush, and a flush that rejected must not be reported as a load that
+    // failed.
+    void (async () => {
+      try { await loadFloorQueue(uid); }
+      catch (e) { loadFailed(uid, e); return; }
       if (!live || !uid) return;
-      void flushAll(uid);
-    });
+      // A rejected flush changes nothing about the queue — every act keeps its
+      // place, stays counted, and is offered again on the next reconnect — but
+      // thrown away by `void` it was the same silence the load's was.
+      try { await flushAll(uid); }
+      catch (e) { reportError('floorQueue.flush', e); }
+    })();
     return () => { live = false; };
   }, [uid]);
   return null;
@@ -252,11 +475,15 @@ export interface FloorQueue {
   /**
    * Try the write; keep it only if nobody answered.
    *
-   * Returns the outcome unchanged, because the caller has to say which of the
-   * three happened. 'unsent' means it is on the phone and the coach must be
-   * told that and not told it saved.
+   * Four answers, because there are four things that can have happened and the
+   * coach has to be told which. The three `WriteOutcome` arms are unchanged —
+   * 'unsent' means it is on the phone and the coach must be told that and not
+   * told it saved — and 'full' is the fourth: nobody answered AND the device
+   * would not keep it, because it is already holding `FLOOR_CAP` acts. Nothing
+   * was kept and nothing is coming, which is the one thing 'unsent' must never
+   * be allowed to say. `floorFullLine` is the sentence.
    */
-  attempt: (act: FloorAct) => Promise<WriteOutcome>;
+  attempt: (act: FloorAct) => Promise<WriteOutcome | 'full'>;
   /** Send everything waiting. */
   flush: () => Promise<{ sent: number; refused: number; kept: number }>;
 }
@@ -272,21 +499,34 @@ export function useFloorQueue(uid: string | null): FloorQueue {
 
   useEffect(() => {
     let live = true;
-    void loadFloorQueue(uid).then(() => {
+    // The same shape as `FloorQueueSync`, because it is the same two failures.
+    // This site had the identical missing `.catch` and it is the one a coach
+    // actually reaches: `FloorQueueSync` is mounted by the trainer layout, but
+    // this runs on every one of the four screens that own the queue.
+    void (async () => {
+      try { await loadFloorQueue(uid); }
+      catch (e) { loadFailed(uid, e); return; }
       if (!live || !uid) return;
       // Anything written on a previous visit goes up as soon as a screen that
       // uses this queue is opened with signal. Failing here is neither fatal
       // nor silent: the act keeps its place, stays counted, and is tried again.
-      void flushAll(uid);
-    });
+      try { await flushAll(uid); }
+      catch (e) { reportError('floorQueue.flush', e); }
+    })();
     return () => { live = false; };
   }, [uid]);
 
-  const attempt = useCallback(async (act: FloorAct): Promise<WriteOutcome> => {
+  const attempt = useCallback(async (act: FloorAct): Promise<WriteOutcome | 'full'> => {
     if (!uid) return 'unsent';
     const out = await send(act, uid);
     if (out !== 'unsent') return out;
-    acts = enqueueAct(acts, { id: localId(), at: new Date().toISOString(), act });
+    const next = enqueueAct(acts, { id: localId(), at: new Date().toISOString(), act });
+    // Nothing was kept. Said rather than swallowed: a coach told "it is on this
+    // phone" about a write the phone refused would walk away from the screen
+    // believing an hour of training is safe. `enqueueAct` never refuses a
+    // supersede, so a correction to something already queued cannot land here.
+    if (!next.added) return 'full';
+    acts = next.queue;
     await persist();
     announce();
     return 'unsent';

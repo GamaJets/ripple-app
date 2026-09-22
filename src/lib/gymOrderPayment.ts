@@ -1,4 +1,9 @@
-// ── The ledger row an online gym sale has to leave behind ───────────────────
+// ── The ledger rows an online gym sale has to leave behind, both ways ───────
+//
+// The sale is the first half of this file and the REFUND is the second, below
+// the banner two thirds of the way down. They are together because they are the
+// same ledger and the same argument, and because a leaf module cannot import
+// another one — splitting them would mean restating `LedgerMethod` twice.
 //
 // A member who buys a membership or a pass from their gym pays Stripe, and
 // `supabase/functions/stripe-webhook` grants the entitlement. Until this module
@@ -235,6 +240,33 @@ export interface OnlineOrderState {
   inLedger: boolean;
   /** `gym_orders.failure_note`, verbatim. */
   failureNote: string | null;
+
+  /* ── what Stripe sent back, against what the ledger took off ─────────────
+   *
+   * Both halves, so the third exception below is DERIVED rather than declared
+   * — see the header of supabase/parts/800. A stored "this went wrong" flag
+   * would never clear: Stripe does not redeliver an event it has already
+   * answered with a 200, so nothing would ever come back to take the flag
+   * down once an owner had recorded the missing correction by hand. Two
+   * numbers that disagree stop disagreeing the moment the correction lands.
+   *
+   * Optional, because the two callers of this function are the reconciliation
+   * screen (which supplies them, through `fetchOnlineOrders`) and this
+   * module's own tests. An order read before part 800 existed simply has no
+   * refund to report.
+   */
+
+  /** `gym_orders.refunded_cents` — Stripe's running total across every refund
+   *  on this order's charge, in minor units. NULL means Stripe has never
+   *  mentioned a refund, which is not the same fact as zero. */
+  refundedCents?: number | null;
+  /** The sum of what the ledger has actually taken off this order's payment —
+   *  |amount| over every `gym_payments` row whose `reverses_payment_id` names
+   *  it — in minor units and positive. */
+  reversedCents?: number | null;
+  /** `gym_orders.refund_note`: why the webhook could not mirror a refund, in
+   *  its own words. Not the exception; what the exception says. */
+  refundNote?: string | null;
 }
 
 /**
@@ -256,6 +288,22 @@ export interface OnlineOrderState {
  *     lock refusing the write, which is a decision rather than a fault; before
  *     `gym_payments.gym_order_id` existed it happened on every single online
  *     sale and nothing anywhere could see it.
+ *
+ *   · REFUNDED IN STRIPE, AND NOT IN THE LEDGER. The mirror of the case above
+ *     and the reason supabase/parts/800 exists. The gym pressed Refund in its
+ *     own Stripe dashboard, the money went back, and `gym_payments` still
+ *     holds the whole original amount — so /money, /revenue, /accounting and
+ *     /close all go on counting it.
+ *
+ *     This one is worse to leave unlisted than either of the others, because
+ *     there is nothing wrong-LOOKING anywhere. A failed order has no
+ *     entitlement behind it and a paid order with no ledger row is missing
+ *     from a total. Here the sale, the entitlement and the payment row all
+ *     exist and all read as correct. The payment is simply too big, and no
+ *     screen in the product would draw it any differently.
+ *
+ * A paid order that reached the ledger, and whose refunds — if any — reached it
+ * too, is not listed at all. It is an ordinary payment.
  */
 export function onlineOrderProblem(o: OnlineOrderState): string | null {
   if (o.status === 'failed') {
@@ -267,5 +315,446 @@ export function onlineOrderProblem(o: OnlineOrderState): string | null {
   if (o.status === 'paid' && !o.inLedger) {
     return 'Paid, and not in the payment record. The member has what they bought and this money is missing from every figure on this page. The usual cause is the month having been closed when the sale landed.';
   }
+
+  // Deliberately after the two above and deliberately not merged with them. An
+  // order that never reached the ledger cannot have a reversal against it
+  // either, and reporting both would tell an owner to fix two things when there
+  // is one.
+  //
+  // No figures in this sentence, and that is not squeamishness. This module is
+  // a leaf — it may not import `money()` from src/lib/gymRecord.ts — so the
+  // only way it could state an amount is bare or in a currency it assumed, and
+  // both are the defect scripts/check-currency.mjs exists to stop. The amounts
+  // are on the row the screen draws this beside.
+  const refunded = typeof o.refundedCents === 'number' && Number.isFinite(o.refundedCents) ? o.refundedCents : 0;
+  if (refunded > 0) {
+    const reversed = typeof o.reversedCents === 'number' && Number.isFinite(o.reversedCents)
+      ? Math.abs(o.reversedCents)
+      : 0;
+    if (reversed < refunded) {
+      const why = (o.refundNote ?? '').trim();
+      // "Some of it" and "none of it" are different jobs. A partly mirrored
+      // refund means one instalment landed and another did not, and an owner
+      // reading "not in the payment record" would go looking for a reversal
+      // that is sitting right there.
+      const head = reversed > 0
+        ? 'Refunded in Stripe, and only part of that refund is in the payment record.'
+        : 'Refunded in Stripe, and not in the payment record.';
+      const tail = 'Every figure on this page still counts this money as taken.';
+      return why ? `${head} ${tail} ${why}` : `${head} ${tail}`;
+    }
+  }
   return null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * MONEY GOING BACK OUT, WHEN THE GYM SENT IT BACK
+ *
+ * Everything above is the ledger row an online gym sale LEAVES. This half is
+ * the same defect pointed the other way, and it is in this file rather than in
+ * one of its own because it is the same ledger, the same table and the same
+ * argument — and because a module an edge function imports must be a leaf, so a
+ * second one would have to restate `LedgerMethod` a third time and carry a
+ * third copy of the test that keeps the restatement honest.
+ *
+ * `supabase/functions/stripe-webhook` resolves a `charge.refunded` event
+ * against exactly two tables — `client_subscription_payments` by
+ * `stripe_invoice_id` and `client_purchases` by payment intent — and a gym
+ * online sale is in neither of them. A gym owner pressing Refund in their own
+ * Stripe dashboard (the ordinary way, because under direct charges the gym is
+ * the merchant of record and has the full dashboard) produced a log line
+ * reading "REFUND WITH NO SALE TO MIRROR IT ON" and a `gym_payments` row still
+ * holding the whole original amount. The gym's ledger, its month-end close and
+ * its revenue screen all went on counting money that had gone back.
+ *
+ * ── A reversal is a ROW, not an edit ──────────────────────────────────────
+ *
+ * supabase/parts/180 settled this and nothing here reopens it. Money is taken
+ * off `gym_payments` by inserting a NEGATIVE row that names what it undoes in
+ * `reverses_payment_id`, because there are eleven places in this console that
+ * add `amount_cents` up: a reversal that is a row nets correctly in all eleven
+ * with no change at all, and a flag would have to be understood by every one of
+ * them, today and in every query written after today. The one that forgets is
+ * silently wrong in the direction of MORE money, which is the direction nobody
+ * checks. `reversePayment` in src/lib/gymRecord.ts is the hand-entry path and
+ * these functions build the same shape it does.
+ *
+ * So the original row is never touched. It is what happened.
+ *
+ * Nothing below restates the five payment methods, and that is the difference
+ * from the half above. That half CHOOSES a method from a Stripe checkout
+ * session and so has to name them. This one never chooses: the method on a
+ * reversal is copied verbatim off the payment being reversed, a row
+ * `gym_payments`'s own CHECK constraint has already validated.
+ * ══════════════════════════════════════════════════════════════════════════ */
+/** One Stripe refund, in the fields this mirror needs. */
+export interface RefundFacts {
+  /** `re_...`. The identity, and the whole of the idempotency argument. */
+  id: string;
+  /** `amount`, in minor units and POSITIVE — what Stripe sent back. */
+  amountCents: number | null | undefined;
+  /** `currency`, lower case on the event. */
+  currency: string | null | undefined;
+  /** `created`, in whole seconds since the epoch, as Stripe states it. */
+  createdSeconds: number | null | undefined;
+  /** `status`. Stripe reports 'succeeded', 'pending', 'failed' or 'canceled'. */
+  status?: string | null;
+}
+
+/** The `gym_payments` row being reversed, as the ledger holds it. */
+export interface ReversibleSale {
+  /** `gym_payments.id`. What `reverses_payment_id` will point at. */
+  paymentId: string;
+  tenantId: string;
+  memberId: string | null;
+  membershipId: string | null;
+  /** What was taken, in minor units. Positive on a payment. */
+  amountCents: number;
+  /** The sale's own money. A reversal is denominated in this and nothing else. */
+  currency: string;
+  /** How the money arrived, carried through verbatim. */
+  method: string;
+}
+
+/** The reversal, exactly as `gym_payments` wants it. */
+export interface GymRefundRow {
+  tenant_id: string;
+  member_id: string | null;
+  membership_id: string | null;
+  stripe_refund_id: string;
+  reverses_payment_id: string;
+  /** NEGATIVE. The sign is applied here and never typed by a caller. */
+  amount_cents: number;
+  currency: string;
+  method: string;
+  taken_at: string;
+  note: string;
+  kind: 'refund';
+  recorded_by: null;
+}
+
+/**
+ * A refund Stripe has actually sent back, as opposed to one it is thinking
+ * about.
+ *
+ * `charge.refunded` fires on the charge, and the refunds hanging off it are not
+ * all necessarily money that has moved: a refund to a delayed-settlement method
+ * sits at 'pending' and one that bounces ends at 'failed' or 'canceled'.
+ * Mirroring a pending refund would take money off a gym's takings that its
+ * member has not been given back, and there is no later event that would put it
+ * right in the direction that matters — the gym would simply under-report until
+ * somebody noticed.
+ *
+ * A refund with NO status stated is treated as settled. Stripe has always
+ * stated one on a real refund; the missing case is a hand-built object in a
+ * test or an older API shape, and refusing those would silently mirror nothing
+ * at all rather than visibly mirroring the wrong thing.
+ */
+export function refundHasSettled(r: Pick<RefundFacts, 'status'>): boolean {
+  const s = String(r.status ?? '').trim().toLowerCase();
+  return s === '' || s === 'succeeded';
+}
+
+/**
+ * Which of a charge's refunds this ledger has not recorded yet.
+ *
+ * The webhook reads the `stripe_refund_id`s already sitting against the sale
+ * and passes them in. That read is the cheap guard and the UNIQUE index from
+ * supabase/parts/800 is the one that actually holds — two deliveries racing
+ * both find nothing and both try, and exactly one of them gets 23505.
+ *
+ * Duplicated ids WITHIN the list are collapsed, because Stripe's refund list is
+ * paginated and a caller stitching pages together can hand the same object
+ * twice. Two inserts of the same id in one delivery would collide with each
+ * other, which is not wrong but is a 23505 that means something different from
+ * the one the index is there to raise.
+ */
+export function refundsToMirror(
+  refunds: readonly RefundFacts[] | null | undefined,
+  alreadyMirrored: readonly string[] | null | undefined,
+): RefundFacts[] {
+  const seen = new Set((alreadyMirrored ?? []).map((x) => String(x ?? '').trim()).filter(Boolean));
+  const out: RefundFacts[] = [];
+  for (const r of refunds ?? []) {
+    const id = String(r?.id ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    if (!refundHasSettled(r)) continue;
+    seen.add(id);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * When a reversal is dated, and why it is not the sale's date.
+ *
+ * supabase/parts/180 argues this at length: a refund handed back in September
+ * belongs in September. Back-dating it onto the original's `taken_at` would
+ * change a month that has already been reported, and it would quietly walk
+ * around the closed-month lock supabase/parts/182 exists to enforce — the
+ * refund would land in a filed August and restate a figure somebody has given
+ * their accountant.
+ *
+ * It is Stripe's instant for the REFUND and not for the event and not now(). A
+ * delivery retried three days late must not file Saturday's money on Tuesday,
+ * and one `charge.refunded` can carry refunds made on different days.
+ */
+export function refundTakenAt(r: Pick<RefundFacts, 'createdSeconds'>, fallbackISO: string): string {
+  const s = r.createdSeconds;
+  if (typeof s === 'number' && Number.isFinite(s) && s > 0) {
+    return new Date(Math.round(s) * 1000).toISOString();
+  }
+  return fallbackISO;
+}
+
+/** What the note on a reversal says, and why it says the id. */
+export function refundNote(refundId: string): string {
+  const ref = String(refundId ?? '').trim();
+  // The row an owner lands on when the bank statement and the ledger disagree.
+  // The only useful thing it can carry is the string that finds the refund in
+  // the Stripe dashboard.
+  return ref ? `Refunded through Stripe. ${ref}` : 'Refunded through Stripe.';
+}
+
+/**
+ * The reversal for one Stripe refund, or the reason it cannot honestly be
+ * written.
+ *
+ * ── PARTIAL REFUNDS: what is mirrored is what was refunded ────────────────
+ *
+ * `refund.amount` and nothing else. Not the sale's amount, not
+ * `charge.amount_refunded`, and not a figure recomputed from either.
+ *
+ *   · NOT THE SALE. `charge.refunded` fires for a partial refund exactly as it
+ *     does for a full one, and there is nothing in the event that says which it
+ *     was. A gym refunding one month of a twelve-month membership that a member
+ *     is leaving mid-term is the ordinary case, not the exotic one. Reversing
+ *     the whole sale for it would take eleven months of somebody's money off
+ *     the gym's takings, and — because a reversal nets silently into every SUM
+ *     in the console — it would do it without anything looking wrong.
+ *
+ *   · NOT THE RUNNING TOTAL. `charge.amount_refunded` is the sum across every
+ *     refund on the charge. The client-side tables assign it, and that is right
+ *     for them because they hold ONE `refunded_cents` per sale. It is exactly
+ *     wrong here: rows ACCUMULATE, so a second partial refund carrying the
+ *     running total would reverse the first one twice. Two 2000 refunds would
+ *     take 6000 off the ledger.
+ *
+ *   · NOT RECOMPUTED. Nothing here divides, multiplies or prorates. The amount
+ *     is Stripe's integer of minor units, negated, in the sale's own currency.
+ *     `Math.round` is applied only because Stripe's field is typed as a number
+ *     and a fractional minor unit is not a thing this column can hold.
+ *
+ * The running total still matters — it is what the reconciliation compares the
+ * sum of these rows against — and it is stored on `gym_orders.refunded_cents`
+ * by the webhook, well away from anything that adds money up.
+ *
+ * ── Why it can refuse ─────────────────────────────────────────────────────
+ *
+ * A CURRENCY THAT DISAGREES. `reversePayment` in src/lib/gymRecord.ts states
+ * the rule for the hand-entered case: "You cannot refund pounds against a
+ * payment taken in dirhams." A reversal is denominated in the original's money
+ * because that is the only way it nets against it; a row in another currency
+ * would sit in the ledger as an unexplained pair and would be added to a total
+ * in a unit it is not in. Stripe refunds in the charge's currency, so a
+ * disagreement here means this app's record of the sale and Stripe's disagree
+ * about what was taken — which is a thing for a person, not a thing to net.
+ *
+ * A ZERO OR NEGATIVE AMOUNT. Part 180's `gym_payments_correction_shape`
+ * requires a reversal to be strictly negative, and it is right to: a zero
+ * reversal reverses nothing and a positive one is a second payment. Zero is
+ * legal on the SALE side — a fully discounted joining fee is a real transaction
+ * — and that asymmetry is deliberate and is argued in part 180's header.
+ *
+ * A refusal is a string an owner can read, because it ends up on
+ * `gym_orders.refund_note` and from there on the reconciliation screen. It is
+ * not an exception: the webhook must go on to record what Stripe did even when
+ * it cannot mirror it, and throwing would lose that.
+ */
+export function gymRefundRow(args: {
+  sale: ReversibleSale;
+  refund: RefundFacts;
+  /** When Stripe says the EVENT happened. Used only if the refund states no
+   *  date of its own. ISO. */
+  fallbackAtISO: string;
+}): { row: GymRefundRow | null; refusal: string | null } {
+  const { sale, refund, fallbackAtISO } = args;
+
+  const refundId = String(refund?.id ?? '').trim();
+  if (!refundId) {
+    return { row: null, refusal: 'Stripe sent a refund with no id on it, so there is no way to record it once and only once.' };
+  }
+
+  const amount = typeof refund.amountCents === 'number' && Number.isFinite(refund.amountCents)
+    ? Math.round(refund.amountCents)
+    : null;
+  if (amount == null || amount <= 0) {
+    return { row: null, refusal: 'Stripe stated no amount on this refund, so nothing could be taken off the payment record.' };
+  }
+
+  const saleCurrency = String(sale.currency ?? '').trim().toUpperCase();
+  if (!saleCurrency) {
+    // Unreachable through the webhook — `gym_payments.currency` is NOT NULL and
+    // has had no default since supabase/parts/150 — and refused rather than
+    // assumed anyway. There is nothing to fall back on in a white-label
+    // product: a currency invented here is a permanent wrong stamp on a row an
+    // accountant files.
+    return { row: null, refusal: 'The payment being refunded states no currency, so a reversal against it could not be denominated.' };
+  }
+  const refundCurrency = String(refund.currency ?? '').trim().toUpperCase();
+  if (refundCurrency && refundCurrency !== saleCurrency) {
+    return {
+      row: null,
+      refusal: `Stripe refunded in ${refundCurrency} and the payment it reverses was taken in ${saleCurrency}. A reversal in a different money would not net against the payment, so it has been left for a person.`,
+    };
+  }
+
+  return {
+    row: {
+      tenant_id: sale.tenantId,
+      member_id: sale.memberId,
+      membership_id: sale.membershipId,
+      stripe_refund_id: refundId,
+      // What makes this a correction rather than a bare negative. Part 180's
+      // CHECK requires it, and the `on delete restrict` on it means the
+      // original cannot be lost while this row stands.
+      reverses_payment_id: sale.paymentId,
+      amount_cents: -amount,
+      // The original's money, always.
+      currency: saleCurrency,
+      // How it arrived. Not chosen here: `reversePayment` defaults a
+      // hand-entered correction to the original's method for the same reason,
+      // and a card sale refunded to the same card is the only shape a Stripe
+      // refund has.
+      method: sale.method,
+      taken_at: refundTakenAt(refund, fallbackAtISO),
+      note: refundNote(refundId),
+      kind: 'refund',
+      // Nobody at the desk handed this back. `recorded_by` names a member of
+      // staff and filling it with anybody would be a false statement about who
+      // handled the money.
+      recorded_by: null,
+    },
+    refusal: null,
+  };
+}
+
+/**
+ * Stripe has sent back more than this ledger thinks was ever taken — by how
+ * much, or 0 when it has not.
+ *
+ * All figures in minor units and positive. `alreadyReversedCents` is the sum of
+ * what is already recorded against the payment, `thisRefundCents` the one being
+ * added.
+ *
+ * ── Why this does not refuse ──────────────────────────────────────────────
+ *
+ * `reversalBlocker` in src/lib/gymRecord.ts REFUSES an over-reversal, and that
+ * is right for the screen it guards: an owner typing a bigger number than is
+ * left on a payment has made a mistake and the form should say so before it
+ * writes anything.
+ *
+ * This is the opposite situation and takes the opposite answer. The money has
+ * already gone back. It went back in Stripe, days ago, and nothing this code
+ * does can un-refund it. Declining to record it would leave the ledger
+ * overstating the gym's takings by the whole refund — which is precisely the
+ * defect this module was written to fix — in exchange for keeping one row's
+ * arithmetic tidy.
+ *
+ * So it is recorded, and the discrepancy is reported. The only way here is that
+ * this app's `amount_cents` for the sale is smaller than what Stripe actually
+ * charged: the sale fell back to the order's QUOTE because the checkout session
+ * stated no total (see `gymOrderPaymentRow`), or somebody edited the charge in
+ * Stripe. Both are facts about a disagreement between two systems, and both
+ * need a person rather than a silently dropped write. It is the same call the
+ * client-side branch makes when part 192's `refunded_cents <= amount_cents`
+ * CHECK fires: log it, accept the event, leave the row visibly wrong rather
+ * than invisibly retried.
+ */
+export function overReversedBy(
+  saleAmountCents: number,
+  alreadyReversedCents: number,
+  thisRefundCents: number,
+): number {
+  const sale = Number.isFinite(saleAmountCents) ? saleAmountCents : 0;
+  const already = Number.isFinite(alreadyReversedCents) ? Math.abs(alreadyReversedCents) : 0;
+  const now = Number.isFinite(thisRefundCents) ? Math.abs(thisRefundCents) : 0;
+  const over = already + now - sale;
+  return over > 0 ? over : 0;
+}
+
+/**
+ * The note left on `gym_orders.refund_note` when a refund could not be
+ * mirrored, or null when every one of them was.
+ *
+ * One line per reason, joined, because a charge can carry several refunds and
+ * they can fail for different reasons — a first one refused by a closed month
+ * and a second one in a currency that disagrees. A note that reported only the
+ * last would send the owner to fix half of it.
+ *
+ * This is the REASON, not the exception. The exception is derived from
+ * `gym_orders.refunded_cents` against the sum of reversals — see part 800 —
+ * so it clears itself the moment somebody records the correction by hand.
+ * A note that was itself the exception would sit there forever, because Stripe
+ * does not redeliver an event it has already had a 200 for and nothing would
+ * ever come back to take it down.
+ */
+export function refusalNote(refusals: readonly string[] | null | undefined): string | null {
+  const lines = (refusals ?? []).map((r) => String(r ?? '').trim()).filter(Boolean);
+  if (!lines.length) return null;
+  // Deduplicated: two refunds on one charge refused by the closed-month lock
+  // produce the same sentence twice, and repeating it says nothing the first
+  // one did not.
+  const seen: string[] = [];
+  for (const l of lines) if (!seen.includes(l)) seen.push(l);
+  return seen.join(' ');
+}
+
+/**
+ * What Stripe did, as the three columns supabase/parts/800 put on `gym_orders`.
+ *
+ * The webhook writes this FIRST and unconditionally, before it attempts a
+ * single reversal, and that order is the point. `gym_orders` is not locked by
+ * part 182's closed-month trigger (only `gym_payments` and `gym_invoices` are),
+ * so this write always lands — which means the record of what Stripe did
+ * survives even when the ledger refuses the consequence of it. Written last, it
+ * would be missing in exactly the case this whole part exists for.
+ *
+ * The note is deliberately NOT here. It is the outcome of trying, so it is a
+ * second write after the loop, through `refusalNote`.
+ *
+ * The total is Stripe's `amount_refunded`, ASSIGNED. Never added: an addition
+ * is wrong under the retry this whole module is defending against, and wrong in
+ * the same way `client_purchases.refunded_cents` would be — two deliveries
+ * racing, each adding its own figure to a total it read a moment earlier.
+ * Assignment is idempotent by construction, and it is also the reason this
+ * figure lives on the ORDER and not in the ledger: `gym_payments` accumulates
+ * rows, and a running total assigned into an accumulating table is the double
+ * count `gymRefundRow` refuses above.
+ *
+ * The currency is Stripe's, upper-cased, and is NOT defaulted to the order's.
+ * If they disagree the reversal is refused above, and this column is how a
+ * screen can say what the disagreement was rather than drawing a figure in a
+ * money nobody chose.
+ */
+export function refundStateForOrder(args: {
+  /** `charge.amount_refunded`, in minor units. Stripe's running total. */
+  amountRefundedCents: number | null | undefined;
+  /** The currency Stripe stated on the charge. */
+  currency: string | null | undefined;
+  /** Stripe's instant for the event. ISO. */
+  atISO: string;
+}): { refundedCents: number; refundedCurrency: string | null; refundedAt: string } {
+  const total = typeof args.amountRefundedCents === 'number' && Number.isFinite(args.amountRefundedCents)
+    ? Math.max(0, Math.round(args.amountRefundedCents))
+    : 0;
+  const cur = String(args.currency ?? '').trim().toUpperCase();
+  return {
+    refundedCents: total,
+    // NULL rather than a guess. supabase/parts/800's CHECK accepts only three
+    // upper-case letters, and a blank string would fail the write outright on
+    // an event that happened to state nothing.
+    refundedCurrency: /^[A-Z]{3}$/.test(cur) ? cur : null,
+    refundedAt: args.atISO,
+  };
 }

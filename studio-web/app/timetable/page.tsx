@@ -15,10 +15,55 @@
 // adds the other thing an owner cannot otherwise see: where their trainers
 // actually are.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// The reader's locale, the GYM's zone for instants; no zone at all for the
+// calendar days the week strip is built from. Both were the reader's clock,
+// which is how a 06:00 class on a Dubai timetable read 02:00 — and, for a
+// reader far enough west, under the previous day's heading.
+import { useHourTick, hourStart } from '@/lib/hourTick';
+import { gymDateTimeText, gymTimeText, calendarDateText } from '@lib/gymWhen';
+// Escape, focus and the tab trap these dialogs never had.
+import { useDialog, dialogPanel } from '@/lib/dialog';
+// `gymWallValue` and `instantAtGym` are the two halves of a `datetime-local`
+// that means the gym's clock rather than the browser's — see `localInputValue`.
+import { parseGymZone, gymWallValue, instantAtGym, NO_ZONE_NOTE } from '@lib/gymZone';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useLiveFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
+import { changedFailure } from '@lib/changedRows';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
+import { gymLink, noGymNote } from '@lib/gymLink';
+import { tellTheCancelledRoom, type ClassOffSend } from '@lib/classOff';
+import { classOffConfirmation } from '@lib/notifyCopy';
+
+/**
+ * How this console sends one push: straight at the send-push edge function,
+ * with the signed-in owner's own JWT.
+ *
+ * There is no `sendPushChecked` here — that lives in src/ui/pushNotifications.ts
+ * and reaches expo-notifications, which Next.js cannot import. This wrapper is
+ * only the send; the inbox row is written by the trigger before this runs, so
+ * recording one here would be the second row for one event.
+ *
+ * `ok` means send-push accepted the call, never that anything was delivered:
+ * Expo's receipt is a separate fetch minutes later and nothing polls for it.
+ * `partial` is send-push saying its own paged read of push_tokens ran short,
+ * which makes any count built from it a floor rather than a total.
+ */
+const sendPush: ClassOffSend = async (userIds, title, body, data, channel) => {
+  try {
+    const { data: res, error } = await supabase.functions.invoke('send-push', {
+      body: { user_ids: userIds, title, body, data, ...(channel ? { channel } : {}) },
+    });
+    if (error) return { ok: false };
+    return { ok: true, partial: !!(res as { partial?: boolean } | null)?.partial };
+  } catch {
+    return { ok: false };
+  }
+};
 import {
   fetchClasses, createClass, createSeries, deleteClass,
   cancelClass, restoreClass, cancelSeriesFrom, updateClass, updateSeriesFrom,
@@ -28,14 +73,28 @@ import {
 } from '@lib/gymSchedule';
 import {
   fetchPtSlots, fetchTrainerOptions, createPtSlot, removePtSlot, updatePtSlot,
-  mergeTimetable, summariseBoard, clashes, floorByHour, floorAt,
+  mergeTimetable, summariseBoard, clashes, floorAt,
   slotBlocker,
   type PtSlot, type TimetableEntry, type FloorSlice,
 } from '@lib/gymPtSchedule';
 import { fetchMemberships, type Membership } from '@lib/gymRecord';
-import { WEEK_DAYS, startOfWeek } from '@lib/weekStart';
+import { WEEK_DAYS } from '@lib/weekStart';
+// The week, the day and the hour AS THE GYM COUNTS THEM. `weekStartOf` opens
+// the week on the gym's calendar, `weekWindow` turns it into the two instants
+// the database is asked for, and `rotaInstant` names a given hour of a given
+// gym day. All three fall back to the reader's clock for a gym with no zone —
+// which is what this board already did — and the difference is that the
+// fallback is now the exception rather than the rule. See `range` below.
+import { weekStartOf, weekDays, shiftWeek, weekWindow } from '@lib/gymRota';
+import { rotaInstant, rotaToday, rotaCell } from '@lib/rotaClock';
+import { Banner, type BannerTone } from '@/components/Banner';
+// The three answers `promote_session_waitlist` can give, read once for the
+// whole product. `src/ui/sessions.tsx` reads the same RPC through the same
+// module, so the coach's screen and the desk cannot drift apart on what a null
+// means — and neither of them may print "nobody was waiting" over a call that
+// failed.
+import { readPromotion, mayReoffer, promotionText } from '@lib/waitlistPromotion';
 
-const DAY = 86400000;
 const DAY_NAMES = WEEK_DAYS;
 const FIRST_HOUR = 6;
 const LAST_HOUR = 22;
@@ -47,10 +106,16 @@ interface Board { classes: GymClass[]; slots: PtSlot[] }
 
 export default function Timetable() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Kept separate from `err`: load() clears that on a successful timetable
   // read moments later, which would wipe this message off the screen.
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [raw, setRaw] = useState<Board | null>(null);
   const [openClass, setOpenClass] = useState<GymClass | null>(null);
   // The class being corrected. There was no edit-a-class path in the product at
@@ -58,6 +123,11 @@ export default function Timetable() {
   // be deleted and retyped, which took its bookings with it.
   const [editing, setEditing] = useState<GymClass | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Kept apart from `err`, and not for tidiness: `err` is a `crit` banner,
+  // which this console reserves for "that did not happen". An hour handed to
+  // the head of its waitlist DID happen, and interrupting a screen reader with
+  // it as an alert is how a console teaches people to ignore alerts.
+  const [waitNote, setWaitNote] = useState<SlotNote | null>(null);
   const [loadFail, setLoadFail] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   // Who the gym can book a one-to-one to. Read once rather than per week — the
@@ -86,23 +156,58 @@ export default function Timetable() {
    *   · autumn back, and the next week's opening hour leaks in and is counted
    *     as this week's, in the fill rate and in the class pay.
    *
-   * So the end is the NEXT week's opening midnight, built the same way the
-   * start is — `setDate(+7)` then `setHours(0,0,0,0)`, which is arithmetic on
-   * the calendar rather than on the clock — minus a millisecond. Both bounds
-   * are then the gym's own midnights whatever its offset did that weekend.
+   * So the end is the NEXT week's opening midnight, minus a millisecond.
+   *
+   * ── And whose midnights those were ──────────────────────────────────────
+   *
+   * The paragraph above says "both bounds are then the gym's own midnights",
+   * and they were not. Both were built by `startOfWeek()` and `setHours` on the
+   * READER's machine — right for the desk standing in the building, wrong for
+   * every owner, bookkeeper and area manager who is not. The comment fixed the
+   * clocks-change bug and left the zone bug behind it, which is why it read as
+   * settled.
+   *
+   * What it costs is a week whose edges belong to somebody else's day. An owner
+   * in Los Angeles opening a London gym's board asks for 00:00 PDT Sunday —
+   * 08:00 Sunday in London — so the gym's Sunday 06:00 and 07:00 classes are
+   * outside the window at one end, and the FOLLOWING Sunday's early classes are
+   * inside it at the other. The board then draws a Sunday morning with nothing
+   * on it, and `clashes()` and floor cover are computed over a set of classes
+   * that is missing an end and carrying somebody else's.
+   *
+   * `weekStartOf` opens the week on the gym's own calendar day and `weekWindow`
+   * turns it into instants through `rotaInstant`, which solves the offset AT the
+   * instant being named — so a week containing a clocks change is still seven
+   * days and still the gym's seven days. With no zone both fall back to the
+   * reader's clock, exactly as before.
+   *
+   * The end stays CLOSED by a millisecond because both readers below bound with
+   * `.lte`: `fetchClasses` and `fetchPtSlots` each filter `starts_at` with
+   * `.gte(from).lte(to)`, and `weekWindow` hands back an exclusive end. Passing
+   * it as it stands would put a class at the next week's opening midnight into
+   * two weeks at once — counted twice in the fill rate and in the class pay.
    */
   const range = useCallback(() => {
-    const weekOpened = startOfWeek();
-    weekOpened.setDate(weekOpened.getDate() + weekOffset * 7);
-    const nextWeek = new Date(weekOpened);
-    nextWeek.setDate(weekOpened.getDate() + 7);
-    nextWeek.setHours(0, 0, 0, 0);
-    const lastMoment = new Date(nextWeek.getTime() - 1);
-    return { from: weekOpened.toISOString(), to: lastMoment.toISOString(), weekOpened };
-  }, [weekOffset]);
+    const weekIso = shiftWeek(weekStartOf(Date.now(), zone), weekOffset);
+    const w = weekWindow(weekIso, zone);
+    // `weekWindow` is null only for a date that is not a date, which
+    // `weekStartOf` cannot produce. Handled rather than asserted away: a null
+    // window means the board asks for nothing rather than for all of time.
+    if (!w) return null;
+    return {
+      from: w.fromISO,
+      to: new Date(Date.parse(w.toISO) - 1).toISOString(),
+      weekIso,
+    };
+  }, [weekOffset, zone]);
 
-  const load = useCallback(async (tenantId: string) => {
-    const { from, to } = range();
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
+    const window = range();
+    // No window, no read. Reporting it rather than asking for an unbounded
+    // week: an unbounded read is not a failure anybody would notice, it is a
+    // board that quietly shows every class the gym has ever run.
+    if (!window) { setRaw(null); setLoadFail('the week being shown could not be worked out'); return false; }
+    const { from, to } = window;
     setRaw(null); setLoadFail(null);
     // allSettled, not all: which half failed is the useful part of the message.
     const [c, p] = await Promise.allSettled([
@@ -119,10 +224,16 @@ export default function Timetable() {
     const missing: string[] = [];
     if (c.status === 'rejected') missing.push(`classes (${c.reason?.message ?? 'unknown error'})`);
     if (p.status === 'rejected') missing.push(`one-to-ones (${p.reason?.message ?? 'unknown error'})`);
-    if (missing.length) { setLoadFail(missing.join(' and ')); return; }
+    if (missing.length) { setLoadFail(missing.join(' and ')); return false; }
     if (c.status === 'fulfilled' && p.status === 'fulfilled') {
       setRaw({ classes: c.value, slots: p.value });
     }
+
+    // Whole means both halves of the board came back. `useFetched` stamps only
+    // on a whole read, so a week whose one-to-ones would not load leaves the
+    // stamp where it was rather than dating a board that is missing half of
+    // what is on the floor.
+    return settledLanded([c, p]);
   }, [range]);
 
   useEffect(() => {
@@ -130,28 +241,110 @@ export default function Timetable() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setRaw({ classes: [], slots: [] }); return; }
+      // `{ classes: [], slots: [] }` is a board that was read and is genuinely
+      // empty: no classes this week, no one-to-ones, a fill rate of nothing out
+      // of nothing — on the screen a coach walks up to in order to find out
+      // which room to stand in. And the `<Fetched>` line above it said the
+      // board had never been read, so the page contradicted itself in two
+      // places at once. Nothing was asked; `raw` stays null and the branch
+      // below the staff gate is what renders. See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'classes or one-to-ones');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } rather than rejecting, so a
       // read that failed — or that RLS refused — arrives as t === null and is
       // indistinguishable from a tenant row that genuinely is not there. Dropping
       // the error leaves the sidebar saying "No gym linked", which the owner reads
       // as a fact about their account: they go off to re-link a gym that was
       // linked all along and never learn the read is what broke.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', link.tenantId).single();
       if (live) {
         setGymName(tErr ? null : (t?.name ?? null));
         setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       // The roster, independently of the board: it is not week-scoped, and a
       // membership read that fails must not empty the timetable with it.
-      fetchMemberships(supabase, who.tenantId)
+      fetchMemberships(supabase, link.tenantId)
         .then((rows) => { if (live) { setMembers(rows); setMembersErr(null); } })
         .catch((e: any) => { if (live) { setMembers(null); setMembersErr(e?.message ?? 'Could not read the member list.'); } });
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity, the gym record and the roster only. The board itself is read
+    // by the effect below, through `refresh`.
+  }, []);
+
+  /**
+   * The week on the board, kept current and dated.
+   *
+   * A timetable is the most-shared screen in a gym — the office has it open,
+   * the desk has it open, and a coach moves a class from their phone. Until now
+   * every one of those tabs answered about the moment it was opened and said
+   * nothing about which moment that was, on a board people read to decide which
+   * room to walk into.
+   *
+   * `range()` closes over the week offset, so changing week is a fresh read;
+   * `useFetched` coalesces a second change made while the first is in flight
+   * rather than dropping it.
+   *
+   * ── Why THIS screen gets a socket ─────────────────────────────────────
+   *
+   * Because it is the one people book against, from more than one place at
+   * once. The office moves a class, the desk sells a place into the room it was
+   * moved out of, a coach cancels a one-to-one from their phone; and the two
+   * figures this board computes — `clashes()` and floor cover — are claims
+   * about the whole week that go silently wrong the moment one of those writes
+   * lands somewhere this tab cannot see. A stale board does not look stale. It
+   * looks like a week with no clash in it.
+   *
+   * Both tables are the gym's own and both are filtered on `tenant_id` in the
+   * subscription as well as in the read. The filter is narrowing only — realtime
+   * applies row-level security, and `load()` is what scopes what appears — but a
+   * console tab at one gym has no business being woken by another's timetable.
+   */
+  const { at: readAt, busy: reading, refresh, live: liveStatus } = useLiveFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    {
+      channel: `console-timetable-${me?.tenantId ?? 'none'}`,
+      subs: me?.tenantId
+        ? [
+            { table: 'gym_classes', filter: `tenant_id=eq.${me.tenantId}` },
+            { table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` },
+            // And the deletions, unfiltered, because a filtered binding cannot
+            // receive one — see `LiveSub.filter` in lib/live.ts. Both verbs on
+            // this board hard-delete: `deleteClass` is wired to the Remove
+            // control below, and `removePtSlot` is what a coach presses to
+            // release an hour from their phone. Without these two lines a class
+            // or a slot taken off the board elsewhere stayed on this one, under
+            // a line saying the screen was updating as the gym changed.
+            { table: 'gym_classes', event: 'DELETE' },
+            { table: 'sessions', event: 'DELETE' },
+          ]
+        : [],
+      enabled: !!me?.tenantId,
+    },
+  );
+
+  /**
+   * The first read, and every re-read the WINDOW changes under.
+   *
+   * `zone` is in the list because the week the board asks for is now cut on the
+   * gym's clock, so the window genuinely changes when the zone lands. Without
+   * it the first read — fired the moment `setMe` lands, which is before the
+   * `tenants` row comes back — would stand as the week for the rest of the
+   * session, and the board would be showing the reader's week under a label
+   * saying the gym's. `useFetched` coalesces, so the second read replaces the
+   * first rather than racing it.
+   */
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, weekOffset, zone]);
 
   // Cancelled classes are OFF the merged board, and everything computed from
   // the board — floor cover, clashes, "on the floor at six" — is therefore
@@ -171,11 +364,14 @@ export default function Timetable() {
   // have been reading for months without saying so.
   const classSum = useMemo(() => (raw ? summariseAttendance(raw.classes) : null), [raw]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/timetable">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -217,7 +413,7 @@ export default function Timetable() {
   const staff = me.role === 'owner' || me.role === 'trainer';
   if (!staff) {
     return (
-      <Shell me={me} gymName={gymName} current="/timetable">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The timetable is for gym staff.</p>
       </Shell>
@@ -225,16 +421,35 @@ export default function Timetable() {
   }
   const owner = me.role === 'owner';
 
-  const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
-  const { weekOpened } = range();
-  // The same calendar arithmetic as `range` above, for the same reason: on a
-  // clocks-change week `weekOpened + 6 * DAY` lands an hour either side of
-  // midnight, and the label would name the wrong last day of the week it is
-  // showing.
-  const lastDayLabel = new Date(weekOpened);
-  lastDayLabel.setDate(weekOpened.getDate() + 6);
-  const weekLabel = `${weekOpened.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${lastDayLabel.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+  // Before the board — and it is what lets the line below read `me.tenantId`
+  // instead of asserting `me.tenantId!`. A coach on an account with no gym was
+  // otherwise shown an empty week and no register, and a register not taken on
+  // the day is not recoverable afterwards, so "there is nothing on today" is
+  // the most expensive wrong sentence this screen can print.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
+        <h1>Timetable</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('classes or one-to-ones')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId)`, handed to every write on this board, so adding a
+  // class re-read the week WITHOUT moving the stamp under it.
+  // The seven calendar dates this board is showing, on the gym's calendar.
+  // `weekStartOf` has already spent the zone, so these are bare `YYYY-MM-DD`
+  // strings: calendar days, not instants, and `calendarDateText` draws them
+  // without a zone precisely because drawing a bare date in one could name the
+  // day before it.
+  const weekIso = range()?.weekIso ?? weekStartOf(Date.now(), zone);
+  const days = weekDays(weekIso);
+  const short = { day: 'numeric', month: 'short' } as const;
+  const weekLabel = `${calendarDateText(days[0] ?? weekIso, short) ?? '—'} – ${calendarDateText(days[6] ?? weekIso, short) ?? '—'}`;
 
   const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
 
@@ -267,15 +482,46 @@ export default function Timetable() {
     // somebody who cleared the box, and `cancelClass` refuses that with its own
     // sentence rather than filing a cancellation nobody explained.
     if (why === null) return;
-    cancelClass(supabase, c.id, why)
-      .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'That class was not called off, so it is still on the timetable.'));
+    void (async () => {
+      try {
+        await cancelClass(supabase, c.id, why);
+      } catch (x: any) {
+        setErr(writeFailedText(x, {
+          what: 'Calling off that class',
+          unchanged: 'it is still on the timetable',
+          howToCheck: 'Reload this page: the timetable shows whether the class is actually called off. Members are told from the stored row, not from this screen.',
+        }));
+        return;
+      }
+      // ── this console used to send nothing ─────────────────────────────
+      //
+      // The prompt above promises "Everybody booked or waiting is sent this",
+      // and until now that promise was kept by the database: the trigger wrote
+      // the inbox rows and notifications_dispatch_push turned each one into its
+      // own push. That is also why the coach app's members got TWO — the
+      // handset sent an aggregated push and the dispatcher sent per-class ones
+      // on top. Part 2392 stops the dispatcher pushing these rows, so this
+      // screen has to send what it was already claiming to send.
+      //
+      // The failure is reported and not swallowed. A cancellation nobody was
+      // told about is the room arriving at a locked door, and the owner is the
+      // only person who can still fix it.
+      const told = await tellTheCancelledRoom(supabase, [c.id], c.title, why, me?.id ?? null, sendPush);
+      setErr(told.people === null || (told.people > 0 && told.pushed < told.people)
+        ? classOffConfirmation(1, told.people, told.pushed, told.partial)
+        : null);
+      refresh();
+    })();
   };
 
   const putBack = (c: GymClass) => {
     restoreClass(supabase, c.id)
       .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'That class was not put back on.'));
+      .catch((x: any) => setErr(writeFailedText(x, {
+        what: 'Putting that class back on',
+        unchanged: 'it is still called off',
+        howToCheck: 'Reload this page: the timetable shows whether the class is actually back on.',
+      })));
   };
 
   const remove = (e: TimetableEntry) => {
@@ -290,20 +536,28 @@ export default function Timetable() {
       if (!confirm(`Delete "${e.title}"? Nobody has booked it, so nothing is lost. Use “Call off” instead if it was meant to run.`)) return;
       deleteClass(supabase, e.sourceId)
         .then(() => { setErr(null); refresh(); })
-        .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+        .catch((x: any) => setErr(writeFailedText(x, {
+          what: 'Deleting that class',
+          unchanged: 'it is still on the timetable',
+          howToCheck: 'Reload this page: the timetable shows whether the class is actually gone.',
+        })));
       return;
     }
     if (!confirm('Remove that one-to-one from the timetable?')) return;
     removePtSlot(supabase, e.sourceId)
       .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+      .catch((x: any) => setErr(writeFailedText(x, {
+        what: 'Removing that one-to-one',
+        unchanged: 'it is still on the timetable',
+        howToCheck: 'Reload this page: the timetable shows whether the slot is actually gone.',
+      })));
   };
 
   const cols: Column<TimetableEntry>[] = [
     { key: 'when', header: 'When', value: (e) => e.startsAt,
-      render: (e) => new Date(e.startsAt).toLocaleString(undefined, {
+      render: (e) => gymDateTimeText(e.startsAt, zone, {
         weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'what', header: 'What', value: (e) => e.title,
       render: (e) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -356,7 +610,7 @@ export default function Timetable() {
             <BookTo
               slot={raw?.slots.find((s) => s.id === e.sourceId) ?? null}
               members={members} membersErr={membersErr}
-              onDone={(m) => { setErr(m); if (!m) refresh(); }}
+              onDone={(m, n) => { setErr(m); setWaitNote(n ?? null); if (!m) refresh(); }}
             />
           ) : null}
           {/* Rendered only where deleting destroys nothing. A class with
@@ -374,7 +628,7 @@ export default function Timetable() {
   ];
 
   return (
-    <Shell me={me} gymName={gymName} current="/timetable">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1>Timetable</h1>
@@ -382,6 +636,8 @@ export default function Timetable() {
             {weekLabel} · classes and one-to-ones on one board
             {owner ? null : ' · take a register from any class here'}
           </p>
+          <Fetched at={readAt} busy={reading} onRefresh={refresh} live={liveStatus}
+                   what="this board" style={{ margin: '6px 0 0' }} />
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setWeekOffset((w) => w - 1)} style={ghostBtn}>← Previous</button>
@@ -413,6 +669,9 @@ export default function Timetable() {
         </Banner>
       ) : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
+      {/* What became of a freed hour's waitlist. Three answers, one of which is
+          "we do not know" — see `handOn`. */}
+      {waitNote ? <Banner tone={waitNote.tone}>{waitNote.text}</Banner> : null}
       {loadFail ? (
         <Banner tone="crit">
           <strong style={{ color: 'var(--ink)' }}>The board is incomplete, so none of it is shown.</strong>{' '}
@@ -448,14 +707,14 @@ export default function Timetable() {
              } />
       </div>
 
-      {conflicts.length ? <Clashes rows={conflicts} /> : null}
+      {conflicts.length ? <Clashes rows={conflicts} zone={zone} /> : null}
 
-      <FloorCover board={board} weekOpened={weekOpened} />
+      <FloorCover board={board} days={days} zone={zone} />
 
       {owner ? (
         <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
-          <AddClass tenantId={tenantId} onChange={refresh} />
-          <AddOneToOne tenantId={tenantId} members={members} membersErr={membersErr} onChange={refresh} />
+          <AddClass tenantId={tenantId} zone={zone} onChange={refresh} />
+          <AddOneToOne tenantId={tenantId} zone={zone} members={members} membersErr={membersErr} onChange={refresh} />
         </div>
       ) : null}
 
@@ -467,8 +726,9 @@ export default function Timetable() {
             {owner ? (
               <>
                 A one-to-one can be booked to a member here — for the one who rang up — and freeing
-                one opens the hour to anybody rather than to whoever is first on its waitlist in the
-                app; only the trainer&rsquo;s own screen hands it to them.
+                one hands the hour to whoever is first on its waitlist in the app, who is booked in
+                and told. The board says which of those happened each time; where nobody was
+                waiting, the hour simply goes back on as open.
               </>
             ) : (
               <>
@@ -485,22 +745,22 @@ export default function Timetable() {
             Not shown — the board could not be read in full.
           </div>
         ) : board === null ? <Loading /> : (
-          <DataTable rows={board} columns={cols} rowKey={(e) => e.key}
+          <DataTable noun="timetable entries" rows={board} columns={cols} rowKey={(e) => e.key}
             empty="Nothing on the timetable this week — no classes and no one-to-ones. Add one below." />
         )}
       </section>
 
-      {owner ? <CalledOff classes={calledOff} onPutBack={putBack} /> : null}
+      {owner ? <CalledOff classes={calledOff} onPutBack={putBack} zone={zone} /> : null}
 
       {openClass ? (
         <Roster
-          gymClass={openClass} canEdit={staff} members={members} membersErr={membersErr}
+          gymClass={openClass} canEdit={staff} members={members} membersErr={membersErr} zone={zone}
           onClose={() => { setOpenClass(null); refresh(); }}
         />
       ) : null}
       {editing ? (
         <EditClass
-          gymClass={editing} tenantId={tenantId}
+          gymClass={editing} tenantId={tenantId} zone={zone}
           onClose={(changed) => { setEditing(null); if (changed) refresh(); }}
         />
       ) : null}
@@ -521,8 +781,10 @@ export default function Timetable() {
  * facts about the same empty slot, and both are gone in three months without a
  * column to keep them in.
  */
-function CalledOff({ classes, onPutBack }: {
+function CalledOff({ classes, onPutBack, zone }: {
   classes: GymClass[] | null; onPutBack: (c: GymClass) => void;
+  /** `tenants.timezone` — the hour a cancelled class was due to run. */
+  zone: string | null;
 }) {
   if (!classes || classes.length === 0) return null;
   return (
@@ -542,7 +804,7 @@ function CalledOff({ classes, onPutBack }: {
             display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 13,
           }}>
             <span className="mono" style={{ color: 'var(--ink3)', fontSize: 11.5 }}>
-              {new Date(c.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              {gymDateTimeText(c.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? '—'}
             </span>
             <span style={{ color: 'var(--ink)' }}>{c.title}</span>
             <span style={{ color: 'var(--ink2)' }}>
@@ -563,14 +825,54 @@ function CalledOff({ classes, onPutBack }: {
 
 /* ── correcting a class that is already up ─────────────────────────────────── */
 
-/** Local-time value for an `<input type="datetime-local">`, which takes wall
- *  clock and no zone. `toISOString()` here would show a UK owner their 6am
- *  class as 05:00 in summer and save it an hour early. */
-function localInputValue(iso: string): string {
+/**
+ * Wall-clock value for an `<input type="datetime-local">`, which holds a wall
+ * clock with no zone on it.
+ *
+ * `toISOString()` here would show a UK owner their 6am class as 05:00 in summer
+ * and save it an hour early — which is what the original comment said, and it
+ * is only half the problem. The browser both FILLS this field in and READS IT
+ * BACK as its own zone, so with no zone applied a Dubai gym's 06:00 class
+ * opened in London showed 03:00, and pressing Save wrote 03:00 Dubai: the read
+ * was three hours out and the write MOVED THE CLASS. Nothing on the form said
+ * which clock it was in, so there was nothing to notice — and the people who
+ * find out are the twelve members who turn up at six to a dark room.
+ *
+ * `gymWallValue` puts the gym's own clock in the field; `instantOf` below takes
+ * the gym's own clock back out. The two are exact inverses, including across
+ * the days the clocks move, and they have to stay that way: a form that reads
+ * in one clock and writes in another moves every class it touches.
+ *
+ * With no zone this falls back to the browser's, which is what this field has
+ * always been — the difference is that the forms now say so.
+ */
+function localInputValue(iso: string, zone: string | null): string {
+  const atGym = gymWallValue(iso, zone);
+  if (atGym) return atGym;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** A wall clock out of one of the forms below → the instant it names at the
+ *  gym. The inverse of `localInputValue`, and the half that writes. Falls back
+ *  to the browser's zone for a gym that has not set one, which is the old
+ *  behaviour and is said out loud on the form. */
+function instantOf(wall: string, zone: string | null): string {
+  return instantAtGym(wall, zone) ?? new Date(wall).toISOString();
+}
+
+/**
+ * The sentence a time field carries when the gym has not said what its clock
+ * is.
+ *
+ * Null when it has, because a note on every form is a note nobody reads. One
+ * wording from `NO_ZONE_NOTE`, the same sentence the rest of the console prints
+ * for the same silence.
+ */
+function whenNote(zone: string | null): string | null {
+  return zone ? null : `Times are on this device’s clock — ${NO_ZONE_NOTE}.`;
 }
 
 /**
@@ -590,11 +892,14 @@ function localInputValue(iso: string): string {
  * twelve classes on one Tuesday evening, and `updateSeriesFrom` refuses the
  * field outright rather than trusting this form not to send it.
  */
-function EditClass({ gymClass, tenantId, onClose }: {
-  gymClass: GymClass; tenantId: string; onClose: (changed: boolean) => void;
+function EditClass({ gymClass, tenantId, zone, onClose }: {
+  gymClass: GymClass; tenantId: string;
+  /** `tenants.timezone` — the hour this class runs at the gym. */
+  zone: string | null;
+  onClose: (changed: boolean) => void;
 }) {
   const [title, setTitle] = useState(gymClass.title);
-  const [when, setWhen] = useState(localInputValue(gymClass.startsAt));
+  const [when, setWhen] = useState(localInputValue(gymClass.startsAt, zone));
   const [duration, setDuration] = useState(String(gymClass.durationMin));
   const [capacity, setCapacity] = useState(String(gymClass.capacity));
   const [room, setRoom] = useState(gymClass.room ?? '');
@@ -633,32 +938,73 @@ function EditClass({ gymClass, tenantId, onClose }: {
     try {
       if (scope === 'series' && gymClass.seriesId) {
         const n = await updateSeriesFrom(supabase, gymClass.seriesId, gymClass.startsAt, patch);
+        // The COUNT, not the absence of an error. `updateSeriesFrom` ends
+        // `.select('id')` and hands back a row count, and this interpolated it
+        // into a success sentence without ever comparing it to zero — the exact
+        // defect src/lib/changedRows.ts was written for, quoted in its own
+        // header. The fix landed on the phone half (app/(trainer)/classes.tsx)
+        // and not here. The two policies on `gym_classes` FILTER rather than
+        // refuse, so an owner editing a series they may not touch matches no
+        // rows, gets no error, and read "0 classes changed, from this one
+        // onward" over a term that is still on.
+        //
+        // Zero can only be a refusal here: the class this sheet was opened on
+        // is itself in the series and its own start is the lower bound, so
+        // `series_id = X and starts_at >= gymClass.startsAt` matches at least
+        // that row for anybody permitted to change it.
+        //
+        // `changedFailure` and not `assertChanged`, which is what the phone
+        // uses: throwing would land in the catch below, and that catch words
+        // itself through `writeFailedText`. A locally thrown Error carries no
+        // `code` and no `status`, so `writeFate` classifies it 'unanswered' and
+        // the owner would be told the change "was sent and nothing came back …
+        // it may have been saved and only the reply lost". The server answered.
+        // It matched nothing. Saying otherwise is a worse sentence than the one
+        // being replaced.
+        const refused = changedFailure('That change to the series', n);
+        if (refused) {
+          setMsg(refused);
+          // Deliberately NOT `onClose(true)`: that closes the sheet and tells
+          // the board to refresh, which is how a refused write comes to look
+          // like a saved one.
+          return;
+        }
         setMsg(`${n} ${n === 1 ? 'class' : 'classes'} changed, from this one onward. The ones already past are untouched — they are the attendance record.`);
       } else {
         // Time only ever moves one occurrence. See the note above.
         await updateClass(supabase, gymClass.id, {
           ...patch,
-          ...(when ? { startsAt: new Date(when).toISOString() } : {}),
+          ...(when ? { startsAt: instantOf(when, zone) } : {}),
         });
         setMsg('Saved.');
       }
       onClose(true);
     } catch (x: any) {
-      setMsg(x?.message ?? 'That change was refused, so the class is unchanged.');
+      setMsg(writeFailedText(x, {
+        what: 'That change to the class',
+        unchanged: 'the class is unchanged',
+        howToCheck: 'Close this and reload the page: the timetable carries whichever version is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
+  // Escape, initial focus, a tab trap, and focus back to whatever opened this.
+  const panel = useDialog<HTMLDivElement>(() => onClose(false));
+
   return (
-    <div role="dialog" aria-label={`Edit ${gymClass.title}`}
+    <div
          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 10 }}
          onClick={() => onClose(false)}>
-      <div onClick={(e) => e.stopPropagation()}
+      {/* The dialog is the PANEL, not the scrim — see lib/dialog.ts, which also
+          brings Escape, an initial focus, a tab trap and focus return. */}
+      <div {...dialogPanel(panel, `Edit ${gymClass.title}`)}
+           onClick={(e) => e.stopPropagation()}
            style={{ width: 560, maxWidth: '100%', maxHeight: '85vh', overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--ring)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <h2>Edit this class</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()} · {gymClass.booked} booked
+              {gymDateTimeText(gymClass.startsAt, zone) ?? 'a start time that could not be read'} · {gymClass.booked} booked
               {inSeries ? ' · part of a weekly series' : ' · a one-off'}
             </p>
           </div>
@@ -666,15 +1012,25 @@ function EditClass({ gymClass, tenantId, onClose }: {
         </div>
 
         <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" style={field} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" aria-label="Class name" style={field} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* A datetime-local has no placeholder to borrow a name from, so
+                with no label it was announced as a bare date field. The three
+                beside it lose their placeholder the moment somebody types. */}
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)}
-                   disabled={scope === 'series'}
+                   disabled={scope === 'series'} aria-label="When it starts"
                    style={{ ...field, flex: 2, minWidth: 190, opacity: scope === 'series' ? 0.5 : 1 }} />
-            <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
-            <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
+            <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" aria-label="How many minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
+            <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" aria-label="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
             <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 120 }} />
           </div>
+          {whenNote(zone) ? (
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+              {/* Whose clock the field above both shows and saves in. Only when
+                  it is not the gym's — see `whenNote`. */}
+              {whenNote(zone)}
+            </p>
+          ) : null}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 160 }}
                     aria-label="Which coach is teaching this class">
@@ -718,7 +1074,10 @@ function EditClass({ gymClass, tenantId, onClose }: {
             <button type="submit" disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
           </div>
-          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+          {/* Announced. On success this form calls `onClose(true)`, so the only
+              state that ever reaches here is a refusal — drawn, until now, in
+              the same grey as the hint text beside it. */}
+          {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
         </form>
       </div>
     </div>
@@ -740,39 +1099,133 @@ function stateLabel(e: TimetableEntry): string {
 
 /* ── is the floor covered at six? ──────────────────────────────────────────── */
 
-function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; weekOpened: Date }) {
+/**
+ * Is the floor covered at six — and whose six.
+ *
+ * ── The hour this panel used to answer about ─────────────────────────────
+ *
+ * Every instant here was built from the READER's midnight: `dayStart` was a
+ * locally-constructed midnight and each column was `dayStart + hour * 3600000`.
+ * So the button marked 18:00 asked "who is on the floor at 18:00 where I am
+ * sitting", and drew the answer under a heading that says the gym's Tuesday.
+ * For an owner in London checking a Dubai gym that is the gym's 22:00: a studio
+ * that is closed reads as a studio with nobody in it, which is the same picture
+ * as a hole in the cover, and the panel exists to find holes in the cover.
+ *
+ * The heading was the tell and it was reasoned about the wrong way round. Its
+ * comment says the day and the hour "are not instants, so neither takes a zone"
+ * — true of the LABEL, and the data underneath it was an instant all along. One
+ * of the two had to move, and it is the data: a calendar day and an hour of it
+ * are what an owner means, and `rotaInstant` is what turns that pair into the
+ * moment it names at the gym.
+ *
+ * `rotaInstant` per hour rather than one midnight plus an offset, because on
+ * the two mornings a year the clocks move those are different instants — it
+ * re-solves the offset at each hour, so 18:00 is 18:00 on the gym's wall on the
+ * spring-forward Sunday too. With no zone it is the reader's own midnight plus
+ * the hour, which is exactly what this panel already did.
+ */
+function FloorCover({ board, days, zone }: {
+  board: TimetableEntry[] | null;
+  /** The seven calendar dates of the week being shown, on the gym's calendar. */
+  days: string[];
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
+}) {
   // Default to today when the shown week contains it, so the first thing an
-  // owner sees is the day they are standing in.
+  // owner sees is the day they are standing in — the GYM's today, because that
+  // is the day the gym is having. An owner in Los Angeles at 17:00 on a
+  // Saturday is looking at a London gym where it is already Sunday, and opening
+  // them on Saturday is opening them on a day that is over.
+  /**
+   * The day and the hour the panel opens on: where the gym actually is.
+   *
+   * `rotaCell` gives the gym's calendar date and its hour from ONE reading, so
+   * the two can never disagree about which day it is at the gym — the failure
+   * that two separate `Intl` calls either side of midnight produce.
+   *
+   * ── The hour this used to open on ───────────────────────────────────────
+   *
+   * 18. Always 18, whatever the time. The panel is named "Is the floor covered
+   * at six?" and it answered that question and only that one: a desk opening
+   * the board at nine in the morning to see who is on now was shown the evening,
+   * and had to count nine buttons along to reach its own hour. Every front-desk
+   * console this is measured against — Mindbody, Glofox, PushPress, Wodify,
+   * Zen Planner — opens on now, because "who is on the floor" is overwhelmingly
+   * a question about the next few minutes.
+   *
+   * It opens on 18 only when the shown day is NOT the day the gym is having:
+   * paging to next Tuesday has no "now" in it, and the evening is the hour an
+   * owner planning cover is looking for.
+   */
+  // Keyed on the hour, not on the zone alone. The zone does not change when
+  // time does, so reading the clock in a memo keyed on it fixed this value at
+  // the moment the tab was opened — and a desk leaves this board up all day.
+  const hourTick = useHourTick();
+  const gymNow = useMemo(() => rotaCell(hourStart(hourTick), zone), [hourTick, zone]);
   const todayIdx = useMemo(() => {
-    // Counted in calendar days rather than by dividing a millisecond gap by
-    // 86,400,000: on a clocks-change week one of those days is 23 or 25 hours
-    // long, and the division lands on the day before or after the one the owner
-    // is standing in.
-    const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const opened = new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate()).getTime();
-    const i = Math.round((midnight - opened) / DAY);
-    return i >= 0 && i < 7 ? i : 0;
-  }, [weekOpened]);
+    // Matched as a calendar DATE rather than counted as a span of days: both
+    // sides are `YYYY-MM-DD` on the same calendar, so this is a string compare
+    // and no clocks-change day of 23 or 25 hours can move it.
+    const today = gymNow?.date ?? rotaToday(zone);
+    if (!today) return 0;
+    const i = days.indexOf(today);
+    return i >= 0 ? i : 0;
+    // `hourTick` is in the deps for the fallback arm, not for `gymNow`. When
+    // the gym has no zone, `gymNow` is null and `rotaToday(zone)` reads the
+    // clock itself — so without the tick this memo would settle the reader's
+    // day once, at mount, for exactly the gyms that have set no zone. The tick
+    // is the only dependency here that moves when time does.
+  }, [days, zone, gymNow, hourTick]);
+  /** The gym's current hour, clamped into the strip the panel draws. Null when
+   *  the shown week does not contain the gym's today, or when the clock could
+   *  not be read at all — and 18:00 is what the panel falls back to, which is
+   *  what it has always opened on. */
+  const nowHour = useMemo(() => {
+    if (!gymNow || days[todayIdx] !== gymNow.date) return null;
+    return Math.min(LAST_HOUR, Math.max(FIRST_HOUR, gymNow.hour));
+  }, [gymNow, days, todayIdx]);
   const [dayIdx, setDayIdx] = useState(todayIdx);
-  const [hour, setHour] = useState(18);
+  const [hour, setHour] = useState(nowHour ?? 18);
   useEffect(() => { setDayIdx(todayIdx); }, [todayIdx]);
+  // Follows the clock only while the panel is showing the gym's today. Moving
+  // to another day leaves the chosen hour where the reader put it: a desk that
+  // clicked 07:00 to check tomorrow's cover has not asked to be sent back to
+  // now.
+  useEffect(() => { if (nowHour != null) setHour(nowHour); }, [nowHour]);
 
-  // Local midnight built from parts rather than by adding 86_400_000, so a
-  // clock change does not shift the whole strip by an hour.
-  const dayStart = useMemo(
-    () => new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate() + dayIdx),
-    [weekOpened, dayIdx],
+  /** The gym's calendar date this strip is drawn for. */
+  const dayIso = days[dayIdx] ?? days[0] ?? null;
+
+  /** Hour `h` of `dayIso`, as the instant it names at the gym. Null only when
+   *  there is no day — never silently the reader's, which is the bug. */
+  const instantAt = useCallback(
+    (h: number) => {
+      const iso = dayIso ? rotaInstant(dayIso, h, zone) : null;
+      return iso == null ? null : Date.parse(iso);
+    },
+    [dayIso, zone],
   );
 
-  const hours = useMemo(
-    () => (board ? floorByHour(board, dayStart.getTime(), FIRST_HOUR, LAST_HOUR) : null),
-    [board, dayStart],
-  );
-  const slice = useMemo(
-    () => (board ? floorAt(board, dayStart.getTime() + hour * 3_600_000) : null),
-    [board, dayStart, hour],
-  );
+  const hours = useMemo(() => {
+    if (!board || !dayIso) return null;
+    // `floorByHour` takes one day-start and adds whole hours to it, which is
+    // the arithmetic this is replacing — so each column is asked for
+    // individually through `floorAt`, at the instant `rotaInstant` names.
+    const out: FloorSlice[] = [];
+    for (let h = FIRST_HOUR; h <= LAST_HOUR; h++) {
+      const at = instantAt(h);
+      if (at == null || !Number.isFinite(at)) return null;
+      out.push(floorAt(board, at));
+    }
+    return out;
+  }, [board, dayIso, instantAt]);
+
+  const slice = useMemo(() => {
+    if (!board) return null;
+    const at = instantAt(hour);
+    return at == null || !Number.isFinite(at) ? null : floorAt(board, at);
+  }, [board, instantAt, hour]);
 
   const busiest = hours ? Math.max(1, ...hours.map((h) => h.entries.length)) : 1;
 
@@ -781,13 +1234,23 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 12, alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <div>
           <h2>Who is on the floor</h2>
-          <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-            Classes and one-to-ones counted together. A quiet hour is shown as a quiet hour, not left out.
+          <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
+            Classes and one-to-ones counted together. A quiet hour is shown as a quiet hour, not left out.{' '}
+            {/* Whose hours these are, said in both states and for the reason the
+                door's own histogram says it: a strip drawn on the wrong clock
+                renders exactly as neatly as one drawn on the right clock, and
+                the only reader who ever finds out is the coach rostered against
+                it. */}
+            {zone
+              ? <>Hours are <span className="mono">{zone}</span>, this gym&rsquo;s own clock.</>
+              : <>Hours are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong> — {NO_ZONE_NOTE}.</>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {DAY_NAMES.map((d, i) => (
-            <button key={d} onClick={() => setDayIdx(i)}
+            /* `aria-pressed`, matching the hour strip ten lines below, which
+               already had it. */
+            <button key={d} type="button" aria-pressed={i === dayIdx} onClick={() => setDayIdx(i)}
               style={{ ...ghostBtn, padding: '5px 9px',
                        background: i === dayIdx ? 'var(--brand)' : 'var(--surface2)',
                        color: i === dayIdx ? 'var(--brand-ink)' : 'var(--ink2)' }}>{d}</button>
@@ -832,7 +1295,7 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
           </div>
 
           <div style={{ padding: '10px 14px 16px' }}>
-            <SliceDetail slice={slice} hour={hour} day={dayStart} />
+            <SliceDetail slice={slice} hour={hour} day={dayIso} zone={zone} />
           </div>
         </>
       )}
@@ -840,8 +1303,21 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
   );
 }
 
-function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: number; day: Date }) {
-  const when = `${day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} at ${String(hour).padStart(2, '0')}:00`;
+function SliceDetail({ slice, hour, day, zone }: {
+  slice: FloorSlice | null; hour: number;
+  /** The gym's calendar date, `YYYY-MM-DD`. */
+  day: string | null;
+  zone: string | null;
+}) {
+  // `day` is a bare calendar date on the GYM's calendar and the hour beside it
+  // is the grid's own column, already chosen. Neither is an instant, so neither
+  // takes a zone here: rendering a bare date in one could name the day before
+  // it. What changed is that the pair now describes the same moment the slice
+  // was cut at — before, this heading said the gym's Tuesday 18:00 over data
+  // taken at the reader's.
+  const when = day
+    ? `${calendarDateText(day, { weekday: 'long', day: 'numeric', month: 'short' }) ?? day} at ${String(hour).padStart(2, '0')}:00`
+    : `${String(hour).padStart(2, '0')}:00`;
   if (!slice) return <Loading />;
 
   if (!slice.entries.length) {
@@ -887,7 +1363,7 @@ function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: num
   );
 }
 
-function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
+function Clashes({ rows, zone }: { rows: ReturnType<typeof clashes>; zone: string | null }) {
   return (
     <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
@@ -906,17 +1382,17 @@ function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
             padding: '10px 14px', borderTop: i ? '1px solid var(--ring)' : 'none', fontSize: 13,
           }}>
             <span style={{
-              color: c.reason === 'room-shared' ? '#f0c04e' : 'var(--crit)',
+              color: c.reason === 'room-shared' ? 'var(--warn)' : 'var(--crit)',
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>
               {c.reason === 'room' ? 'Room' : c.reason === 'trainer' ? 'Trainer' : 'Shared'}
             </span>
             <span style={{ color: 'var(--ink)', marginLeft: 8 }}>{c.what}</span>
             <span style={{ color: 'var(--ink3)', marginLeft: 8 }}>
-              {new Date(c.a.startsAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+              {gymDateTimeText(c.a.startsAt, zone, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) ?? '—'}
               {' — '}{c.a.title}{c.a.withName ? ` (${c.a.withName})` : ''}
               {' overlaps '}{c.b.title}{c.b.withName ? ` (${c.b.withName})` : ''}
-              {' at '}{new Date(c.b.startsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+              {' at '}{gymTimeText(c.b.startsAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'}
             </span>
           </li>
         ))}
@@ -951,6 +1427,52 @@ function memberOptions(members: Membership[] | null): { id: string; name: string
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** What a freed hour leaves on the screen behind it: what became of its
+ *  waitlist, and whether that is news or a warning. */
+interface SlotNote { text: string; tone?: BannerTone }
+
+/**
+ * Hand a freed hour to the head of its waitlist, and say what happened.
+ *
+ * `promote_session_waitlist` is SECURITY DEFINER and, since part 2610, admits
+ * the owner of the gym the session is delivered in as well as its own trainer.
+ * It returns the promoted member's id, or null for "the server ran and promoted
+ * nobody", or raises. src/lib/waitlistPromotion.ts is the reading of those three
+ * — the same module `promoteWaitlist` in src/ui/sessions.tsx reads them with, so
+ * the coach's screen and the desk cannot drift apart on what null means.
+ *
+ * A THROW is 'failed' and not 'nobody'. `readPromotion(null)` says so, and it
+ * matters here more than anywhere: a refused or lost call tells the desk nothing
+ * about the queue, and least of all that it was empty. So the "book whoever
+ * rings next into it" clause is gated on `mayReoffer` — true for the
+ * proven-empty answer and nothing else — and the failed sentence sends the desk
+ * to a reload instead. Handing the hour to the next caller off an unread queue
+ * is the race the waitlist was built to replace.
+ *
+ * No read of `session_waitlist` anywhere in this file. Part 144 keeps that table
+ * unreadable to owners on purpose and part 2610 did not widen it; the gym gets
+ * the answer, never the queue. The only person named is the one who came out of
+ * it holding the hour — and only where this gym's own roster already knows them.
+ */
+async function handOn(sessionId: string, options: { id: string; name: string }[]): Promise<SlotNote> {
+  let answer: { data?: unknown; error?: unknown } | null = null;
+  try {
+    answer = await supabase.rpc('promote_session_waitlist', { p_session: sessionId });
+  } catch {
+    answer = null;
+  }
+  const p = readPromotion(answer);
+  const who = p.clientId ? options.find((o) => o.id === p.clientId)?.name ?? null : null;
+  return {
+    text: promotionText(p, who)
+      + (mayReoffer(p) ? ' Book whoever rings next into it from the picker on that row.' : ''),
+    // `crit` is this console's word for "that did not happen", and the freeing
+    // did. A promotion that could not be read is a warning about what to do
+    // next, not a refused write.
+    tone: p.outcome === 'failed' ? 'warn' : undefined,
+  };
+}
+
 /**
  * Put a named member on an open slot, or take them off it.
  *
@@ -970,19 +1492,48 @@ function memberOptions(members: Membership[] | null): { id: string; name: string
  * let one be removed for exactly this reason, and moving whose session it was
  * after the fact would rewrite who a trainer was paid for.
  *
- * ONE THING IT DELIBERATELY DOES NOT DO, and the section below says so out loud:
- * it does not promote the waitlist. Promotion is not a trigger — it rides inside
- * `cancel_my_session` and `promote_session_waitlist`
- * (126-the-late-fee-and-the-waitlist.sql), and the second is authorised on
- * `trainer_id = auth.uid()`, so an owner cannot call it. Freeing an hour here
- * therefore opens it for anyone rather than handing it to whoever was first in
- * the queue. Claiming otherwise would be worse than saying it.
+ * ── FREEING AN HOUR NOW HANDS IT ON ──────────────────────────────────────
+ *
+ * This comment used to say the opposite, and said it deliberately: promotion is
+ * not a trigger, it rides inside `cancel_my_session` and
+ * `promote_session_waitlist` (part 126), and that function was authorised on
+ * `trainer_id = auth.uid()` alone — so an owner could not call it, freeing an
+ * hour at the desk opened it to anybody, and the member who had been first in
+ * the queue for three weeks was never told. Claiming otherwise would have been
+ * worse than saying it.
+ *
+ * Part 2610 added the second arm: `sessions.tenant_id is not null and
+ * public.is_owner_of(s.tenant_id)`, character for character the USING clause of
+ * `sessions_gym_owner_u` — the same fact that already lets this screen empty the
+ * slot, asked again by the function that has to hand it on. The trainer arm is
+ * untouched and is still evaluated first. So the sentence is now false and the
+ * call is made: free the slot, then promote.
+ *
+ * The console still cannot READ the queue, and must not look as though it can.
+ * Part 144 keeps `session_waitlist` unreadable to owners on purpose — which
+ * named members are queueing for a PT slot is not the gym's to see — and part
+ * 2610 does not disturb it. The RPC is SECURITY DEFINER, so the gym gets the
+ * ANSWER without the table. Nothing here reads `session_waitlist`, and nobody in
+ * the queue is named except the one person who came out of it holding the hour.
+ *
+ * ── three answers, and the one that licenses the desk to act ──────────────
+ *
+ * A uuid, a null and a raise are three different facts, and
+ * src/lib/waitlistPromotion.ts is the shared reading of them —
+ * `src/ui/sessions.tsx` reads the same RPC through the same module. The one
+ * that matters is the third: a call that did not come back is NOT a queue
+ * proven empty. It may have promoted somebody and lost the reply, so the desk
+ * is not invited to book the next caller into the hour — `mayReoffer` is the
+ * gate on that sentence and it is true for the proven-empty answer only.
  */
 function BookTo({ slot, members, membersErr, onDone }: {
   slot: PtSlot | null;
   members: Membership[] | null;
   membersErr: string | null;
-  onDone: (err: string | null) => void;
+  /** The refusal, where the write failed; and what became of the waitlist,
+   *  where an hour was freed. They are two different sentences in two different
+   *  tones — a hour handed to the head of the queue is not an error. */
+  onDone: (err: string | null, note?: SlotNote | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   if (!slot) return null;
@@ -1001,12 +1552,22 @@ function BookTo({ slot, members, membersErr, onDone }: {
     setBusy(true);
     try {
       await updatePtSlot(supabase, slot.id, { clientId: next || null });
-      onDone(null);
+      // Only on freeing. Booking a member IN takes the hour off the queue's
+      // hands; there is nothing to promote into a slot that now has an owner.
+      onDone(null, next ? null : await handOn(slot.id, options));
     } catch (e: any) {
       const who = options.find((o) => o.id === next)?.name ?? 'that member';
-      onDone(next
-        ? `${who} was not booked in: ${e?.message ?? 'the change was refused'}. The slot is unchanged.`
-        : `That slot was not freed: ${e?.message ?? 'the change was refused'}. It is still booked.`);
+      onDone(writeFailedText(e, next
+        ? {
+          what: `Booking ${who} in`,
+          unchanged: 'the slot is unchanged',
+          howToCheck: 'Reload this page: the slot shows whoever is actually booked into it.',
+        }
+        : {
+          what: 'Freeing that slot',
+          unchanged: 'it is still booked',
+          howToCheck: 'Reload this page: the slot shows whoever is actually booked into it.',
+        }));
     } finally { setBusy(false); }
   };
 
@@ -1037,8 +1598,10 @@ function BookTo({ slot, members, membersErr, onDone }: {
 
 /* ── adding a one-to-one ───────────────────────────────────────────────────── */
 
-function AddOneToOne({ tenantId, members, membersErr, onChange }: {
+function AddOneToOne({ tenantId, zone, members, membersErr, onChange }: {
   tenantId: string;
+  /** `tenants.timezone` — the clock the hour typed below is meant in. */
+  zone: string | null;
   members: Membership[] | null;
   membersErr: string | null;
   onChange: () => void;
@@ -1068,7 +1631,7 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
 
   const draft = {
     trainerId,
-    startsAt: when ? new Date(when).toISOString() : '',
+    startsAt: when ? instantOf(when, zone) : '',
     durationMin: parseInt(duration, 10),
     room,
     blocked: hold,
@@ -1110,24 +1673,35 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
       </div>
       <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
         {trainersErr ? (
-          <span style={{ fontSize: 12.5, color: 'var(--crit)' }}>{trainersErr}</span>
+          <span role="alert" aria-live="assertive" aria-atomic="true" style={{ fontSize: 12.5, color: 'var(--crit)' }}>{trainersErr}</span>
         ) : trainers === null ? (
           <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Loading trainers…</span>
         ) : trainers.length === 0 ? (
           <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
-            No trainers on your roster yet — invite one first and they will appear here.
+            No trainers on your roster yet — invite one on the Staff page and they appear here when they accept.
           </span>
         ) : (
-          <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 150 }}>
+          <select aria-label="Which coach" value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 150 }}>
             <option value="">Which trainer?</option>
             {trainers.map((t) => (
               <option key={t.id} value={t.id}>{t.name ?? 'Unnamed trainer'}</option>
             ))}
           </select>
         )}
-        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ ...field, flex: 2, minWidth: 190 }} />
+        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
+        {/* Whose clock the hour above is meant in, said only when it is not the
+            gym's. A gym with a timezone set needs no caption — the field is
+            already the gym's clock, which is what an owner means when they type
+            06:00. A gym without one is typing into the reader's, and a class
+            written from another country then runs at an hour nobody chose. */}
+        {whenNote(zone) ? (
+          <p style={{ margin: 0, width: '100%', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+            {whenNote(zone)}
+          </p>
+        ) : null}
+
         {/* Disabled rather than hidden while the hour is held: the two are a
             real either/or (slotBlocker refuses both together) and a control
             that disappears reads as one that was never there. */}
@@ -1149,21 +1723,26 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
         </label>
         <button type="submit" disabled={busy || !trainers?.length} style={primaryBtn}>Add</button>
       </form>
-      {blocker ? <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>{blocker}</div> : null}
+      {blocker ? <div style={{ padding: '0 14px 12px', color: 'var(--warn)', fontSize: 12.5 }}>{blocker}</div> : null}
       {membersErr ? (
-        <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>
+        <div style={{ padding: '0 14px 12px', color: 'var(--warn)', fontSize: 12.5 }}>
           The member list could not be read, so this slot can only go up open: {membersErr}. That is
           a failed query, not a gym with no members — book it to somebody once the page reloads.
         </div>
       ) : null}
-      {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
+      {msg ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );
 }
 
 /* ── adding classes ────────────────────────────────────────────────────────── */
 
-function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => void }) {
+function AddClass({ tenantId, zone, onChange }: {
+  tenantId: string;
+  /** `tenants.timezone` — the clock the hour typed below is meant in. */
+  zone: string | null;
+  onChange: () => void;
+}) {
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState('');
   const [duration, setDuration] = useState('45');
@@ -1239,7 +1818,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
     setBusy(true); setMsg(null);
     const c = {
       title: title.trim(),
-      startsAt: new Date(when).toISOString(),
+      startsAt: instantOf(when, zone),
       durationMin: parseInt(duration, 10) || 45,
       capacity: parseInt(capacity, 10) || 0,
       room: room.trim() || null,
@@ -1278,9 +1857,20 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
       </div>
       <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" style={{ ...field, flex: 2, minWidth: 140 }} />
-        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ ...field, flex: 2, minWidth: 190 }} />
+        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
+        {/* Whose clock the hour above is meant in, said only when it is not the
+            gym's. A gym with a timezone set needs no caption — the field is
+            already the gym's clock, which is what an owner means when they type
+            06:00. A gym without one is typing into the reader's, and a class
+            written from another country then runs at an hour nobody chose. */}
+        {whenNote(zone) ? (
+          <p style={{ margin: 0, width: '100%', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+            {whenNote(zone)}
+          </p>
+        ) : null}
+
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
         {/* The picker first, the free-text name second and disabled once a
             coach is chosen — the same either/or as the one-to-one form above,
@@ -1314,7 +1904,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
           /staff. A class with no coach attached is not a broken class — it is
           a class no per-coach figure can ever count. */}
       {trainersErr ? (
-        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>
           Your coaches could not be read, so this class can only carry a typed name: {trainersErr}.
           That is a failed query, not a gym with no coaches — a class saved now will not appear in
           anybody&rsquo;s class hours on Staff, and its own coach will not be able to edit it.
@@ -1328,7 +1918,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         </div>
       ) : null}
       {kitErr && needs.trim() ? (
-        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>
           The equipment register could not be read, so this capacity is unchecked rather than
           checked and found fine: {kitErr}. Adding the class is still allowed — the check is a
           warning, not a gate.
@@ -1336,7 +1926,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
       ) : null}
       {check ? (
         <div style={{ padding: '0 14px 12px', fontSize: 12.5,
-                      color: check.supported === false ? '#f0c04e' : 'var(--ink3)' }}>
+                      color: check.supported === false ? 'var(--warn)' : 'var(--ink3)' }}>
           {check.supported === false
             ? `${check.note} Adding it anyway is allowed — the register may simply be out of date, and a stale inventory should not stop a class reaching the timetable.`
             : check.supported === null
@@ -1344,7 +1934,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
               : `${check.usable} available — enough for ${check.limit}.`}
         </div>
       ) : null}
-      {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
+      {msg ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );
 }
@@ -1367,9 +1957,11 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
  * desk handles — the member who rings up, the no-show at 06:05 whose bike is
  * free, the coach who says one more can squeeze in — had no path at all.
  */
-function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
+function Roster({ gymClass, canEdit, members, membersErr, zone, onClose }: {
   gymClass: GymClass; canEdit: boolean;
   members: Membership[] | null; membersErr: string | null;
+  /** `tenants.timezone` — the hour this class runs at the gym. */
+  zone: string | null;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
@@ -1500,17 +2092,22 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
     </li>
   );
 
+  // Escape, initial focus, a tab trap, and focus back to whatever opened this.
+  const panel = useDialog<HTMLDivElement>(onClose);
+
   return (
     <div
-      role="dialog"
-      aria-label={`Check in for ${gymClass.title}`}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
         display: 'grid', placeItems: 'center', padding: 24, zIndex: 10,
       }}
       onClick={onClose}
     >
+      {/* The dialog is the PANEL, not the scrim — see lib/dialog.ts. This is
+          the register a coach works from standing in the room, and it was
+          unreachable from a keyboard except by tabbing through all of it. */}
       <div
+        {...dialogPanel(panel, `Check in for ${gymClass.title}`)}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto',
@@ -1521,7 +2118,7 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
           <div>
             <h2>{gymClass.title}</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()}
+              {gymDateTimeText(gymClass.startsAt, zone) ?? 'a start time that could not be read'}
               {/* Counted off the roster in hand, not off the board's snapshot.
                   Capacity of 0 is a class nobody sized, and "of 0" would read
                   as a class with no room in it. */}
@@ -1544,7 +2141,10 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
             display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap',
             padding: '11px 16px', borderBottom: '1px solid var(--ring)', background: 'var(--surface2)',
           }}>
-            <label style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Add somebody at the desk</label>
+            {/* Not a <label>: it has no `htmlFor`, so clicking it did nothing
+                and it named no control. The select beside it carries its own
+                `aria-label`, which is what a screen reader was already using. */}
+            <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Add somebody at the desk</span>
             <select value={adding} onChange={(e) => { setAdding(e.target.value); setAddMsg(null); }}
                     style={{ ...field, flex: 2, minWidth: 200 }} aria-label="Who to put on this class">
               <option value="">
@@ -1657,28 +2257,3 @@ const linkBtn = {
   fontSize: 12.5, padding: 0, fontFamily: 'var(--sans)',
 } as const;
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

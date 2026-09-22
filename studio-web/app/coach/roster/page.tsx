@@ -44,8 +44,18 @@
 // `readAll`'s contract — so nothing downstream may assume rows arrive newest
 // first. The two loops that did are rewritten to compare timestamps instead.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { gymDateText, gymDateTimeText, calendarDateText } from '@lib/gymWhen';
+import { parseGymZone } from '@lib/gymZone';
+// `Unresolved` comes from here rather than being declared at the bottom of
+// this file. Seven console screens held a byte-identical copy, every one of
+// them a plain `<div>` — so the sentence saying THIS section's rows could not
+// be read was never announced. One copy, with the live region on it.
+import { ConsoleGate, Unresolved } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { DataTable, type Column } from '@/components/DataTable';
 // `money()` is deliberately not imported: the only amount on this screen is a
 // pack price, and `client_purchases` carries no currency for it to print.
@@ -54,12 +64,13 @@ import { DataTable, type Column } from '@/components/DataTable';
 // scripts/check-currency.mjs. It now reads the signed-in coach's own
 // preference; lib/units.ts sets out whose unit that is and why, and what a
 // coach who has never chosen one is told.
-import { unitsFor, weightText, deltaText, unitSourceNote } from '@/lib/units';
+import { unitsFor, weightText, deltaText, unitSourceNote, type WeightUnit } from '@/lib/units';
 import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
 import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind } from '@lib/goalTargets';
-import { fmtDay } from '@lib/format';
 import { readByIds } from '@lib/idLookup';
 import { readAll } from '@lib/rowCap';
+import { Banner } from '@/components/Banner';
+import { num } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -99,7 +110,6 @@ const IN_WINDOW = `in the last ${ACTIVITY_DAYS} days`;
  * query that errored, and a coach acts on both — one by waiting, the other by
  * concluding their book has been wiped.
  */
-type Unread = 'loading' | 'failed' | null;
 
 // A local `ask()` used to sit here, turning `{ data: null, error }` back into a
 // rejection: supabase-js RESOLVES on a database error, so a refused query handed
@@ -108,13 +118,6 @@ type Unread = 'loading' | 'failed' | null;
 // read below now goes through `readAll` or `readByIds`, which check `error` on
 // every page and throw for the same reason — a read that fails half way through
 // must not hand back the pages that did arrive as though they were the set.
-
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as { message?: string } | null)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 const settled = <T,>(res: PromiseSettledResult<T[]>): T[] | null =>
   res.status === 'fulfilled' ? res.value : null;
@@ -270,6 +273,10 @@ interface Pack {
 
 export default function CoachRoster() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Whether the gym's NAME could not be READ, as distinct from there being no
   // gym. The read below still drops the error into a `no-error-ok:` — no figure
@@ -277,6 +284,8 @@ export default function CoachRoster() {
   // either, and that is a sentence about the owner's ACCOUNT produced by a
   // query that failed. Carrying this one bit is what lets the rail say which.
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [packsErr, setPacksErr] = useState(false);
@@ -285,7 +294,7 @@ export default function CoachRoster() {
    *  real but short, which is worse than no list unless it is said out loud. */
   const [partial, setPartial] = useState<string | null>(null);
 
-  const load = useCallback(async (coachId: string) => {
+  const load = useCallback(async (coachId: string): Promise<boolean> => {
     setErr(null);
     setPartial(null);
 
@@ -334,7 +343,9 @@ export default function CoachRoster() {
       setRows(null);
       setPacks(null);
       setErr(bookTrouble.join(' · '));
-      return;
+      // Nothing landed. The stamp stays where it was, and the banner above says
+      // which read is missing.
+      return false;
     }
     if (bookTrouble.length) {
       setPartial(
@@ -358,7 +369,10 @@ export default function CoachRoster() {
       setPacks([]);
       setPacksErr(false);
       setErr(bookTrouble.length ? bookTrouble.join(' · ') : null);
-      return;
+      // A book with nobody on it is a complete answer, and the decorating reads
+      // were never sent because there was nobody to ask about. Whole unless one
+      // of the two halves of the book itself failed.
+      return bookTrouble.length === 0;
     }
 
     // Everything that decorates a client who is on the book either way. Settled
@@ -619,6 +633,12 @@ export default function CoachRoster() {
       failure(cpRes, 'their session packs'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means every one of the nine reads came back — the two halves of the
+    // book, and the seven that decorate it. `useFetched` stamps only on a whole
+    // read, so a roster whose check-ins would not load leaves the stamp where
+    // it was rather than dating a "gone quietest" order computed without them.
+    return trouble.length === 0;
   }, []);
 
   useEffect(() => {
@@ -626,20 +646,50 @@ export default function CoachRoster() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who) return;
       if (who.tenantId) {
         // The error is now read off the result. Not because the name matters — it
         // is a label — but because "we could not ask" and "there is no gym" must
         // not arrive at the rail as the same null. See Shell's gymNameUnread.
-        const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-        if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
+        // `timezone` joins `name`: every date below — when somebody last
+        // trained, when a pack was bought — is a fact about the gym's day, and
+        // was being drawn on whichever clock this page was opened from.
+        const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+        if (live) {
+          setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr);
+          const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+          setZone(z.kind === 'zone' ? z.zone : null);
+        }
       }
-      if (who.role !== 'trainer' && who.role !== 'owner') return;
-      await load(who.id);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the book is the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * "Ordered by who has gone quietest, so the top of this list is the morning's
+   * call list" — and the order is computed from reads bounded at the moment of
+   * the request. A coach who opens this at eight and works down it at eleven is
+   * ringing people in an order struck three hours ago, with somebody who has
+   * since trained still at the top.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.id && (me.role === 'trainer' || me.role === 'owner')
+      ? load(me.id)
+      : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.id) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id, me?.role]);
 
   // Ranked before the table sees them, so the default view already answers
   // "who first" without anyone clicking a column header.
@@ -658,8 +708,11 @@ export default function CoachRoster() {
       });
   }, [rows]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   // A refused profile read is not a statement about who somebody is.
   //
@@ -764,7 +817,19 @@ export default function CoachRoster() {
         return (
           <span title={open.map((g) => goalLabel(g) + (g.targetValue != null ? ` ${g.targetValue}` : '')).join(' · ')}>
             {goalLabel(lead)}{lead.targetValue != null ? ` ${lead.targetValue}${unit}` : ''}
-            {lead.targetDateISO ? <span className="dash"> by {fmtDay(lead.targetDateISO)}</span> : null}
+            {/* `calendarDateText`, not `fmtDay`. A goal's `target_date` is a
+                `date` column — a calendar day, not an instant — and both
+                helpers spell it the same three numbers, so this is not a
+                repair. It is the console having ONE answer to "whose format is
+                this": src/lib/gymWhen.ts, whose `calendarDateText` parses and
+                formats a bare day in UTC so the two cancel and no reader's
+                clock is consulted at all. `fmtDay` reaches that answer by a
+                different route (local midnight, local format), and a second
+                route is how a screen ends up on the reader's clock the next
+                time somebody passes it an instant instead. */}
+            {lead.targetDateISO ? (
+              <span className="dash"> by {calendarDateText(lead.targetDateISO, { weekday: 'short', day: 'numeric', month: 'short' }) ?? lead.targetDateISO}</span>
+            ) : null}
             {more > 0 ? <span className="dash"> +{more}</span> : null}
           </span>
         );
@@ -783,7 +848,7 @@ export default function CoachRoster() {
       render: (r) => {
         if (!r.row.activityKnown) return <span className="dash">— activity unreadable</span>;
         if (r.row.lastMs == null) return <span className="dash">— nothing {IN_WINDOW}</span>;
-        return <span title={new Date(r.row.lastMs).toLocaleString()}>{ago(r.row.lastMs)}</span>;
+        return <span title={gymDateTimeText(r.row.lastMs, zone) ?? undefined}>{ago(r.row.lastMs)}</span>;
       },
     },
     {
@@ -881,6 +946,9 @@ export default function CoachRoster() {
         session packs are read in full, however old they are.
       </p>
 
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="your book" style={{ margin: '2px 0 14px' }} />
+
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {partial ? <Banner>{partial}</Banner> : null}
 
@@ -936,12 +1004,15 @@ export default function CoachRoster() {
             reading it, and it does not get the unit chosen — the same call
             src/lib/unitPreference.ts makes for the phone. */}
         {unitNote ? (
-          <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>{unitNote}</p>
+          <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)', maxWidth: '80ch' }}>
+            {unitNote}{' '}
+            <UnitChoice me={me} unit={units.weightUnit} onChosen={(u) => setMe({ ...me, weightUnit: u })} />
+          </p>
         ) : null}
         {unread ? (
           <Unresolved state={unread} what="your roster" />
         ) : (
-          <DataTable
+          <DataTable noun="clients"
             rows={ranked ?? []}
             columns={cols}
             rowKey={(r) => r.row.id}
@@ -950,14 +1021,18 @@ export default function CoachRoster() {
         )}
       </Section>
 
-      <Packs packs={packs} failed={packsErr} rows={rows} />
+      <Packs packs={packs} failed={packsErr} rows={rows} zone={zone} />
     </Shell>
   );
 }
 
 /* ── packs ─────────────────────────────────────────────────────────────────── */
 
-function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean; rows: Row[] | null }) {
+function Packs({ packs, failed, rows, zone }: {
+  packs: Pack[] | null; failed: boolean; rows: Row[] | null;
+  /** `tenants.timezone` — the day a pack was bought is the gym's day. */
+  zone: string | null;
+}) {
   const nameOf = (id: string | null) => {
     if (!id) return null;
     return rows?.find((r) => r.id === id)?.name ?? null;
@@ -975,7 +1050,7 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
       // spent; it was never counted in sessions at all.
       render: (p) => p.total == null
         ? <span className="dash">— not sold by the session</span>
-        : `${Math.max(0, p.total - p.used)} of ${p.total}`,
+        : `${num(Math.max(0, p.total - p.used))} of ${num(p.total)}`,
     },
     {
       key: 'paid', header: 'Paid (minor units)', value: (p) => p.amountCents, numeric: true,
@@ -985,16 +1060,22 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
       // labelling every pack a coach ever sold with the currency it defaults to.
       // /revenue reached the same wall and answers it the same way: the digits,
       // said to be minor units, rather than a denomination nobody recorded.
+      //
+      // And it must actually BE the digits. This rendered
+      // `(p.amountCents / 100).toFixed(2)`, which is not the integer with the
+      // currency withheld — it is that integer with a decimal point invented
+      // two places from the right. A ¥60,000 pack printed "600.00", which is a
+      // different number, not a figure whose denomination is unstated. The
+      // integer, with no separator at all, is the honest render of what the
+      // sentence above claims to be doing.
       render: (p) => p.amountCents == null
         ? <span className="dash">— nothing recorded</span>
-        : <span className="mono">{(p.amountCents / 100).toFixed(2)}</span>,
+        : <span className="mono">{String(p.amountCents)}</span>,
     },
     { key: 'status', header: 'Status', value: (p) => p.status },
     {
       key: 'bought', header: 'Bought', value: (p) => p.createdAt,
-      render: (p) => p.createdAt
-        ? new Date(p.createdAt).toLocaleDateString()
-        : <span className="dash">—</span>,
+      render: (p) => gymDateText(p.createdAt, zone) ?? <span className="dash">—</span>,
     },
   ];
 
@@ -1006,7 +1087,7 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
       {packs === null ? (
         <Unresolved state={failed ? 'failed' : 'loading'} what="your session packs" />
       ) : (
-        <DataTable rows={packs} columns={cols} rowKey={(p) => p.id} empty="Nobody has bought a pack from you yet." />
+        <DataTable noun="packs" rows={packs} columns={cols} rowKey={(p) => p.id} empty="Nobody has bought a pack from you yet." />
       )}
     </Section>
   );
@@ -1026,41 +1107,81 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div
-        className="mono"
-        style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}
-      >
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
-}
-
 /**
  * What stands in for a table whose rows are not known.
  *
  * A refused read must not fall through to the table's own empty line, or "we
  * could not ask" and "you have no clients" become the same sentence on screen.
  */
-function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
+
+
+
+/* ── choosing the unit, here ───────────────────────────────────────────────── */
+
+/** The unit as a person says it. `weightLabel` in src/lib/units.ts formats a
+ *  FIGURE and needs one; this is the noun on its own, for a control. */
+const UNIT_WORD: Record<WeightUnit, string> = { kg: 'kilograms', lb: 'pounds' };
+
+/**
+ * Two buttons that write `profiles.weight_unit`.
+ *
+ * The note beside them used to end "Choose one in the Repple app and this
+ * follows it" — a sentence written before this console had a Settings screen,
+ * and an instruction to install something in order to change a preference on an
+ * account that is signed in right here. `loadMe()` already reads the column;
+ * this writes it, for the signed-in person's own row and nobody else's.
+ *
+ * The state is lifted so the table above re-renders in the chosen unit at once
+ * rather than after a reload — this console has no client-side routing, so a
+ * reload is the whole application again.
+ */
+function UnitChoice({ me, unit, onChosen }: {
+  me: Me; unit: WeightUnit; onChosen: (u: WeightUnit) => void;
+}) {
+  const [busy, setBusy] = useState<WeightUnit | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const choose = async (u: WeightUnit) => {
+    setBusy(u); setErr(null);
+    // The count is checked, not `error` alone. A PostgREST update matching zero
+    // rows returns 204 with no error, and a preference that silently did not
+    // save is one somebody sets three times and then stops trusting.
+    const r = await supabase.from('profiles').update({ weight_unit: u }, { count: 'exact' }).eq('id', me.id);
+    setBusy(null);
+    if ((r as any)?.error) {
+      setErr(`Not saved: ${(r as any).error.message ?? 'the write was refused'}. Weights are still shown in ${UNIT_WORD[unit]}.`);
+      return;
+    }
+    if ((r as any)?.count === 0) {
+      setErr('Not saved — that write matched no row. Weights are unchanged.');
+      return;
+    }
+    onChosen(u);
+  };
+
   return (
-    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
-      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
-    </div>
+    <>
+      {(['kg', 'lb'] as const).map((u) => (
+        <button
+          key={u}
+          type="button"
+          onClick={() => { void choose(u); }}
+          disabled={busy !== null}
+          aria-label={`Show weights in ${UNIT_WORD[u]}`}
+          style={{
+            background: 'none', border: 0, padding: '0 0 0 6px', font: 'inherit',
+            color: busy ? 'var(--ink3)' : 'var(--brand)',
+            cursor: busy ? 'default' : 'pointer', textDecoration: 'underline',
+          }}
+        >
+          {busy === u ? 'Saving…' : `Show ${UNIT_WORD[u]}`}
+        </button>
+      ))}
+      {/* Announced. "Not saved — that write matched no row" over a
+          preference the reader just chose is the exact sentence a silent
+          region loses. */}
+      {err ? <span role="alert" aria-live="assertive" aria-atomic="true"
+                   style={{ display: 'block', marginTop: 4, color: 'var(--crit)' }}>{err}</span> : null}
+    </>
   );
 }

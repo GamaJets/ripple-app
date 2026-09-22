@@ -1,5 +1,5 @@
-// The three member-record kinds the outbox did not have. Compile with tsc, run
-// with node.
+// The member-record kinds the outbox did not have. Compile with tsc, run with
+// node.
 //
 // Four failures are guarded here, and the first is the one that would be
 // invisible:
@@ -25,7 +25,9 @@
 //   4. A LINE THAT CLAIMS DELIVERY. Same walk as `outboxNote` and `unsentNote`:
 //      the work is safe, nobody has it, and the screen will not show it yet.
 import {
-  asDayPlanIntent, asGlucoseIntent, asGoalIntent, keptOnPhoneNote, notKeptNote, planExpiry,
+  asCoachDocAcceptIntent, asDayPlanIntent, asGlucoseIntent, asGoalIntent, asScanIntent,
+  asSessionRequestIntent, sessionRequestExpiry,
+  keptOnPhoneNote, notKeptNote, planExpiry,
 } from './recordQueue';
 import { canPlan, isoToday } from './dayPlan';
 import { partitionLapsed, newItem } from './outbox';
@@ -128,9 +130,136 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   eq(asGlucoseIntent({ mmol: 5.4 }), null, 'and one with no moment cannot be charted, so it is refused rather than filed under now');
   eq(asGlucoseIntent({ mmol: 0, at: '2026-09-01T08:00:00.000Z' }), null, 'zero is not a reading a monitor produces');
   eq(asGlucoseIntent({ mmol: 5.4, at: 'this morning' }), null, 'nor is an unreadable moment tolerated');
+
+  // The id is what makes a replay safe. `glucose_external_once` is partial on
+  // `external_id is not null` and supabase/parts/102 deliberately lets a
+  // hand-typed reading repeat, so the primary key is the only thing that can
+  // tell "the member typed 5.4 twice" apart from "we offered 5.4 twice because
+  // the first answer was lost". Without it a lost response is a second point on
+  // the chart for one finger-prick.
+  eq(asGlucoseIntent({ id: 'row-1', mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, 'row-1',
+    'A READING CARRIES THE ROW ID THE DEVICE CHOSE — it is what a replay collides on');
+  eq(asGlucoseIntent({ id: '   ', mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, null,
+    'a blank id is no id, never a key the insert would send as whitespace');
+  // A reading queued by a build that predates the id has none, and is still a
+  // reading. Refusing it would discard something a member typed in order to fix
+  // a duplicate they have not got.
+  eq(asGlucoseIntent({ mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, null,
+    'and one queued before this field existed still drains rather than being refused');
+  eq(asGlucoseIntent({ mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.mmol, 5.4, 'with its value intact');
 }
 
-/* ── 5 · the sentences ─────────────────────────────────────────────────── */
+/* ── 5 · the coach's paperwork ─────────────────────────────────────────── */
+
+{
+  const a = asCoachDocAcceptIntent({ documentId: 'doc-1', title: 'Studio Waiver' });
+  eq(a?.documentId, 'doc-1', 'an acceptance is the document it is about');
+  eq(a?.title, 'Studio Waiver', 'and carries what it was called, for a sentence on a screen');
+
+  eq(asCoachDocAcceptIntent({ title: 'Studio Waiver' }), null,
+    'a title with no document names nothing the server could ever store, so it is refused rather than retried for ever');
+  eq(asCoachDocAcceptIntent({ documentId: '   ' }), null, 'and neither is a blank id a document');
+  eq(asCoachDocAcceptIntent({ documentId: 'doc-2' })?.title, null,
+    'a missing title is null, never the empty string a screen would render as a nameless document');
+  eq(asCoachDocAcceptIntent(null), null, 'nothing at all is not an intent');
+
+  // No expiry, unlike the planned day. An acceptance is not about a date, and
+  // discarding somebody's signature on a timer would send them to the studio
+  // door with paperwork the coach cannot see. See src/lib/outbox.ts.
+  const item = newItem('coach-doc-accept', { documentId: 'doc-1', title: 'Studio Waiver' });
+  eq(item.expiresAt, null, 'an acceptance never lapses');
+  const { live, lapsed } = partitionLapsed([item], Date.now() + 400 * 24 * 3600 * 1000);
+  eq(lapsed.length, 0, 'not even a year later');
+  eq(live.length, 1, 'it is still waiting to be sent');
+}
+
+/* ── 5b · a body scan typed with no signal ─────────────────────────────── */
+
+{
+  const good = asScanIntent({
+    id: 'b3f1c2a4-0000-4000-8000-000000000001', takenAt: '2026-08-14',
+    weightKg: 81.8, bodyFatPct: 18.2, skeletalMuscleKg: 36.1, source: 'InBody (OCR)',
+    metrics: { visceral: 7 },
+  });
+  ok(good != null, 'a full scan is an intent');
+  eq(good!.takenAt, '2026-08-14', 'dated by the day the member stood on the machine, not by the day it sends');
+  eq(good!.weightKg, 81.8, 'kilograms, which is what the column holds');
+  eq(good!.metrics?.visceral, 7, 'and the InBody breakdown rides along');
+
+  // The id is the whole of what makes a replay safe: `scans.id` is a uuid
+  // primary key, so a scan the server already took comes back 23505 instead of
+  // being filed as a second weigh-in on the same day.
+  eq(asScanIntent({ ...(good as object), id: '' }), null, 'a scan with no id of its own is refused — a replay of it could duplicate a body');
+  eq(asScanIntent({ ...(good as object), id: undefined }), null, 'and so is one that lost it');
+
+  // The two columns a scan cannot be filed without. A payload missing either
+  // could never become a row, so it is refused HERE and taken out, rather than
+  // being offered to the server on every reconnect for the life of the install.
+  eq(asScanIntent({ ...(good as object), weightKg: undefined }), null, 'no weight is no scan');
+  eq(asScanIntent({ ...(good as object), bodyFatPct: null }), null, 'and neither is no body fat');
+  eq(asScanIntent({ ...(good as object), weightKg: 0 }), null, 'a zero weight is not a light member, it is a member nobody weighed');
+  // The same bound on the other column. Only the weight side of it was ever
+  // asserted, so the body-fat check could have been relaxed to `>= 0` with
+  // nothing to show for it — and a scan that reached the queue with a zero
+  // there is one the `scans` table refuses, retried on every reconnect for the
+  // life of the install because nothing on the device will ever take it out.
+  eq(asScanIntent({ ...(good as object), bodyFatPct: 0 }), null, 'and a zero body fat is a reading nobody took, not a member with none');
+  eq(asScanIntent({ ...(good as object), takenAt: '14 August' }), null, 'a date that is not a date is refused rather than guessed at');
+  eq(asScanIntent({ ...(good as object), takenAt: '2026-08-14T09:00:00Z' }), null,
+    'and so is an instant: `scans.taken_at` is a date, and a timestamp moves the scan a day west of Greenwich');
+
+  // Muscle mass is the one figure the printout may not carry. Absent means
+  // absent — never zero, which would draw as a real reading on the chart.
+  eq(asScanIntent({ ...(good as object), skeletalMuscleKg: undefined })!.skeletalMuscleKg, null, 'no muscle reading is null');
+  eq(asScanIntent({ ...(good as object), skeletalMuscleKg: 0 })!.skeletalMuscleKg, null, 'and a zero is treated as one');
+
+  // `metrics` is plain JSON bound for a jsonb column and the only thing asked
+  // of it is that it be an OBJECT. An array passes `typeof x === 'object'`, so
+  // the array check is the whole of the guard, and a scan carrying one would
+  // send a shape nothing downstream reads by key.
+  eq(asScanIntent({ ...(good as object), metrics: [1, 2] })!.metrics, null, 'a list is not an InBody breakdown');
+  eq(asScanIntent({ ...(good as object), metrics: 'visceral 7' })!.metrics, null, 'and neither is a line of text');
+  eq(asScanIntent({ ...(good as object), metrics: undefined })!.metrics, null, 'a printout that carried none says none');
+
+  eq(asScanIntent(null), null, 'nothing is not an intent');
+  eq(asScanIntent({ id: 'x' }), null, 'and neither is a fragment');
+}
+
+/* ── 6 · the hour they asked their coach for ───────────────────────────── */
+
+{
+  const r = asSessionRequestIntent({ startsAt: '2026-09-10T18:00:00.000Z', durationMin: 45, note: '  legs  ' });
+  ok(r !== null, 'a request the member typed offline is an intent');
+  eq(r?.durationMin, 45, 'the length asked for survives');
+  eq(r?.note, 'legs', 'and their words are trimmed');
+  eq(asSessionRequestIntent({ startsAt: '2026-09-10T18:00:00.000Z', durationMin: 60 })?.note, null,
+    'a request with no words is still a request');
+
+  eq(asSessionRequestIntent(null), null, 'nothing is not an intent');
+  eq(asSessionRequestIntent({ durationMin: 60 }), null, 'and neither is a request with no hour in it');
+  eq(asSessionRequestIntent({ startsAt: 'next tuesday', durationMin: 60 }), null,
+    'an hour nothing can read is refused rather than retried for ever');
+  eq(asSessionRequestIntent({ startsAt: '2026-09-10T18:00:00.000Z', durationMin: 0 }), null,
+    'a session of no length is not a session');
+  eq(asSessionRequestIntent({ startsAt: '2026-09-10T18:00:00.000Z', durationMin: 600 }), null,
+    'and one past the constraint in part 740 is refused here rather than by a failing write');
+
+  // There is deliberately no coach on the payload. `request_session` resolves
+  // `clients.trainer_id` when it runs, so a member who changed coach while this
+  // sat on their phone asks the coach they now have.
+  ok(!Object.prototype.hasOwnProperty.call(r ?? {}, 'trainerId'),
+    'the intent names no coach, so a stored one cannot go stale on the phone');
+
+  // The expiry is the hour itself — the same boundary the server enforces and
+  // the same one the member's screen states. Three places, one rule, and this
+  // is where the coincidence stops being one.
+  const start = '2026-09-10T18:00:00.000Z';
+  eq(sessionRequestExpiry(start), start, 'a queued request stops being worth sending at the hour it asks for');
+  eq(sessionRequestExpiry('whenever'), null,
+    'and an unreadable hour is no expiry rather than an immediate one, so nothing is thrown away on a bad string');
+}
+
+/* ── 7 · the sentences ─────────────────────────────────────────────────── */
 
 {
   const kept = keptOnPhoneNote('planned day');
@@ -141,9 +270,23 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
     'and warns that the screen will not show it, because the screen is the evidence and it has not changed');
 
   const full = notKeptNote('reading', 'full');
+  const unavailable = notKeptNote('reading', 'unavailable');
   ok(/not saved/.test(full), 'a phone that is full says plainly that nothing was kept');
   ok(!/goes up next time/.test(full), 'and does not make this one the promise the kept line makes');
-  ok(/not saved/.test(notKeptNote('reading', 'unavailable')), 'and so does a device with no outbox to key');
+  ok(/not saved/.test(unavailable), 'and so does a device with no outbox to key');
+
+  // Both of the above are satisfied by either sentence, so between them they
+  // could not tell the two reasons apart — and these are two different things
+  // to do about it. A phone that is FULL needs signal so the backlog can drain;
+  // a phone with no outbox to key has nothing waiting at all, and telling that
+  // member to wait for the queue to clear sends them to look at an empty one.
+  ok(full !== unavailable, 'the two reasons are two sentences');
+  ok(/as much unsent work as it will hold/.test(full),
+    'the full phone is told what is actually wrong with it: the backlog, which is a thing signal will fix');
+  ok(!/as much unsent work as it will hold/.test(unavailable),
+    'and the phone with nowhere to keep it is NOT told it has a backlog it does not have');
+  ok(/Nothing was kept/.test(unavailable), 'it is told nothing was kept');
+  ok(full.includes('reading') && unavailable.includes('reading'), 'and both name the thing that was lost');
 }
 
 if (errors.length) {

@@ -53,7 +53,35 @@ export class ErrorBoundary extends Component<Props, State> {
     } catch { keep(null); }
   }
 
-  reset = () => this.setState({ error: null });
+  /**
+   * Reload, and mean it.
+   *
+   * This was `setState({ error: null })`, which re-renders the same subtree
+   * from the same state — so when the thing that threw was a provider reading a
+   * malformed blob off disk at mount, Reload threw again immediately and the
+   * button did nothing a person could see. That is now the case this boundary
+   * is mounted at the top of the tree to catch, so the button has to be able to
+   * answer it.
+   *
+   * `Updates.reloadAsync()` restarts the JS bundle, which re-runs every
+   * provider from scratch. It is not a fix for a crash that is deterministic in
+   * stored data — nothing here can be — but it is a real retry rather than a
+   * repaint, and it is what recovers the ordinary case: a transient read, a
+   * race at mount, a value that arrived once and will not again.
+   *
+   * The clear-and-re-render stays as the fallback, because `reloadAsync` throws
+   * in a development build and in Expo Go, which is exactly where somebody is
+   * most likely to be pressing this button.
+   */
+  reset = () => {
+    (async () => {
+      try {
+        const Updates = require('expo-updates');
+        if (Updates?.isEnabled) { await Updates.reloadAsync(); return; }
+      } catch { /* falls through to the repaint below */ }
+      this.setState({ error: null });
+    })();
+  };
 
   render() {
     if (this.state.error) {
@@ -61,7 +89,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <View style={{ flex: 1, backgroundColor: '#0d0d0d', alignItems: 'center', justifyContent: 'center', padding: sp.xxl }}>
           <Icon name="wrench" size={40} color="#2dd4bf" />
           <Text accessibilityRole="header" style={{ ...ty.title, color: '#ffffff', textAlign: 'center', marginTop: sp.md, marginBottom: sp.sm }}>Something Went Wrong</Text>
-          <Text style={{ ...ty.body, color: '#898781', textAlign: 'center', marginBottom: sp.xl }}>This screen hit an unexpected error. Your data is safe — tap below to reload.</Text>
+          <Text style={{ ...ty.body, color: '#898781', textAlign: 'center', marginBottom: sp.xl }}>This screen hit an unexpected error. Your data is safe. Tap below to reload.</Text>
           <Pressable onPress={this.reset} accessibilityRole="button" accessibilityLabel="Reload the app" style={{ backgroundColor: '#2dd4bf', borderRadius: radius.sm, paddingVertical: sp.lg, paddingHorizontal: 34 }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: '#062e2a' }}>Reload</Text>
           </Pressable>

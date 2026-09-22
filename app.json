@@ -3,27 +3,24 @@
     "name": "Repple",
     "slug": "repple",
     "scheme": "repple",
-    "version": "1.1.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washateria.repple",
+      "appleTeamId": "GR7PT3S232",
       "infoPlist": {
         "NSHealthShareUsageDescription": "Repple reads your heart rate, calories, steps, workouts and sleep, so your training, recovery and daily targets reflect what you actually did rather than what you remembered to type. If you use a continuous glucose monitor, Repple can also read the blood glucose it writes to Health, and shows it beside your food log. Blood glucose is asked for separately, only when you open that screen, and is never shared with your coach unless you turn sharing on.",
         "NSCalendarsUsageDescription": "Repple reads your calendar so it can offer to block the times you are already busy, rather than asking you to type them in twice. It reads the times only, never who you are meeting or what about, nothing is sent to your clients, and nothing is written back to your calendar.",
         "NSCalendarsFullAccessUsageDescription": "Repple reads your calendar so it can offer to block the times you are already busy, rather than asking you to type them in twice. It reads the times only, never who you are meeting or what about, nothing is sent to your clients, and nothing is written back to your calendar.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
+        "NSMicrophoneUsageDescription": "Repple uses the microphone only while you are recording a coaching clip with the camera, so the video has your voice on it. Nothing is recorded at any other time, and Repple never listens in the background.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
+        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written.",
+        "NSSupportsLiveActivities": true
       }
     },
     "android": {
@@ -52,16 +49,36 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0B1D19"
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/@expo-google-fonts/sora/600SemiBold/Sora_600SemiBold.ttf",
+            "node_modules/@expo-google-fonts/sora/700Bold/Sora_700Bold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/400Regular/PlusJakartaSans_400Regular.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/500Medium/PlusJakartaSans_500Medium.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/600SemiBold/PlusJakartaSans_600SemiBold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/700Bold/PlusJakartaSans_700Bold.ttf"
+          ]
+        }
+      ],
       "expo-router",
       "expo-image-picker",
       "expo-camera",
       "expo-video",
       [
-        "react-native-health",
+        "@kingstinct/react-native-healthkit",
         {
-          "isClinicalDataEnabled": false,
-          "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training.",
-          "healthUpdatePermission": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
+          "NSHealthShareUsageDescription": "Repple reads your heart rate, calories, steps, workouts and sleep, so your training, recovery and daily targets reflect what you actually did rather than what you remembered to type. If you use a continuous glucose monitor, Repple can also read the blood glucose it writes to Health, and shows it beside your food log. Blood glucose is asked for separately, only when you open that screen, and is never shared with your coach unless you turn sharing on.",
+          "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
         }
       ],
       [
@@ -76,6 +93,12 @@
           "faceIDPermission": "Repple uses Face ID to unlock the app, so your training record is not open to anyone who picks up your phone."
         }
       ],
+      [
+        "expo-calendar",
+        {
+          "remindersPermission": false
+        }
+      ],
       "expo-web-browser",
       "expo-secure-store",
       "expo-sharing",
@@ -87,7 +110,8 @@
             "minSdkVersion": 26
           }
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "extra": {
       "router": {},

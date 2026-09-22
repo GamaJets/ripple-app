@@ -26,7 +26,7 @@
 //          SECONDS. See src/lib/timedSets.
 //
 // The second of those is the one this row exists to make possible. The app
-// prescribes `'45 sec'` planks in its own programme builder and the isometric
+// prescribes `'45 sec'` planks in its own program builder and the isometric
 // set method's blurb says "the reps column is seconds", and until now both log
 // paths refused anything that was not a positive whole number of reps. What
 // people typed instead was 45 into a reps box, which reads for ever after as
@@ -37,10 +37,11 @@ import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { Field } from './kit';
 import { WeightUnitToggle } from './WeightUnitToggle';
-import { sp, radius, hairline, type as ty } from '../theme/scale';
+import { sp, radius, hairline, grown, font, type as ty } from '../theme/scale';
 import type { Theme } from '../theme/tokens';
 import { readLift, type WeightUnit } from '../lib/units';
 import { readHold } from '../lib/timedSets';
+import { hitSlopFor } from '../lib/a11y';
 
 /** What one logged set says. `value` is reps, or SECONDS when `timed`. */
 export interface LoggedSet {
@@ -72,7 +73,12 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
   const [kg, setKg] = useState('');
   const [bwOn, setBwOn] = useState(false);
   const [timedOn, setTimedOn] = useState(timedDefault);
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
+  // One height for the two boxes and the button (TF-21: "Log set button
+  // size"). The button had no height of its own, so it was as tall as its
+  // label and sat under the boxes' baseline like a caption. `grown` so the
+  // three still match when the reader's text size moves them.
+  const H = grown(46);
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, minHeight: H, flex: 1, ...ty.body } as const;
   return (
     <View style={{ marginTop: sp.md }}>
       <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
@@ -87,7 +93,7 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
         <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
           <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
         </Field>
-        <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
+        <Pressable accessibilityRole="button" accessibilityLabel="Log Set" onPress={() => {
           // The first box is checked HERE and said out loud. This guarded with a
           // bare `if (!reps) return`, so tapping the button with an empty box —
           // which is what happens when somebody types the load first and then
@@ -95,40 +101,40 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
           let value: number;
           if (timedOn) {
             const held = readHold(first);
-            if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+            if (!held.ok) { Alert.alert('How Long Was the Hold?', held.reason); return; }
             value = held.secs;
           } else {
             const r = parseInt(first, 10);
-            if (!Number.isFinite(r) || r <= 0) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
+            if (!Number.isFinite(r) || r <= 0) { Alert.alert('How Many Reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
             value = r;
           }
           const read = readLift(kg, unit);
           // Left in the box on a refusal, with the reason said, rather than
           // cleared — the number was typed once and the app has no better guess.
-          if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+          if (!read.ok) { Alert.alert('Check That Load', read.reason); return; }
           // An empty load box IS a bodyweight set, which is what this screen's
           // alert has always told people. Recorded rather than inferred later: a
           // stored 0 cannot be told apart from a load nobody typed, and
           // inferring it at read time would relabel every old zero as a pull-up.
           onLog({ value, kg: read.kg, bw: bwOn || read.kg == null, timed: timedOn });
           setFirst(''); setKg('');
-        }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-          <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
+        }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, minHeight: H, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ ...ty.label, ...font('700'), color: t.brandInk }}>Log Set</Text>
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap' }}>
         <SetKindChip
           t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
-          label="Bodyweight set"
-          onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
+          label="Bodyweight Set"
+          onLabel={`Bodyweight set: the box above is what you added, in ${unit}`}
           a11yHint={bwOn
             ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
             : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
         />
         <SetKindChip
           t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
-          label="Timed set"
-          onLabel="Timed set — the first box is seconds held"
+          label="Timed Set"
+          onLabel="Timed set: the first box is seconds held"
           a11yHint={timedOn
             ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
             : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'}
@@ -166,6 +172,12 @@ export function SetKindChip({ t, on, onToggle, label, onLabel, a11yHint }: {
       accessibilityState={{ checked: on }}
       accessibilityLabel={label}
       accessibilityHint={a11yHint}
+      // 18pt box plus 6 top and bottom is 30 — fourteen short of MIN_TARGET,
+      // on the two controls that decide whether the first box is reps or
+      // SECONDS and whether the load is the bar or what was added to the body.
+      // A mis-tap here changes what a stored set means. `hitSlopFor` is the
+      // helper this file already had in the tree for exactly this.
+      hitSlop={hitSlopFor(30)}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm, paddingVertical: 6 }}>
       <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: hairline, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
         {on ? <Icon name="check" size={12} color={t.brandInk} /> : null}

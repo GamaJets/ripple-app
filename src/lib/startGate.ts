@@ -4,7 +4,7 @@
 //
 // The Train screen kept two different lists of today's exercises and let a
 // button on one of them open a runner built from the other. The gate asked the
-// RAW day — `workout.exercises`, straight off the programme — while the runner
+// RAW day — `workout.exercises`, straight off the program — while the runner
 // was handed that list minus the rows the member had removed and minus the
 // rows held back for a severe injury. Nothing kept the two in step, so a day
 // whose every movement had fallen out of the second list still showed a live
@@ -60,7 +60,7 @@ const OPEN: StartGate = { canStart: true, reason: 'none', note: null, safety: fa
 /**
  * @param isStrength whether the strength log is the one on screen. The runner
  *   is a barbell runner; the cardio and recovery tabs have their own.
- * @param planned how many exercises the programme wrote for today, before
+ * @param planned how many exercises the program wrote for today, before
  *   anything was taken out of it.
  * @param runnable how many the runner would actually be handed — THE list, the
  *   same expression that is passed to it, which is the whole point of this

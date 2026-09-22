@@ -24,7 +24,7 @@
  *
  * This is the load-bearing decision and it is worth stating rather than
  * inferring from the switch below. A start date now decides WHICH WEEK OF A
- * BLOCK is on screen. It does not decide WHETHER the programme is on screen.
+ * BLOCK is on screen. It does not decide WHETHER the program is on screen.
  * Every phase resolves to a real week that the client can train today:
  *
  *   · 'before'      week one, now, exactly as before this file existed. A block
@@ -43,7 +43,7 @@
  *                   coach has not written the next one yet must not open Train
  *                   to nothing.
  *
- * There is no phase that withholds a programme, and there is no way to add one
+ * There is no phase that withholds a program, and there is no way to add one
  * here without deleting one of the five branches, which is the point of writing
  * them as five branches rather than as a fallback.
  *
@@ -67,7 +67,7 @@ import type { BlockPosition } from './programStart';
  * could not read, when only the second is worth anybody looking into.
  */
 export type WeekReason =
-  /** The programme is one week long. Every programme written before
+  /** The program is one week long. Every program written before
    *  `Program.weeks` existed is this, and nothing on screen names a week. */
   | 'only-week'
   /** The start date has passed and this is the week it counts to. */
@@ -97,14 +97,14 @@ export interface ClientWeek {
  * `weeks` is the block's own length from `weekCount` in
  * src/lib/programBlock.ts, and must be the same number that was handed to
  * `blockPosition` to produce `pos`. Clamped rather than trusted: `pos.week`
- * comes from arithmetic on a date and a programme can be edited between the two
+ * comes from arithmetic on a date and a program can be edited between the two
  * calls, and an index past the end of the block renders an empty training day
- * over a programme that is not empty.
+ * over a program that is not empty.
  */
 export function clientWeek(pos: BlockPosition, weeks: number): ClientWeek {
   const count = Number.isFinite(weeks) && weeks >= 1 ? Math.floor(weeks) : 1;
-  // Asked first, so a one-week programme can never be given a week number by
-  // any of the branches below. A start date on a one-week programme is a real
+  // Asked first, so a one-week program can never be given a week number by
+  // any of the branches below. A start date on a one-week program is a real
   // and ordinary thing for a coach to set, and it must not make the client's
   // screen start counting weeks that do not exist.
   if (count === 1) return { index: 0, count, reason: 'only-week' };
@@ -130,7 +130,7 @@ export function clientWeek(pos: BlockPosition, weeks: number): ClientWeek {
  * nothing else: a client reading ahead is not being told anything about their
  * effort, their adherence or their coach, only which week they have opened.
  *
- * Null for a one-week programme, so a programme written before blocks existed
+ * Null for a one-week program, so a program written before blocks existed
  * renders exactly as it did, with no week number anywhere on the screen.
  */
 export function clientWeekLine(w: ClientWeek, viewing: number): string | null {

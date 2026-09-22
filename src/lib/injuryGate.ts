@@ -81,12 +81,45 @@ export function ackState(
   return active.every((i) => seen.has(injuryKey(i))) ? 'covered' : 'stale';
 }
 
+/** How the SECOND client-side read stands — the programs a coach assigned
+ *  knowing about a disclosure.
+ *
+ *  Separate from `ackState` because it is a separate table and a separate
+ *  failure. Folding the two together is what let a screen print "we couldn't
+ *  check whether your coach has read these" over an acknowledgement that had
+ *  been read, while the block that really had failed rendered as nothing at
+ *  all — a member reading that concludes their coach assigned nothing over
+ *  their knee, which is the one conclusion a failed read must not produce.
+ *
+ *   'unknown' — the read did not finish or did not land. An empty list here
+ *               means we do not know, and the screen must say so.
+ *   'none'    — the read finished and there are none. Sayable as a fact.
+ *   'some'    — the read finished and these are all of them.
+ *   'partial' — the rows are real but there are more than came back. The list
+ *               may be shown; "these are all of them" may not.
+ */
+export type ChoiceState = 'unknown' | 'none' | 'some' | 'partial';
+
+export function programChoiceState(status: LoadStatus, count: number): ChoiceState {
+  // whole-ok: 'partial' is a value of this function's own return type and it is
+  // produced on the very next line — the type comment above lists all four
+  // answers precisely so 'partial' would not have to hide inside one of the
+  // others. This guard means "the read did not land", and a truncated read did
+  // land: some programs assigned over a disclosure are known to exist, which
+  // is not 'unknown' and is not "these are all of them" either. Note that a
+  // truncated read with a zero count still goes to 'unknown' below, because a
+  // count of zero off a prefix is the one number a prefix cannot supply.
+  if (status === 'error' || status === 'loading') return 'unknown';
+  if (status === 'partial') return count > 0 ? 'partial' : 'unknown';
+  return count > 0 ? 'some' : 'none';
+}
+
 /**
- * May this coach assign a programme to this client?
+ * May this coach assign a program to this client?
  *
  * `disclosures` is how the read of the client's OWN injury list went, and
  * `status` is how the read of the acknowledgement went. Both unknowns are
- * refused for the same reason the overwrite guard refuses one: a programme
+ * refused for the same reason the overwrite guard refuses one: a program
  * built without seeing an injury is not undone by finding out later.
  */
 export function guardInjuries(
@@ -135,7 +168,7 @@ export function guardInjuries(
     return {
       allowed: false,
       label: 'Injuries Could Not Be Read',
-      reason: `${clientName} has disclosed injuries and this screen could not confirm they have been acknowledged. Building a programme around an injury nobody has read is the thing this check exists to stop, so it is held until the list loads.`,
+      reason: `${clientName} has disclosed injuries and this screen could not confirm they have been acknowledged. Building a program around an injury nobody has read is the thing this check exists to stop, so it is held until the list loads.`,
       outstanding: [],
     };
   }
@@ -149,7 +182,7 @@ export function guardInjuries(
     allowed: false,
     label: `Read ${clientName}'s Injuries First`,
     reason: isFirst
-      ? `${clientName} has disclosed ${countPhrase(active.length)}. Read them and confirm before building a programme around them.`
+      ? `${clientName} has disclosed ${countPhrase(active.length)}. Read them and confirm before building a program around them.`
       : `${clientName} has disclosed ${countPhrase(unseen.length)} since you last confirmed. Read the change before assigning.`,
     // The whole current list, not just the new part: an acknowledgement stands
     // for everything it was made against, and writing only the delta would

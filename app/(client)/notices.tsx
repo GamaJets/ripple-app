@@ -15,7 +15,7 @@
 // is the other half of the fix; the fan-out in src/ui/announcements.tsx is the
 // first half.
 //
-// ── It re-reads nothing ────────────────────────────────────────────────────
+// ── It owns no query ───────────────────────────────────────────────────────
 //
 // Every row here comes from the provider that app/_layout.tsx already mounts,
 // which is the same store the dashboard block reads. That matters beyond the
@@ -23,6 +23,11 @@
 // arrived, and the two would disagree the first time one of them failed. There
 // is one read and one `status`, and this screen states what that status means
 // rather than deciding it again.
+//
+// The Try Again below is not an exception to that. It calls the provider's own
+// `reload`, so the second attempt is the same read as the first and its answer
+// reaches the dashboard block at the same moment it reaches this screen — which
+// a private retry here could not have done.
 //
 // ── An empty list is two different sentences ───────────────────────────────
 //
@@ -34,15 +39,20 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Notice, PartialRead, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { useCallback } from 'react';
 import { useAnnouncements } from '../../src/ui/announcements';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { inboxAge } from '../../src/lib/notifyInbox';
 
 export default function Notices() {
   const t = useTheme();
   const router = useRouter();
-  const { announcements, status } = useAnnouncements();
+  const { announcements, status, reload } = useAnnouncements();
+  // The provider's own reload — it puts the status back to 'loading' first, so
+  // a screen showing a cached list says so while the read is out.
+  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
 
   // A client authors nothing here, so everything they can read is addressed to
   // them. `mine` is filtered anyway rather than assumed: this store is shared
@@ -53,36 +63,45 @@ export default function Notices() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym and your coach</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Notices</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <PageHead title="Notices" subtitle="Your gym and your coach" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           Everything posted to you, newest first. Notices stay here after the day they were sent.
         </Text>
 
-        <Rule />
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your notices"
+            {/* "Try again in a moment" used to be the whole remedy on this
+                screen, and there was nothing on it to try again WITH: the
+                provider read once per sign-in, so the only way to ask a second
+                time was to close the app. A notice is how a gym says it is shut
+                tomorrow, and telling somebody to retry while offering no way to
+                is worse than saying nothing. */}
+            <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your notices"
               note={rows.length
                 ? 'What is below is what we had before the read failed. There may be a newer notice that is not on this list.'
-                : 'This is not an empty noticeboard — it is one we could not open. Try again in a moment, or ask at the desk.'} />
+                : 'This is not an empty noticeboard. It is one we could not open. Try again, or ask at the desk.'}>
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try Again" wide onPress={reload} />
+              </View>
+            </Notice>
           </Section>
         ) : null}
 
+        {/* `undefined` rather than a zero. `shown` renders as "Showing the
+            first N", and "Showing the first 0" is not a sentence — the
+            component's own no-count arm says "Showing part of the list", which
+            is what a page that came back at the cap carrying nothing this
+            reader may see actually amounts to. `rows` is the filtered list, so
+            it can be shorter than the page it came from. */}
         {status === 'partial' ? (
-          <Section><PartialRead what="notices" shown={rows.length} /></Section>
+          <Section><PartialRead what="notices" shown={rows.length || undefined} /></Section>
         ) : null}
 
         <Section>
-          <SectionHead title="Posted To You" note={status === 'ready' && rows.length ? String(rows.length) : undefined} />
+          <SectionHead title="Posted to You" note={status === 'ready' && rows.length ? String(rows.length) : undefined} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your notices…</Text>
@@ -110,7 +129,6 @@ export default function Notices() {
           ))}
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

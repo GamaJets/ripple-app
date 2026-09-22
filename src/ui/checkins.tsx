@@ -36,7 +36,7 @@
 // screen says "saved on this phone, not sent yet" rather than "your coach can
 // see this week's check-in" — which is the sentence a person acts on by not
 // sending it again.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -45,6 +45,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 export interface CheckIn {
   id: string; at: string;
@@ -62,6 +63,20 @@ interface CheckInsValue {
   /** Whether `checkins` is the server's answer. Under 'error' a null `latest`
    *  means unknown, and no screen should read it as "never checked in". */
   status: LoadStatus;
+  /**
+   * Read again from the server.
+   *
+   * A real re-read, not a state reset: it bumps the key the load effect below
+   * is keyed on, so the same query runs and `status` goes back through
+   * 'loading' to whatever the server answers this time. Nothing local is
+   * cleared and nothing pending is dropped, so a refused re-read leaves what is
+   * on screen exactly where it was with the status saying it is not confirmed.
+   *
+   * Added for the pull-to-refresh gesture on the screens this provider feeds:
+   * without it those screens could show a failed read for the whole session
+   * with no way to ask again.
+   */
+  reload: () => void;
   /**
    * Resolves true only once the check-in is on the server, where the coach can
    * read it.
@@ -104,6 +119,9 @@ const Ctx = createContext<CheckInsValue | null>(null);
 
 export function CheckInsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
+  /** Bumped by `reload`. A counter, so two pulls are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const [checkins, setCheckinsState] = useState<CheckIn[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -225,7 +243,7 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached history stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   /**
    * Send the check-ins this device is holding that the server has never had.
@@ -268,7 +286,31 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
   // this is the first entry that is not still waiting.
   const latestSent = useMemo(() => checkins.find((c) => !isPending(c.id)) ?? null, [checkins]);
 
-  return <Ctx.Provider value={{ checkins, latest: checkins[0] ?? null, latestSent, status, addCheckIn, sendCheckIn, unsent }}>{children}</Ctx.Provider>;
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('checkins', status, reload);
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCheckIns`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addCheckIn(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addCheckIn, sendCheckIn });
+  impl.current = { addCheckIn, sendCheckIn };
+  const addCheckInStable = useCallback((...a: Parameters<typeof addCheckIn>) => impl.current.addCheckIn(...a), []);
+  const sendCheckInStable = useCallback((...a: Parameters<typeof sendCheckIn>) => impl.current.sendCheckIn(...a), []);
+  const value = useMemo<CheckInsValue>(() => ({ checkins, latest: checkins[0] ?? null, latestSent, status, addCheckIn: addCheckInStable, sendCheckIn: sendCheckInStable, unsent, reload }), [checkins, checkins[0] ?? null, latestSent, status, addCheckInStable, sendCheckInStable, unsent, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useCheckIns(): CheckInsValue {

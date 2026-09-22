@@ -25,6 +25,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import { useTheme } from './components';
+import { MIN_OTP_SUBMIT, MAX_OTP_ENTRY } from './emailOtp';
 import { Ghost, Card } from './kit';
 import { sp, radius, hairline, type as ty, value } from '../theme/scale';
 import { digitsOnly } from '../lib/phone';
@@ -76,6 +77,11 @@ export function OtpCodeEntry({
   // every caller gets here by having just sent one.
   const [left, setLeft] = useState(RESEND_AFTER);
   const codeRef = useRef<TextInput>(null);
+  // Draw the length this project issues, or the length actually in hand when
+  // that is longer. A code the screen is holding but not showing is the same
+  // defect as one it truncated — the member cannot see what is about to be
+  // submitted for them.
+  const boxes = Math.max(length, digitsOnly(code).length);
 
   useEffect(() => {
     if (left <= 0) return;
@@ -114,10 +120,27 @@ export function OtpCodeEntry({
         Sent to {sentTo}.
       </Text>
 
-      <Pressable onPress={() => codeRef.current?.focus()} accessibilityRole="button"
-        accessibilityLabel={`Enter the ${length}-digit code`}>
+      {/* ── the boxes, and the one field that actually holds the code ──────
+          The field is laid OVER the boxes at full size rather than parked
+          off-screen, and this is the whole reason the keyboard's "tap to fill"
+          suggestion appears at all.
+
+          It used to be `{ position: 'absolute', opacity: 0, height: 1, width: 1 }`
+          — a real input, correctly marked `oneTimeCode`, that iOS would never
+          offer a code to. UIKit does not put a one-time-code suggestion above
+          the keyboard for a field it considers invisible, and a transparent
+          one-pixel box is invisible by both tests it applies: zero alpha, and
+          no area to attach the suggestion to. Every other ingredient was
+          already right, which is why this looked like it worked.
+
+          So: full width and height of the boxes, opaque to UIKit, and unseen by
+          the reader because the TEXT is transparent and the caret is hidden.
+          The painted boxes underneath remain the only thing anybody sees, and
+          a tap anywhere on them now lands on the field itself, which is what
+          focuses it — the Pressable that used to do that by hand is gone. */}
+      <View>
         <View style={{ flexDirection: 'row', gap: sp.sm }}>
-          {Array.from({ length }).map((_, i) => {
+          {Array.from({ length: boxes }).map((_, i) => {
             const ch = digitsOnly(code)[i];
             const active = digitsOnly(code).length === i;
             return (
@@ -133,22 +156,65 @@ export function OtpCodeEntry({
             );
           })}
         </View>
-      </Pressable>
-      <TextInput
-        ref={codeRef}
-        value={code}
-        onChangeText={(v) => {
-          const d = digitsOnly(v).slice(0, length);
-          setCode(d); setError(null); setSent(null);
-          if (d.length === length) void submit(d);
-        }}
-        keyboardType="number-pad"
-        textContentType="oneTimeCode"
-        autoComplete={channel === 'sms' ? 'sms-otp' : 'one-time-code'}
-        maxLength={length}
-        autoFocus
-        style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }}
-      />
+        <TextInput
+          ref={codeRef}
+          value={code}
+          onChangeText={(v) => {
+            // Held to MAX_OTP_ENTRY, not to the number of boxes drawn. Slicing
+            // to `length` here is what turned an eight-digit code into a
+            // six-digit one and then submitted it — see MAX_OTP_ENTRY for why
+            // that is autofill's failure in particular rather than a typist's.
+            const d = digitsOnly(v).slice(0, MAX_OTP_ENTRY);
+            setCode(d); setError(null); setSent(null);
+            // At or PAST the expected length, so the common path needs no
+            // button press either way: six typed digits go at six, and a code
+            // that arrives whole from the keyboard goes at whatever length it
+            // actually is. Shorter codes are not refused — they wait for
+            // Confirm below. MIN_OTP_SUBMIT in src/ui/emailOtp.ts argues why
+            // this screen must not be the thing that decides a code is wrong.
+            if (d.length >= length) void submit(d);
+          }}
+          keyboardType="number-pad"
+          // The two halves of "offer me the code". `textContentType` is what
+          // puts it in the iOS QuickType bar — from an SMS, and from Mail on
+          // iOS 17 and later, which is the door this screen uses.
+          textContentType="oneTimeCode"
+          // Android reads a code out of an ARRIVING SMS and cannot read one out
+          // of an inbox, so an emailed code asks for the keyboard suggestion
+          // and nothing more. Claiming `sms-otp` for an emailed code would
+          // promise a fill that never comes.
+          autoComplete={channel === 'sms' ? 'sms-otp' : 'one-time-code'}
+          maxLength={MAX_OTP_ENTRY}
+          autoFocus
+          caretHidden
+          selectionColor="transparent"
+          accessibilityLabel={`Enter the ${length}-digit code`}
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            // Transparent TEXT over painted boxes — not a transparent FIELD.
+            // The distinction is the fix: the reader sees the boxes, and iOS
+            // sees a full-size field worth offering a code to.
+            color: 'transparent', backgroundColor: 'transparent',
+            textAlign: 'center', fontSize: 26, padding: 0,
+          }}
+        />
+      </View>
+
+      {/* Confirm, for a code that is not the length these boxes were drawn at.
+          The auto-submit above still handles the ordinary case, so this is
+          usually never pressed — it exists because the code length is a server
+          setting that can move without a release, and a screen that refuses to
+          TRY a six-digit code because it drew eight boxes is broken in exactly
+          the way the eight-digit code broke it in the first place. Only
+          Supabase can say whether a code is right; this button lets it. */}
+      {digitsOnly(code).length >= MIN_OTP_SUBMIT && digitsOnly(code).length !== length ? (
+        <View style={{ alignItems: 'center', marginTop: sp.xl }}>
+          <Ghost
+            label={busy ? 'Checking…' : `Confirm ${digitsOnly(code).length} Digits`}
+            onPress={() => { if (!busy) void submit(digitsOnly(code)); }}
+          />
+        </View>
+      ) : null}
 
       {error ? (
         <Card tone={t.warn} style={{ marginTop: sp.xl }}>

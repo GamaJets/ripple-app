@@ -72,6 +72,7 @@
 //    gym name and a graphic with half a word hanging off it.
 
 import { mayPublishPhoto, type PublishConsent } from './photoPublish';
+import { numUpTo } from './format';
 
 /* ── canvas sizes ──────────────────────────────────────────────────────────── */
 
@@ -89,8 +90,8 @@ import { mayPublishPhoto, type PublishConsent } from './photoPublish';
 export interface CardSize { key: CardShape; label: string; note: string; w: number; h: number }
 export type CardShape = 'post' | 'story';
 export const CARD_SIZES: CardSize[] = [
-  { key: 'post', label: 'Post', note: '4:5 — feed', w: 1080, h: 1350 },
-  { key: 'story', label: 'Story', note: '9:16 — stories, Reels, TikTok', w: 1080, h: 1920 },
+  { key: 'post', label: 'Post', note: '4:5 · feed', w: 1080, h: 1350 },
+  { key: 'story', label: 'Story', note: '9:16 · stories, Reels, TikTok', w: 1080, h: 1920 },
 ];
 
 export const cardSize = (shape: CardShape): CardSize =>
@@ -172,6 +173,38 @@ export type CardBuild =
   | { ok: false; reason: BlockReason; why: string };
 
 export type BlockReason = 'unread' | 'empty' | 'consent' | 'nothing-picked';
+
+/**
+ * Why a card cannot be composed while the coach's gym is unknown.
+ *
+ * app/(trainer)/share-kit.tsx took its brand as `tenant?.name || authUser?.name`
+ * with the tenant provider's `status` not even destructured. One of those two
+ * strings is a BUSINESS and the other is whatever the person typed when they
+ * signed up for an app, and a dropped connection for one second silently swaps
+ * one for the other. What comes out is a PNG the coach posts to a public feed
+ * with their own legal name across it instead of their gym's — not a rendering
+ * fault, but publishing a private detail, permanently, on their behalf.
+ *
+ * `tenant === null` under a WHOLE read is a different and correct answer: an
+ * independent coach has no gym and their own name is the brand. The refusal is
+ * only for not knowing which of the two situations this is.
+ */
+export const BRAND_UNREAD_NOTE =
+  'Your gym could not be read, so this card has no name to carry. It is not made rather than made with the wrong one. '
+  + 'A card that went out with your own account name where your gym\'s should be cannot be taken back. Pull to refresh and it will build.';
+
+/**
+ * The logo is set, and the picture of it did not arrive.
+ *
+ * Two different nulls arrive at `logo.dataUri`: no logo, and a logo whose file
+ * would not download. app/(trainer)/brand.tsx already draws the distinction;
+ * the screen that PUBLISHES did not, so the coach had done the work, the record
+ * said the logo was set, and the card that went out under their name was
+ * unbranded — invisible on the one surface where it is permanent.
+ */
+export const LOGO_SET_NOT_FETCHED =
+  'Your logo is set and the picture of it could not be fetched, so this card is being prepared without it. '
+  + 'Pull to refresh before you post if you want it on there.';
 
 /* ── word wrap ─────────────────────────────────────────────────────────────── */
 
@@ -352,7 +385,7 @@ export function hoursLabel(minutes: number): string {
   if (minutes < 60) return `${Math.round(minutes)} min`;
   const h = minutes / 60;
   const rounded = Math.round(h * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded} hrs` : `${rounded.toFixed(1)} hrs`;
+  return `${numUpTo(rounded, 1)} hrs`;
 }
 
 /* ── the week card ─────────────────────────────────────────────────────────── */
@@ -408,7 +441,7 @@ export function weekCard(input: WeekInput): CardBuild {
   if (sessions == null && minutes == null && clients == null) {
     return {
       ok: false, reason: 'unread',
-      why: 'Repple could not read your sessions just now, so there are no figures it can honestly put on a card. Try again in a moment — nothing has been posted.',
+      why: 'Repple could not read your sessions just now, so there are no figures it can honestly put on a card. Try again in a moment. Nothing has been posted.',
     };
   }
 
@@ -425,7 +458,7 @@ export function weekCard(input: WeekInput): CardBuild {
   if (!stats.length) {
     return {
       ok: false, reason: 'empty',
-      why: `You have no sessions marked as delivered in ${lower(input.spanLabel)}. Mark a session’s outcome and it will appear here — Repple will not make a card out of a week that has not happened.`,
+      why: `You have no sessions marked as delivered in ${lower(input.spanLabel)}. Mark a session’s outcome and it will appear here. Repple will not make a card out of a week that has not happened.`,
     };
   }
 
@@ -441,7 +474,7 @@ export function weekCard(input: WeekInput): CardBuild {
   // — reads as a template that was filled in rather than as something a coach
   // wrote, which is the whole difference between a post and an ad.
   const caption = [
-    `${headline} — ${lower(input.spanLabel)}.`,
+    `${headline}, ${lower(input.spanLabel)}.`,
     // `lower()` is for the coach's span label, where "August" has to survive.
     // Stat labels are common nouns this module wrote itself, so they are simply
     // lower-cased — running them through the proper-noun heuristic produced
@@ -588,7 +621,7 @@ export function resultCard(input: ResultInput, consent: ResultConsent): CardBuil
   const brand = String(input.brand ?? '').trim() || 'Repple';
 
   const caption = [
-    `${capitalise(who)} — ${lower(span)}.`,
+    `${capitalise(who)}, ${lower(span)}.`,
     figures.map((f) => `${f.label}: ${f.value}`).join(' · '),
     note,
   ].filter(Boolean).join('\n');

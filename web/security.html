@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#06130f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)">
 <title>Repple — security &amp; data</title>
   <link rel="canonical" href="https://www.repplefitness.com/security">
-<meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why progress photos are deliberately closed to coaches, how deletion works, and where the data is held.">
+<meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why a progress photo reaches a coach only when you share that photo, how deletion works, and where the data is held.">
 <meta property="og:title" content="Repple — security &amp; data">
 <meta property="og:description" content="Row-level rules per gym, what a coach can and cannot see, and what deletion actually removes.">
 <meta property="og:url" content="https://www.repplefitness.com/security">
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=8dde9b8fb4">
+<link rel="stylesheet" href="legal-redesign.css?v=3d893352c2">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -20,10 +42,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -37,26 +77,37 @@ addEventListener('DOMContentLoaded', function () {
 });
 </script>
 </head>
-<body>
+<body class="legal-page legal-explainer">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-        </svg>
-      </span>
-      Repple
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
-    <nav class="site">
+    <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -67,7 +118,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
 
 <section class="hero">
   <div class="wrap">
@@ -77,14 +128,15 @@ addEventListener('DOMContentLoaded', function () {
       <p class="lede after">
         Not by what a screen chooses to render. Every table in Repple carries row-level rules
         keyed to the account asking and, where it matters, to the gym that account belongs to.
-        This page is the mechanism &mdash; who can read what, why a coach cannot see your progress
-        photos, and what deletion actually removes. The policy version of the same ground is in
+        This page is the mechanism &mdash; who can read what, why a coach sees a progress photo only
+        when you share that one photo, and what deletion actually removes. The policy version of the same ground is in
         <a href="/privacy">Privacy</a>.
       </p>
-      <ul class="jump">
+      <ul class="jump" role="list">
         <li><a href="#who">Who can read what</a></li>
         <li><a href="#photos">Progress photos</a></li>
         <li><a href="#fence">How the fence holds</a></li>
+        <li><a href="#the-phone">The phone in your hand</a></li>
         <li><a href="#deletion">Deletion</a></li>
         <li><a href="#held">Where it is held</a></li>
         <li><a href="#limits">What this page does not claim</a></li>
@@ -98,6 +150,11 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
+<!-- This band had no heading of any level and no eyebrow either, so it was
+           absent from the outline entirely — a reader moving by heading went from
+           "Three parties, and one of them is you" to whatever follows, and never
+           met the paragraph the whole page is built on. -->
+        <h2 class="vh">The rule we build to</h2>
         <p class="q">A screen that decides what to show you is a preference. A row your account cannot read is a fact.</p>
         <p class="lede after-sm">
           Hidden buttons and filtered lists are how most software describes its permissions. They
@@ -107,7 +164,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The rules live under the data, not over it.</strong> A read that a policy forbids returns nothing, whichever app asked and however the request was made.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -134,56 +191,57 @@ addEventListener('DOMContentLoaded', function () {
         two lists are genuinely different, and neither of them is everything.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-whocan">
       <table class="data">
+        <caption class="vh" id="tbl-whocan">What is recorded, and which of the three parties can read it</caption>
         <thead>
-          <tr><th>What is recorded</th><th>You</th><th>Your coach, if you linked one</th><th>Your gym, if you are a member of one</th></tr>
+          <tr><th scope="col">What is recorded</th><th scope="col">You</th><th scope="col">Your coach, if you linked one</th><th scope="col">Your gym, if you are a member of one</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Sessions, sets, cardio</strong></td>
+            <th scope="row"><strong>Sessions, sets, cardio</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Meals and food log</strong></td>
+            <th scope="row"><strong>Meals and food log</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Scans, measurements, check-ins, habits</strong></td>
+            <th scope="row"><strong>Scans, measurements, check-ins, habits</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Progress photos</strong></td>
+            <th scope="row"><strong>Progress photos</strong></th>
             <td>Read and write</td>
-            <td><strong>No</strong> &mdash; deliberately, at both layers</td>
+            <td><strong>No</strong>, unless you share one &mdash; per photo, withdrawable, at both layers</td>
             <td><strong>No</strong></td>
           </tr>
           <tr>
-            <td><strong>Messages with your coach</strong></td>
+            <th scope="row"><strong>Messages with your coach</strong></th>
             <td>Read and write your own</td>
             <td>Read and write their own</td>
             <td>No &mdash; an owner has no access to these</td>
           </tr>
           <tr>
-            <td><strong>Membership, payments, invoices</strong></td>
+            <th scope="row"><strong>Membership, payments, invoices</strong></th>
             <td>Read your own</td>
             <td>No</td>
             <td>The owner, for the gym they own</td>
           </tr>
           <tr>
-            <td><strong>Door visits</strong></td>
+            <th scope="row"><strong>Door visits</strong></th>
             <td>Read your own</td>
             <td>No, not as your coach</td>
             <td>The owner, and staff working the desk</td>
           </tr>
           <tr>
-            <td><strong>Class roster</strong></td>
+            <th scope="row"><strong>Class roster</strong></th>
             <td>Your own bookings</td>
             <td>The trainer taking that class</td>
             <td>The owner of that class's gym</td>
@@ -205,7 +263,47 @@ addEventListener('DOMContentLoaded', function () {
 <!-- ── progress photos ────────────────────────────────────────────────── -->
 <section class="band" id="photos">
   <div class="wrap">
-    <div class="split flip">
+    <!-- The two columns are in the order they are READ, and the class is no
+         longer `flip`. `.split.flip > :first-child { order: 2 }` put the three
+         h3 cards first in the DOM and last on the screen, so a reader moving
+         by heading met "A private bucket", "Links that expire" and "No coach
+         access by default" parented to the PREVIOUS section's h2 — three h3s
+         under a heading about who can read what — and only then reached the h2
+         they belong to. Below 900px the override is reset and the fault
+         vanishes, which is why it was only ever wrong on a desktop. Swapping
+         the source is the fix; the rendered order is unchanged. -->
+    <div class="split">
+      <div>
+        <div class="eyebrow">Progress photos</div>
+        <h2 class="hd">A photograph is not<br><span class="serif">another number.</span></h2>
+        <p class="lede after-sm">
+          Every other thing a coach can read about you is a figure you chose to record for them to
+          coach against. A progress photo is typically taken in underwear, alone, in a bathroom.
+          A coach seeing your body-fat percentage is the product working; a coach seeing that
+          photograph without you choosing it is a different act entirely.
+        </p>
+        <ul class="ticks" role="list">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>The consent step now exists, and it is per photo.</strong> Nothing is shared because of who your coach is. You grant one photograph at a time, you can see which ones you have granted, and you can withdraw a grant.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Sharing has to be something you do.</strong> Not something that is quietly true because of who your coach is.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Only you can create the grant.</strong> A coach can read a grant and cannot make one, cannot make one for a photo that is not yours, and cannot make one where the coaching link is not live. Those are four separate conditions on the write, not a button that is hidden from them.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Ending the link ends the grants.</strong> They are not a copy a coach keeps. Stop working with them and the photographs you had shared stop resolving along with the rest of their access.</span></li>
+        </ul>
+        <div class="callout">
+          <p>
+            This page used to say that per-photo sharing would need three things together: a record
+            of the grant, a read rule gated on it, and a matching rule on the file itself, because
+            the record and the image are granted separately. All three are now built, and the rule
+            on the file is written in terms of the rule on the row so the two cannot drift apart.
+            One thing to know before you share: the grant is for the photo&rsquo;s whole record, so the
+            weight and body-fat figure stored alongside that photograph go with it.
+          </p>
+        </div>
+      </div>
+
       <div class="assure">
         <div class="pair">
           <div class="card">
@@ -221,37 +319,8 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="card">
           <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3.4M6.5 6.6C4.2 8.1 3 10.3 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
-          <h3>No coach access, and it was removed on purpose</h3>
-          <p>A read permission for the linked coach existed and has been taken out. It is not an oversight waiting to be corrected, and the reasoning is written into the schema so nobody re-adds it by copying the pattern from the tables either side of it.</p>
-        </div>
-      </div>
-
-      <div>
-        <div class="eyebrow">Progress photos</div>
-        <h2 class="hd">A photograph is not<br><span class="serif">another number.</span></h2>
-        <p class="lede after-sm">
-          Every other thing a coach can read about you is a figure you chose to record for them to
-          coach against. A progress photo is typically taken in underwear, alone, in a bathroom.
-          A coach seeing your body-fat percentage is the product working; a coach seeing that
-          photograph without you choosing it is a different act entirely.
-        </p>
-        <ul class="ticks">
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>There is no consent step yet.</strong> No per-photo sharing control, no indicator that anyone else can see them, no way to take it back. Access without those means people upload believing it is private and are wrong.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Sharing has to be something you do.</strong> Not something that is quietly true because of who your coach is.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>It bought nothing.</strong> Nothing in the coach app displays a client's progress photos, so the permission granted access no screen was using &mdash; a standing exposure with no feature behind it.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Latent access is worse than open access.</strong> The day somebody adds a coach-side viewer, the photos would have become visible with no review of consent, because the hard part already looked done.</span></li>
-        </ul>
-        <div class="callout">
-          <p>
-            When per-photo sharing is built, it needs three things together: a flag on the photo,
-            a read rule gated on that flag, and a matching rule on the file itself &mdash; because
-            the record and the image are granted separately. Until all three exist, the answer is
-            no at both layers.
-          </p>
+          <h3>No coach access by default, and a grant you make per photo</h3>
+          <p>A blanket read permission for the linked coach existed and was taken out. Nothing replaced it with another blanket rule: a coach sees a photo only where you have granted that specific photo, and the reasoning against re-adding a standing permission is written into the schema so nobody restores it by copying the pattern from the tables either side of it.</p>
         </div>
       </div>
     </div>
@@ -320,6 +389,71 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </section>
 
+<!-- ── the phone in your hand ─────────────────────────────────────────
+     WHERE EACH CLAIM IS IN THE CODE:
+       · the lock is over a session, and stores
+         no password                          src/lib/appLock.ts:5-16
+       · sixty seconds in the background       src/lib/appLock.ts:24 (GRACE_MS)
+       · passcode fallback deliberately on     src/ui/appLock.tsx:158
+       · platform-correct wording              src/lib/appLock.ts:60 (lockMethodsLabel)
+       · mounted for all three apps            app/_layout.tsx:100, :101
+       · the current password is required, and
+         why                                   src/lib/accountSecurity.ts:18-27
+       · ending other sessions keeps this one  src/lib/accountSecurity.ts:262
+                                               app/(trainer)/account.tsx:156 -->
+<section class="band" id="the-phone">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The phone in your hand</div>
+      <h2 class="hd">The other half of this<br><span class="serif">is a bench in a changing room.</span></h2>
+      <p class="lede">
+        Everything above is about what a request may read. None of it helps if the phone is face
+        up on a bench and somebody picks it up.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Lock</div>
+        <h3>Face ID, Touch ID or a passcode over the app</h3>
+        <p>On iOS it is offered in those words; on Android as a fingerprint, face unlock or a
+        screen lock, because that is what the handset calls them. It asks on a cold start and
+        after a minute in the background &mdash; not every time you glance at a notification,
+        which is how a lock gets turned off within a day.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Not a sign-in</div>
+        <h3>It stores no password, because it is not one</h3>
+        <p>This is a lock over a session you are already signed in to, not a second way to sign
+        in. A &ldquo;log in with Face ID&rdquo; that keeps your password in the keychain and
+        replays it would create a copy of something we do not hold at all. The device check
+        decides whether the app is shown; nothing about your credentials changes.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Fallback</div>
+        <h3>A face that will not read is not a lockout</h3>
+        <p>The device passcode is deliberately left as a fallback. A gym is dark, you are sweating
+        and your hands are chalked, and being unable to open your own training record because of
+        that is a worse outcome than the one the lock prevents.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Password</div>
+        <h3>Changing it asks for the old one</h3>
+        <p>The platform underneath does not require that: any live session can set a new password,
+        which means an unlocked unattended phone is enough to lock you out of your own account
+        permanently. So the current password is checked first, and it is checked the only way a
+        phone honestly can &mdash; by signing in with it.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Sessions</div>
+        <h3>Sign out everywhere else, and stay signed in here</h3>
+        <p>Changing your password offers to end every other session. It keeps this one on purpose:
+        you have just proved you know the password, and dropping you onto a sign-in screen would
+        leave you wondering whether the change went through.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ── deletion ───────────────────────────────────────────────────────── -->
 <section class="band" id="deletion">
   <div class="wrap">
@@ -333,56 +467,162 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
+    <!-- THE FIGURES ON THIS CHART, AND THE ONLY PLACE THEY CAN COME FROM.
+         As of 14 September 2026 an erasure reaches 118 tables in `public`
+         plus 11 inside Supabase's own `auth` schema — 129 in all — measured
+         against the live database (project phgfwzpkkwdysftlgkoq) as the
+         transitive closure of `on delete cascade` from the row that
+         `action_account_deletion()` actually deletes, which is the
+         `auth.users` row and not the profile:
+
+           with recursive fk as (
+             select (conrelid::regclass)::text  as child,
+                    (confrelid::regclass)::text as parent
+               from pg_constraint
+              where contype = 'f' and confdeltype = 'c')
+           , rec as (
+             select 'auth.users'::text as tbl
+              union
+             select fk.child from fk join rec on fk.parent = rec.tbl)
+           select count(*) from rec where tbl <> 'auth.users';
+
+         The first two bars are the DIRECT fan-out from `profiles`, same
+         catalogue, same day — 76 columns across 68 tables `on delete cascade`,
+         81 columns across 59 tables `on delete set null`:
+
+           select confdeltype, count(*) as cols, count(distinct conrelid) as tables
+             from pg_constraint
+            where contype = 'f' and confrelid = 'public.profiles'::regclass
+            group by confdeltype;
+
+         SAY WHICH ROW A FIGURE IS COUNTED FROM. The closure from `profiles` is
+         109 including `profiles` itself; the closure from `auth.users` is 129.
+         Three lanes have now been caught by that difference. The bars above are
+         labelled accordingly and the aria-label says it in words.
+
+         COUNT IT AGAINST THE LIVE CATALOGUE, NEVER BY PARSING supabase/setup.sql:
+         a `create table` clause is not the last word on a foreign key, and part
+         184 drops and recreates memberships_member_id_fkey,
+         gym_invoices_member_id_fkey and gym_payments_member_id_fkey with
+         `on delete set null`. File parses have given 120, 122 and 125 against
+         the live 118.
+
+         WHAT THIS PAGE SAID UNTIL TODAY, and why it is worth recording. The
+         chart was stamped 3 September 2026 and read 66 tables / 74 columns
+         cascading, 50 tables / 69 columns kept, 106 reached. Every one of
+         those five numbers had drifted, and check F of
+         scripts/check-site-claims.mjs passed the chart on every run in between,
+         because check F checks the figures against EACH OTHER and the stamp
+         against being a parseable past date — never against a database. The
+         middle bar's label, "50 tables keep their rows with the person detached
+         from them", also carried on its own the reading Lane 99 removed from
+         web/studio.html: detached is not anonymous. The columns that keep the
+         name on purpose, all confirmed present on 14 September 2026, are
+         gym_invoices.billed_name, gym_payments.payer_name,
+         memberships.member_label (written by trg_profiles_retain_financial_record
+         in the moment before the profile goes), gym_passes.holder_name,
+         gym_agreement_signatures.signed_name and .guardian_name,
+         staff_grants.subject_name, .actor_name and .revoked_by_name, and
+         gym_events.summary, which is composed at write time so the feed does
+         not change when somebody is renamed or erased.
+
+         NO COUNT IS GIVEN FOR THAT SET, deliberately. "Seventeen name-bearing
+         columns" was carried into this lane's brief as an established figure
+         and is not one: nothing in this repo states it, and the nearest thing
+         that does — "17 columns / 13 tables" in part 41's header — is the OLD
+         direct `set null` fan-out from a much smaller schema, not a count of
+         names. Which text columns on a surviving row amount to "the person's
+         name" is a judgement (deletion_log.subject_label is deliberate;
+         exercises.name is not a person), so it is enumerated above rather than
+         totalled. A number nobody can re-derive is how 39 started.
+
+         WHEN THIS MOVES, EVERY SURFACE MOVES. The pin is the `do $$` block at
+         the foot of supabase/parts/41-account-deletion.sql, which re-runs the
+         closure against whatever database setup.sql is applied to and raises a
+         WARNING when it has grown. Check O of scripts/check-site-claims.mjs
+         reads 118 and 11 out of that block and requires every file stating the
+         figure — this page among them — to state the same pair, with the date
+         and the query beside it. -->
     <figure class="chart">
       <div class="chart-hd">
         <div>
-          <span class="chart-k">Counted from the live catalogue</span>
-          <h3>What deleting an account reaches</h3>
+          <span class="chart-k">Counted from the live catalogue, 14 September 2026</span>
+          <h3 id="chart-what-deleting-an-account-reaches">What deleting an account reaches</h3>
         </div>
       </div>
-      <div class="chart-scroll">
-        <svg viewBox="0 0 740 214" width="740" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 28 tables are deleted along with the person, across 32 columns. 13 tables keep their rows with the person detached from them, across 17 columns. Following the cascade all the way down, 42 tables are reached in total.">
-          <line class="cx-grid" x1="372.8" y1="34" x2="372.8" y2="176"/>
-          <line class="cx-grid" x1="485.6" y1="34" x2="485.6" y2="176"/>
-          <line class="cx-grid" x1="598.4" y1="34" x2="598.4" y2="176"/>
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-deleting-an-account-reaches">
+        <svg viewBox="0 0 760 214" width="760" height="214" role="img" aria-label="Horizontal bar chart of how far deleting an account reaches in the database, counted from the database&rsquo;s own foreign keys on 14 September 2026. Hanging straight off your profile row: 68 tables are deleted with it, across 76 columns, and 59 tables keep their rows, across 81 columns, with the link to you emptied but nothing else about the row changed, so several of them still hold your name in a column of their own. Following the chain all the way down from the sign-in account that is actually deleted, 129 tables are reached in total &mdash; 118 of them in the application schema and 11 inside the sign-in schema Supabase keeps for itself.">
+          <line class="cx-grid" x1="350.24" y1="34" x2="350.24" y2="176"/>
+          <line class="cx-grid" x1="440.48" y1="34" x2="440.48" y2="176"/>
+          <line class="cx-grid" x1="530.72" y1="34" x2="530.72" y2="176"/>
+          <line class="cx-grid" x1="620.96" y1="34" x2="620.96" y2="176"/>
           <line class="cx-grid" x1="711.2" y1="34" x2="711.2" y2="176"/>
           <line class="cx-base" x1="260" y1="34" x2="260" y2="176"/>
 
           <text class="cx-lab" x="250" y="56" text-anchor="end">Deleted with you</text>
-          <text class="cx-ax" x="250" y="72" text-anchor="end">32 columns</text>
-          <rect class="f-hi" x="260" y="40" width="293.3" height="26" rx="3"/>
-          <text class="cx-val" x="563.3" y="58">28 tables</text>
+          <text class="cx-ax" x="250" y="72" text-anchor="end">76 columns</text>
+          <rect class="f-hi" x="260" y="40" width="204.5" height="26" rx="3"/>
+          <text class="cx-val" x="474.5" y="58">68 tables</text>
 
-          <text class="cx-lab" x="250" y="104" text-anchor="end">Kept, with you detached</text>
-          <text class="cx-ax" x="250" y="120" text-anchor="end">17 columns</text>
-          <rect class="f-lo" x="260" y="88" width="146.7" height="26" rx="3"/>
-          <text class="cx-val" x="416.7" y="106">13 tables</text>
+          <!-- This row used to read "Kept, with you detached". Nothing beside it
+               was false, and the figcaption below already explained the name
+               snapshots &mdash; but the label is the part that gets read on its own,
+               quoted, and screenshotted, and on its own "detached" is heard as
+               "anonymised". It is not: the link goes, the name often does not.
+               The label now says so, in the same words the owner console uses. -->
+          <text class="cx-lab" x="250" y="104" text-anchor="end">Kept &mdash; unlinked, not anonymous</text>
+          <text class="cx-ax" x="250" y="120" text-anchor="end">81 columns</text>
+          <rect class="f-lo" x="260" y="88" width="177.5" height="26" rx="3"/>
+          <text class="cx-val" x="447.5" y="106">59 tables</text>
 
           <text class="cx-lab" x="250" y="152" text-anchor="end">Reached in total</text>
           <text class="cx-ax" x="250" y="168" text-anchor="end">following the chain down</text>
-          <rect class="ch-c" x="260" y="136" width="440" height="26" rx="3"/>
-          <text class="cx-val" x="710" y="154" text-anchor="end">42 tables</text>
+          <rect class="ch-c" x="260" y="136" width="388" height="26" rx="3"/>
+          <!-- Outside the bar, like the two above it. This one was drawn back
+               INTO its own fill with text-anchor="end", so the only value label on
+               the chart sitting on tinted accent was this one &mdash; inconsistent to
+               look at and the only one whose contrast depended on the tint. -->
+          <text class="cx-val" x="658" y="154">129 tables</text>
 
           <line class="cx-base" x1="260" y1="176" x2="711.2" y2="176"/>
           <g class="cx-ax">
             <text x="260" y="196" text-anchor="middle">0</text>
-            <text x="372.8" y="196" text-anchor="middle">10</text>
-            <text x="485.6" y="196" text-anchor="middle">20</text>
-            <text x="598.4" y="196" text-anchor="middle">30</text>
-            <text x="711.2" y="196" text-anchor="middle">40</text>
+            <text x="350.24" y="196" text-anchor="middle">30</text>
+            <text x="440.48" y="196" text-anchor="middle">60</text>
+            <text x="530.72" y="196" text-anchor="middle">90</text>
+            <text x="620.96" y="196" text-anchor="middle">120</text>
+            <text x="711.2" y="196" text-anchor="middle">150</text>
           </g>
         </svg>
       </div>
       <figcaption class="chart-note">
-        <strong>The middle bar is the one to read carefully.</strong> Those rows survive with you
-        detached from them &mdash; payments taken, door visits and guest passes, which a gym has
-        tax and legal reasons to keep. Invoices and memberships are <em>not</em> in that set: they
-        point at the person and go when the person does. A gym with a retention obligation needs
-        to know that before it presses the button, so it is stated rather than assumed.
+        <strong>The middle bar is the one to read carefully, and its label is the part that used to
+        mislead.</strong> Those rows survive &mdash; payments taken, door visits and guest passes, which a
+        gym has tax and legal reasons to keep. <strong>Invoices and memberships are in that set too</strong>,
+        and this page said the opposite until the schema was read again: all three of
+        <span class="mono">memberships</span>, <span class="mono">gym_invoices</span> and
+        <span class="mono">gym_payments</span> point at a person with <em>set null</em> rather than
+        <em>cascade</em>, so the row outlives the account. What goes is the link to it, and only the
+        link. <strong>Detached is not anonymous.</strong> Several of those tables keep your name in a
+        column of their own, on purpose: the name an invoice was billed to, the name a payment was
+        taken from and the name on a membership are copied onto the row in the moment before the
+        profile goes, because an invoice for an unnamed party does not balance anybody&rsquo;s books; the
+        name written at the desk stays on a guest pass; and the name that signed a waiver stays on the
+        waiver, because a waiver nobody signed is not evidence of anything. A gym with a retention
+        obligation, and a member deciding whether to press the button, each need both halves of that,
+        so both are stated rather than assumed.
+        These are not estimates: they come from one query over the database&rsquo;s own foreign keys &mdash;
+        every table whose rows go when the account does, then every table reached by following those
+        deletions down. Say which row a figure is counted from, because the two answers differ: the
+        first two bars are counted from your profile row, the third from the sign-in account that the
+        erasure deletes, which reaches the profile and 128 other tables. The figures move whenever a
+        cascading key is added, and they have moved &mdash; every number on this chart was re-counted on
+        14 September 2026 and every one of them had grown &mdash; so they are re-measured rather than
+        remembered.
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -421,8 +661,22 @@ addEventListener('DOMContentLoaded', function () {
       <li>
         <span class="no">6</span>
         <div>
-          <h3>The files are chased separately, and confirmed</h3>
-          <p>Deleting a database row does not delete an image in object storage &mdash; there is no cascade between the two. So the file's location is recorded before the row is gone, a delete is sent for it, and it is marked done only on a reply that actually says the object is no longer there. Nothing is marked deleted because it asked nicely.</p>
+          <h3>The files are chased separately, and every store that holds a person&rsquo;s file is chased</h3>
+          <p>Deleting a database row does not delete an image in object storage &mdash; there is no cascade between the two. So the gap is closed in software, and the same way each time: the object&rsquo;s location is recorded before the row is gone, a delete is sent for it on a schedule, and the entry is marked done only on a reply that actually says the object is no longer there. Nothing is marked deleted because it asked nicely. That now covers seven stores across two queues &mdash; progress photographs, injury documents, message attachments, profile photos, and on the coaching side a coach's logo, published documents and exercise clips. One is left out on purpose: a gym's own filing cabinet is keyed to the building rather than to a person, so an individual erasure cannot even enumerate it, and how long a gym must keep a document about a former member is a legal question with a different answer in each country. That decision has not been made, so those files stay and the outstanding ones are listed for the gym that will have to make it. Both apps say all of this at the moment you ask for deletion rather than leaving you to find out.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">7</span>
+        <div>
+          <h3>The queue is drained on a schedule, and an alarm fires when an entry stops moving</h3>
+          <p>The drain runs every five minutes and records that it ran; recording that it ran is not recording that it removed anything. So a second scheduled job reads both queues once a day and fails on purpose if anything has been outstanding for more than a day, naming the bucket, the path and the last thing storage said about it. A failed scheduled run is a red row in the log of runs, which is a signal in a place already read &mdash; and it is worth being exact about the size of that, because it is a failing job in a log rather than a page or an email to anybody. What it rules out is the failure this had already had once: a drain reporting success every five minutes for three days while one entry, a test row as it turned out, never moved.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">8</span>
+        <div>
+          <h3>Only one route can remove an acceptance, and it is the coach&rsquo;s own erasure</h3>
+          <p>A coach can publish a document their clients accept, and an acceptance is locked to its document so neither can be altered without the other. That lock is a foreign key that refuses deletion, and it is unchanged: no admin screen, no cleanup script and no policy can delete an accepted document. What exists alongside it is a single named exception &mdash; when the coach who owns the document is erased, the acceptances are released first and the erasure completes. Until that was built, a coach anybody had ever agreed with could not be deleted at all; the attempt raised a constraint error and rolled the whole thing back, including the record that it had been attempted. The exception costs something, so it is written down rather than smoothed over: erasing a coach takes the record that their clients accepted their document with it. The alternative was keeping a person&rsquo;s name, file and paperwork indefinitely because their clients ticked a box, which is a refusal to erase wearing retention&rsquo;s clothes.</p>
         </div>
       </li>
     </ol>
@@ -440,24 +694,29 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Where it is held</div>
       <h2 class="hd">One database,<br><span class="serif">one file store.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">Supabase</div>
-        <div class="lbl"><strong>Database, sign-in and files.</strong> Managed Postgres, which is where the row-level rules on this page live. It may be processed outside your country; where data leaves the UK or EEA it moves under the safeguards those rules require.</div>
+        <dt class="stat-n">Supabase</dt>
+        <dd class="lbl"><strong>Database, sign-in and files.</strong> Managed Postgres, which is where the row-level rules on this page live. It may be processed outside your country; where data leaves the UK or EEA it moves under the safeguards those rules require.</dd>
       </div>
       <div>
-        <div class="stat-n">TLS</div>
-        <div class="lbl"><strong>Encrypted in transit and at rest.</strong> Both ends of it, for the database and for the file store.</div>
+        <dt class="stat-n">TLS</dt>
+        <dd class="lbl"><strong>Encrypted in transit, and at rest by the platform.</strong> Every connection to the database and the file store is over TLS. Encryption at rest is Supabase&rsquo;s disk encryption underneath both &mdash; it is real, and it is theirs rather than something Repple adds on top. No individual column is separately encrypted by this application, so anyone holding a valid database credential reads plain values; what stands between an account and somebody else&rsquo;s row is the row-level rules on this page, not a second key.</dd>
       </div>
       <div>
-        <div class="stat-n">Stripe</div>
-        <div class="lbl"><strong>Card details never reach us.</strong> Where a gym or trainer takes a payment, Stripe handles the card directly. We do not receive or store card numbers.</div>
+        <dt class="stat-n">Stripe</dt>
+        <dd class="lbl"><strong>Card details never reach us.</strong> Where a gym or trainer takes a payment, Stripe handles the card directly. We do not receive or store card numbers.</dd>
       </div>
       <div>
-        <div class="stat-n">Export</div>
-        <div class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export everything Repple holds about them from Settings, without asking a person for it. A gym can ask us to export everything held for the gym.</div>
+        <dt class="stat-n">Export</dt>
+        <dd class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export their record from Settings as a JSON file, without asking a person for it &mdash; forty-odd tables including the gym-side ones, plus a list of every file held for them, which you then save one at a time. Where a table could not be read, the export says so in place of the rows rather than writing an empty list. A gym can ask us to export everything held for the gym.</dd>
       </div>
-    </div>
+    </dl>
     <p class="tiny after-sm">
       The full list of the services that process data on our behalf, and what each one is for, is
       in <a href="/privacy">Privacy</a>.
@@ -501,7 +760,7 @@ addEventListener('DOMContentLoaded', function () {
       <p>
         If you find something wrong, tell us and it gets fixed:
         <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>. There is no
-        disclosure programme to enrol in and no form to fill out first.
+        disclosure program to enrol in and no form to fill out first.
       </p>
     </div>
   </div>
@@ -529,12 +788,12 @@ addEventListener('DOMContentLoaded', function () {
         <div class="a"><p>Every rule is keyed to the specific gym a row belongs to, and being an owner somewhere is not the same as being the owner of your gym. That distinction is the single most common way a system like this leaks, and it is why every rule tests the second thing rather than the first.</p></div>
       </details>
       <details>
-        <summary>Will you ever let coaches see progress photos?</summary>
-        <div class="a"><p>Only behind a control you operate, per photo, that you can withdraw. Anything less is people uploading in the belief it is private and being wrong, which is the outcome the current answer exists to prevent. Until that control is built, the answer is no.</p></div>
+        <summary>Can coaches see progress photos?</summary>
+        <div class="a"><p>Only behind a control you operate, per photo, that you can withdraw &mdash; and that control now exists. Nothing is visible to a coach because of who they are; a photograph reaches them because you granted that photograph, and ending the coaching link ends every grant with it. Anything less would be people uploading in the belief it is private and being wrong, which is the outcome this design exists to prevent.</p></div>
       </details>
       <details>
         <summary>Does deleting my account delete my gym's records of me?</summary>
-        <div class="a"><p>Partly, and the split matters. Your membership and your invoices go with you. Payments taken, door visits and passes stay as rows with you detached from them, because a gym has tax and legal reasons to keep the fact that money moved. <a href="/delete-account">Deleting your account</a> lists both sides.</p></div>
+        <div class="a"><p>Partly, and the split matters &mdash; and this answer had it backwards until the schema was read again. Your membership, your invoices and the payments a gym recorded do <em>not</em> go with you: those are the gym&rsquo;s financial record and it has tax and legal reasons to keep them, so the row stays and the link to your account is emptied. Door visits and guest passes stay the same way. Emptying the link is not the same as anonymising the row: on an invoice, a payment, a membership, a guest pass and a signed waiver the name is deliberately kept, because an invoice made out to nobody balances nothing and a waiver nobody signed is evidence of nothing. What goes is everything that was yours &mdash; the profile, the training, the body data, the messages. <a href="/delete-account">Deleting your account</a> lists both sides, and <a href="#deletion">the chart above</a> counts them.</p></div>
       </details>
       <details>
         <summary>Do people at Repple look at my data?</summary>
@@ -566,48 +825,61 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
-              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
-            </svg>
-          </span>
-          Repple
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
         </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
-          The operating record for gyms, the coaches who work in them, and the people they train.
+          One connected fitness platform for members, coaches and gyms.
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
-        <ul>
-          <li><a href="/client">Repple</a></li>
-          <li><a href="/trainer">Repple Coach</a></li>
-          <li><a href="/studio">Repple Studio</a></li>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
-        <ul>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
-          <li><a href="/signup">Create account</a></li>
-          <li><a href="/forgot-password">Reset password</a></li>
           <li><a href="/support">Support</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
-        <ul>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
-          <li><a href="/security">Security &amp; data</a></li>
-          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
         </ul>
       </div>
     </div>
     <div class="base">
       <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
       <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
     </div>
   </div>

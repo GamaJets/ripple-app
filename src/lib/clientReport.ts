@@ -212,7 +212,7 @@ export interface ClientReportDoc {
  */
 export const REPORT_PROVENANCE = [
   'These are the figures held in this app for the person named above, printed at their request and by their own action.',
-  'Body-composition figures are transcribed from body-composition machine printouts — read automatically from a photograph of the printout, or typed in by hand — and are not measured by this app. Tape measurements and training are logged by the person themselves.',
+  'Body-composition figures are transcribed from body-composition machine printouts (read automatically from a photograph of the printout, or typed in by hand) and are not measured by this app. Tape measurements and training are logged by the person themselves.',
   'Dates are the dates recorded against each entry. Where a figure was not recorded it is shown as a dash, never as a zero.',
 ];
 
@@ -230,7 +230,7 @@ export const REPORT_LIMITS =
  *  who is not told will not know that progress photographs exist at all, and
  *  the client who sent this should not have to remember that they did not. */
 export const REPORT_NO_PHOTOS =
-  'No photographs are included. Progress photographs are stored privately to this account and are never attached to a document; they can only be shared one at a time, deliberately, from the app. Documents uploaded about an injury are likewise not included — only the injury the person recorded from them.';
+  'No photographs are included. Progress photographs are stored privately to this account and are never attached to a document; they can only be shared one at a time, deliberately, from the app. Documents uploaded about an injury are likewise not included, only the injury the person recorded from them.';
 
 /* ── read honesty ─────────────────────────────────────────────────────────── */
 
@@ -269,7 +269,7 @@ export function sectionCaveat(what: string, status: LoadStatus): string | null {
   const st = sectionState(status);
   if (st === 'whole') return null;
   if (st === 'partial') {
-    return `${what}: more entries exist than could be read in one request. What is listed is real, and it is not all of it — no total or overall change is stated for this section.`;
+    return `${what}: more entries exist than could be read in one request. What is listed is real, and it is not all of it. No total or overall change is stated for this section.`;
   }
   return `${what}: could not be read when this document was made. This section is EMPTY BECAUSE OF A FAILED READ, not because there is nothing on record. Do not read it as "none".`;
 }
@@ -417,7 +417,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
 
   /* ── heading ───────────────────────────────────────────────────────────── */
   H.push(`<div class="h"><h1>Health &amp; training summary</h1><p>${escapeHtml(who)} · prepared ${escapeHtml(dayLabel(input.generatedOn))} · ${escapeHtml(brand)}</p></div>`);
-  T.push(`${who} — health & training summary`);
+  T.push(`${who} · health & training summary`);
   T.push(`Prepared ${dayLabel(input.generatedOn)} · ${brand}`);
 
   /* ── what this is, and is not ──────────────────────────────────────────── */
@@ -451,7 +451,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
     T.push('', 'BODY COMPOSITION');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Body-composition scans'));
-      T.push('Not read — body-composition scans could not be read. This is not a statement that there are none.');
+      T.push('Not read. Body-composition scans could not be read. This is not a statement that there are none.');
     } else if (!scans.length) {
       H.push(emptyBlock('No body-composition scans are recorded.'));
       T.push('No body-composition scans are recorded.');
@@ -484,8 +484,8 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
           H.push(`<p>First reading to latest: ${escapeHtml(lines.join(' · '))}</p>`);
           T.push('First reading to latest: ' + lines.join(' · '));
         } else {
-          H.push('<p class="lede">One reading of each figure so far — a change needs two.</p>');
-          T.push('One reading of each figure so far — a change needs two.');
+          H.push('<p class="lede">One reading of each figure so far. A change needs two.</p>');
+          T.push('One reading of each figure so far. A change needs two.');
         }
       } else {
         H.push('<p class="lede">No overall change is stated: not all of this person’s scans could be read, so the earliest one listed may not be their first.</p>');
@@ -503,7 +503,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
     T.push('', 'TAPE MEASUREMENTS');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Tape measurements'));
-      T.push('Not read — tape measurements could not be read. This is not a statement that there are none.');
+      T.push('Not read. Tape measurements could not be read. This is not a statement that there are none.');
     } else if (!entries.length || !cols.length) {
       H.push(emptyBlock('No tape measurements are recorded.'));
       T.push('No tape measurements are recorded.');
@@ -541,7 +541,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
     T.push('', 'TRAINING LOGGED');
     if (st === 'unreadable' || b.state === 'unreadable') {
       H.push(unreadableBlock('Logged training'));
-      T.push('Not read — logged training could not be read. This is not a statement that none was logged.');
+      T.push('Not read. Logged training could not be read. This is not a statement that none was logged.');
     } else if (!b.days.length && b.undatedCount < 1) {
       // Nothing dated AND nothing undated. Only then is the record empty — a
       // history whose every session carries an unreadable timestamp has no days
@@ -609,7 +609,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
     T.push('', 'INJURIES DISCLOSED IN THE APP');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Disclosed injuries'));
-      T.push('Not read — disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
+      T.push('Not read. Disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
     } else if (!items.length) {
       H.push(emptyBlock('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.'));
       T.push('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.');
@@ -622,10 +622,10 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
       const body = items.map((i) => `<tr><td>${escapeHtml(i.label)}</td>`
         + `<td>${escapeHtml(i.severity)}</td>`
         + `<td>${escapeHtml(i.status)}</td>`
-        + `<td>${escapeHtml(dayLabel(String(i.at).slice(0, 10)))}</td>`
+        + `<td>${escapeHtml(dayLabel(i.at))}</td>`
         + `<td>${escapeHtml(i.note || '—')}</td></tr>`).join('');
       H.push(`<table><tr><th>Area</th><th>Severity as recorded</th><th>State</th><th>Recorded on</th><th>Their note</th></tr>${body}</table>`);
-      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(String(i.at).slice(0, 10))}${i.note ? ' — "' + i.note + '"' : ''}`);
+      for (const i of items) T.push(`  ${i.label}: ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ', "' + i.note + '"' : ''}`);
       H.push('<p class="lede">Severity and state are as the person recorded them, in the app’s own three-step wording. They are not a clinical grading.</p>');
       T.push('Severity and state are as the person recorded them; they are not a clinical grading.');
     }
@@ -634,7 +634,7 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
   /* ── foot ──────────────────────────────────────────────────────────────── */
   const foot = complete
     ? `Every section of this document was read successfully on ${dayLabel(input.generatedOn)}. Generated by ${brand}.`
-    : `PARTS OF THIS DOCUMENT COULD NOT BE READ — see "This record is incomplete" above. Generated by ${brand}.`;
+    : `PARTS OF THIS DOCUMENT COULD NOT BE READ. See "This record is incomplete" above. Generated by ${brand}.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 

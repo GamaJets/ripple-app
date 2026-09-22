@@ -28,34 +28,55 @@
 // And the read now reports its own failure. `videos: []` used to mean both "your
 // coach has not uploaded anything" and "we could not reach the server", and the
 // client library asserted the former in both cases.
+//
+// ── And the clips kept on the phone belong to somebody ────────────────────
+//
+// The entries this hook keeps locally — the ones whose row was refused — lived
+// under `repple.exerciseVideos`, a key with no account in it that nothing ever
+// cleared, so the next coach to sign in on a shared gym handset inherited them.
+// They are keyed by account now; src/lib/handsetClips.ts holds the key, the
+// validator and the argument for not migrating the old one.
 import { useEffect, useState, useCallback } from 'react';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { ExVideo } from '../lib/trainerMock';
+import {
+  handsetClipsKey, readHandsetClips, writeHandsetClips, LEGACY_HANDSET_CLIPS_KEY,
+  type ClipVisibility, type StoredClip,
+} from '../lib/handsetClips';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is — which here decides
+// which sentence a coach reads when their clip does not upload. See
+// src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { exerciseSlug } from '../lib/exerciseId';
 import { writeFailure } from '../lib/wroteRows';
 import { reportError } from '../lib/reportError';
+import {
+  VIDEO_BUCKET, exerciseVideoPath, videoUploadFailureLine, videoUploadRefusal,
+  orphanedVideoObject, type VideoRowOutcome, type VideoUploadRefusal,
+} from '../lib/exerciseVideoUpload';
 
 /** Who the trainer decided may watch a clip. Mirrors the CHECK constraint on
  *  exercise_videos.visibility; 'private' still reaches anyone named in
- *  exercise_video_grants. */
-export type Visibility = 'private' | 'clients' | 'gym' | 'public';
+ *  exercise_video_grants.
+ *
+ *  Declared in src/lib/handsetClips.ts now and aliased here, so the union the
+ *  screens import and the union the stored-clip validator narrows to are one
+ *  declaration rather than two that agree today. */
+export type Visibility = ClipVisibility;
 
-export interface VideoItem extends ExVideo {
-  url?: string;
-  /** Catalogue id of the movement this demonstrates, or null for a local-only
-   *  entry that never reached the server. */
-  exerciseId: string | null;
-  /** Whose clip it is. Null means a platform clip belonging to no gym. */
-  trainerId: string | null;
-  visibility: Visibility;
-  /** Path inside the private bucket, when we host the file ourselves. */
-  path?: string;
-}
+/** One clip, from either end: a row in `exercise_videos` or an entry this
+ *  handset is holding because its row was refused.
+ *
+ *  The shape lives in src/lib/handsetClips.ts beside the function that reads it
+ *  back off the device. It was `extends ExVideo` plus four fields; every field
+ *  is the same field, and it moved so that what is written to storage and what
+ *  is validated coming out of it cannot drift apart. */
+export type VideoItem = StoredClip;
 
 /** Whether the library could be read. `[]` with status 'error' is not the same
  *  claim as `[]` with status 'ready', and the screens must not conflate them.
@@ -66,9 +87,14 @@ export interface VideoItem extends ExVideo {
  *  library renders its figure as a dash without that screen being touched. */
 export type LibraryStatus = LoadStatus;
 
-const KEY = 'repple.exerciseVideos';
 const SIGNED_TTL = 60 * 60; // an hour is longer than any set, shorter than a share
 let SEQ = 1;
+
+/** Eight characters of randomness beside the millisecond, the same shape
+ *  coachLogo.ts, injuryDocs.ts and progressPhotos.ts already use. */
+function newToken(): string {
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
 
 /** Video upload is available whenever the backend is on (storage + table). */
 export const videoUploadAvailable = () => USE_SUPABASE;
@@ -79,23 +105,75 @@ export const videoUploadAvailable = () => USE_SUPABASE;
  * It used to return a public URL, which is what made the bucket public and the
  * permission model decorative. The path is what gets stored; the URL is minted
  * per viewer, per hour, by playbackUrl().
+ *
+ * ── Why this no longer upserts ────────────────────────────────────────────
+ *
+ * This was `${uid}/${Date.now()}.mp4` with `upsert: true`, and it was the only
+ * `upsert: true` against storage anywhere in the repository — injuryDocs.ts,
+ * messaging.ts, avatarUpload.ts and coachLogo.ts all pass `upsert: false`.
+ * `upsert: true` sends `x-upsert`, which makes the write an
+ * `insert … on conflict do update`: a REPLACEMENT of the bytes behind a key
+ * that a named client may already hold a grant and a signed URL for, with no
+ * version, no checksum and no modified-at anywhere downstream that could show
+ * it happened. supabase/parts/1150 removes `exvid_object_u` — the only UPDATE
+ * policy on `storage.objects` in the project — and names this as its follow-up.
+ *
+ * So the write asks for a NEW object every time, and the key is built to be new
+ * every time: `exerciseVideoPath()` puts a random token beside the millisecond,
+ * the way coachLogoPath() and coachDocPath() already do. A millisecond alone is
+ * not a unique key — two taps inside one millisecond collide, and `Date.now()`
+ * is not monotonic across a clock correction on a phone.
+ *
+ * ── And a refused upload now says which refusal it was ────────────────────
+ *
+ * The failure path was `if (error) return null` with nothing else: no report,
+ * and no way for the screen to tell "you are signed out" from "that key is
+ * taken" from "the network died". `onFailure` is handed the sentence for the
+ * actual cause, and the cause is reported either way — so a refusal that
+ * reaches nobody's eyes still reaches the error log rather than vanishing.
  */
-export async function uploadExerciseVideo(uri: string): Promise<string | null> {
+export async function uploadExerciseVideo(
+  uri: string,
+  onFailure?: (line: string) => void,
+): Promise<string | null> {
   if (!USE_SUPABASE || !uri) return null;
+  const fail = (reason: VideoUploadRefusal, detail: unknown): null => {
+    const line = videoUploadFailureLine(reason);
+    reportError('exerciseVideos.uploadExerciseVideo', detail ?? new Error(line), { reason });
+    onFailure?.(line);
+    return null;
+  };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return null;
+    // Not a silent null. A coach whose session lapsed while the picker was open
+    // is the commonest way to arrive here, and "check your connection" is the
+    // one piece of advice that cannot fix it.
+    //
+    // But the OTHER commonest way is a coach standing in a gym basement whose
+    // auth read did not land — and until the error beside this call was read,
+    // that coach got the same sentence: "you are not signed in on this device.
+    // Sign in and add it again." Which is false, and worse than useless,
+    // because the one thing that would fix it — waiting for signal — is the one
+    // thing it tells them not to do. The two refusals already existed
+    // (src/lib/exerciseVideoUpload.ts) and the file's own rule for choosing
+    // between them is the same asymmetry as this one: never send somebody to
+    // fix the thing that is working.
+    const who = await signedInUid('exerciseVideos.upload');
+    if (who.fate === 'signed-out') return fail('signed-out', new Error('no signed-in user'));
+    if (who.fate !== null) return fail('unreachable', new Error('auth read unreadable before upload'));
+    const uid = who.uid;
     const ab = await (await fetch(uri)).arrayBuffer();
     // The folder is the uploader's id: that is the whole of the storage write
     // rule (exvid_object_w), so a path shaped any other way is rejected.
-    const path = `${uid}/${Date.now()}.mp4`;
+    const path = exerciseVideoPath(uid, Date.now(), newToken());
     const { error } = await supabase.storage
-      .from('exercise-videos')
-      .upload(path, ab, { contentType: 'video/mp4', upsert: true });
-    if (error) return null;
+      .from(VIDEO_BUCKET)
+      .upload(path, ab, { contentType: 'video/mp4', upsert: false });
+    if (error) return fail(videoUploadRefusal(error), error);
     return path;
-  } catch { return null; }
+  } catch (e) {
+    // fetch() on the local file, or the upload with no reply at all.
+    return fail(videoUploadRefusal(e), e);
+  }
 }
 
 /**
@@ -112,7 +190,7 @@ export async function playbackUrl(v: Pick<VideoItem, 'url' | 'path'>): Promise<s
   if (!v.path || !USE_SUPABASE) return null;
   try {
     const { data, error } = await supabase.storage
-      .from('exercise-videos')
+      .from(VIDEO_BUCKET)
       .createSignedUrl(v.path, SIGNED_TTL);
     if (error) return null;
     return data?.signedUrl ?? null;
@@ -169,9 +247,68 @@ export function useExerciseVideos() {
   const [added, setAdded] = useState<VideoItem[]>([]);
   const [remote, setRemote] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<LibraryStatus>('loading');
+  // ── whose clips ────────────────────────────────────────────────────────
+  //
+  // The handset entries were read and written under one unqualified key with
+  // no account in it and no entry in src/lib/signOutState.ts, so the next
+  // person to sign in on a coach's handset opened Videos and read the previous
+  // coach's clips. See src/lib/handsetClips.ts, which makes the same argument
+  // src/lib/mealSwaps.ts makes about a member's meal swaps.
+  //
+  // `user?.id` rather than a `getUser()` inside `load`, because the KEY has to
+  // be a render value: the effect below is keyed on it, which is what makes an
+  // account switch a re-read rather than a list left standing from the last
+  // session.
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  const clipsKey = handsetClipsKey(uid);
+  // False until a read of THIS key has come back. It arms the write in
+  // `persist`, and it is reset before every read — see the effect.
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    // Cleared BEFORE the read, not left at whatever the last key's read set it
+    // to. `hydrated` is the arming flag for the write, and a flag that survived
+    // the key changing would let an account switch whose read then failed write
+    // this coach's empty list straight over the other one's stored clips —
+    // which is the one way to LOSE a clip rather than merely show the wrong
+    // one. Lane 4 caught this in its own fix; it is the same trap here.
+    setHydrated(false);
+    // No account is no store. The clips still work for this session; they are
+    // simply not kept, which is what `handsetClipsKey` returning null means.
+    if (!clipsKey) { setAdded([]); return; }
+    let live = true;
+    AsyncStorage.getItem(clipsKey)
+      .then((r) => { if (live) { setAdded(readHandsetClips(r)); setHydrated(true); } })
+      // An unreadable store is no clips on screen, and `hydrated` stays false,
+      // so nothing is persisted over whatever is actually on the device. A clip
+      // added in this session still shows; it is not kept, and the next launch
+      // reads the real bytes again.
+      .catch(() => { if (live) setAdded([]); });
+    return () => { live = false; };
+  }, [clipsKey]);
+
+  // The unqualified key this replaces, removed rather than migrated: nothing
+  // distinguishes a single-owner handset's own old clips from the previous
+  // coach's on a shared one, and reading it would be the defect performed once
+  // deliberately. See the header of src/lib/handsetClips.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_HANDSET_CLIPS_KEY).catch(() => {}); }, []);
+
+  // The same question for the half of the list that is not on the device.
+  //
+  // `remote` is the previous account's server rows, and nothing cleared it:
+  // signing out does not unmount this provider, so the next coach saw the
+  // previous one's library until their own read came back — and a read that
+  // FAILED never came back at all, which left one coach's clip names on
+  // another's screen for as long as they stayed on it. `exvid_read` decides
+  // what each person MAY see, and it was doing so correctly; what was wrong is
+  // that nobody asked it again before the rows stayed on screen.
+  //
+  // Keyed on the account rather than folded into `load`, so a pull-to-refresh
+  // does not blank the list it is refreshing.
+  useEffect(() => { setRemote([]); setStatus('loading'); }, [uid]);
 
   const load = useCallback(async () => {
-    try { const raw = await AsyncStorage.getItem(KEY); if (raw) setAdded(JSON.parse(raw)); } catch { /* ignore */ }
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
       // No trainer filter: exvid_read decides what this person may see, and it
@@ -198,9 +335,26 @@ export function useExerciseVideos() {
   }, [authRev]);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Show the new list, and keep it if this device is allowed to.
+   *
+   * Two guards, and neither is an "ignore":
+   *
+   *   · no key — nobody is signed in, so there is no account to keep it under
+   *     and a shared key is the defect this file was changed to end.
+   *   · not hydrated — the read of this key has not come back, or came back
+   *     refused. Writing now would put this session's list on top of bytes we
+   *     never managed to read.
+   *
+   * In both cases the clip is on screen for this session and is not kept. The
+   * `try` this replaces could not catch anything at all: `setItem` returns a
+   * promise, so a storage rejection was an unhandled rejection rather than the
+   * ignored one the comment claimed.
+   */
   const persist = (next: VideoItem[]) => {
     setAdded(next);
-    try { AsyncStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    if (!clipsKey || !hydrated) return;
+    AsyncStorage.setItem(clipsKey, writeHandsetClips(next)).catch(() => { /* on screen this session either way */ });
   };
 
   /**
@@ -215,10 +369,27 @@ export function useExerciseVideos() {
     const name = (v.name || '').trim(); if (!name) return 'none';
     const group = (v.group || 'Uncategorised').trim() || 'Uncategorised';
     const visibility: Visibility = v.visibility || 'clients';
+    // Which of the three the write turned out to be. 'unconfirmed' is the
+    // starting value on purpose: every branch that ANSWERS sets it, and the one
+    // that does not — an exception, meaning no reply at all — leaves it, which
+    // is the reading that keeps a possibly-live row's file. See
+    // `orphanedVideoObject` in src/lib/exerciseVideoUpload.ts.
+    let outcome: VideoRowOutcome = 'unconfirmed';
+    let uploader: string | null = null;
     if (USE_SUPABASE) {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
+        // The error beside this call was discarded, so an outage reached the
+        // `else` below as "nobody signed in". The OUTCOME it sets is right and
+        // stays: no insert was attempted on either fate, so there is certainly
+        // no row, and 'refused' is what says that — which is what lets the
+        // orphan sweep delete the object the upload left behind. What was
+        // missing is the report: `signedInUid` records an unreadable auth read
+        // under this key, so a coach whose clip fell back to local storage on
+        // an outage leaves a trace of why rather than being filed alongside
+        // every genuinely signed-out one.
+        const who = await signedInUid('exerciseVideos.addVideo');
+        const uid = who.uid;
+        uploader = uid;
         const exerciseId = uid ? await ensureExercise(name, group) : null;
         if (uid && exerciseId) {
           const { data, error } = await supabase.from('exercise_videos').insert({
@@ -232,16 +403,40 @@ export function useExerciseVideos() {
             visibility,
           }).select().single();
           if (!error && data) { setRemote((p) => [rowToItem(data), ...p]); return 'remote'; }
+          // The server replied and there is no row: `.single()` errors on nought
+          // rows, so `!data` and `error` are the same answer.
+          outcome = 'refused';
+        } else {
+          // Nobody signed in, or the catalogue would not take the movement. No
+          // insert was attempted, so there is certainly no row.
+          outcome = 'refused';
         }
       } catch { /* fall through to local, and say so */ }
     }
+
+    // A file we uploaded seconds ago that no row will ever point at. Removed
+    // here, while the coach's session still can — `exvid_object_r` needs a row,
+    // so from the next launch nobody on the platform can even see it. The
+    // fast path only: supabase/parts/2510 sweeps whatever this misses.
+    const orphan = orphanedVideoObject(outcome, uploader, v.path);
+    if (orphan) {
+      try {
+        const { error } = await supabase.storage.from(VIDEO_BUCKET).remove([orphan]);
+        if (error) reportError('exerciseVideos.discardOrphan', error, { path: orphan });
+      } catch (e) { reportError('exerciseVideos.discardOrphan', e, { path: orphan }); }
+    }
+
+    // `path` goes with the object. A local entry still carrying the key of a
+    // file we have just deleted draws a play button on a clip that cannot be
+    // signed by anybody, which is a worse answer than "not recorded yet".
+    const path = orphan ? undefined : v.path;
     const item: VideoItem = {
       id: 'vx' + Date.now().toString(36) + SEQ++,
       name, group,
-      dur: v.path ? 'clip' : 'link',
-      uploaded: !!(v.path || v.url?.trim()),
+      dur: path ? 'clip' : 'link',
+      uploaded: !!(path || v.url?.trim()),
       url: v.url?.trim() || undefined,
-      path: v.path,
+      path,
       exerciseId: exerciseSlug(name) || null,
       trainerId: null,
       visibility,
@@ -376,7 +571,17 @@ export function useExerciseVideos() {
       const why = writeFailure('That clip', r);
       if (why) { reportError('exerciseVideos.removeVideo', new Error(why), { id }); return false; }
       if (target?.path) {
-        try { await supabase.storage.from('exercise-videos').remove([target.path]); } catch { /* the row is gone; a stray file is not worth failing the delete */ }
+        // Swallowed on purpose, and the reason is stronger than it used to be.
+        // This read "the row is gone; a stray file is not worth failing the
+        // delete", which was a shrug at bytes nobody would chase. There is no
+        // stray file now: the row delete above fires `trg_exercise_video_deleted`
+        // (supabase/parts/1152), which queues `exercise-videos` + this path into
+        // `object_purge` in the same transaction, and the drain sends the DELETE.
+        // So this call is the fast path, not the only path — it clears the object
+        // immediately when it works, and when it does not, the queue still has it.
+        // A double delete is expected and handled: the drain treats 404 as
+        // 'already absent' rather than as a failure.
+        try { await supabase.storage.from(VIDEO_BUCKET).remove([target.path]); } catch { /* the queue has this path; see above */ }
       }
       setRemote((p) => p.filter((x) => x.id !== id));
       return true;

@@ -111,11 +111,14 @@ eq(Object.keys(sparse).length, 1, 'and nothing else is added');
 
 const BUSINESS: Record<string, unknown> = {
   sessionsDeliveredThisMonth: 42,
+  sessionsStillUnmarked: 9,
   revenueAtOwnRate: 6300,
+  takenThisMonth: 'AED 12,400.00',
   currency: 'AED',
   clients: 14,
   avgAdherence: '81%',
   atRiskClients: 3,
+  howTheyCoach: 'entirely online',
   // The field somebody adds to the digest six months from now.
   atRiskNames: ['Ana', 'Ben', 'Cara'],
   rosterEmails: ['ana@example.com'],
@@ -125,6 +128,26 @@ eq(biz.sessionsDeliveredThisMonth, 42, 'the coach may send their own session cou
 eq(biz.currency, 'AED', 'and the ISO code, so the model does not write dollars at a coach in Dubai');
 eq(biz.atRiskNames, undefined, 'a list of named clients added to the digest is dropped by the same allowlist');
 eq(biz.rosterEmails, undefined, 'and so is anything else that identifies somebody');
+
+// ── the three the Monday digest writes its rules about ──────────────────
+//
+// The allowlist's one failure mode, and it had happened: analytics.tsx composed
+// all three, the prompt spends three sentences on them, and none was declared —
+// so the model was told to quote a figure it had never been given, told not to
+// add unmarked sessions it could not see, and told to suppress room-based
+// suggestions on a signal that never arrived. A model given a rule about an
+// absent field writes around the gap in prose, where no formatter can catch it.
+eq(biz.takenThisMonth, 'AED 12,400.00',
+  'the takings figure the digest is told to quote exactly actually reaches the model');
+eq(biz.sessionsStillUnmarked, 9,
+  'and the unmarked count, without which "congratulations on a quiet month" is the answer to nine unrecorded sessions');
+eq(biz.howTheyCoach, 'entirely online',
+  'and how they coach, without which the rule about not suggesting anything needing a room can never fire');
+// None of the three is about one person, which is the test that licenses them.
+for (const k of ['takenThisMonth', 'sessionsStillUnmarked', 'howTheyCoach']) {
+  ok(!(COACH_CLIENT_KEYS as readonly string[]).includes(k),
+    `${k} is a fact about the coach's own book, not about a client`);
+}
 
 // The two lists must not overlap in a way that lets a client key through the
 // business door. Nothing about the business is a fact about one person.

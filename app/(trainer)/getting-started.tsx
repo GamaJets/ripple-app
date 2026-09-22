@@ -34,21 +34,67 @@
 // are in src/lib/coachFirstRun.ts and tested there; the reads are in
 // src/ui/coachSetup.ts and each says why it can lie by succeeding.
 import { useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Section, SectionHead, Ghost, PageHead, HeroCard, HeroRing } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachSetup } from '../../src/ui/coachSetup';
 import { useCoachDelivery, useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
-import { deliveryNote } from '../../src/lib/coachDelivery';
+import { deliveryAskLine, deliveryNote } from '../../src/lib/coachDelivery';
 import {
-  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
+  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, coachSetupDone, coachSetupNa, coachSetupUnknown, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
+import { FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * The mark against one setup row — a filled tick, a hairline ring, a dash for a
+ * state nothing could read, or a short bar for a step that does not apply.
+ *
+ * A module-scope PLAIN FUNCTION, called as `tick(r.state, t)`, and not a
+ * component written as `<Tick state={…} />`. Declared inside the screen body it
+ * was a new function object on every render, so React saw a different element
+ * TYPE each time and threw away every mark on the list rather than updating it
+ * — and this screen re-reads on every focus, which is the whole point of it.
+ * Nothing here holds a TextInput or an accessibility label (the label is on the
+ * Pressable around it), so what that cost was wasted work, not a coach's caret.
+ * The rule is app/(client)/report.tsx:475 and scripts/check-remount.mjs.
+ *
+ * At module scope because it closes over nothing from the render body: the
+ * sizes and the hairline are module imports, and the theme is passed.
+ *
+ * The member's copy is app/(client)/getting-started.tsx and is deliberately a
+ * second function rather than a shared one: these are route modules in two
+ * route groups, the two states differ ('na' is a coach-only answer), and
+ * importing one screen into the other to save eight lines would make a route
+ * file into a library. If they are ever shared, the shared one belongs in
+ * src/ui/.
+ */
+const tick = (state: CoachSetupRow['state'], t: Theme) => (
+  <View style={{
+    width: 24, height: 24, borderRadius: radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: state === 'done' ? t.brand : 'transparent',
+    borderWidth: state === 'done' ? 0 : hairline,
+    borderColor: t.ring,
+  }}>
+    {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+    {/* A dash, not an empty circle. An empty circle is a claim that this has
+        not been done, and under a failed read that is a claim we have not
+        earned. */}
+    {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
+    {/* Neither a tick nor a dash. A step that does not apply to this coach
+        has been answered and does not need doing, and both of the other two
+        marks would say something untrue about it. */}
+    {state === 'na' ? <View style={{ width: 8, height: hairline * 2, backgroundColor: t.ink3, borderRadius: 1 }} /> : null}
+  </View>
+);
 
 export default function CoachGettingStarted() {
   const t = useTheme();
@@ -69,46 +115,45 @@ export default function CoachGettingStarted() {
   // returns, and is still being told to set their currency — which reads as the
   // setting not having saved.
   useFocusEffect(useCallback(() => { void reload(); void refreshDelivery(); }, [reload, refreshDelivery]));
+  // The same two reads focus runs. This is the checklist a new coach works
+  // through, and every line on it is ticked by something they do somewhere
+  // else — often on another device, or on the web — so "I have done that, why
+  // is it not ticked" is the exact question this gesture answers.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reload(), refreshDelivery()]),
+    [reload, refreshDelivery],
+  ));
 
   const rows = coachSetupRows(facts, delivery.shape);
   const next = coachSetupNext(rows);
+  const done = coachSetupDone(rows);
+  const applicable = rows.length - coachSetupNa(rows);
+  // Null is "cannot be drawn": a read still in flight, a row nothing could
+  // read, or a list with no step that applies. Never a nought.
+  const ringValue = status === 'loading' || coachSetupUnknown(rows) > 0 || applicable <= 0 ? null : done / applicable;
   const G = layout.gutter;
-
-  const Tick = ({ state }: { state: CoachSetupRow['state'] }) => (
-    <View style={{
-      width: 24, height: 24, borderRadius: radius.pill,
-      alignItems: 'center', justifyContent: 'center',
-      backgroundColor: state === 'done' ? t.brand : 'transparent',
-      borderWidth: state === 'done' ? 0 : hairline,
-      borderColor: t.ring,
-    }}>
-      {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-      {/* A dash, not an empty circle. An empty circle is a claim that this has
-          not been done, and under a failed read that is a claim we have not
-          earned. */}
-      {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
-      {/* Neither a tick nor a dash. A step that does not apply to this coach
-          has been answered and does not need doing, and both of the other two
-          marks would say something untrue about it. */}
-      {state === 'na' ? <View style={{ width: 8, height: hairline * 2, backgroundColor: t.ink3, borderRadius: 1 }} /> : null}
-    </View>
-  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Ghost icon="back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{coachSetupHeading(rows)}</Text>
-          </View>
-        </View>
+        <PageHead title="Getting Started" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-          {coachSetupNote(rows, status)}
-        </Text>
+        {/* ── the state, and the one action ────────────────────────────────────
+            The night hero: how far along, as a ring, and the first step still
+            outstanding as the bright button. The ring's arithmetic is the
+            heading's own (`coachSetupHeading`): done over the steps that APPLY
+            to this coach, and no fraction at all while any row is unread or
+            the reads are still landing. An arc over a partly unread list
+            would be the denominator that heading refuses to print, drawn as
+            a picture instead of written as a number. The note is unchanged
+            and says why when the ring is empty. */}
+        <HeroCard eyebrow="Your Setup" title={coachSetupHeading(rows)} meta={coachSetupNote(rows, status)}
+          ring={<HeroRing value={ringValue}
+            figure={ringValue == null ? null : `${done}/${applicable}`}
+            sub={ringValue == null ? 'Not Known' : 'Steps'}
+            spoken={ringValue == null ? 'Setup progress, not known yet' : `${done} of ${applicable} steps done`} />}
+          cta={next ? { label: `Open ${next.title}`, onPress: () => router.push(next.route as any) } : undefined} />
 
         <Section>
           {rows.map((r) => (
@@ -119,9 +164,9 @@ export default function CoachGettingStarted() {
               accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : r.state === 'na' ? 'Does not apply to you' : 'Still to do'}. ${r.item.note}`}
               style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}
             >
-              <View style={{ paddingTop: 2 }}><Tick state={r.state} /></View>
+              <View style={{ paddingTop: 2 }}>{tick(r.state, t)}</View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
+                <Text style={{ ...ty.head, color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
                 {/* Why it is worth doing, on the rows that are not done. This is
                     the half a checklist usually leaves out and the reason a
@@ -144,7 +189,7 @@ export default function CoachGettingStarted() {
                   </Text>
                 ) : null}
               </View>
-              <View style={{ paddingTop: 4 }}><Icon name="chevron" size={15} color={t.ink3} /></View>
+              <View style={{ paddingTop: 4 }}><Icon name={FORWARD_ICON} size={15} color={t.ink3} /></View>
             </Pressable>
           ))}
         </Section>
@@ -160,30 +205,27 @@ export default function CoachGettingStarted() {
         <Section>
           <SectionHead title="How Do You Coach?" />
           <DeliveryModeChoice onPicked={() => { void reload(); }} />
+          {/* The ASK, until it has been answered, and the state afterwards.
+              `deliveryAskLine` was written for this and imported by nothing —
+              so the checklist counted the unanswered question against the coach
+              while `deliveryNote` described a state rather than requesting an
+              answer, and the coach was left to work out for themselves which
+              control fills the row in. On the screen whose entire job is to say
+              what is left. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {deliveryNote(delivery)}
+            {deliveryAskLine(delivery) ?? deliveryNote(delivery)}
           </Text>
         </Section>
 
-        {next ? (
-          <Section>
-            <SectionHead title="Start Here" />
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              {next.title} is the first one still outstanding, and the rest of the list is easier once it is done.
-            </Text>
-            <View style={{ marginTop: sp.lg }}>
-              <Ghost label="Open It" onPress={() => router.push(next.route as any)} />
-            </View>
-          </Section>
-        ) : null}
+        {/* "Start Here" was a card at the foot of the page. It is the hero's
+            bright button now: the first outstanding step, offered before the
+            list rather than after it. */}
 
-        <Rule />
 
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />
-          <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-            Several screens carry a row at the top saying what they are showing you. Open it, read it, and close
-            it — it does not come back.
+          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.lg }}>
+            Many screens open with a row saying what they show. Read it once and it goes.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.md, flexWrap: 'wrap' }}>
             <Ghost label="Search Every Screen" onPress={() => router.push('/(trainer)/explore')} />

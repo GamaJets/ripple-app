@@ -24,6 +24,24 @@
 // a bodyweight set in the middle of a session" — which is precisely the
 // confusion, written down, in the code that ships.
 //
+// ── nor from the catalogue's `is_bodyweight`, which is a different fact ────
+//
+// `public.exercises.is_bodyweight` arrived with the RepDB v1.41 drop and is
+// true on 183 rows, and it looks from its name like the flag this file infers.
+// It is not, and the pack's own data settles it: not one of those 183 rows
+// carries any equipment, and `chin-ups` and `dips` are both FALSE — a pull-up
+// bar and a dip station are equipment, so the movements this whole module was
+// written for are outside the column. Meanwhile 58 of the 183 are stretches,
+// which move no load at all. The column means "needs no kit", not "the load is
+// the person".
+//
+// Using it to price a set would therefore refuse to price a pull-up and would
+// price a hamstring stretch as the member's whole body. And even a column that
+// meant the right thing would be a fact about the MOVEMENT where this is a fact
+// about the SET: a dip done with a 20 kg belt and a dip done on an assisted
+// machine are the same catalogue row and are not the same load. The person who
+// did the set is the only one who knows, and `bw[i]` is where they said so.
+//
 // `bw` is an explicit per-set boolean, aligned to `sets` exactly as `feel`
 // already is. `bw[i] === true` is testimony: the person said this set was their
 // own bodyweight. And once that is said out loud, `sets[i][1]` on such a set

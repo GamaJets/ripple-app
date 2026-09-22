@@ -26,18 +26,38 @@ import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useCallback, useState } from 'react';
 import { useClientData } from '../../src/ui/clientData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
-import { weightDeltaIn } from '../../src/lib/units';
+// `plain`, not `String(Math.abs(x))`. Both figures on this screen are carried
+// to one decimal, and a bare interpolation of a Number writes a FULL STOP in
+// every locale there has ever been — which is the sixth thing src/lib/
+// deltaLabel.ts's header says a movement has to get right, and the reason that
+// module prints through `plain` itself. The KPI row further down already used
+// `deltaLabel` for these same two values, so a German member read "3,4" there
+// and "3.4" in the hero four lines above it. The share text is worse than a
+// disagreement: it leaves the phone and stays posted, addressed to readers who
+// have no settings screen to check it against and for whom a full stop is the
+// THOUSANDS separator.
+import { plain, weightDeltaIn } from '../../src/lib/units';
  import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Section, KpiRow, Cta, Notice, fig, PageHead, HeroCard, Expandable } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useBrand } from '../../src/ui/brand';
+import { SharePostSheet } from '../../src/ui/SharePost';
+import { progressPost, type PostBuild } from '../../src/lib/postCard';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
 export default function Social() {
  const t = useTheme();
  const router = useRouter();
  const cd = useClientData();
+ // Every figure on this screen is derived from the scan history, and every one
+ // of them leaves the phone when the member shares it. A stale share is the
+ // expensive kind, so the read behind it can be asked for again.
+ const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
  const wu = useSettings().weightUnit;
 
  // `cd.scansStatus`, which this screen ignored entirely. It matters more here
@@ -81,89 +101,106 @@ export default function Social() {
  // about a change the scans did not record, made in public on the member's
  // behalf.
  const bits = [
- deltaMoved(wtMove) ? `${wayWord(wtMove)} ${Math.abs(wtMove)} ${wu}` : null,
- deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}% body fat` : null,
+ deltaMoved(wtMove) ? `${wayWord(wtMove)} ${plain(Math.abs(wtMove), 1)} ${wu}` : null,
+ deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}% body fat` : null,
  ].filter(Boolean);
  const msg = measured && bits.length
- ? `My ${BRAND.label} progress — ${bits.join(' and ')} so far. Every rep ripples out.`
+ ? `My ${BRAND.label} progress: ${bits.join(' and ')} so far. Every rep ripples out.`
  : `I train with ${BRAND.label}. Every rep ripples out.`;
- try { await Share.share({ message: msg }); } catch {}
+ // Closing the sheet without posting rejects on iOS, and it is the commonest
+ // way this call ends: a member opens the sheet, reads the sentence back, and
+ // decides not to post it. That is the feature working. Turning it into "we
+ // could not share" would tell somebody who chose not to post that the app
+ // failed, which is worse than saying nothing — and every other share in the
+ // app (referral.tsx, exportShare.ts, social.ts) reads it the same way.
+ try { await Share.share({ message: msg }); } catch { /* dismissed — see above */ }
+ };
+
+ // The picture card, in the gym's name. Weight leads when it moved; body fat
+ // leads when only it did. Both are the member's own, since their first scan.
+ const { appName } = useBrand();
+ const [build, setBuild] = useState<PostBuild | null>(null);
+ const makeCard = (): PostBuild => {
+ const bf = deltaMoved(bfMove) ? `Body Fat ${deltaLabel(bfMove, { since: null, unit: '%' })}` : null;
+ if (measured && deltaMoved(wtMove)) {
+ return progressPost({ what: 'Weight', change: `${deltaLabel(wtMove, { since: null })} ${wu}`, since: 'Since My First Scan', lines: bf ? [bf] : [], brand: appName });
+ }
+ if (measured && deltaMoved(bfMove)) {
+ return progressPost({ what: 'Body Fat', change: deltaLabel(bfMove, { since: null, unit: '%' }), since: 'Since My First Scan', brand: appName });
+ }
+ return { ok: false, why: 'Nothing has moved since your first scan yet, so there is no change to put on a card.' };
  };
 
  const G = layout.gutter;
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon="back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Your story, your call</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share</Text>
- </View>
- </View>
+ <PageHead title="Share" subtitle="Your Story, Your Call" />
 
  {measured ? (
- <Hero
- label={!deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up'}
- figure={Math.abs(wtMove).toString()}
- unit={wu}
- note={`Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}%` : 'unchanged'} across ${cd.scans.length} scans`}
- />
+ (() => {
+ const label = !deltaMoved(wtMove) ? 'WEIGHT UNCHANGED' : wayWord(wtMove) === 'down' ? 'WEIGHT DOWN' : 'WEIGHT UP';
+ const figure = plain(Math.abs(wtMove), 1);
+ const note = `Body Fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'Unchanged'} Since Your First Scan`;
+ return (
+ /* The night hero (round five): this screen has one state — how far the
+ member has come since their first scan — and one action, sharing it, so
+ the figure is the headline and Share is the bright button on the same
+ card. It was a figure card at the top and a button four sections down.
+ The words are spoken as one sentence by the card. */
+ <HeroCard eyebrow={label} title={`${figure} ${wu}`} meta={note}
+  cta={{ label: 'Share My Progress', onPress: () => setBuild(makeCard()) }} />
+ );
+ })()
  ) : (
  !scansWhole && cd.scansStatus !== 'loading' ? (
  <View style={{ marginTop: sp.lg }}>
-  <Notice tone={t.warn} kicker="Your progress"
-   title={cd.scansStatus === 'error' ? 'We couldn’t read your scans' : 'Not all of your scans could be read'}
+  <Notice tone={t.warn} kicker="Your Progress"
+   title={cd.scansStatus === 'error' ? 'We Couldn’t Read Your Scans' : 'Not All of Your Scans Could Be Read'}
    note={cd.scansStatus === 'error'
     ? 'There is nothing to share from this screen right now, and that is a fault here rather than an absence in your record. Your scans are safe.'
-    : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one — which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
+    : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one, which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
  </View>
  ) : (
- <View style={{ paddingTop: sp.xxl, paddingBottom: sp.xl }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Your progress</Text>
- <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
-  {cd.scansStatus === 'loading' ? 'Reading your scans…' : 'Nothing to show yet'}
- </Text>
- <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
- Log a second body scan and the change between your first and your latest appears here — and in anything you share.
- </Text>
- </View>
+ <HeroCard eyebrow="Your Progress"
+  title={cd.scansStatus === 'loading' ? 'Reading Your Scans…' : 'Nothing to Show Yet'}
+  meta="Log a second body scan and the change since your first appears here, and in anything you share."
+  cta={{ label: `Share ${BRAND.label}`, onPress: share }} />
  )
  )}
 
- <Rule />
+ {/* A withheld figure still leaves the app itself to share: the button the
+ hero would have carried, under the notice that says why there is no hero. */}
+ {!measured && !scansWhole && cd.scansStatus !== 'loading' ? (
+ <View style={{ marginTop: 14 }}><Cta label={`Share ${BRAND.label}`} wide onPress={share} /></View>
+ ) : null}
 
- {measured ? (<>
- <Section>
- <SectionHead title="Since Your First Scan" />
- <KpiRow items={[
- // The heading above names the baseline, so these two carry the figure alone —
- // and where it rounds to nothing they carry the word instead of a sign, with
- // the unit dropped so it cannot read "No change kg".
- { label: 'Weight', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined },
- { label: 'Body Fat', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined },
- { label: 'Scans', value: fig(cd.scans.length) },
+ {/* The three figures behind the headline, as tiles on the ground. Blue,
+ purple and grey: they NAME the metric. Whether down is good depends on a
+ goal this screen does not read, so no tile wears green or red. */}
+ {measured ? (
+ <KpiRow tiles items={[
+ // The hero names the baseline, so these carry the figure alone — and where
+ // it rounds to nothing they carry the word instead of a sign, with the unit
+ // dropped so it cannot read "No change kg".
+ { label: 'Weight Change', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined, tone: 'blue' },
+ { label: 'Body Fat Change', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined, tone: 'purple' },
+ { label: 'Scans', value: fig(num(cd.scans.length)), tone: 'neutral' },
  ]} />
- </Section>
- <Rule />
- </>) : null}
+ ) : null}
 
  <Section>
- <SectionHead title="How Sharing Works" />
- <Text style={{ ...ty.body, color: t.ink2 }}>
- Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
+ <Expandable title="How Sharing Works">
+ <Text style={{ ...ty.caption, color: t.ink3 }}>
+ Sharing opens your phone's own share sheet, so it goes wherever you send it: a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
  </Text>
- </Section>
-
- <Rule />
-
- <Section>
- <Cta label={measured ? 'Share My Progress' : `Share ${BRAND.label}`} wide onPress={share} />
+ </Expandable>
  </Section>
 
  </ScrollView>
+ <SharePostSheet invite build={build} onClose={() => setBuild(null)} />
  </SafeAreaView>
  );
 }

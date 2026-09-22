@@ -36,6 +36,11 @@
 //    clients on the roster and twenty-eight nowhere. The report says exactly
 //    which rows landed, so the coach re-imports the rest rather than the lot.
 import type { CoachClientRow, ImportPreview } from './csvImport';
+// The reader's own grouping. Safe here because this module is reachable only
+// from the phone app: an edge function has no reader whose locale it could ask,
+// and a latched `appLocale()` under Next.js resolves on the server during
+// render and again in the browser. See scripts/check-numbers.mjs.
+import { num } from './format';
 
 /** What the import is about to do, row by row, before it does any of it. */
 export interface RosterPlan {
@@ -98,7 +103,7 @@ export function rosterPlan(
  */
 export function planBlocker(preview: ImportPreview<CoachClientRow>, plan: RosterPlan): string | null {
   if (preview.missingRequired.length) {
-    return 'This file has no column this recognises as a name. Add a header row with a “Name” column and try again — nothing has been imported.';
+    return 'This file has no column this recognises as a name. Add a header row with a “Name” column and try again. Nothing has been imported.';
   }
   if (!preview.sheet.rows.length) {
     return 'This file has a header and no rows under it, so there is nobody to import.';
@@ -118,19 +123,23 @@ export function planBlocker(preview: ImportPreview<CoachClientRow>, plan: Roster
  */
 export function planSummary(plan: RosterPlan, total: number): string {
   const n = plan.create.length;
+  // `total` is the row count of a CSV a gym exported from whatever it used
+  // before Repple, so four digits is the ordinary case for a club rather than
+  // the far end of one. Both halves of the ratio go through the same formatter:
+  // "1,204" beside "1204" in one sentence is the defect this gate is for.
   const parts: string[] = [
-    `${n} of ${total} row${total === 1 ? '' : 's'} will be added to your roster.`,
+    `${num(n)} of ${num(total)} row${total === 1 ? '' : 's'} will be added to your roster.`,
   ];
   if (plan.invite.length) {
-    parts.push(`${plan.invite.length} of them will also have an invite recorded against their email address, which links them to you the first time they sign in to Repple with it.`);
+    parts.push(`${num(plan.invite.length)} of them will also have an invite recorded against their email address, which links them to you the first time they sign in to Repple with it.`);
   } else {
     parts.push('None of them carries an email address to record an invite against. Your coaching code links a client whoever they are and whatever address they sign up with.');
   }
   if (plan.inviteSkipped.length) {
-    parts.push(`${plan.inviteSkipped.length} will be added without an invite, listed below with the reason.`);
+    parts.push(`${num(plan.inviteSkipped.length)} will be added without an invite, listed below with the reason.`);
   }
   if (plan.rejected.length) {
-    parts.push(`${plan.rejected.length} row${plan.rejected.length === 1 ? ' was' : 's were'} refused and will not be imported. Nothing about them is guessed at.`);
+    parts.push(`${num(plan.rejected.length)} row${plan.rejected.length === 1 ? ' was' : 's were'} refused and will not be imported. Nothing about them is guessed at.`);
   }
   return parts.join(' ');
 }
@@ -165,7 +174,7 @@ export function resultSummary(r: RosterResult): string {
     parts.push(`${inviteFailed} of them ${inviteFailed === 1 ? 'is' : 'are'} on your roster with NO invite recorded, so they will not link to you when they sign in. Send them your coaching code instead.`);
   }
   if (failed) {
-    parts.push(`${failed} row${failed === 1 ? '' : 's'} did not save at all and ${failed === 1 ? 'is' : 'are'} not on your roster. ${failed === 1 ? 'It is' : 'They are'} named above — import ${failed === 1 ? 'it' : 'them'} again rather than the whole file.`);
+    parts.push(`${failed} row${failed === 1 ? '' : 's'} did not save at all and ${failed === 1 ? 'is' : 'are'} not on your roster. ${failed === 1 ? 'It is' : 'They are'} named above. Import ${failed === 1 ? 'it' : 'them'} again rather than the whole file.`);
   }
   return parts.join(' ');
 }

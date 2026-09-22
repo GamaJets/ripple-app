@@ -49,9 +49,9 @@ export const COACHING_MODE_LABEL: Record<CoachingMode, string> = {
  *  travels with the option everywhere it is offered — "Hybrid" on its own is
  *  a word, not a choice anybody can make. */
 export const COACHING_MODE_NOTE: Record<CoachingMode, string> = {
-  online: 'Your coach programs and checks in remotely — no sessions to book.',
-  inperson: 'Your coach trains you in the room — book sessions with them.',
-  hybrid: 'Both — book sessions with them, and check in for the weeks you train alone.',
+  online: 'Your coach programs and checks in remotely. No sessions to book.',
+  inperson: 'Your coach trains you in the room. Book sessions with them.',
+  hybrid: 'Both: book sessions with them, and check in for the weeks you train alone.',
   solo: 'No coach. AI plans and tools, and nothing sent to anybody.',
 };
 
@@ -59,7 +59,7 @@ export const COACHING_MODE_NOTE: Record<CoachingMode, string> = {
 export const COACHED_MODE_NOTE_COACH: Record<CoachedMode, string> = {
   online: 'You program and check in remotely. They get no booking calendar.',
   inperson: 'You train them in the room. They can book your open slots.',
-  hybrid: 'Both — they book your slots, and check in for the weeks they train alone.',
+  hybrid: 'Both: they book your slots, and check in for the weeks they train alone.',
 };
 
 /** Whether this person has sessions with their coach to book. The booking
@@ -90,6 +90,27 @@ export function readCoachedModeOrNull(v: unknown): CoachedMode | null {
 
 export function readCoachingMode(v: unknown, fallback: CoachingMode = 'online'): CoachingMode {
   return v === 'online' || v === 'inperson' || v === 'hybrid' || v === 'solo' ? v : fallback;
+}
+
+/**
+ * Tolerant read of a `diet` column.
+ *
+ * `Diet` is a five-member union in this file and a plain `text` column in the
+ * database, and src/ui/clientData.tsx was casting the column straight to the
+ * union: `setDiet(r.diet as Diet)`. A row holding anything else — an older
+ * vocabulary, a value a coach or an import wrote, a typo — then reached
+ * `mealAt` in src/lib/meals.ts, where the component pools for that diet are
+ * EMPTY and the meal is assembled by dereferencing them. The whole nutrition
+ * screen throws a TypeError out of render.
+ *
+ * 'meat' is the fallback because it is the state's own default in that provider
+ * and the widest pool: it excludes nothing the other four exclude, so an
+ * unrecognised value degrades to more choice rather than to a plan built around
+ * a restriction nobody chose. The member's own setting is one tap away and
+ * writing this back is what the next save does.
+ */
+export function readDiet(v: unknown, fallback: Diet = 'meat'): Diet {
+  return v === 'meat' || v === 'vegetarian' || v === 'vegan' || v === 'paleo' || v === 'keto' ? v : fallback;
 }
 
 
@@ -180,6 +201,26 @@ export interface TrainingSession {
    *  row marked before the column existed, which is not the same thing, so the
    *  two are never collapsed into one. */
   outcomeAt?: string | null;
+  /**
+   * What this session was filed as being worth, in MINOR units of
+   * `rateCurrency`. `sessions.rate_cents`, snapshotted at the moment of
+   * delivery by src/lib/rateSnapshot.ts.
+   *
+   * Meaningless without the field below and must never be read without it: the
+   * minor-unit factor is a property of the currency and is 1, 100 or 1000, so
+   * the integer alone names no money. supabase/parts/1010 says exactly that on
+   * the column. Read it through `sessionRate` in src/lib/sessionRate.ts, which
+   * is the only thing in this codebase that turns the pair into a figure.
+   *
+   * It rode in on `select('*')` all along and was thrown away by the row mapper,
+   * exactly as `outcome` was, so the member could see that an hour had been
+   * delivered and nothing about what it was worth.
+   */
+  rateCents?: number | null;
+  /** The currency `rateCents` is in, as it stood when the rate was snapshotted.
+   *  NULL means the unit was never recorded — every row written before part
+   *  1010 — and must be read as UNKNOWN, never as the gym's currency today. */
+  rateCurrency?: string | null;
 }
 
 export interface CancellationResult {
