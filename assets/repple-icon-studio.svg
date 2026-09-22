@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Repple Studio app icon. The drawing is "R≡" from the approved board's R≡PPLE wordmark — the same geometry as src/ui/BrandMark.tsx. -->
+  <!-- Repple Studio app icon. Studio gold bars (#d88c0b), as the owner chose on 22 Sep 2026. The drawing is "R≡" from the approved board's R≡PPLE wordmark — the same geometry as src/ui/BrandMark.tsx. -->
   <rect width="1024" height="1024" fill="#0a1311"/>
   <g transform="translate(182.0 374.5) scale(2.75)">
     <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linejoin="round"><path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/></g>
     <path fill="#ffffff" d="M38 62H70L112 100H78Z"/>
-    <g fill="#22c55e" transform="translate(124 0)"><path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/></g>
+    <g fill="#d88c0b" transform="translate(124 0)"><path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/></g>
   </g>
 </svg>

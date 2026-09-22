@@ -11,7 +11,7 @@ import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { VARIANT, HOME_ROUTE } from '../src/lib/variant';
 import { hasSeenTour } from './tour';
-import { BrandWordmark } from '../src/ui/BrandMark';
+import { BrandWordmark, useMarkSignal } from '../src/ui/BrandMark';
 import { useBrand } from '../src/ui/brand';
 import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
 import { type as ty } from '../src/theme/scale';
@@ -19,6 +19,7 @@ import { type as ty } from '../src/theme/scale';
 
 export default function Home() {
   const t = useTheme();
+  const markSignal = useMarkSignal();
   const { authed, loading } = useAuth();
   const { appName } = useBrand();
 
@@ -41,7 +42,7 @@ export default function Home() {
         {/* The drawn word is the HOUSE brand's logo. A white-label tenant's
             launch says its own name, in Sora, exactly as its door does. */}
         {BRAND_ID === DEFAULT_BRAND_ID
-          ? <BrandWordmark width={200} ink={t.nightInk} signal={t.brandBright} />
+          ? <BrandWordmark width={200} ink={t.nightInk} signal={markSignal} />
           : <Text style={{ ...ty.hero, letterSpacing: 0, color: t.nightInk, textAlign: 'center', paddingHorizontal: 24 }}>{appName}</Text>}
       </View>
     );

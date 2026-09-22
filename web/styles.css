@@ -83,8 +83,8 @@
      because an app icon does not, and they are not redefined in either media
      block below. */
   --client-tile: #22c55e;  --client-tile-ink: #052e16;   /* 8.67:1 */
-  --coach-tile:  #16a34a;  --coach-tile-ink:  #052e16;   /* 5.99:1 */
-  --studio-tile: #15803d;  --studio-tile-ink: #ffffff;   /* 5.02:1 */
+  --coach-tile:  #665fe8;  --coach-tile-ink:  #ffffff;   /* 4.81:1, coach purple, as the app's mark */
+  --studio-tile: #d88c0b;  --studio-tile-ink: #1a1204;   /* 6.78:1, studio gold, as the app's mark */
 
   /* The accent as a SOLID FILL, as opposed to as text. Link text has to clear
      4.5:1 against the page, which forces the light theme down to the dark end

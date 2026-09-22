@@ -242,9 +242,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             ),
           }
         : null),
-      // Same mark for all three; the plate behind it carries the colour,
-      // matching the iOS tile.
-      adaptiveIcon: { ...(config.android?.adaptiveIcon ?? {}), backgroundColor: id.tile },
+      // The plate carries the tile colour, matching the iOS tile; the mark's
+      // bars carry the app's own colour where the brand gives it one.
+      adaptiveIcon: {
+        ...(config.android?.adaptiveIcon ?? {}),
+        ...(id.adaptive ? { foregroundImage: id.adaptive } : {}),
+        backgroundColor: id.tile,
+      },
       // Android App Links — the same decision as associatedDomains above, and
       // the same scope. `autoVerify` is what makes Android open the app without
       // asking; it requires /.well-known/assetlinks.json to name this package

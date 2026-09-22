@@ -83,6 +83,20 @@ export const VARIANT_ACCENT: Record<AppVariant, string> = {
   owner: '#15803d',
 };
 
+/**
+ * The colour of the wordmark's three bars, per app: green for the member app,
+ * purple for Coach, gold for Studio. The owner's choice on 22 Sep 2026, so each
+ * app keeps the same R≡PPLE mark in its own colour; the same values are drawn
+ * into assets/repple-icon-*.svg. Only the MARK changes: the interface stays on
+ * the one shared accent, and a gym that sets its own brand colour has its
+ * colour in the bars instead (src/ui/BrandMark.tsx `useMarkSignal`).
+ */
+export const VARIANT_MARK: Record<AppVariant, string> = {
+  client: '#22c55e',
+  trainer: '#665fe8',
+  owner: '#d88c0b',
+};
+
 /** Human name for the current build, used in copy and the user guide. */
 export const VARIANT_LABEL: Record<AppVariant, string> = {
   client: 'Repple',

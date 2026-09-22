@@ -17,6 +17,16 @@
 // their colour in the bars and their name under the word, not Repple's green.
 import Svg, { G, Path } from 'react-native-svg';
 import { useTheme } from './components';
+import { VARIANT, VARIANT_MARK } from '../lib/variant';
+
+/** The bars' colour on this build: the app's own (green, purple, gold) while
+ *  the theme is on Repple's default accent, the gym's colour once it has set
+ *  one — a white-label door carries the gym's colour, not ours. */
+export const REPPLE_SIGNAL = '#22c55e';
+export function useMarkSignal(): string {
+  const t = useTheme();
+  return t.brandBright.toLowerCase() === REPPLE_SIGNAL ? VARIANT_MARK[VARIANT] : t.brandBright;
+}
 
 /** One squared bowl-and-stem: the P, and the R before its leg. */
 export const WORDMARK_P = 'M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12';

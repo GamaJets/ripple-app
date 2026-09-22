@@ -24,7 +24,7 @@ import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
 import { Card, Cta, CtaBright, HeroCard, Segmented } from '../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, font } from '../src/theme/scale';
-import { BrandMark, BrandWordmark } from '../src/ui/BrandMark';
+import { BrandMark, BrandWordmark, useMarkSignal } from '../src/ui/BrandMark';
 import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
 
 
@@ -38,6 +38,7 @@ const ROLE_NOTE: Record<typeof VARIANT, string> = {
 
 export default function Welcome() {
   const t = useTheme();
+  const markSignal = useMarkSignal();
   const router = useRouter();
   const auth = useAuth();
   const { appName } = useBrand();
@@ -220,7 +221,7 @@ export default function Welcome() {
                 in its own accent as it is drawn on night. */}
             {BRAND_ID === DEFAULT_BRAND_ID ? (
               <View accessible accessibilityRole="header" accessibilityLabel={appName}>
-                <BrandWordmark width={236} ink={t.nightInk} signal={t.brandBright} />
+                <BrandWordmark width={236} ink={t.nightInk} signal={markSignal} />
               </View>
             ) : (
               /* The hero step's -1.5 tracking is an optical correction for a
@@ -228,7 +229,7 @@ export default function Welcome() {
                  so it is opened up here. Wraps rather than shrinks: a gym's
                  name is the one thing on this screen that must be legible. */
               <>
-                <BrandMark size={84} ink={t.nightInk} signal={t.brandBright} />
+                <BrandMark size={84} ink={t.nightInk} signal={markSignal} />
                 <Text accessibilityRole="header" style={{ ...ty.hero, color: t.nightInk, letterSpacing: 0, textAlign: 'center', marginTop: sp.lg }}>{appName}</Text>
               </>
             )}
