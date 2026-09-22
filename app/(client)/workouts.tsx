@@ -75,7 +75,7 @@ import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotific
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { SharePostButton } from '../../src/ui/SharePost';
-import { workoutPost } from '../../src/lib/postCard';
+import { workoutPost, cardioPost } from '../../src/lib/postCard';
 import { useBrand } from '../../src/ui/brand';
 import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow, Segmented, TonedChip, Meter, HeroRing, CtaBright, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, grown } from '../../src/theme/scale';
@@ -4324,6 +4324,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
   const [saving, setSaving] = useState(false);
   const recovery = kind === 'recovery';
+  const { appName: brandName } = useBrand();
   const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   // The log stores whole minutes, so anything under thirty seconds rounds to
@@ -4550,7 +4551,15 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               <Cta label="Close" wide onPress={onClose} />
             </View>
           )}
-          <View style={{ marginTop: sp.md, alignItems: 'center' }}>
+          <View style={{ marginTop: sp.md, flexDirection: 'row', justifyContent: 'center', gap: sp.md }}>
+            {finalMins > 0 ? <SharePostButton label="Share" make={() => {
+              const d = readNumber(dist);
+              return cardioPost({
+                activity: titleCaseName(activity), minutes: finalMins,
+                distance: d != null && d > 0 ? `${fig(d)} ${unit}` : null,
+                kcal: recovery ? null : parseInt(kcalIn, 10) || null, brand: brandName,
+              });
+            }} /> : null}
             {finalMins > 0 ? <Ghost label="Discard" onPress={discard} /> : null}
           </View>
         </ScrollView>

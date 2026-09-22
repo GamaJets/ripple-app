@@ -9,7 +9,7 @@ is paid again on every turn of the session that opened it.
 
 | lines | ~tok | file |
 | ----: | ---: | ---- |
-| 7,700 | 123k | `app/(client)/workouts.tsx` |
+| 7,709 | 123k | `app/(client)/workouts.tsx` |
 | 5,365 | 83k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
@@ -57,11 +57,11 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,506 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 118,868 lines, ~1719k tokens if every one were read whole.
+Total: 47 files, 118,877 lines, ~1719k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
-7,700 lines · ~123k tokens · 167 anchors
+7,709 lines · ~123k tokens · 167 anchors
 
 ```
 54-103        §        the block, the week of it this client is on, and the three fields a set
@@ -162,75 +162,75 @@ Total: 47 files, 118,868 lines, ~1719k tokens if every one were read whole.
 4135-4156     fn             source
 4157-4186     fn           sub
 4187-4289     fn       ZonePanel
-4290-4326     fn       TimedSessionRunner
-4327-4350     fn         clock
-4351-4358     fn         hrInput
-4359-4377     fn         hrEstimate
-4378-4382     fn         hrUnknownNote
-4383-4407     fn         finish
-4408-4691     fn         discard
-4692-4704     fn       clipCaption
-4705-4715     fn       SessionDemo
-4716-4834     fn         clip
-4835-4850     fn       DayPicture
-4851-4852     type     RunnerView
-4853-4859     fn       SessionRunner
-4860-4941     fn         shownName
-4942-4942     fn         cardioAt
-4943-4944     fn         setCardioAt
-4945-5029     fn         showLoad
-5030-5038     fn         cancelRestAlert
-5039-5047     fn         startRest
-5048-5070     §        Making a noise from a pocket
-5071-5168     fn           sub
-5169-5207     fn           id
-5208-5225     §        Surviving the phone
-5226-5239     §        and one key PER ACCOUNT
-5240-5252     fn         forgetGuidedDraft
-5253-5287     fn         planNames
-5288-5301     fn               n
-5302-5357     fn           any
-5358-5371     fn         methodAt
-5372-5376     fn         prescribedTempoAt
-5377-5427     fn         logSet
-5428-5535     fn         record
-5536-5536     fn         feelStep
-5537-5545     fn         chooseFeel
-5546-5651     fn         buildEntries
-5652-5661     fn         save
-5662-5686     fn         finish
-5687-5698     fn         retry
-5699-5717     fn         next
-5718-5728     fn         back
-5729-5729     fn         pause
-5730-5744     fn         resume
-5745-5749     fn         startSet
-5750-5751     fn         openDemo
-5752-5752     fn         skipRest
-5753-5779     fn         loggedSets
-5780-5782     fn         notDoneNames
-5783-5802     fn         endSession
-5803-5803     fn           totalSets
-5804-5817     §        what counts as training volume, and what only counts as work
-5818-5828     fn           counts
-5829-5860     §        and why a bodyweight set is not a zero
-5861-5865     fn           workingSets
-5866-6101     fn           exDone
-6102-6135     §        the two things this movement is, beyond its name
-6136-6164     fn         variedPlan
-6165-6182     fn         tickPlanned
-6183-6330     fn         untickLast
-6331-6364     fn         nav
-6365-7349     fn         repsWord
-7350-7368     §        What was already here, and what the report actually asked for
-7369-7388     §        What happens to the sets, and to a PR
-7389-7407     §        The unit
-7408-7451     fn       EditEntrySheet
-7452-7453     fn         setAt
-7454-7471     fn         flagAt
-7472-7478     fn         dayLabel
-7479-7518     fn         save
-7519-7700     fn         setCount
+4290-4327     fn       TimedSessionRunner
+4328-4351     fn         clock
+4352-4359     fn         hrInput
+4360-4378     fn         hrEstimate
+4379-4383     fn         hrUnknownNote
+4384-4408     fn         finish
+4409-4700     fn         discard
+4701-4713     fn       clipCaption
+4714-4724     fn       SessionDemo
+4725-4843     fn         clip
+4844-4859     fn       DayPicture
+4860-4861     type     RunnerView
+4862-4868     fn       SessionRunner
+4869-4950     fn         shownName
+4951-4951     fn         cardioAt
+4952-4953     fn         setCardioAt
+4954-5038     fn         showLoad
+5039-5047     fn         cancelRestAlert
+5048-5056     fn         startRest
+5057-5079     §        Making a noise from a pocket
+5080-5177     fn           sub
+5178-5216     fn           id
+5217-5234     §        Surviving the phone
+5235-5248     §        and one key PER ACCOUNT
+5249-5261     fn         forgetGuidedDraft
+5262-5296     fn         planNames
+5297-5310     fn               n
+5311-5366     fn           any
+5367-5380     fn         methodAt
+5381-5385     fn         prescribedTempoAt
+5386-5436     fn         logSet
+5437-5544     fn         record
+5545-5545     fn         feelStep
+5546-5554     fn         chooseFeel
+5555-5660     fn         buildEntries
+5661-5670     fn         save
+5671-5695     fn         finish
+5696-5707     fn         retry
+5708-5726     fn         next
+5727-5737     fn         back
+5738-5738     fn         pause
+5739-5753     fn         resume
+5754-5758     fn         startSet
+5759-5760     fn         openDemo
+5761-5761     fn         skipRest
+5762-5788     fn         loggedSets
+5789-5791     fn         notDoneNames
+5792-5811     fn         endSession
+5812-5812     fn           totalSets
+5813-5826     §        what counts as training volume, and what only counts as work
+5827-5837     fn           counts
+5838-5869     §        and why a bodyweight set is not a zero
+5870-5874     fn           workingSets
+5875-6110     fn           exDone
+6111-6144     §        the two things this movement is, beyond its name
+6145-6173     fn         variedPlan
+6174-6191     fn         tickPlanned
+6192-6339     fn         untickLast
+6340-6373     fn         nav
+6374-7358     fn         repsWord
+7359-7377     §        What was already here, and what the report actually asked for
+7378-7397     §        What happens to the sets, and to a PR
+7398-7416     §        The unit
+7417-7460     fn       EditEntrySheet
+7461-7462     fn         setAt
+7463-7480     fn         flagAt
+7481-7487     fn         dayLabel
+7488-7527     fn         save
+7528-7709     fn         setCount
 ```
 
 ## `app/(trainer)/builder.tsx`

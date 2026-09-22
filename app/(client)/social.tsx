@@ -26,7 +26,7 @@ import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
@@ -45,6 +45,9 @@ import { plain, weightDeltaIn } from '../../src/lib/units';
 import { Section, KpiRow, Cta, Notice, fig, PageHead, HeroCard, Expandable } from '../../src/ui/kit';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useBrand } from '../../src/ui/brand';
+import { SharePostSheet } from '../../src/ui/SharePost';
+import { progressPost, type PostBuild } from '../../src/lib/postCard';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
 export default function Social() {
@@ -113,19 +116,34 @@ export default function Social() {
  try { await Share.share({ message: msg }); } catch { /* dismissed — see above */ }
  };
 
+ // The picture card, in the gym's name. Weight leads when it moved; body fat
+ // leads when only it did. Both are the member's own, since their first scan.
+ const { appName } = useBrand();
+ const [build, setBuild] = useState<PostBuild | null>(null);
+ const makeCard = (): PostBuild => {
+ const bf = deltaMoved(bfMove) ? `Body Fat ${deltaLabel(bfMove, { since: null, unit: '%' })}` : null;
+ if (measured && deltaMoved(wtMove)) {
+ return progressPost({ what: 'Weight', change: `${deltaLabel(wtMove, { since: null })} ${wu}`, since: 'Since My First Scan', lines: bf ? [bf] : [], brand: appName });
+ }
+ if (measured && deltaMoved(bfMove)) {
+ return progressPost({ what: 'Body Fat', change: deltaLabel(bfMove, { since: null, unit: '%' }), since: 'Since My First Scan', brand: appName });
+ }
+ return { ok: false, why: 'Nothing has moved since your first scan yet, so there is no change to put on a card.' };
+ };
+
  const G = layout.gutter;
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
- <PageHead title="Share" subtitle="Your story, your call" />
+ <PageHead title="Share" subtitle="Your Story, Your Call" />
 
  {measured ? (
  (() => {
- const label = !deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up';
+ const label = !deltaMoved(wtMove) ? 'WEIGHT UNCHANGED' : wayWord(wtMove) === 'down' ? 'WEIGHT DOWN' : 'WEIGHT UP';
  const figure = plain(Math.abs(wtMove), 1);
- const note = `Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'unchanged'} across ${num(cd.scans.length)} scans`;
+ const note = `Body Fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'Unchanged'} Since Your First Scan`;
  return (
  /* The night hero (round five): this screen has one state — how far the
  member has come since their first scan — and one action, sharing it, so
@@ -133,7 +151,7 @@ export default function Social() {
  card. It was a figure card at the top and a button four sections down.
  The words are spoken as one sentence by the card. */
  <HeroCard eyebrow={label} title={`${figure} ${wu}`} meta={note}
-  cta={{ label: 'Share My Progress', onPress: share }} />
+  cta={{ label: 'Share My Progress', onPress: () => setBuild(makeCard()) }} />
  );
  })()
  ) : (
@@ -167,8 +185,8 @@ export default function Social() {
  // The hero names the baseline, so these carry the figure alone — and where
  // it rounds to nothing they carry the word instead of a sign, with the unit
  // dropped so it cannot read "No change kg".
- { label: 'Weight Since First Scan', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined, tone: 'blue' },
- { label: 'Body Fat Since First Scan', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined, tone: 'purple' },
+ { label: 'Weight Change', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined, tone: 'blue' },
+ { label: 'Body Fat Change', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined, tone: 'purple' },
  { label: 'Scans', value: fig(num(cd.scans.length)), tone: 'neutral' },
  ]} />
  ) : null}
@@ -182,6 +200,7 @@ export default function Social() {
  </Section>
 
  </ScrollView>
+ <SharePostSheet build={build} onClose={() => setBuild(null)} />
  </SafeAreaView>
  );
 }
