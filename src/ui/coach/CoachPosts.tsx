@@ -32,7 +32,7 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
   const t = useTheme();
   return (
     <Pressable onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
-      style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brandSoft : t.surface2 }}>
+      style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );

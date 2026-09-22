@@ -17,7 +17,7 @@ export default function OwnerCommunity() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} refreshControl={pull}>
-        <PageHead title="Community" subtitle="Reports, and your members' board" />
+        <PageHead title="Community" subtitle="Reports, and Your Members' Board" />
         <CommunityReports key={`r-${key}`} />
         <Section>
           <SectionHead title="Members Board" />

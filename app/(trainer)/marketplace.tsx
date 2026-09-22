@@ -94,7 +94,7 @@ export default function CoachMarketplace() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false} refreshControl={pull} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive">
-        <PageHead title="Marketplace" subtitle="Sell your programs to members of your gym" />
+        <PageHead title="Marketplace" subtitle="Sell Your Programs to Members of Your Gym" />
 
         {status === 'error' ? (
           <Notice kicker="Not Loaded" title="Your listings could not be read" note="Pull down to try again. Nothing has been changed." />

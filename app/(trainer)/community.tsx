@@ -19,7 +19,7 @@ export default function CoachCommunity() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} refreshControl={pull} keyboardShouldPersistTaps="handled">
-        <PageHead title="Coach Community" subtitle="Your gym's boards, and what members have reported" />
+        <PageHead title="Coach Community" subtitle="Your Gym's Boards, and What Members Have Reported" />
         <Segmented style={{ marginTop: sp.lg }} value={channel} onChange={setChannel}
           options={[{ key: 'members', label: 'Members' }, { key: 'coaches', label: 'Coaches' }] as const} />
         <CommunityFeed key={`${channel}-${key}`} channel={channel} canPost moderator />

@@ -178,7 +178,7 @@ export default function Habits() {
   // WHOOP's number that way.
   const stepsDevice = (() => {
     const id = wear.todayFrom.steps;
-    return (id ? PROVIDERS.find((p) => p.meta.id === id)?.meta.name : null) ?? 'your device';
+    return (id ? PROVIDERS.find((p) => p.meta.id === id)?.meta.name : null) ?? 'device';
   })();
 
   // ── last night, for the sleep row ────────────────────────────────────────
@@ -699,7 +699,7 @@ export default function Habits() {
                 <Pressable key={o.id} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${o.label}, ${on ? "on your list" : "not on your list"}`}
                   onPress={() => h.setOwnHabits(on ? h.ownHabits.filter((x) => x !== o.id) : [...h.ownHabits, o.id])}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.pill,
-                    backgroundColor: on ? t.brandSoft : t.surface2 }}>
+                    backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.body }}>{o.icon}</Text>
                   <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{o.label}</Text>
                 </Pressable>

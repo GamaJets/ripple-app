@@ -370,20 +370,23 @@ export default function ClientCoachDocumentsScreen() {
               </Section>
             )) : null}
 
-            <Section>
-              <Notice
-                kicker="WHOSE DOCUMENT THIS IS"
-                title={`Your coach’s, not ${BRAND.label}’s`}
-                note={COACH_DOC_NOT_REPPLE}
-              />
-            </Section>
-            <Section>
-              <Notice
-                kicker="ACCEPTING"
-                title="It can’t be taken back"
-                note={COACH_DOC_ACCEPT_RULE}
-              />
-            </Section>
+            {/* The waiver notices are about paperwork; a guide is not signed. */}
+            {only === null || only === 'paperwork' ? (<>
+              <Section>
+                <Notice
+                  kicker="WHOSE DOCUMENT THIS IS"
+                  title={`Your Coach’s, Not ${BRAND.label}’s`}
+                  note={COACH_DOC_NOT_REPPLE}
+                />
+              </Section>
+              <Section>
+                <Notice
+                  kicker="ACCEPTING"
+                  title="It Can’t Be Taken Back"
+                  note={COACH_DOC_ACCEPT_RULE}
+                />
+              </Section>
+            </>) : null}
             {/* The other half of that permanence, and the half only the coach
                 was being told. The acceptance is for ever; the ACCESS is not —
                 `can_read_coach_doc` follows `clients.trainer_id`, so changing
@@ -392,7 +395,7 @@ export default function ClientCoachDocumentsScreen() {
             <Section>
               <Notice
                 kicker="WHILE THIS IS YOUR COACH"
-                title="These open for you while you are coached by them"
+                title="These Open for You While You Are Coached by Them"
                 note={COACH_DOC_ACCESS_ENDS_NOTE}
               />
             </Section>

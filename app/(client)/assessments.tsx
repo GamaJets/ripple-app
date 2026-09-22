@@ -30,7 +30,7 @@ export default function MyAssessments() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <PageHead title="My Assessments" subtitle="Tests your coach recorded with you" />
+        <PageHead title="My Assessments" subtitle="Tests Your Coach Recorded With You" />
 
         {a.status === 'error' ? (
           <Notice tone={t.crit} kicker="Not Loaded" title="Your tests could not be read"

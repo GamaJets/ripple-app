@@ -16,7 +16,7 @@ export default function Resources() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <PageHead title="Resources" subtitle="What you build once and use with every client" />
+        <PageHead title="Resources" subtitle="What You Build Once and Use With Every Client" />
 
         <Section>
           <SectionHead title="Training" />

@@ -88,6 +88,7 @@ ok(scheduledFocus(ppl, 0) === null, 'Sunday is not in a Mon/Wed/Fri plan and mus
 ok(scheduledFocus(ppl, 2) === null, 'Tuesday is not a training day in a Mon/Wed/Fri plan');
 ok(scheduledFocus([], 1) === null, 'a plan with no days schedules nothing');
 ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'Pull' }, 'train') === 'Train · Pull', 'the training row names the session');
+ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'LEGS' }, 'train') === 'Train · Legs', 'a focus in capitals reads in Title Case');
 ok(!ids({ ...NOTHING, todaysTrainingFocus: '   ' }).includes('train'), 'a blank focus is not a session');
 ok(!ids(NOTHING).includes('train'), 'a rest day carries no training row');
 

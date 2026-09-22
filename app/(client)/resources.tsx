@@ -16,7 +16,7 @@ export default function Resources() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <PageHead title="Resources" subtitle="What to read and watch" />
+        <PageHead title="Resources" subtitle="What to Read and Watch" />
 
         <Section>
           <SectionHead title="From Your Coach" />

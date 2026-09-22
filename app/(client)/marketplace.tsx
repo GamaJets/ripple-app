@@ -62,7 +62,7 @@ export default function ClientMarketplace() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <PageHead title="Marketplace" subtitle="Programs from the coaches at your gym" />
+        <PageHead title="Marketplace" subtitle="Programs From the Coaches at Your Gym" />
 
         {status === 'error' ? (
           <Notice kicker="Not Loaded" title="Programs could not be read" note="Pull down to try again." />

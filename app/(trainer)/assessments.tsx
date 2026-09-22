@@ -52,7 +52,7 @@ export default function CoachAssessments() {
         <ClientAssessments key={id} clientId={id} who={who} onSwitch={() => setPicked(null)} />
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
-          <PageHead title="Assessments" subtitle="Pick a client" />
+          <PageHead title="Assessments" subtitle="Pick a Client" />
           {id && !askable ? (
             <Notice kicker="Not Available" title="Assessments need a client with an account"
               note="This person was added by hand, so there is no record for tests to be kept on or shared to." />

@@ -18,7 +18,7 @@ export default function Community() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} refreshControl={pull} keyboardShouldPersistTaps="handled">
-        <PageHead title="Community" subtitle="Your gym, and only your gym" />
+        <PageHead title="Community" subtitle="Your Gym, and Only Your Gym" />
         <CommunityFeed key={key} channel="members" canPost moderator={false} />
       </ScrollView>
     </SafeAreaView>

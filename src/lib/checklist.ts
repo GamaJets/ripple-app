@@ -48,6 +48,7 @@
 import type { ProgramDay } from './programs';
 import { num } from './format';
 import { plain } from './units';
+import { titleCaseName } from './exerciseName';
 
 /** Where a line came from, so a screen can say so without guessing. */
 export type ChecklistSource = 'targets' | 'plan' | 'coach' | 'own';
@@ -228,7 +229,8 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   const gaps: ChecklistGap[] = [];
 
   const focus = (input.todaysTrainingFocus || '').trim();
-  if (focus) items.push({ id: 'train', label: `Train · ${focus}`, icon: '🏋️', source: 'plan' });
+  // A plan day can arrive in capitals ("LEGS"); the row reads in Title Case.
+  if (focus) items.push({ id: 'train', label: `Train · ${titleCaseName(focus)}`, icon: '🏋️', source: 'plan' });
 
   const kcal = target(input.kcalTarget);
   if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${num(kcal)} kcal target`, icon: '🔥', source: 'targets' });
