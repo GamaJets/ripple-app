@@ -7,23 +7,27 @@
 // app/(trainer)/builder.tsx.
 //
 // The figure is src/ui/MuscleBody.tsx, the same drawing as the Recovery Map,
-// handed a two-band ramp: green for a whole region, amber for muscles picked
-// inside a region that is only partly picked. Colour is not the only channel:
-// every chip carries a tick, and the figure speaks each region's state.
-import { useMemo } from 'react';
+// painted through `colorOf`: each region takes its own muscle group's colour
+// out of src/ui/groupTone.ts — the SAME colour that group's chip carries — at
+// full strength for a whole region and mixed back into the body for one that
+// is only partly picked. Owner feedback, and it is the right rule: the chip
+// and the muscle it lights are one control, and two colours for one thing read
+// as two different things. Colour is not the only channel either: every chip
+// carries a tick, and the figure speaks each region's state.
+import { useCallback, useMemo } from 'react';
 import { Pressable, Text, View, type GestureResponderEvent } from 'react-native';
 import { useTheme } from './components';
-import { TonedChip } from './kit';
+import { TonedChip, toneOf } from './kit';
 import { MuscleBody } from './MuscleBody';
 import { ART } from './muscleArt';
 import { groupTone } from './groupTone';
 import { grown, hairline, sp, type as ty, font } from '../theme/scale';
 import { MIN_TARGET, hitSlopFor } from '../lib/a11y';
-import type { Band } from '../lib/bodyHeat';
+import { bodyGround, mixHex, type Band } from '../lib/bodyHeat';
 import type { Target } from '../lib/targetedWorkout';
 import {
-  PICKER_REGIONS, optionKey, pickedLayers, regionAt, regionSpoken, regionState, regionsOn,
-  toggleOption, toggleRegion, type BodySide,
+  PICKER_REGIONS, layerRegion, optionKey, pickedLayers, regionAt, regionSpoken, regionState,
+  regionsOn, toggleOption, toggleRegion, type BodySide,
 } from '../lib/musclePicker';
 
 /** One target chip, a checkbox. `kind` is spoken because "Arms" the group and
@@ -60,8 +64,9 @@ function TargetChip({ label, kind, on, onPress }: {
 const FIGURE_H = 240;
 
 /** One side of the body, tappable by region. */
-function Figure({ side, chosen, onChange, ramp }: {
+function Figure({ side, chosen, onChange, ramp, colorOf }: {
   side: BodySide; chosen: string[]; onChange: (next: string[]) => void; ramp: readonly Band[];
+  colorOf: (layer: string, band: Band) => string | undefined;
 }) {
   const t = useTheme();
   const w = FIGURE_H * ART[side].aspect;
@@ -88,8 +93,8 @@ function Figure({ side, chosen, onChange, ramp }: {
       }}
     >
       <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <MuscleBody side={side} intensity={lit} status="ready" ramp={ramp} height={FIGURE_H}
-          surface={t.surface} legend={false} captions={false} />
+        <MuscleBody side={side} intensity={lit} status="ready" ramp={ramp} colorOf={colorOf}
+          height={FIGURE_H} surface={t.surface} legend={false} captions={false} />
       </View>
     </Pressable>
   );
@@ -100,22 +105,45 @@ export function MusclePicker({ chosen, onChange }: {
   onChange: (next: string[]) => void;
 }) {
   const t = useTheme();
+  // The two states the figure draws. The colours here are only what a layer
+  // falls back to: `colorOf` below paints each muscle in its own group's
+  // colour, so the body and the chip for the same muscle are never two
+  // different colours — which is what a member reading both at once expects.
   const ramp = useMemo<readonly Band[]>(() => [
     { no: 1, name: 'Partly Selected', color: t.warn, from: 0, to: 0.5 },
     { no: 2, name: 'Selected', color: t.good, from: 0.5, to: 1 },
   ], [t.warn, t.good]);
 
+  const ground = bodyGround(t.ink3, t.surface);
+  /** A whole region in its group's own colour, a partly-picked one in the same
+   *  colour mixed back into the body — one hue, two strengths, so colour says
+   *  WHICH muscle and strength says how much of it. Neither is the only
+   *  channel: every chip carries a tick and the figure speaks each region's
+   *  state. */
+  const colorOf = useCallback((layer: string, band: Band): string | undefined => {
+    const r = layerRegion(layer);
+    if (!r) return undefined;
+    const mark = toneOf(t, groupTone(r.label)).mark;
+    return band.no === 1 ? mixHex(mark, ground, 0.45) : mark;
+  }, [t, ground]);
+
   return (
     <View>
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: sp.xl, paddingVertical: sp.md }}>
-        <Figure side="front" chosen={chosen} onChange={onChange} ramp={ramp} />
-        <Figure side="back" chosen={chosen} onChange={onChange} ramp={ramp} />
+        <Figure side="front" chosen={chosen} onChange={onChange} ramp={ramp} colorOf={colorOf} />
+        <Figure side="back" chosen={chosen} onChange={onChange} ramp={ramp} colorOf={colorOf} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: sp.lg, marginBottom: sp.sm }}
         accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {ramp.slice().reverse().map((b) => (
           <View key={b.no} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: b.color }} />
+            {/* Strength, not hue: the hue on the body is the muscle group's
+                own, so a key drawn in one colour would name a group rather
+                than a state. */}
+            <View style={{
+              width: 10, height: 10, borderRadius: 5,
+              backgroundColor: b.no === 1 ? mixHex(t.ink2, ground, 0.45) : t.ink2,
+            }} />
             <Text style={{ ...ty.micro, color: t.ink2 }}>{b.name}</Text>
           </View>
         ))}
@@ -127,7 +155,7 @@ export function MusclePicker({ chosen, onChange }: {
           <View key={r.key}>
             {heading && i > 0 ? (
               <Text accessibilityRole="header"
-                style={{ ...ty.micro, ...font('700'), color: t.ink2, marginTop: sp.lg }}>{heading}</Text>
+                style={{ ...ty.label, ...font('700'), color: t.ink, marginTop: sp.lg }}>{heading}</Text>
             ) : null}
             <View style={{
               paddingVertical: sp.md,

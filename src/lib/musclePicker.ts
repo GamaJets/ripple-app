@@ -106,6 +106,16 @@ export function regionLayers(r: PickerRegion): string[] {
 }
 
 /**
+ * The region a drawn layer belongs to, for colouring it in that region's own
+ * colour. First match wins and the order of `PICKER_REGIONS` decides it, which
+ * matters for the layers two regions share — `brachioradialis` is in Arms
+ * twice over, `gluteus_medius` is in Glutes, `trapezius` in Back.
+ */
+export function layerRegion(layer: string): PickerRegion | null {
+  return PICKER_REGIONS.find((r) => regionLayers(r).includes(layer)) ?? null;
+}
+
+/**
  * What the body lights, as an intensity per drawn layer for MuscleBody: 1 for
  * a whole region (drawn green), 0.5 for the muscles picked inside a region
  * that is only partly picked (drawn amber). Full wins where two overlap.

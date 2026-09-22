@@ -72,6 +72,7 @@
 import { needsNoKit, type KitRow } from './equipmentFacet';
 import { exerciseSlug } from './exerciseId';
 import { dayNameAt, isStretch, list, repsFor, setsFor } from './noKitProgram';
+import { WEEK_DAYS } from './weekStart';
 import type { Program, ProgramDay, ProgramExercise } from './programs';
 
 /** A catalogue row, as much of one as this needs. Structurally a subset of
@@ -176,6 +177,10 @@ export interface TargetedCoverage {
   poolSize: number;
   /** Whether the caller asked for movements needing no equipment at all. */
   noKit: boolean;
+  /** Whether every target was built into ONE day rather than a day each. The
+   *  "that day is shorter than the rest" sentence is about a week and says
+   *  nothing about a single session, so it is not written under this. */
+  together: boolean;
   /** Targets that reached the week, and how many movements the catalogue
    *  actually holds for each. Never rounded up, and `options` below `perDay`
    *  is how a screen knows the day is short. */
@@ -252,14 +257,43 @@ const rank = (r: TargetRow): number => {
  *
  * `rows` is the WHOLE catalogue and not a pre-filtered pool: what a target
  * could not be served from is only knowable from the rows left out.
+ *
+ * `flags` is the member's own disclosure, asked per movement — the same
+ * question `checkInjury` answers in src/lib/builtWorkout.ts. It moves a
+ * flagging movement DOWN its target's pool so the day is filled from the
+ * movements that do not load an injured area first. A preference and never a
+ * filter, for the reason `nextAlternative` gives: a target whose every
+ * movement flags still gets its day, every row still carries its own caution,
+ * and nothing here ever claims a movement is safe. Omit it where the
+ * disclosure was not read — an unread list must not reorder anything, because
+ * an empty answer would read as "nothing is flagged".
  */
 export function targetedProgram(
   rows: readonly TargetRow[],
   targets: readonly Target[],
-  opts: { perDay?: number; noKit?: boolean } = {},
+  opts: {
+    perDay?: number; noKit?: boolean; together?: boolean;
+    /** The day of the week the first session lands on, as an index into
+     *  `WEEK_DAYS` — so 0 is whatever day the member's week starts on. The
+     *  rest of the week spreads on from there and wraps. Omitted, the days are
+     *  named from the start of the week exactly as they were. */
+    startDay?: number;
+    flags?: (name: string, group: string) => boolean;
+  } = {},
 ): TargetedPlan {
   const perDay = Math.max(1, Math.min(8, Math.trunc(opts.perDay ?? 5) || 5));
   const noKit = opts.noKit === true;
+  const together = opts.together === true;
+  const start = Number.isFinite(opts.startDay as number)
+    ? ((Math.trunc(opts.startDay as number) % 7) + 7) % 7 : null;
+  /** The weekday a session lands on: the even spread `dayNameAt` already does,
+   *  rotated to start on the day the member picked. */
+  const dayLabel = (i: number, days: number): string => {
+    const name = dayNameAt(i, days);
+    if (start == null) return name;
+    const at = WEEK_DAYS.indexOf(name);
+    return WEEK_DAYS[((at < 0 ? i : at) + start) % 7];
+  };
 
   // The equipment option narrows the POOL, once, before any target is looked
   // at — so "held" below counts the rows a target has in the catalogue and the
@@ -285,7 +319,14 @@ export function targetedProgram(
     const usable = pool.filter((r) => matches(r, target));
     if (usable.length) {
       usable.sort((a, b) => (rank(a) - rank(b)) || a.name.localeCompare(b.name));
-      served.push({ target, rows: usable });
+      // Stable partition, after the ranking, so the order inside each half is
+      // still isolation-before-compound and still the same every time.
+      const flag = opts.flags;
+      const ordered = flag
+        ? [...usable.filter((r) => !flag(r.name, (r.group || '').trim())),
+          ...usable.filter((r) => flag(r.name, (r.group || '').trim()))]
+        : usable;
+      served.push({ target, rows: ordered });
       continue;
     }
     // Nothing usable. WHY is the whole point: a member who picked Biceps and
@@ -297,9 +338,68 @@ export function targetedProgram(
 
   // Seven days in a week. More targets than that is a real choice a member can
   // make — there are 11 groups and 18 muscles — and the ones that do not fit
-  // are named rather than dropped.
-  const fit = served.slice(0, 7);
-  const overflow = served.slice(7).map((s) => s.target.name);
+  // are named rather than dropped. Nothing overflows a SINGLE day: every
+  // target that was served is in it.
+  const fit = together ? served : served.slice(0, 7);
+  const overflow = together ? [] : served.slice(7).map((s) => s.target.name);
+
+  /** One row, and the rest of its own target's pool behind it to swap for.
+   *  `taken` is how many of that pool this day already holds, so the pool is
+   *  offered from the first movement the day did NOT take. */
+  const exOf = (row: TargetRow, s: { target: Target; rows: TargetRow[] }, taken: number, d: number): ProgramExercise => ({
+    key: `target-${exerciseSlug(row.name)}-${d}`,
+    name: row.name,
+    group: (row.group || '').trim() || s.target.name,
+    sets: setsFor(row),
+    reps: repsFor(row),
+    alternatives: [...s.rows.slice(taken), ...s.rows.slice(0, taken)].map((x) => x.name),
+  });
+
+  // ── everything in one day ───────────────────────────────────────────────
+  //
+  // Round robin, one movement per target per pass, so a chest-and-back day is
+  // chest, back, chest, back and not five chest movements with back at the
+  // end. The day holds `perDay` movements, or one per target where that is
+  // more — two targets is still five movements, six targets is six, and the
+  // cap is the same 8 a single day has anywhere else. A target whose pool runs
+  // out drops out of the rotation; nothing is invented to keep its share.
+  if (together && fit.length) {
+    const room = Math.max(1, Math.min(8, Math.max(perDay, fit.length)));
+    const at = fit.map(() => 0);
+    const seen = new Set<string>();
+    const exercises: ProgramExercise[] = [];
+    for (let pass = 0; exercises.length < room && pass < room + fit.length; pass++) {
+      for (let i = 0; i < fit.length && exercises.length < room; i++) {
+        const s = fit[i];
+        // Past this target's own pool, or already on the day under another
+        // target — Chest and Triceps both hold Close Grip Push Ups.
+        while (at[i] < s.rows.length && seen.has(norm(s.rows[at[i]].name))) at[i]++;
+        if (at[i] >= s.rows.length) continue;
+        const row = s.rows[at[i]];
+        at[i]++;
+        seen.add(norm(row.name));
+        exercises.push(exOf(row, s, at[i], 0));
+      }
+    }
+    const names = fit.map((s) => s.target.name);
+    const coverage: TargetedCoverage = {
+      poolSize: pool.length, noKit, together: true,
+      served: fit.map((s) => ({ target: s.target.name, options: s.rows.length })),
+      empty, overflow,
+    };
+    return {
+      program: {
+        title: names.length === 1 ? `${names[0]} Workout` : 'One Session',
+        focus: names,
+        note: [
+          noKit ? 'Every movement here needs no equipment at all: no bar, no bands, no bench.' : null,
+          targetedCoverageNote(coverage, perDay),
+        ].filter(Boolean).join(' '),
+        days: [{ day: dayLabel(0, 1), focus: list(names), exercises }],
+      },
+      coverage,
+    };
+  }
 
   const days: ProgramDay[] = fit.map((s, d) => {
     const exercises: ProgramExercise[] = s.rows.slice(0, perDay).map((row) => ({
@@ -326,12 +426,13 @@ export function targetedProgram(
       // has is on the day already.
       alternatives: [...s.rows.slice(perDay), ...s.rows.slice(0, perDay)].map((x) => x.name),
     }));
-    return { day: dayNameAt(d, fit.length), focus: s.target.name, exercises };
+    return { day: dayLabel(d, fit.length), focus: s.target.name, exercises };
   });
 
   const coverage: TargetedCoverage = {
     poolSize: pool.length,
     noKit,
+    together: false,
     served: fit.map((s) => ({ target: s.target.name, options: s.rows.length })),
     empty,
     overflow,
@@ -399,7 +500,7 @@ export function targetedCoverageNote(c: TargetedCoverage, perDay = 5): string | 
   // Short of a full day. Said because a member counting four rows under a
   // target they picked has no way to tell whether the fifth is missing or
   // never existed.
-  const thin = c.served.filter((x) => x.options < perDay);
+  const thin = c.together ? [] : c.served.filter((x) => x.options < perDay);
   if (thin.length) {
     const said = thin.map((x) => `${x.target} has ${x.options === 1 ? 'only one movement' : `only ${x.options} movements`}`);
     parts.push(`${list(said)} in the catalogue${c.noKit ? ' that needs no equipment' : ''}, so that day is shorter than the rest.`);

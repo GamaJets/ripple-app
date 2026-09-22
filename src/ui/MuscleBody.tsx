@@ -133,7 +133,7 @@ export type { BodySide };
  *            nothing, and none of those is this week.
  */
 export function MuscleBody({
-  side, intensity, status, ramp, height, surface, legend = true, captions = true, onFlip, style,
+  side, intensity, status, ramp, colorOf, height, surface, legend = true, captions = true, onFlip, style,
 }: {
   side: BodySide;
   /** Intensity 0..1 per DRAWN layer name — `drawnIntensity` in src/lib/muscleMap.ts. */
@@ -141,6 +141,17 @@ export function MuscleBody({
   status: LoadStatus;
   /** Overrides the palette's own ramp. Defaults to `rampFor(t.bg)`. */
   ramp?: readonly Band[];
+  /**
+   * The colour for ONE layer, overriding its band's.
+   *
+   * For the caller whose colours mean something other than how hard a muscle
+   * was trained — the muscle picker paints each region in its own muscle
+   * group's colour, the same colour that group's chip carries, so the two
+   * halves of that control cannot disagree. Return undefined for a layer to
+   * leave it on the band's colour. The band is still what decided the layer is
+   * drawn at all, and is passed in so a caller can vary within it.
+   */
+  colorOf?: (layer: string, band: Band) => string | undefined;
   /**
    * Drawn height in points. Omit and the figure fills its container instead,
    * still on the side's own aspect ratio — the front and the back are 0.3716 and
@@ -223,9 +234,12 @@ export function MuscleBody({
       const at = byName.get(l.name);
       if (at) at.push(l); else byName.set(l.name, [l]);
     }
-    return lit.flatMap((l) =>
-      (byName.get(l.layer) ?? []).map((a) => ({ art: a, color: graded ? l.band.color : bands[0].color })));
-  }, [art, lit, graded, bands]);
+    return lit.flatMap((l) => {
+      const own = colorOf?.(l.layer, l.band);
+      const color = own ?? (graded ? l.band.color : bands[0].color);
+      return (byName.get(l.layer) ?? []).map((a) => ({ art: a, color }));
+    });
+  }, [art, lit, graded, bands, colorOf]);
 
   const caution = status === 'error'
     ? 'Your training could not be read, so this is not a picture of it'

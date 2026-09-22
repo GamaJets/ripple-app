@@ -161,9 +161,22 @@ const hx = (h: string): [number, number, number] | null => {
  * unparseable one should cost a member the tint, not the whole diagram.
  */
 export function bodyGround(ink3: string, card: string): string {
-  const a = hx(ink3); const b = hx(card);
-  if (!a || !b) return card;
-  const mix = a.map((v, i) => Math.round(GROUND_MIX * v + (1 - GROUND_MIX) * b[i]));
+  return mixHex(ink3, card, GROUND_MIX);
+}
+
+/**
+ * `weightA` of the first colour over the second, as a hex string.
+ *
+ * Falls back to the SECOND colour when either is not a plain 6-digit hex, for
+ * the reason `bodyGround` gives: a white-label tenant's brand colour reaches
+ * `Theme` from the database, and an unparseable one costs a tint, never a
+ * screen.
+ */
+export function mixHex(a: string, b: string, weightA: number): string {
+  const x = hx(a); const y = hx(b);
+  if (!x || !y) return b;
+  const w = Math.max(0, Math.min(1, weightA));
+  const mix = x.map((v, i) => Math.round(w * v + (1 - w) * y[i]));
   return `#${mix.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('')}`;
 }
 

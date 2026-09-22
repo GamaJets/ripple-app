@@ -59,7 +59,10 @@ import { MusclePicker } from '../../src/ui/MusclePicker';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
-import { hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
+import { grown, hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
+import { WEEK_DAYS, WEEK_DAY_NAMES, weekIndexOf } from '../../src/lib/weekStart';
+import { useToday } from '../../src/ui/today';
+import { localDate } from '../../src/lib/localDate';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { FORWARD_CHAR } from '../../src/ui/direction';
 import { NO_KIT } from '../../src/lib/equipmentFacet';
@@ -85,7 +88,17 @@ export default function BuildWorkout() {
    *  has asked for one. Held separately from `chosen` on purpose: changing a
    *  chip must not silently rewrite the workout already on screen underneath
    *  it, which is a page that changes while it is being read. */
-  const [built, setBuilt] = useState<{ targets: string[]; noKit: boolean } | null>(null);
+  /** One session for everything picked, or a day each. Only asked once there
+   *  are two targets; with one, the two answers are the same workout. */
+  const [split, setSplit] = useState<'together' | 'split'>('together');
+  /** The weekday the workout is for, as an index into the member's own week,
+   *  or null for "today" — which is the default, because somebody standing in
+   *  the gym is building the session they are about to do. Held as null rather
+   *  than as today's index so a screen left open over midnight still means
+   *  today; `useToday` below is what makes that re-render. */
+  const [startDay, setStartDay] = useState<number | null>(null);
+  const [built, setBuilt] = useState<
+    { targets: string[]; noKit: boolean; together: boolean; startDay: number } | null>(null);
   /** One movement swapped for another, by the generated row's own key. Cleared
    *  whenever a new workout is built, because a key from the last build names a
    *  row that is no longer on screen. */
@@ -94,8 +107,17 @@ export default function BuildWorkout() {
 
   const plan = useMemo(() => {
     if (!built || !built.targets.length) return null;
-    return targetedProgram(cat.rows, built.targets.map(parse), { noKit: built.noKit });
-  }, [built, cat.rows]);
+    // The disclosure only orders the pool when it was actually READ. Under a
+    // failed or half read `cd.injuries` is `[]`, which would order nothing and
+    // read as a workout built around the member's injuries; the banner in
+    // `result()` says the check could not run instead.
+    const flags = isWhole(cd.profileStatus)
+      ? (name: string, group: string) => checkInjury(name, group, cd.injuries, cd.profileStatus).state === 'flagged'
+      : undefined;
+    return targetedProgram(cat.rows, built.targets.map(parse), {
+      noKit: built.noKit, together: built.together, startDay: built.startDay, flags,
+    });
+  }, [built, cat.rows, cd.injuries, cd.profileStatus]);
 
   /** The reader's own language for a movement, and the English identity to
    *  navigate by. The generator works in English names because those are the
@@ -106,6 +128,16 @@ export default function BuildWorkout() {
     return m;
   }, [cat.rows]);
 
+  /** A day each is only a choice with something to split; one target is one
+   *  session whichever way the control is set. */
+  const splitting = split === 'split' && chosen.length > 1;
+  /** Today, in the member's own week order. `useToday()` and not a bare clock
+   *  read: this screen can sit open past midnight, and `check:frozen-day` is
+   *  the gate that says so. */
+  const todayDate = localDate(useToday());
+  const today = todayDate ? weekIndexOf(todayDate) : 0;
+  const day = startDay ?? today;
+
   const G = layout.gutter;
   const ready = isWhole(cat.status) && !cat.signedOut && cat.rows.length > 0;
 
@@ -114,7 +146,8 @@ export default function BuildWorkout() {
     <>
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
         Tap the body or pick a muscle group, or a single muscle inside it, and this builds a session
-        out of the movements the catalogue actually holds for it. Pick more than one and each becomes its own day.
+        out of the movements the catalogue actually holds for it. Pick more than one and you choose
+        whether they share one session or take a day each.
       </Text>
 
       <Section>
@@ -146,6 +179,75 @@ export default function BuildWorkout() {
         </Text>
       </Section>
 
+      {/* ── one session or a day each, and which day ──────────────────────
+          A day each was the only answer this screen had, and it is the wrong
+          one for the member who trains chest and back on a Tuesday. The split
+          only appears once there are two targets to split; the day always
+          does, because a one-target workout still lands on a day. */}
+      {chosen.length > 1 ? (
+        <>
+          <Rule />
+          <Section>
+            <SectionHead title="How To Split It" note="One Session or a Day Each" />
+            <Segmented
+              options={[
+                { key: 'together', label: 'One Session' },
+                { key: 'split', label: 'A Day Each' },
+              ] as const}
+              value={split}
+              onChange={setSplit}
+            />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {split === 'together'
+                ? 'Everything you picked in one session, taken in turns from each so no muscle is left to the end.'
+                : 'A day for each thing you picked, spread across the week from the day you start on.'}
+            </Text>
+          </Section>
+        </>
+      ) : null}
+
+      <Rule />
+
+      <Section>
+        <SectionHead title={splitting ? 'Start On' : 'Train On'}
+          note={splitting ? 'The First Day of the Week You Train' : 'The Day This Session Is For'} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {/* Today first, then the week itself. Today is the day most of these
+              sessions are for and the member should not have to work out which
+              weekday that is; the week still reads Sunday to Saturday behind
+              it, and today's own weekday carries the tick too — the two chips
+              are one day. */}
+          {[{ label: 'Today', at: today }, ...WEEK_DAY_NAMES.map((n, i) => ({ label: n, at: i }))].map(({ label, at }, k) => {
+            const name = WEEK_DAY_NAMES[at];
+            const i = at;
+            return (
+            <Pressable
+              key={`${label}-${k}`}
+              onPress={() => setStartDay(i)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: day === i }}
+              accessibilityLabel={`${splitting ? 'Start on' : 'Train on'} ${name}${i === today ? ', today' : ''}`}
+              hitSlop={hitSlopFor(MIN_TARGET)}
+            >
+              {day === i ? (
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <TonedChip label={label} icon="check" />
+                </View>
+              ) : (
+                <View style={{
+                  minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3,
+                  borderRadius: grown(26) / 2, backgroundColor: t.surface2,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.ink2 }}>{label}</Text>
+                </View>
+              )}
+            </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
       <Section>
         <Cta
           wide
@@ -154,7 +256,10 @@ export default function BuildWorkout() {
           a11yLabel={chosen.length === 0
             ? 'Build my workout. Pick at least one muscle or muscle group first'
             : `Build a workout for ${chosen.map((k) => parse(k).name).join(', ')}`}
-          onPress={() => { setSwaps({}); setBuilt({ targets: chosen, noKit: kit === 'none' }); }}
+          onPress={() => {
+            setSwaps({});
+            setBuilt({ targets: chosen, noKit: kit === 'none', together: !splitting, startDay: day });
+          }}
         />
       </Section>
     </>
@@ -245,7 +350,14 @@ export default function BuildWorkout() {
             <Section>
               <SectionHead
                 title={d.focus}
-                note={`${d.exercises.length === 1 ? '1 movement' : `${d.exercises.length} movements`} · ${d.exercises.reduce((n, e) => n + e.sets, 0)} Sets`}
+                // The day it is for, spelled out. `ProgramDay.day` is the
+                // abbreviation the week is written in; the member picked a
+                // whole name and should read one back.
+                note={[
+                  WEEK_DAY_NAMES[WEEK_DAYS.indexOf(d.day)] ?? d.day,
+                  d.exercises.length === 1 ? '1 movement' : `${d.exercises.length} movements`,
+                  `${d.exercises.reduce((n, e) => n + e.sets, 0)} Sets`,
+                ].join(' · ')}
               />
               {d.exercises.map((e, ei) => {
                 // The movement this row currently holds: the generated one, or

@@ -271,6 +271,55 @@ const catalogue: TargetRow[] = [
   ok((targetedCoverageNote(coverage) || '').includes('G7'), 'in words as well as in the report');
 }
 
+// ── one session, or a day each ───────────────────────────────────────────
+//
+// The member who trains chest and triceps on a Tuesday was being handed a
+// two-day week and no way to say otherwise.
+{
+  const picks = [{ kind: 'group' as const, name: 'Chest' }, { kind: 'muscle' as const, name: 'Triceps' }];
+  const apart = targetedProgram(catalogue, picks);
+  eq(apart.program.days.length, 2, 'a day each is still what two targets do by default');
+
+  const one = targetedProgram(catalogue, picks, { together: true });
+  eq(one.program.days.length, 1, 'together puts both in one session');
+  eq(one.coverage.overflow, [], 'and nothing overflows a single day');
+  const names = one.program.days[0].exercises.map((e) => e.name);
+  eq(new Set(names).size, names.length, 'no movement is on the day twice');
+  ok(names.length >= 2, 'and both targets reached it');
+  // Taken in turns, so the second target is not left to the end of the day.
+  const groups = one.program.days[0].exercises.map((e) => e.group);
+  ok(groups[0] !== groups[1] || new Set(groups).size === 1,
+    'the day alternates between the targets rather than emptying one first');
+  ok(one.program.days[0].focus.includes('Chest') && one.program.days[0].focus.includes('Triceps'),
+    'and the day says what it is for');
+}
+
+// ── the day it is for ────────────────────────────────────────────────────
+{
+  const picks = [{ kind: 'muscle' as const, name: 'Triceps' }];
+  const plain = targetedProgram(catalogue, picks);
+  const moved = targetedProgram(catalogue, picks, { startDay: 3 });
+  ok(plain.program.days[0].day !== moved.program.days[0].day,
+    'a session lands on the day the member picked, not always the start of the week');
+  eq(targetedProgram(catalogue, picks, { startDay: 0 }).program.days[0].day, plain.program.days[0].day,
+    'and day 0 is the week as it was');
+}
+
+// ── an injured area is built around, never hidden ────────────────────────
+{
+  const picks = [{ kind: 'muscle' as const, name: 'Triceps' }];
+  const flags = (name: string) => name === 'Tricep Pushdown';
+  const built = targetedProgram(catalogue, picks, { flags });
+  const names = built.program.days[0].exercises.map((e) => e.name);
+  ok(names[0] !== 'Tricep Pushdown', 'a flagging movement is not the first thing on the day');
+  ok(built.program.days[0].exercises.concat(
+    built.program.days[0].exercises.flatMap((e) => e.alternatives.map((a) => ({ name: a } as any))),
+  ).some((e: any) => e.name === 'Tricep Pushdown'), 'and it is still offered rather than hidden');
+  // Every movement flagging is not an empty workout.
+  const all = targetedProgram(catalogue, picks, { flags: () => true });
+  eq(all.program.days.length, 1, 'a target whose every movement flags still gets its day');
+}
+
 if (errors.length) {
   console.error(`targetedWorkout.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
   for (const e of errors) console.error('  · ' + e);

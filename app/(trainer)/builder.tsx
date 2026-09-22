@@ -630,6 +630,10 @@ export default function Builder() {
    *  program before now assumed; it is NOT a claim that they own a rack, it is
    *  the absence of the restriction. Nothing is generated off it. */
   const [kit, setKit] = useState<'any' | 'none'>('any');
+  /** Whether the picked muscles share one session or take a day each. The
+   *  coach can still move movements between days in the builder below; this is
+   *  what the generator hands them to start from. */
+  const [muscleSplit, setMuscleSplit] = useState<'together' | 'split'>('split');
   /** Muscles picked under Build From Muscles, as `kind:name` keys. */
   const [targets, setTargets] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -1109,8 +1113,10 @@ export default function Builder() {
     const parsed = targets.map((k): Target => ({
       kind: k.slice(0, k.indexOf(':')) as Target['kind'], name: k.slice(k.indexOf(':') + 1),
     }));
-    return targetedProgram(cat.rows, parsed, { noKit: kit === 'none' });
-  }, [targets, cat.status, cat.rows, kit]);
+    return targetedProgram(cat.rows, parsed, {
+      noKit: kit === 'none', together: muscleSplit === 'together' && targets.length > 1,
+    });
+  }, [targets, cat.status, cat.rows, kit, muscleSplit]);
 
   const buildFromMuscles = () => {
     if (!byMuscle?.program.days.length) return;
@@ -3154,9 +3160,22 @@ export default function Builder() {
           <SectionHead title="Build From Muscles"
             note={targets.length ? `${targets.length} Picked` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
-            Tap the body or pick muscles below. Each one becomes a day, built from the catalogue and the equipment answer above.
+            Tap the body or pick muscles below, built from the catalogue and the equipment answer above.
+            Two or more can share one session or take a day each.
           </Text>
           <MusclePicker chosen={targets} onChange={setTargets} />
+          {targets.length > 1 ? (
+            <View style={{ marginTop: sp.md }}>
+              <Segmented
+                options={[
+                  { key: 'together', label: 'One Session' },
+                  { key: 'split', label: 'A Day Each' },
+                ] as const}
+                value={muscleSplit}
+                onChange={setMuscleSplit}
+              />
+            </View>
+          ) : null}
           {targets.length && cat.status !== 'ready' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               {cat.status === 'loading' ? 'Reading the movement catalogue…'
