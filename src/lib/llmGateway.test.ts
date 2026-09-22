@@ -33,8 +33,8 @@ eq(providerFor(undefined, 'sk-ant-x'), 'anthropic', 'unsetting the gateway key i
 
 /* ── which model ────────────────────────────────────────────────────────── */
 
-eq(modelFor('anthropic', 'text'), 'claude-sonnet-5', 'Anthropic text default is unchanged');
-eq(modelFor('anthropic', 'vision'), 'claude-3-5-sonnet-latest', 'Anthropic vision default is unchanged');
+eq(modelFor('anthropic', 'text'), 'claude-haiku-4-5-20251001', 'Anthropic text runs on Haiku 4.5');
+eq(modelFor('anthropic', 'vision'), 'claude-sonnet-5', 'Anthropic vision runs on Sonnet 5, not a retired model');
 eq(modelFor('cheaper-inference', 'text'), 'claude-sonnet-5', 'the gateway text default');
 
 // Not the text default. `claude-sonnet-5` is marked vision:false in the
@@ -47,7 +47,7 @@ ok(DEFAULT_MODELS['cheaper-inference'].vision !== DEFAULT_MODELS['cheaper-infere
 eq(modelFor('cheaper-inference', 'text', 'gpt-5.5'), 'gpt-5.5', 'an override is used');
 eq(modelFor('cheaper-inference', 'text', '  '), 'claude-sonnet-5', 'a blank override is not a model name');
 eq(modelFor('cheaper-inference', 'text', ''), 'claude-sonnet-5', 'an empty override is not a model name');
-eq(modelFor('anthropic', 'vision', null), 'claude-3-5-sonnet-latest', 'a null override is the default');
+eq(modelFor('anthropic', 'vision', null), 'claude-sonnet-5', 'a null override is the default');
 eq(modelFor('cheaper-inference', 'vision', ' gpt-5.5 '), 'gpt-5.5', 'an override is trimmed');
 
 /* ── the token budget ───────────────────────────────────────────────────── */
@@ -92,7 +92,8 @@ const aTextBody = JSON.parse(aText.body);
 eq(aText.url, ENDPOINTS.anthropic, 'Anthropic text goes to the messages endpoint');
 eq(aText.headers['x-api-key'], 'sk-ant-x', 'Anthropic authenticates with x-api-key');
 eq(aText.headers['anthropic-version'], '2023-06-01', 'Anthropic is sent its version header');
-eq(aTextBody.system, 'You are a coach.', 'Anthropic takes the system prompt as a field');
+eq(aTextBody.system[0].text, 'You are a coach.', 'Anthropic takes the system prompt as a field');
+eq(aTextBody.system[0].cache_control.type, 'ephemeral', 'and it is marked cacheable, since it repeats every turn');
 eq(aTextBody.messages.length, 1, 'Anthropic gets one message');
 eq(aTextBody.max_tokens, 500, 'Anthropic gets the budget it was asked for');
 

@@ -114,7 +114,12 @@ export const providerFor = (
  */
 export const DEFAULT_MODELS: Record<Provider, { text: string; vision: string }> = {
   'cheaper-inference': { text: 'claude-sonnet-5', vision: 'claude-haiku-4.5' },
-  anthropic: { text: 'claude-sonnet-5', vision: 'claude-3-5-sonnet-latest' },
+  // Owner's choice, 22 Sep 2026: the everyday text jobs (the AI coach, meal
+  // text into macros) on Haiku 4.5, which is far cheaper and plenty for them;
+  // reading a photo or an InBody sheet on Sonnet 5, where a misread figure is
+  // the costly mistake. The old vision default, claude-3-5-sonnet-latest, is a
+  // retired model; it never ran only because ANTHROPIC_MODEL overrode it.
+  anthropic: { text: 'claude-haiku-4-5-20251001', vision: 'claude-sonnet-5' },
 };
 
 /**
@@ -223,7 +228,11 @@ export const buildCall = (provider: Provider, key: string, ask: Ask): Call => {
   if (provider === 'anthropic') {
     const last = turns.length - 1;
     const body: Record<string, unknown> = { model: ask.model, max_tokens: maxTokens };
-    if (ask.system) body.system = ask.system;
+    // The system prompt is the same on every turn of a conversation, so it is
+    // marked cacheable: Anthropic then charges a fraction for it after the
+    // first call. Below the model's minimum cacheable length the mark is
+    // simply ignored, so a short prompt costs exactly what it did.
+    if (ask.system) body.system = [{ type: 'text', text: ask.system, cache_control: { type: 'ephemeral' } }];
     body.messages = ask.image
       ? turns.map((t, i) => (i !== last ? t : {
           role: t.role,
