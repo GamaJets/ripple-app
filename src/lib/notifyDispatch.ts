@@ -180,6 +180,12 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // The client's side of the same conversation. Handset-pushed today.
   ['/(client)/my-coach', 'clients'],
   ['/(client)/trainers', 'clients'],
+  // Part 3320: a coach's assessment of a client, and the community board's
+  // replies and reports, written by triggers.
+  ['/(client)/assessments', 'clients'],
+  ['/(client)/community', 'clients'],
+  ['/(trainer)/community', 'clients'],
+  ['/(owner)/community', 'clients'],
 
   // ── admin ───────────────────────────────────────────────────────────────
   // 'An intake coming back, a document accepted, a release signed, and a review

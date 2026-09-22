@@ -30,7 +30,7 @@ import { useReadiness } from '../../src/ui/readiness';
 import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
-import { entryTonnage, setLoadKg, tonnageNote, type BodyweightHistory, type Tonnage } from '../../src/lib/bodyweightSets';
+import { setLoadKg, tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
 // A hold is not a lift, and this screen is where that stopped being true. See
 // src/lib/holdTrend.ts: `bestOf` below fed seconds to Epley, so a plank drew an
 // "estimated 1-rep max" out of a stopwatch on the same axis as a bench press.
@@ -41,6 +41,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig, TonedChip, Expandable, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, elevation, font } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
+import { weeklyVolume } from '../../src/lib/weeklyVolume';
 import { fmtAxisDay } from '../../src/lib/format';
 // The local calendar day of an instant, so one movement done twice in an
 // afternoon is one point on the trend rather than two.
@@ -141,36 +142,23 @@ export default function Trends() {
 
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
-    const weekOpened = startOfWeek(now);
-    // `days`, and named that way on purpose: the value is `days.size`, the label
-    // beside it is "Training Days", and calling the field `sessions` was how the
-    // same figure got read as a session count on three other screens.
-    const out: { label: string; iso: string; vol: number; unpriced: number; days: number }[] = [];
-    for (let w = WEEKS - 1; w >= 0; w--) {
-      const start = new Date(weekOpened); start.setDate(weekOpened.getDate() - w * 7);
-      const end = new Date(start); end.setDate(start.getDate() + 7);
-      const inWk = log.filter((e) => { const d = new Date(e.t); return d >= start && d < end; });
-      const days = new Set(inWk.map((e) => new Date(e.t).toDateString()));
-      // `label` is the Best Week chip's "w/c …", and it was the terse "12/8" —
-      // twelve August to a member in London and unreadable to one in Chicago,
-      // where 12/8 is 8 December. Same defect as the four booking screens'
-      // `${d.getDate()}/${d.getMonth() + 1}`, on the one figure this screen
-      // asks a member to remember. `fmtAxisDay` is the shared renderer for a
-      // day and a short month in the reader's own language and order, and it
-      // takes the PARTS as numbers, so there is no string for `new Date()` to
-      // reinterpret as UTC midnight.
-      //
-      // `iso` is that same opening day as data, for the chart axis to format. Both
-      // are built from local getters, never from a string, so the week a member is
-      // standing in is the week they are shown — see src/lib/localDate.ts.
-      const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-      // The unpriced count travels with the tonnage, not beside it. A week of
-      // pull-ups done by somebody who has never been weighed has real work in
-      // it and no load to put on that work, and a bare `vol` would state the
-      // shortfall as a smaller number rather than as an unknown.
-      const t = inWk.reduce<Tonnage>((a, e) => { const x = entryTonnage(e, weightSeries); return { kg: a.kg + x.kg, unknownSets: a.unknownSets + x.unknownSets }; }, { kg: 0, unknownSets: 0 });
-      out.push({ label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()), iso, vol: t.kg, unpriced: t.unknownSets, days: days.size });
-    }
+    // `days`, and named that way on purpose: the value is distinct training
+    // days, the label beside it is "Training Days", and calling the field
+    // `sessions` was how the same figure got read as a session count on three
+    // other screens. The buckets are src/lib/weeklyVolume.ts, shared with
+    // WeeklyVolumeCard.
+    //
+    // `label` is the Best Week chip's "w/c …" through `fmtAxisDay`, the shared
+    // renderer for a day and short month in the reader's own language and
+    // order (a terse "12/8" is August in London and December in Chicago).
+    // `iso` is that same opening day as data for the chart axis, built from
+    // local getters so the week a member is standing in is the week they are
+    // shown — see src/lib/localDate.ts.
+    const out = weeklyVolume(log, weightSeries, startOfWeek(now), WEEKS).map(({ start, t, days }) => ({
+      label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()),
+      iso: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
+      vol: t.kg, unpriced: t.unknownSets, days,
+    }));
     return out;
     // `now` is a dependency, not a value read past the memo: without it the
     // recomputation that a new day asks for never happens.

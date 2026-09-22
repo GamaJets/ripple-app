@@ -217,7 +217,7 @@ export const COACH_CHANNELS: readonly CoachChannelDef[] = [
     // control on a screen whose whole problem was that one control was too
     // blunt, and it would have left `clients` naming two rare events.
     key: 'clients', title: 'Your Clients', quietCost: null, local: false,
-    note: 'Somebody asking to be coached by you, somebody ending their coaching, and what a client does in between: a goal reached, a personal best, a progress photo sent.',
+    note: 'Somebody asking to be coached by you, somebody ending their coaching, and what a client does in between: a goal reached, a personal best, a progress photo sent. Also a reply to your community post, and a report for you to review.',
   },
   {
     // 'a credential running out' was added to the note when part 900 gave this

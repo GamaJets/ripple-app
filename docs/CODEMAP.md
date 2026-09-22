@@ -13,7 +13,7 @@ is paid again on every turn of the session that opened it.
 | 5,391 | 84k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
-| 5,103 | 81k | `app/(trainer)/dashboard.tsx` |
+| 5,125 | 82k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
 | 3,318 | 50k | `app/(trainer)/client.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,033 lines, ~1723k tokens if every one were read whole.
+Total: 47 files, 119,055 lines, ~1724k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -790,96 +790,97 @@ Total: 47 files, 119,033 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(trainer)/dashboard.tsx`
 
-5,103 lines · ~81k tokens · 87 anchors
+5,125 lines · ~82k tokens · 88 anchors
 
 ```
-161-166       fn       sheet
-167-173       fn       field
-174-185       fn       SheetHead
-186-203       fn       CodeFig
-204-218       fn       JoinLinkFallback
-219-239       fn       Chip
-240-277       fn       driftTone
-278-312       fn       rowStatus
-313-323       fn       toneOf
-324-334       fn       Initials
-335-381       fn       Flag
-382-404       fn       Fold
-405-509       fn         toggle
-510-573       type     Shortcut
-574-632       fn       UnmarkedSessions
-633-669       fn       MoneyOwed
-670-733       default  TrainerClients
-734-767       §        who is drifting
-768-768       fn         driftFor
-769-805       fn         driftActionable
-806-833       fn         openInviteEmails
-834-845       §        finding one person
-846-855       §        who the bulk controls act on
-856-860       fn         togglePick
-861-875       fn         stopPicking
-876-894       fn         acceptJoin
-895-915       fn         cancelInvite
-916-936       §        bringing a whole book across
-937-941       fn         resetImport
-942-982       fn         chooseRosterFile
-983-985       fn         runImport
-986-1015      fn           invited
-1016-1066     fn         copyJoinLink
-1067-1092     fn         loadCodes
-1093-1151     fn         openInvite
-1152-1160     fn           c
-1161-1183     fn         saveSpend
-1184-1298     fn         namedCodes
-1299-1352     §        progress photos this client SENT
-1353-1437     §        the coach's own sessions, read once for the two figures that need them ─
-1438-1450     fn         nextBooked
-1451-1475     fn         nextBookedLine
-1476-1490     §        Nothing prompted the coach to clear this
-1491-1534     §        the other three things about a coach's own book
-1535-1541     fn         invoiceAgeing
-1542-1542     fn         owed
-1543-1584     fn         bookState
-1585-1601     §        and the test is over the rows that CAN carry a count
-1602-1616     fn         threaded
-1617-1631     fn         lowAdherence
-1632-1649     fn         driftNote
-1650-1653     fn         segN
-1654-1675     fn         noProgram
-1676-1729     §        who is waiting on a reply
-1730-1772     fn         matchSeg
-1773-1781     fn         pickedRoster
-1782-1783     fn           pairs
-1784-1802     fn           assessed
-1803-1809     fn         deliverMessage
-1810-1833     fn         sendNudge
-1834-1854     §        plan ending, money owed, no program
-1855-1904     fn         attnFor
-1905-1905     fn         attnReason
-1906-1921     fn         needsAttention
-1922-1926     fn         adherenceValues
-1927-1938     §        the client's name used to go to a model, and now does not
-1939-1992     fn         draftNudge
-1993-2068     fn         sendDraft
-2069-2070     fn         nameOf
-2071-2083     fn         openBulkMessage
-2084-2110     fn         deliverBulk
-2111-2120     fn         bulkAssign
-2121-2169     fn           go
-2170-2178     fn         bulkEnd
-2179-2222     fn           go
-2223-2258     fn         exportRoster
-2259-2273     §        and the same for the weekly summary
-2274-2362     fn         genSummary
-2363-2414     fn         reloadEverything
-2415-2435     fn         nextUp
-2436-2441     fn         openProfile
-2442-3353     fn         openAdd
-3354-3378     §        what used to be here, and why it is gone
-3379-4752     §        and each of the three now goes somewhere
-4753-5013     fn               problem
-5014-5054     fn               on
-5055-5103     fn       CoachSetupRow
+163-168       fn       sheet
+169-175       fn       field
+176-187       fn       SheetHead
+188-205       fn       CodeFig
+206-220       fn       JoinLinkFallback
+221-241       fn       Chip
+242-279       fn       driftTone
+280-314       fn       rowStatus
+315-325       fn       toneOf
+326-336       fn       Initials
+337-383       fn       Flag
+384-406       fn       Fold
+407-511       fn         toggle
+512-575       type     Shortcut
+576-634       fn       UnmarkedSessions
+635-671       fn       MoneyOwed
+672-735       default  TrainerClients
+736-769       §        who is drifting
+770-770       fn         driftFor
+771-807       fn         driftActionable
+808-835       fn         openInviteEmails
+836-847       §        finding one person
+848-857       §        who the bulk controls act on
+858-862       fn         togglePick
+863-877       fn         stopPicking
+878-896       fn         acceptJoin
+897-917       fn         cancelInvite
+918-938       §        bringing a whole book across
+939-943       fn         resetImport
+944-984       fn         chooseRosterFile
+985-987       fn         runImport
+988-1017      fn           invited
+1018-1068     fn         copyJoinLink
+1069-1094     fn         loadCodes
+1095-1153     fn         openInvite
+1154-1162     fn           c
+1163-1185     fn         saveSpend
+1186-1300     fn         namedCodes
+1301-1354     §        progress photos this client SENT
+1355-1439     §        the coach's own sessions, read once for the two figures that need them ─
+1440-1452     fn         nextBooked
+1453-1477     fn         nextBookedLine
+1478-1492     §        Nothing prompted the coach to clear this
+1493-1536     §        the other three things about a coach's own book
+1537-1550     fn         lowCredits
+1551-1557     fn         invoiceAgeing
+1558-1558     fn         owed
+1559-1599     fn         bookState
+1600-1616     §        and the test is over the rows that CAN carry a count
+1617-1631     fn         threaded
+1632-1646     fn         lowAdherence
+1647-1664     fn         driftNote
+1665-1668     fn         segN
+1669-1690     fn         noProgram
+1691-1744     §        who is waiting on a reply
+1745-1787     fn         matchSeg
+1788-1796     fn         pickedRoster
+1797-1798     fn           pairs
+1799-1817     fn           assessed
+1818-1824     fn         deliverMessage
+1825-1848     fn         sendNudge
+1849-1869     §        plan ending, money owed, no program
+1870-1924     fn         attnFor
+1925-1925     fn         attnReason
+1926-1941     fn         needsAttention
+1942-1946     fn         adherenceValues
+1947-1958     §        the client's name used to go to a model, and now does not
+1959-2012     fn         draftNudge
+2013-2088     fn         sendDraft
+2089-2090     fn         nameOf
+2091-2103     fn         openBulkMessage
+2104-2130     fn         deliverBulk
+2131-2140     fn         bulkAssign
+2141-2189     fn           go
+2190-2198     fn         bulkEnd
+2199-2242     fn           go
+2243-2278     fn         exportRoster
+2279-2293     §        and the same for the weekly summary
+2294-2382     fn         genSummary
+2383-2434     fn         reloadEverything
+2435-2455     fn         nextUp
+2456-2461     fn         openProfile
+2462-3375     fn         openAdd
+3376-3400     §        what used to be here, and why it is gone
+3401-4774     §        and each of the three now goes somewhere
+4775-5035     fn               problem
+5036-5076     fn               on
+5077-5125     fn       CoachSetupRow
 ```
 
 ## `studio-web/app/accounting/page.tsx`

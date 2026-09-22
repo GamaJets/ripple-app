@@ -18,7 +18,8 @@ import { useWearables } from './wearables';
 import { useMovementName } from './catalogueTranslations';
 import { importSources, useImportedIds, isLogged, readRecent, type RecentRead } from './watchImport';
 import { startOfWeek } from '../lib/weekStart';
-import { entryTonnage, tonnageNote, type Tonnage } from '../lib/bodyweightSets';
+import { weeklyVolume } from '../lib/weeklyVolume';
+import { tonnageNote } from '../lib/bodyweightSets';
 import { personalRecords } from '../lib/streaks';
 import { bestSetLabel } from '../lib/bestSet';
 import { volumeIn, liftLabel, weightShown } from '../lib/units';
@@ -52,21 +53,9 @@ export function WeeklyVolumeCard() {
   const { weightSeries } = useClientData();
   const wu = useSettings().weightUnit;
   const now = useNow();
-  // The same buckets as trends.tsx: startOfWeek(now), seven-day windows, each
-  // priced by entryTonnage against the weight on the day.
-  const weeks = useMemo(() => {
-    const opened = startOfWeek(now);
-    const out: { day: number; t: Tonnage }[] = [];
-    for (let w = VOLUME_WEEKS - 1; w >= 0; w--) {
-      const start = new Date(opened); start.setDate(opened.getDate() - w * 7);
-      const end = new Date(start); end.setDate(start.getDate() + 7);
-      const tt = log
-        .filter((e) => { const d = new Date(e.t); return d >= start && d < end; })
-        .reduce<Tonnage>((a, e) => { const x = entryTonnage(e, weightSeries); return { kg: a.kg + x.kg, unknownSets: a.unknownSets + x.unknownSets }; }, { kg: 0, unknownSets: 0 });
-      out.push({ day: start.getDate(), t: tt });
-    }
-    return out;
-  }, [log, weightSeries, now]);
+  // The same buckets as trends.tsx: src/lib/weeklyVolume.ts.
+  const weeks = useMemo(() => weeklyVolume(log, weightSeries, startOfWeek(now), VOLUME_WEEKS)
+    .map((w) => ({ day: w.start.getDate(), t: w.t })), [log, weightSeries, now]);
   const known = isWhole(status);
   const thisWeek = weeks[weeks.length - 1];
   const shown = volumeIn(thisWeek.t.kg, wu);

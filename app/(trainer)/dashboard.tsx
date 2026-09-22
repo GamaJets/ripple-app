@@ -143,6 +143,8 @@ import { channelAllows } from '../../src/lib/coachNotify';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
 import { blockEnding } from '../../src/lib/blockEnding';
+import { creditsLow, creditsLine } from '../../src/lib/creditsLow';
+import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect';
 import { weekCount } from '../../src/lib/programBlock';
 import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle, type HomeMoney } from '../../src/lib/homeMoney';
 import { minorMoney } from '../../src/lib/coachMoney';
@@ -1519,6 +1521,20 @@ export default function TrainerClients() {
     })();
     return () => { live = false; };
   }, [coachId, authLoading, readNonce]);
+  /** The coach's own pack sales, for who is about to run out of credits —
+   *  the read app/(trainer)/broadcast.tsx already makes, and `creditsLow` is
+   *  null under anything but a whole one (src/lib/creditsLow.ts). */
+  const [purchases, setPurchases] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  useEffect(() => {
+    if (!coachId || authLoading) return;
+    let live = true;
+    (async () => {
+      const p = await fetchClientPurchases();
+      if (live) setPurchases(p);
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading, readNonce]);
+  const lowCredits = useMemo(() => creditsLow(purchases.rows, isWhole(purchases.status)), [purchases]);
   /**
    * The book, aged against TODAY — and today is a value that moves.
    *
@@ -1552,11 +1568,10 @@ export default function TrainerClients() {
     // disqualifies all of it — see src/lib/clientDrift.ts.
     clientsDrifting: bands && driftRead && !driftRead.truncated && !driftRead.notAsked.size
       ? bands.drifting : null,
-    // Nothing coach-wide reads pack balances yet, so this is honestly unknown
-    // rather than nought. `bookAlert` declares it so the day a screen does read
-    // them, nobody has to reopen the decision about where it ranks.
-    packsRunningOut: null,
-  }), [sessionsUnread, unmarked, invoiceAgeing, invoices.status, bands, driftRead]);
+    // Clients at or under one session across their paid packs, off the whole
+    // purchase read above; null (unknown, not nought) under anything less.
+    packsRunningOut: lowCredits ? lowCredits.size : null,
+  }), [sessionsUnread, unmarked, invoiceAgeing, invoices.status, bands, driftRead, lowCredits]);
   useEffect(() => {
     // Defaults to allowed while the preference read has not landed, matching
     // what supabase/functions/send-push does with the same table: a transient
@@ -1839,10 +1854,10 @@ export default function TrainerClients() {
   // program read, an overdue invoice off the same ageing book the Money Owed
   // card draws behind a 'ready' invoice read, and "no program" behind the same
   // `isWhole(programStatus)` the No Program chip waits for. They come AFTER
-  // the coaching reasons, so money never outranks a check-in owed. Session
-  // credits running low are not here: nothing coach-wide reads pack balances
-  // (see `packsRunningOut` above), and a guess is not a reason.
-  type Attn = { kind: 'drift' | 'adherence' | 'unread' | 'plan' | 'owed' | 'setup'; state: string; line: string; reason: string; tone: string };
+  // the coaching reasons, so money never outranks a check-in owed. Credits
+  // running low come after an overdue invoice, off `lowCredits` above, which
+  // is null unless the whole purchase read answered.
+  type Attn = { kind: 'drift' | 'adherence' | 'unread' | 'plan' | 'owed' | 'credits' | 'setup'; state: string; line: string; reason: string; tone: string };
   const overdueBy = new Map<string, { n: number; oldest: string }>();
   if (invoices.status === 'ready') {
     // `overdue` is longest-overdue first, so the first seen is the oldest.
@@ -1896,6 +1911,11 @@ export default function TrainerClients() {
     if (owedBy) {
       const said = owedBy.n + ' overdue invoice' + (owedBy.n > 1 ? 's' : '');
       return { kind: 'owed', state: 'Payment overdue', line: `${said}. ${owedBy.n > 1 ? 'The oldest is ' : ''}${owedBy.oldest}`, reason: said, tone: t.warn };
+    }
+    const credits = lowCredits?.get(c.id);
+    if (credits) {
+      const { state, line } = creditsLine(credits);
+      return { kind: 'credits', state, line, reason: line, tone: credits.out ? t.warn : t.brand };
     }
     // Linked clients only: a hand-added name has no account to train from, and
     // flagging every one of them forever is the badge nobody reads (see above).
@@ -2729,7 +2749,7 @@ export default function TrainerClients() {
                        for a low figure, blue for somebody waiting on a reply.
                        The words beside it still carry the state. */
                     avatar={<Initials t={t} name={c.name} size={42}
-                      tone={a == null ? 'amber' : a.kind === 'unread' || a.kind === 'plan' ? 'blue' : a.kind === 'adherence' || a.kind === 'owed' ? 'amber'
+                      tone={a == null ? 'amber' : a.kind === 'unread' || a.kind === 'plan' ? 'blue' : a.kind === 'adherence' || a.kind === 'owed' || a.kind === 'credits' ? 'amber'
                         : a.kind === 'setup' ? 'purple'
                         : driftFor(c)?.status === 'idle' ? 'purple' : 'red'} />}
                     name={c.name}
@@ -2748,6 +2768,8 @@ export default function TrainerClients() {
                       ? { label: a.kind === 'setup' ? 'Build Program' : 'Next Block', onPress: () => router.push({ pathname: '/(trainer)/builder', params: { clientId: c.id, name: c.name, from: 'trainerDashboard' } }) }
                       : a && a.kind === 'owed'
                       ? { label: 'Invoices', onPress: () => router.push('/(trainer)/invoices') }
+                      : a && a.kind === 'credits'
+                      ? { label: 'Sell a Pack', onPress: () => router.push('/(trainer)/payments') }
                       /* Drafts a check-in with AI for the coach to review, then
                          send — the same flow the old "Draft" button opened. */
                       : { label: 'Nudge', onPress: () => draftNudge(c) }} />

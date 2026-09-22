@@ -7,7 +7,7 @@
 // comment, Report on every post and comment, Block on every author, Hide From
 // My Feed on every post, and moderators' Hide For Everyone.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, Modal, ScrollView, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, Modal, ScrollView, Alert, Image, Linking } from 'react-native';
 import { useTheme } from './components';
 import { useAuth } from './auth';
 import { Card, Cta, Ghost, Flag, TonedChip, Rule, Section, SectionHead } from './kit';
@@ -15,13 +15,18 @@ import { Icon } from './Icon';
 import { sp, layout, radius, elevation, type as ty, numeric, font } from '../theme/scale';
 import { BRAND } from '../lib/brands';
 import {
-  COMMENT_MAX, COMMUNITY_RULES, FEED_CUT_LINE, POST_MAX, REPORT_REASONS,
-  ago, composeProblem, feedStateLine, likeState, reasonLabel, roleLabel, rulesContactLine,
-  type Channel, type Post, type ReportReason,
+  COMMENT_MAX, COMMUNITY_RULES, FEED_CUT_LINE, PLACE_MAX, POST_MAX, REPORT_REASONS, URL_MAX,
+  ago, composeProblem, eventInstant, eventProblem, eventWhen, feedStateLine, likeState, reasonLabel, roleLabel,
+  rulesContactLine, upcoming, urlProblem,
+  type Channel, type Post, type PostKind, type ReportReason,
 } from '../lib/community';
-import { report, useComments, useCommunityFeed, useCommunityReports, useCommunityRules, type ReportRow } from './community';
+import {
+  pickCommunityPhoto, removeCommunityImage, report, uploadCommunityImage, useComments, useCommunityFeed,
+  useCommunityReports, useCommunityRules, useSignedImages, type PickedPhoto, type PostExtra, type ReportRow,
+} from './community';
+import { DateSheet } from './DateSheet';
 
-type Target = { kind: 'post' | 'comment'; id: string; authorId: string; authorName: string; hidden: boolean };
+type Target = { kind: 'post' | 'comment'; id: string; authorId: string; authorName: string; hidden: boolean; imagePath?: string | null };
 
 function useField() {
   const t = useTheme();
@@ -76,17 +81,48 @@ function RulesSheet({ open, onClose, onAccepted }: { open: boolean; onClose: () 
   );
 }
 
-/** A text box and a send button, behind the rules. */
-function Composer({ max, placeholder, label, onSend }: {
-  max: number; placeholder: string; label: string; onSend: (body: string) => Promise<string | null>;
+/** A text box and a send button, behind the rules. `kind` adds a photo
+ *  (a post), a link (a resource) or a day, time and place (an event). */
+function Composer({ max, placeholder, label, onSend, kind }: {
+  max: number; placeholder: string; label: string; kind?: PostKind;
+  onSend: (body: string, extra?: PostExtra) => Promise<string | null>;
 }) {
   const t = useTheme();
   const field = useField();
+  const line = { ...field, minHeight: 0 };
   const rules = useCommunityRules();
   const [text, setText] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [photo, setPhoto] = useState<PickedPhoto | null>(null);
+  const [url, setUrl] = useState('');
+  const [day, setDay] = useState('');
+  const [time, setTime] = useState('');
+  const [place, setPlace] = useState('');
+  const [dayOpen, setDayOpen] = useState(false);
+
+  const send = async () => {
+    const why = composeProblem(text, max, !!photo)
+      ?? (kind === 'resource' ? urlProblem(url) : null)
+      ?? (kind === 'event' ? (text.trim() ? null : 'Give the event a title.') ?? eventProblem(eventInstant(day, time), place) : null);
+    if (why) { setErr(why); return; }
+    setBusy(true); setErr(null);
+    const extra: PostExtra = {};
+    if (kind === 'resource') extra.url = url.trim();
+    if (kind === 'event') { extra.event_at = new Date(eventInstant(day, time)!).toISOString(); extra.event_place = place.trim() || null; }
+    if (photo) {
+      const up = await uploadCommunityImage(photo);
+      if (up.error || !up.path) { setBusy(false); setErr(up.error ?? 'Your photo could not be uploaded.'); return; }
+      extra.image_path = up.path;
+    }
+    const o = await onSend(text, kind ? extra : undefined);
+    // A post that did not land leaves no photo behind.
+    if (o && extra.image_path) await removeCommunityImage(extra.image_path);
+    setBusy(false);
+    if (o) { setErr(o); return; }
+    setText(''); setPhoto(null); setUrl(''); setDay(''); setTime(''); setPlace('');
+  };
 
   if (rules.accepted === null) {
     return (
@@ -108,16 +144,41 @@ function Composer({ max, placeholder, label, onSend }: {
     <View style={{ paddingVertical: sp.md, gap: sp.sm }}>
       <TextInput value={text} onChangeText={(s) => { setText(s); setErr(null); }} placeholder={placeholder} placeholderTextColor={t.ink3}
         multiline maxLength={max + 200} accessibilityLabel={placeholder} style={field} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      {kind === 'resource' ? (
+        <TextInput value={url} onChangeText={(s) => { setUrl(s); setErr(null); }} placeholder="https://" placeholderTextColor={t.ink3}
+          autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={URL_MAX} accessibilityLabel="Link" style={line} />
+      ) : null}
+      {kind === 'event' ? (
+        <View style={{ gap: sp.sm }}>
+          <View style={{ flexDirection: 'row', gap: sp.sm }}>
+            <Pressable onPress={() => setDayOpen(true)} accessibilityRole="button" accessibilityLabel={day ? `Day, ${day}` : 'Pick a Day'}
+              style={{ ...line, flex: 1, justifyContent: 'center' }}>
+              <Text style={{ ...ty.body, color: day ? t.ink : t.ink3 }}>{day || 'Pick a Day'}</Text>
+            </Pressable>
+            <TextInput value={time} onChangeText={(s) => { setTime(s); setErr(null); }} placeholder="Time, e.g. 18:30" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false} maxLength={8} accessibilityLabel="Time" style={{ ...line, flex: 1 }} />
+          </View>
+          <TextInput value={place} onChangeText={(s) => { setPlace(s); setErr(null); }} placeholder="Place (Optional)" placeholderTextColor={t.ink3}
+            maxLength={PLACE_MAX} accessibilityLabel="Place" style={line} />
+          <DateSheet visible={dayOpen} value={day} heading="Event Day" onCancel={() => setDayOpen(false)}
+            onPick={(iso) => { setDay(iso); setDayOpen(false); setErr(null); }} />
+        </View>
+      ) : null}
+      {kind === 'post' && photo ? (
+        <View>
+          <Image source={{ uri: photo.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.sm }} resizeMode="cover" accessibilityLabel="Photo to post" />
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.xs }}><Ghost label="Remove Photo" onPress={() => setPhoto(null)} /></View>
+        </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>
         <Text style={{ ...ty.caption, ...numeric, color: text.trim().length > max ? t.ink : t.ink3, ...(text.trim().length > max ? font('700') : null) }}>{text.trim().length > max ? `Too Long: ${text.trim().length} / ${max}` : `${text.trim().length} / ${max}`}</Text>
-        <Cta label={label} disabled={busy || !text.trim()} onPress={async () => {
-          const why = composeProblem(text, max);
-          if (why) { setErr(why); return; }
-          setBusy(true);
-          const o = await onSend(text);
-          setBusy(false);
-          if (o) setErr(o); else setText('');
-        }} />
+        {kind === 'post' && !photo ? (
+          <Ghost label="Add Photo" icon="camera" disabled={busy} onPress={async () => {
+            const r = await pickCommunityPhoto();
+            if (r.error) setErr(r.error); else if (r.picked) { setPhoto(r.picked); setErr(null); }
+          }} />
+        ) : null}
+        <Cta label={busy ? 'Sending…' : label} disabled={busy || (!text.trim() && !photo)} onPress={send} />
       </View>
       {err ? <Flag tone={t.warn}>{err}</Flag> : null}
     </View>
@@ -201,7 +262,7 @@ function CommentsSheet({ post, me, moderator, canPost, onClose, onBlock }: {
   return (
     <Sheet open={!!post} onClose={onClose}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>{post.authorName} · {ago(post.createdAt)}</Text>
-      <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{post.body}</Text>
+      {post.body ? <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{post.body}</Text> : null}
       <Rule />
       {c.status === 'error' ? (
         <View style={{ paddingVertical: sp.md, gap: sp.sm }}>
@@ -232,21 +293,27 @@ function CommentsSheet({ post, me, moderator, canPost, onClose, onBlock }: {
   );
 }
 
-export function CommunityFeed({ channel, canPost, moderator }: { channel: Channel; canPost: boolean; moderator: boolean }) {
+const PLACEHOLDER: Record<PostKind, string> = {
+  post: '', resource: 'What is it? e.g. Mobility Guide', event: 'Event title',
+};
+
+export function CommunityFeed({ channel, canPost, moderator, kind = 'post' }: { channel: Channel; canPost: boolean; moderator: boolean; kind?: PostKind }) {
   const t = useTheme();
   const { user } = useAuth();
   const me = user?.id ?? null;
-  const feed = useCommunityFeed(channel);
+  const feed = useCommunityFeed(channel, kind);
   const [target, setTarget] = useState<Target | null>(null);
   const [thread, setThread] = useState<Post | null>(null);
   const [likeErr, setLikeErr] = useState<string | null>(null);
-  const stateLine = feedStateLine(feed.status, feed.posts.length, channel);
+  const shown = kind === 'event' ? upcoming(feed.posts) : feed.posts;
+  const images = useSignedImages(shown.map((p) => p.imagePath));
+  const stateLine = feedStateLine(feed.status, shown.length, channel, kind);
 
   return (
     <View>
       {canPost ? (
-        <Composer max={POST_MAX} label="Post" onSend={feed.publish}
-          placeholder={channel === 'coaches' ? 'Share with the other coaches' : 'Share something with your gym'} />
+        <Composer max={POST_MAX} kind={kind} label={kind === 'event' ? 'Add Event' : kind === 'resource' ? 'Share' : 'Post'} onSend={feed.publish}
+          placeholder={PLACEHOLDER[kind] || (channel === 'coaches' ? 'Share with the other coaches' : 'Share something with your gym')} />
       ) : null}
 
       {stateLine ? (
@@ -257,7 +324,7 @@ export function CommunityFeed({ channel, canPost, moderator }: { channel: Channe
       ) : null}
       {likeErr ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{likeErr}</Flag> : null}
 
-      {feed.posts.map((p) => {
+      {shown.map((p) => {
         const l = likeState(feed.likeStatus, feed.likes, p.id, me);
         const role = roleLabel(p.authorRole);
         return (
@@ -268,7 +335,26 @@ export function CommunityFeed({ channel, canPost, moderator }: { channel: Channe
               {p.hidden ? <TonedChip label="Hidden" tone="red" /> : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginStart: 'auto' }}>{ago(p.createdAt)}</Text>
             </View>
-            <Text style={{ ...ty.body, color: p.hidden ? t.ink3 : t.ink, marginTop: sp.sm }}>{p.body}</Text>
+            {p.kind === 'event' && p.eventAt != null ? (
+              <Text style={{ ...ty.label, ...font('600'), color: t.brand, marginTop: sp.sm }}>
+                {eventWhen(p.eventAt)}{p.eventPlace ? ` · ${p.eventPlace}` : ''}
+              </Text>
+            ) : null}
+            {p.body ? <Text style={{ ...ty.body, color: p.hidden ? t.ink3 : t.ink, marginTop: sp.sm }}>{p.body}</Text> : null}
+            {p.url ? (
+              <Pressable onPress={() => { void Linking.openURL(p.url!).catch(() => setLikeErr('That link could not be opened.')); }}
+                accessibilityRole="link" accessibilityLabel={`Open ${p.url}`} style={{ marginTop: sp.xs, minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, color: t.brand, textDecorationLine: 'underline' }} numberOfLines={2}>{p.url}</Text>
+              </Pressable>
+            ) : null}
+            {p.imagePath ? (
+              images[p.imagePath] ? (
+                <Image source={{ uri: images[p.imagePath] }} resizeMode="cover" accessibilityLabel={`Photo from ${p.authorName}`}
+                  style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.sm, marginTop: sp.sm, backgroundColor: t.surface2 }} />
+              ) : (
+                <View style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.sm, marginTop: sp.sm, backgroundColor: t.surface2 }} />
+              )
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.md }}>
               <Pressable disabled={!me || p.hidden} accessibilityRole="button"
                 accessibilityLabel={`${l.mine ? 'Unlike' : 'Like'}${l.count != null ? `. ${l.count} likes` : ''}`}
@@ -283,7 +369,7 @@ export function CommunityFeed({ channel, canPost, moderator }: { channel: Channe
                 <Icon name="chat" size={18} color={t.ink3} />
                 <Text style={{ ...ty.caption, color: t.ink3 }}>Comments</Text>
               </Pressable>
-              <Pressable onPress={() => setTarget({ kind: 'post', id: p.id, authorId: p.authorId, authorName: p.authorName, hidden: p.hidden })}
+              <Pressable onPress={() => setTarget({ kind: 'post', id: p.id, authorId: p.authorId, authorName: p.authorName, hidden: p.hidden, imagePath: p.imagePath })}
                 accessibilityRole="button" accessibilityLabel="Report, block or hide" style={{ marginStart: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: sp.sm }}>
                 <Text style={{ ...ty.head, color: t.ink3 }}>•••</Text>
               </Pressable>
@@ -296,10 +382,34 @@ export function CommunityFeed({ channel, canPost, moderator }: { channel: Channe
 
       <ActionsSheet target={target} me={me} moderator={moderator} onClose={() => setTarget(null)}
         onHideForMe={feed.hideForMe} onBlock={feed.block}
-        onDelete={(x) => feed.remove(x.id)} onModerate={(x, hide) => feed.moderatePost(x.id, hide)} />
+        onDelete={(x) => feed.remove(x.id, x.imagePath)} onModerate={(x, hide) => feed.moderatePost(x.id, hide)} />
       <CommentsSheet post={thread} me={me} moderator={moderator} canPost={canPost} onClose={() => setThread(null)}
         onBlock={feed.block} />
     </View>
+  );
+}
+
+/** The members channel's next events, small, for the member's Community
+ *  screen. Nothing at all is drawn when there are none, or the read failed:
+ *  the board below is the screen's subject and says its own state. */
+export function UpcomingEvents() {
+  const t = useTheme();
+  const feed = useCommunityFeed('members', 'event');
+  const list = upcoming(feed.posts).slice(0, 5);
+  if (!list.length) return null;
+  return (
+    <Section>
+      <SectionHead title="Upcoming" />
+      {list.map((p) => (
+        <View key={p.id} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.sm }}>
+          <Icon name="calendar" size={18} color={t.brand} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{p.body}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{eventWhen(p.eventAt!)}{p.eventPlace ? ` · ${p.eventPlace}` : ''}</Text>
+          </View>
+        </View>
+      ))}
+    </Section>
   );
 }
 

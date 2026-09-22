@@ -52,6 +52,26 @@ export async function listingsByIds(ids: string[]): Promise<Listing[]> {
   return readListings(data as any[] | null);
 }
 
+/**
+ * The selling coaches' names, from `profiles.full_name` — the same source
+ * app/(client)/trainers.tsx names coaches from. RLS returns only the names this
+ * member may read (their own coach, part 130; listed coaches, part 142), and a
+ * coach missing from the map is shown with no name rather than a placeholder.
+ */
+export async function coachNames(ids: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+  try {
+    const { data, error } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
+    if (error) { reportError('marketplace.coachNames', error); return names; }
+    for (const r of (data ?? []) as { id: string; full_name: string | null }[]) {
+      const n = typeof r.full_name === 'string' ? r.full_name.trim() : '';
+      if (n) names.set(r.id, n);
+    }
+  } catch (e) { reportError('marketplace.coachNames', e); }
+  return names;
+}
+
 /** Sales as the buyer (`as: 'buyer'`) or of my listings (`as: 'coach'`). */
 export const fetchMarketPurchases = (as: 'buyer' | 'coach'): Promise<Read<MarketPurchase>> =>
   readTable('marketplace.purchases', 'marketplace_purchases', PURCHASE_COLS,

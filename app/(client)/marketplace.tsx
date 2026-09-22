@@ -17,7 +17,7 @@ import { fmtDay } from '../../src/lib/format';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { buyBlocker, priceLabel, statusLabel, type Listing, type MarketPurchase } from '../../src/lib/marketplace';
 import { useClientData } from '../../src/ui/clientData';
-import { fetchLiveListings, fetchMarketPurchases, listingsByIds, buyListing } from '../../src/lib/marketplaceData';
+import { fetchLiveListings, fetchMarketPurchases, listingsByIds, buyListing, coachNames } from '../../src/lib/marketplaceData';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
 export default function ClientMarketplace() {
@@ -28,6 +28,7 @@ export default function ClientMarketplace() {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
     const [l, p] = await Promise.all([fetchLiveListings(), fetchMarketPurchases('buyer')]);
@@ -38,6 +39,7 @@ export default function ClientMarketplace() {
     const missing = [...new Set(p.rows.map((x) => x.listingId))].filter((id) => !have.has(id));
     const extra = await listingsByIds(missing);
     setBought(new Map([...l.rows, ...extra].map((x) => [x.id, x])));
+    setNames(await coachNames([...new Set(l.rows.map((x) => x.coachId))]));
   }, []);
   useEffect(() => { void load(); }, [load]);
   const pull = usePullToRefresh(load);
@@ -75,9 +77,11 @@ export default function ClientMarketplace() {
           ) : null}
           {offered.map((l) => {
             const blocked = buyBlocker(l, mine);
+            const by = names.get(l.coachId);
+            const price = priceLabel(l) ?? 'Price unavailable';
             return (
               <View key={l.id}>
-                <ListRow icon="grid" tone="brand" title={l.title} note={priceLabel(l) ?? 'Price unavailable'}
+                <ListRow icon="grid" tone="brand" title={l.title} note={by ? `${price} · By ${by}` : price}
                   meta={blocked ? 'Owned' : undefined} onPress={() => setOpen(open === l.id ? null : l.id)} />
                 {open === l.id ? (
                   <View style={{ paddingBottom: sp.md }}>

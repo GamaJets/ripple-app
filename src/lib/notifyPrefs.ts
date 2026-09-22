@@ -244,7 +244,7 @@ export const MEMBER_CHANNELS: readonly MemberChannelDef[] = [
   },
   {
     key: 'clients', title: 'You And Your Coach', wholeChannel: false,
-    note: 'An answer to a coaching request, a coaching arrangement ending, and a goal you reached.',
+    note: 'An answer to a coaching request, a coaching arrangement ending, a goal you reached, an assessment your coach recorded, and a reply to your community post.',
   },
   {
     key: 'admin', title: 'Forms And Paperwork', wholeChannel: false,

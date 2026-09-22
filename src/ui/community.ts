@@ -4,21 +4,28 @@
 // Every write checks that it landed (src/lib/wroteRows.ts) and returns null or
 // the sentence to show.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import { writeFailure } from '../lib/wroteRows';
 import {
-  COMMUNITY_RULES_VERSION, FEED_CAP, shapeComments, shapePosts,
-  type Channel, type Comment, type Post, type ReportReason,
+  COMMUNITY_MEDIA_BUCKET, COMMUNITY_RULES_VERSION, FEED_CAP, IMAGE_MAX_PX, communityImagePath, imageRefusal,
+  isCommunityImagePath, shapeComments, shapePosts,
+  type Channel, type Comment, type Post, type PostKind, type ReportReason,
 } from '../lib/community';
+import { ensureMediaPermission } from './permissions';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
 export type Outcome = string | null;
 
-const POST_COLS = 'id, author_id, author_name, author_role, channel, body, created_at, hidden_at';
+const POST_COLS = 'id, author_id, author_name, author_role, channel, body, created_at, hidden_at, kind, image_path, url, event_at, event_place';
+
+/** What a post carries besides its words (part 3330). */
+export interface PostExtra { image_path?: string | null; url?: string | null; event_at?: string | null; event_place?: string | null }
 const COMMENT_COLS = 'id, post_id, author_id, author_name, author_role, body, created_at, hidden_at';
 
 /** One write, reduced to null or a sentence. `run` must ask for `count: 'exact'`. */
@@ -35,7 +42,9 @@ async function wrote(where: string, what: string, run: () => PromiseLike<{ error
   }
 }
 
-export function useCommunityFeed(channel: Channel) {
+/** One board: `kind` 'post' is the discussion, 'resource' the coaches' links,
+ *  'event' the upcoming events soonest first (past ones are not asked for). */
+export function useCommunityFeed(channel: Channel, kind: PostKind = 'post') {
   const rev = useAuthRevision();
   const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
@@ -48,10 +57,11 @@ export function useCommunityFeed(channel: Channel) {
     if (!USE_SUPABASE) { setPosts([]); setStatus('ready'); setLikeStatus('ready'); return; }
     setStatus('loading');
     try {
-      const { data, error } = await supabase.from('community_posts').select(POST_COLS)
-        .eq('channel', channel)
-        .order('created_at', { ascending: false }).order('id', { ascending: false })
-        .limit(capLimit(FEED_CAP));
+      const q = supabase.from('community_posts').select(POST_COLS).eq('channel', channel).eq('kind', kind);
+      const { data, error } = await (kind === 'event'
+        ? q.gt('event_at', new Date().toISOString()).order('event_at').order('id')
+        : q.order('created_at', { ascending: false }).order('id', { ascending: false })
+      ).limit(capLimit(FEED_CAP));
       if (me !== run.current) return;
       if (error) { reportError('community.feed', error); setStatus('error'); return; }
       const page = capped(data as any[] | null, FEED_CAP);
@@ -72,7 +82,7 @@ export function useCommunityFeed(channel: Channel) {
       reportError('community.feed', e);
       setStatus('error');
     }
-  }, [channel]);
+  }, [channel, kind]);
 
   useEffect(() => { setPosts([]); setLikes([]); void reload(); }, [reload, rev]);
 
@@ -80,14 +90,19 @@ export function useCommunityFeed(channel: Channel) {
 
   return {
     posts, status, likes, likeStatus, reload,
-    publish: async (body: string) => after(await wrote('community.post', 'Your post', () =>
-      supabase.from('community_posts').insert({ channel, body: body.trim() }, { count: 'exact' }))),
+    publish: async (body: string, extra?: PostExtra) => after(await wrote('community.post', 'Your post', () =>
+      supabase.from('community_posts').insert({ channel, body: body.trim(), kind, ...extra }, { count: 'exact' }))),
     like: async (postId: string, on: boolean, me: string) => after(await wrote('community.like', 'That like', () =>
       on
         ? supabase.from('community_likes').insert({ post_id: postId }, { count: 'exact' })
         : supabase.from('community_likes').delete({ count: 'exact' }).eq('post_id', postId).eq('user_id', me))),
-    remove: async (postId: string) => after(await wrote('community.delete', 'That post', () =>
-      supabase.from('community_posts').delete({ count: 'exact' }).eq('id', postId))),
+    /** Deletes the post, then its photo, which nothing names any more. */
+    remove: async (postId: string, imagePath?: string | null) => {
+      const o = await wrote('community.delete', 'That post', () =>
+        supabase.from('community_posts').delete({ count: 'exact' }).eq('id', postId));
+      if (!o && imagePath) await removeCommunityImage(imagePath);
+      return after(o);
+    },
     hideForMe: async (postId: string) => after(await wrote('community.hide', 'Hiding that post', () =>
       supabase.from('community_hides').insert({ post_id: postId }, { count: 'exact' }))),
     block: async (userId: string) => after(await wrote('community.block', 'That block', () =>
@@ -228,4 +243,84 @@ export function useCommunityReports() {
   };
 
   return { list, status, reload, resolve };
+}
+
+/* ── photos (part 3330) ───────────────────────────────────────────────────── */
+
+export interface PickedPhoto { uri: string; mimeType: string | null }
+
+export async function pickCommunityPhoto(): Promise<{ picked: PickedPhoto | null; error: string | null }> {
+  if (!(await ensureMediaPermission('library', 'add a photo to your post'))) return { picked: null, error: null };
+  try {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] });
+    const a = res.canceled ? null : res.assets?.[0];
+    return { picked: a ? { uri: a.uri, mimeType: a.mimeType ?? null } : null, error: null };
+  } catch (e) {
+    reportError('community.photo.pick', e);
+    return { picked: null, error: 'Your photos could not be opened. Try again.' };
+  }
+}
+
+export async function removeCommunityImage(path: string): Promise<void> {
+  try {
+    const { error } = await supabase.storage.from(COMMUNITY_MEDIA_BUCKET).remove([path]);
+    if (error) reportError('community.photo.remove', error, { path });
+  } catch (e) { reportError('community.photo.remove', e, { path }); }
+}
+
+/** Resize to 1280px, upload into <tenant>/<me>/, and return the key for the
+ *  post to name. A PNG stays a PNG; anything else (HEIC included) becomes JPEG,
+ *  which is all the bucket accepts. */
+export async function uploadCommunityImage(picked: PickedPhoto): Promise<{ path: string | null; error: string | null }> {
+  if (!USE_SUPABASE) return { path: null, error: 'This build has no server, so your photo has nowhere to go.' };
+  try {
+    const { data: s, error: sErr } = await supabase.auth.getSession();
+    if (sErr) { reportError('community.photo.session', sErr); return { path: null, error: 'Your sign-in could not be checked, so the photo was not added. Try again.' }; }
+    const me = s.session?.user.id;
+    if (!me) return { path: null, error: 'Sign in again to add a photo.' };
+    const prof = await supabase.from('profiles').select('tenant_id').eq('id', me).maybeSingle();
+    const tenant = prof.data?.tenant_id as string | undefined;
+    if (prof.error || !tenant) {
+      if (prof.error) reportError('community.photo.tenant', prof.error);
+      return { path: null, error: 'Your gym could not be read, so the photo was not uploaded.' };
+    }
+    const png = String(picked.mimeType ?? '').toLowerCase() === 'image/png';
+    const out = await ImageManipulator.manipulateAsync(picked.uri, [{ resize: { width: IMAGE_MAX_PX } }],
+      { compress: 0.8, format: png ? ImageManipulator.SaveFormat.PNG : ImageManipulator.SaveFormat.JPEG });
+    const bytes = await (await fetch(out.uri)).arrayBuffer();
+    const refusal = imageRefusal(bytes.byteLength);
+    if (refusal) return { path: null, error: refusal };
+    const token = Math.random().toString(36).slice(2, 10);
+    const path = communityImagePath(tenant, me, Date.now(), token, png ? 'png' : 'jpg');
+    const up = await supabase.storage.from(COMMUNITY_MEDIA_BUCKET)
+      .upload(path, bytes, { contentType: png ? 'image/png' : 'image/jpeg', upsert: false });
+    if (up.error) { reportError('community.photo.upload', up.error, { path }); return { path: null, error: 'Your photo could not be uploaded.' }; }
+    return { path, error: null };
+  } catch (e) {
+    reportError('community.photo.upload', e);
+    return { path: null, error: 'That photo could not be prepared. Try a different one.' };
+  }
+}
+
+/** Signed URLs (60s) for the photos on screen, asked for once per set of
+ *  paths. A path missing from the map is drawn as nothing. */
+export function useSignedImages(paths: (string | null)[]): Record<string, string> {
+  const key = paths.filter((p): p is string => !!p && isCommunityImagePath(p)).sort().join('|');
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const list = key ? key.split('|') : [];
+    if (!USE_SUPABASE || !list.length) { setUrls({}); return; }
+    let live = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.storage.from(COMMUNITY_MEDIA_BUCKET).createSignedUrls(list, 60);
+        if (error) { reportError('community.photo.sign', error); return; }
+        const m: Record<string, string> = {};
+        for (const d of data ?? []) if (d.path && d.signedUrl) m[d.path] = d.signedUrl;
+        if (live) setUrls(m);
+      } catch (e) { reportError('community.photo.sign', e); }
+    })();
+    return () => { live = false; };
+  }, [key]);
+  return urls;
 }

@@ -8,7 +8,7 @@ import { useTheme } from '../../src/ui/components';
 import { PageHead } from '../../src/ui/kit';
 import { layout } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { CommunityFeed } from '../../src/ui/CommunityFeed';
+import { CommunityFeed, UpcomingEvents } from '../../src/ui/CommunityFeed';
 
 export default function Community() {
   const t = useTheme();
@@ -19,6 +19,7 @@ export default function Community() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} refreshControl={pull} keyboardShouldPersistTaps="handled">
         <PageHead title="Community" subtitle="Your Gym, and Only Your Gym" />
+        <UpcomingEvents key={`e-${key}`} />
         <CommunityFeed key={key} channel="members" canPost moderator={false} />
       </ScrollView>
     </SafeAreaView>
