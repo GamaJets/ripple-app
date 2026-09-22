@@ -21,13 +21,20 @@ export default function Resources() {
         <Section>
           <SectionHead title="From Your Coach" />
           <ListRow icon="pencil" tone="teal" title="Documents From Your Coach" note="Waivers and forms your coach asks you to read"
-            onPress={() => router.push('/(client)/coach-documents')} />
+            onPress={() => router.push({ pathname: '/(client)/coach-documents', params: { kind: 'paperwork' } })} />
           <ListRow icon="video" tone="blue" title="Exercise Library" note="How-to videos from your coach"
             onPress={() => router.push('/(client)/library')} />
         </Section>
 
-        {/* Nutrition Guides go here as their own Section when the screen
-            exists. Not stubbed: a row leading to nothing is worse than none. */}
+        {/* Guides are coach documents of their own kind (part 3290): the
+            same screen, opened on that kind only. */}
+        <Section>
+          <SectionHead title="Guides" />
+          <ListRow icon="meals" tone="orange" title="Nutrition Guides" note="Meal guides and advice from your coach"
+            onPress={() => router.push({ pathname: '/(client)/coach-documents', params: { kind: 'nutrition' } })} />
+          <ListRow icon="sparkle" tone="purple" title="Learn" note="Reading your coach has shared with you"
+            onPress={() => router.push({ pathname: '/(client)/coach-documents', params: { kind: 'education' } })} />
+        </Section>
 
         <Section>
           <SectionHead title="Everything Else" />

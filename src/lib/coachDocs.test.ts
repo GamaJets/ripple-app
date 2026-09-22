@@ -22,6 +22,7 @@ import {
   outstanding, outstandingCount, shapeDocs, sizeLabel, slugify, standingLine,
   STANDING_TRUNCATED_NOTE,
   uploadRefusalLine, type CoachDoc, type RawCoachDoc,
+  docKindOf,
 } from './coachDocs';
 
 const errors: string[] = [];
@@ -107,12 +108,19 @@ eq(sizeLabel(512), '512 B', 'and a tiny file in bytes');
 eq(sizeLabel(0), '—', 'an unknown size is a dash, never a confident 0 B');
 eq(sizeLabel(null), '—', 'and so is a missing one');
 
+/* ── What kind of document it is (part 3290) ─── */
+
+eq(docKindOf('nutrition'), 'nutrition', 'a nutrition guide is one');
+eq(docKindOf('education'), 'education', 'and so is client education');
+eq(docKindOf(undefined), 'paperwork', 'a row read before the column is paperwork');
+eq(docKindOf('recipe'), 'paperwork', 'and an unknown kind stays visible as paperwork');
+
 /* ── Which paperwork is outstanding ───────────────────────────────────────── */
 
 const doc = (over: Partial<CoachDoc> = {}): CoachDoc => ({
   id: 'd1', coachId: COACH, title: 'Studio Waiver', path: `${COACH}/1-a-studio-waiver.pdf`,
   mime: 'application/pdf', bytes: 84211, required: true, retired: false,
-  createdAt: '2026-08-31T18:00:00Z', acceptedAt: null, ...over,
+  createdAt: '2026-08-31T18:00:00Z', acceptedAt: null, kind: 'paperwork', ...over,
 });
 
 eq(outstanding(doc()), true, 'a required document nobody has accepted is outstanding');

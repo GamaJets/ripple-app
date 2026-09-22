@@ -166,6 +166,8 @@ export interface RawCoachDoc {
   retired: boolean;
   created_at: string;
   accepted_at: string | null;
+  /** Part 3290. Absent on rows read before it, which are all paperwork. */
+  kind?: string | null;
 }
 
 export interface CoachDoc {
@@ -181,6 +183,21 @@ export interface CoachDoc {
   /** When this reader accepted it, or null. On the coach's own list this is
    *  always null — a coach does not accept their own paperwork. */
   acceptedAt: string | null;
+  kind: DocKind;
+}
+
+/** What a document is (part 3290): paperwork to read or accept, a nutrition
+ *  guide, or reading a coach hands out. Set once, at upload. */
+export type DocKind = 'paperwork' | 'nutrition' | 'education';
+export const DOC_KINDS: readonly { key: DocKind; label: string; plural: string }[] = [
+  { key: 'paperwork', label: 'Paperwork', plural: 'Paperwork' },
+  { key: 'nutrition', label: 'Nutrition Guide', plural: 'Nutrition Guides' },
+  { key: 'education', label: 'Client Education', plural: 'Learn' },
+];
+/** Anything unrecognised is paperwork: that is what every row was before the
+ *  column, and it keeps a document visible rather than dropping it. */
+export function docKindOf(v: unknown): DocKind {
+  return v === 'nutrition' || v === 'education' ? v : 'paperwork';
 }
 
 export function shapeDocs(rows: RawCoachDoc[] | null | undefined): CoachDoc[] {
@@ -197,6 +214,7 @@ export function shapeDocs(rows: RawCoachDoc[] | null | undefined): CoachDoc[] {
       retired: !!r.retired,
       createdAt: String(r.created_at),
       acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
+      kind: docKindOf(r.kind),
     }))
     // Outstanding paperwork first, then what is merely on file. Within each,
     // newest first, because the thing a coach just issued is the thing being

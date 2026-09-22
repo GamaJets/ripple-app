@@ -38,7 +38,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag, KpiRow, IconPlate, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag, KpiRow, IconPlate, Segmented, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -57,7 +57,7 @@ import {
 } from '../../src/lib/docAcceptance';
 import { fmtDay } from '../../src/lib/format';
 import {
-  COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, checkUpload,
+  COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, DOC_KINDS, checkUpload, type DocKind,
   coachDocPath, extForMime, shapeDocs, sizeLabel, standingLine, STANDING_ROW_CAP, STANDING_TRUNCATED_NOTE,
   uploadRefusalLine,
   type CoachDoc, type RawCoachDoc,
@@ -90,6 +90,8 @@ export default function CoachDocumentsScreen() {
   const router = useRouter();
 
   const [docs, setDocs] = useState<CoachDoc[]>([]);
+  // What the next upload is (part 3290). Paperwork unless the coach picks otherwise.
+  const [newKind, setNewKind] = useState<DocKind>('paperwork');
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,7 +161,7 @@ export default function CoachDocumentsScreen() {
       const id = me.uid;
       setUid(id);
       const { data, error } = await supabase.from('coach_documents')
-        .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at')
+        .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at, kind')
         .eq('coach_id', id)
         .order('created_at', { ascending: false })
         .limit(capLimit());
@@ -170,7 +172,7 @@ export default function CoachDocumentsScreen() {
       setDocs(shapeDocs(page.rows.map((r: any): RawCoachDoc => ({
         id: r.id, coach_id: r.coach_id, title: r.title, path: r.path, mime: r.mime,
         bytes: r.bytes, required: r.required, retired: r.retired_at != null,
-        created_at: r.created_at, accepted_at: null,
+        created_at: r.created_at, accepted_at: null, kind: r.kind,
       }))));
       setStatus(page.truncated ? 'partial' : 'ready');
 
@@ -324,7 +326,7 @@ export default function CoachDocumentsScreen() {
       // invisible, which is the safe side of this particular failure.
       const title = (a.name || 'Document').replace(/\.[^./\\]+$/, '').slice(0, 120) || 'Document';
       const { error: rowErr } = await supabase.from('coach_documents').insert({
-        coach_id: uid, title, path, mime: a.mimeType, bytes: bytes.byteLength, required: false,
+        coach_id: uid, title, path, mime: a.mimeType, bytes: bytes.byteLength, required: false, kind: newKind,
       });
       if (rowErr) {
         reportError('coachDocs.insert', rowErr, { path });
@@ -652,7 +654,11 @@ export default function CoachDocumentsScreen() {
             ) : null}
 
             <Section>
-              <Cta label={busy ? 'Uploading…' : 'Add a Document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
+              {/* What it is decides where the client finds it: paperwork on
+                  Documents, guides under Nutrition Guides and Learn. */}
+              <Segmented style={{ marginBottom: sp.md }} value={newKind} onChange={setNewKind}
+                options={DOC_KINDS.map((k) => ({ key: k.key, label: k.key === 'nutrition' ? 'Nutrition' : k.key === 'education' ? 'Education' : 'Paperwork', a11yLabel: k.label }))} />
+              <Cta label={busy ? 'Uploading…' : newKind === 'nutrition' ? 'Add a Nutrition Guide' : newKind === 'education' ? 'Add a Guide for Clients' : 'Add a Document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
               {/* Disabled with the reason beside it rather than live and inert.
                   A button that opens nothing reads as a broken screen, and the
                   coach's next move is to try it again. */}
@@ -688,7 +694,7 @@ export default function CoachDocumentsScreen() {
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <Text style={{ ...ty.head, color: t.ink }}>{d.title}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                            {sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
+                            {d.kind !== 'paperwork' ? `${DOC_KINDS.find((k) => k.key === d.kind)?.label} · ` : ''}{sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
                           </Text>
                         </View>
                       </Pressable>

@@ -41,7 +41,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
@@ -60,7 +60,7 @@ import { useOutbox } from '../../src/ui/outbox';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
   COACH_DOC_ACCEPT_RULE, COACH_DOC_ACCESS_ENDS_NOTE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
-  outstandingCount, shapeDocs, sizeLabel, type CoachDoc, type RawCoachDoc,
+  outstandingCount, shapeDocs, sizeLabel, DOC_KINDS, type CoachDoc, type DocKind, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
 
 const BUCKET = 'coach-docs';
@@ -72,6 +72,11 @@ export default function ClientCoachDocumentsScreen() {
   const router = useRouter();
 
   const [docs, setDocs] = useState<CoachDoc[]>([]);
+  // Opened from Resources as "Nutrition Guides" or "Learn", the screen shows
+  // that kind only (part 3290); opened on its own it shows everything, grouped.
+  const { kind: kindParam } = useLocalSearchParams<{ kind?: string }>();
+  const only: DocKind | null = kindParam === 'nutrition' || kindParam === 'education' || kindParam === 'paperwork' ? kindParam : null;
+  const onlyLabel = only ? DOC_KINDS.find((k) => k.key === only)!.plural : null;
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
   /** Whether the read failed because nobody is signed in. A different sentence
@@ -271,13 +276,17 @@ export default function ClientCoachDocumentsScreen() {
   }
 
   const waiting = outstandingCount(docs);
+  const shown = only ? docs.filter((d) => d.kind === only) : docs;
+  const groups = DOC_KINDS
+    .map((k) => ({ key: k.key, plural: k.plural, docs: shown.filter((d) => d.kind === k.key) }))
+    .filter((g) => g.docs.length > 0);
   const ready = status === 'ready';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <PageHead title="Paperwork" subtitle="From your coach" />
+        <PageHead title={onlyLabel ?? 'Documents'} subtitle="From Your Coach" />
 
         {!USE_SUPABASE ? (
           <Section>
@@ -301,7 +310,7 @@ export default function ClientCoachDocumentsScreen() {
             ) : (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
                 {status === 'loading' ? 'Reading what your coach has asked of you.'
-                  : docs.length === 0 ? 'Your coach hasn’t added any paperwork.'
+                  : shown.length === 0 ? (only === 'nutrition' ? 'Your coach hasn’t shared a nutrition guide yet.' : only === 'education' ? 'Your coach hasn’t shared anything to read yet.' : 'Your coach hasn’t added any paperwork.')
                     : waiting === 0 ? 'Nothing is waiting on you.'
                       : `${waiting} document${waiting === 1 ? '' : 's'} waiting on you.`}
               </Text>
@@ -319,10 +328,10 @@ export default function ClientCoachDocumentsScreen() {
               </Flag>
             ) : null}
 
-            {ready && docs.length ? (
-              <Section>
-                <SectionHead title="DOCUMENTS" />
-                {docs.map((d, i) => (
+            {ready && shown.length ? groups.map((g) => (
+              <Section key={g.key}>
+                <SectionHead title={g.plural} />
+                {g.docs.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}
                     <View style={{ paddingVertical: sp.md }}>
@@ -359,7 +368,7 @@ export default function ClientCoachDocumentsScreen() {
                   </View>
                 ))}
               </Section>
-            ) : null}
+            )) : null}
 
             <Section>
               <Notice

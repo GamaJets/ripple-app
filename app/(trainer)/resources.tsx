@@ -34,8 +34,15 @@ export default function Resources() {
             onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
-        {/* Nutrition Guides go here as their own Section when the screen
-            exists. Not stubbed: a row leading to nothing is worse than none. */}
+        {/* Guides upload through the same Documents screen with their own
+            kind (part 3290), and clients find them under Resources. */}
+        <Section>
+          <SectionHead title="Guides for Clients" />
+          <ListRow icon="meals" tone="orange" title="Nutrition Guides" note="Upload a meal guide; clients find it under Nutrition Guides"
+            onPress={() => router.push('/(trainer)/documents')} />
+          <ListRow icon="sparkle" tone="purple" title="Client Education" note="Reading you want clients to have"
+            onPress={() => router.push('/(trainer)/documents')} />
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );
