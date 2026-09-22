@@ -30,6 +30,9 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
+import { SharePostButton } from '../../src/ui/SharePost';
+import { useBrand } from '../../src/ui/brand';
+import { badgePost } from '../../src/lib/postCard';
 import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, toneOf, HeroCard, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { CLIENT_FEATURES, ME_GROUPS, ME_QUICK, ME_QUICK_TITLE, meGroupFeatures, type Feature } from '../../src/lib/features';
@@ -514,6 +517,7 @@ export default function Profile() {
   // Which medal's meaning is showing under the row. The medals were icons
   // alone, and "8 of 12" told nobody what any of them was (owner, 21 Sep 2026).
   const [medalOpen, setMedalOpen] = useState<string | null>(null);
+  const { appName } = useBrand();
   const volumeLabel = (kg: number) => `${num(volumeIn(kg, wu))} ${wu}`;
   const medalRow = [...medals.filter((m) => m.state === 'earned'), ...medals.filter((m) => m.state !== 'earned')].slice(0, 5);
 
@@ -780,6 +784,11 @@ export default function Profile() {
               <View style={{ marginTop: sp.md, padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface2, gap: 2 }}>
                 <Text style={{ ...ty.head, color: t.ink }}>{m.title} · {said}</Text>
                 <Text style={{ ...ty.label, color: t.ink2 }}>{m.state === 'earned' ? `${how}. ${m.cheer}` : `To earn it: ${how}.`}</Text>
+                {m.state === 'earned' ? (
+                  <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                    <SharePostButton label="Share This Badge" make={() => badgePost({ name: m.title, meaning: how, brand: appName })} />
+                  </View>
+                ) : null}
               </View>
             );
           })()}

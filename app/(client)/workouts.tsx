@@ -74,6 +74,9 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
+import { SharePostButton } from '../../src/ui/SharePost';
+import { workoutPost } from '../../src/lib/postCard';
+import { useBrand } from '../../src/ui/brand';
 import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow, Segmented, TonedChip, Meter, HeroRing, CtaBright, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, grown } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
@@ -4969,6 +4972,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [prMsg, setPrMsg] = useState<string | null>(null);
+  // Every best set this session, worded for the share card at the end.
+  const [sessionPrs, setSessionPrs] = useState<string[]>([]);
+  const { appName } = useBrand();
   // WHICH set of this movement the banner above is about, by position. The
   // banner outlives the set that raised it — it stays up until the movement
   // changes — so without this an Undo on a mis-tapped record left "New PR!"
@@ -5471,6 +5477,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     );
     if (historyWhole && newE1 > 0 && newE1 > priorBest) {
       setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`);
+      setSessionPrs((l) => [...l.filter((x) => !x.startsWith(`${name} `)), `${name} ${fig(liftLabel(wkg, unit))} ${unit}`]);
       prAt.current = done.length;
       setConfetti(true);
       // The coach is told from INSIDE this branch, and that placement is the
@@ -6060,6 +6067,16 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               does not, and must not say it does: a member frightened off the
               Done button by a warning that does not apply to them is a member
               standing in a gym waiting for signal they may not get. */}
+          {(saveState === 'saved' || saveState === 'queued') && totalSets > 0 ? (
+            <View style={{ alignItems: 'center', marginBottom: sp.md }}>
+              <SharePostButton label="Share My Workout" make={() => workoutPost({
+                focus: titleCaseName(focus), sets: uncountedSets > 0 ? workingSets : totalSets,
+                minutes: finalElapsed >= 60 ? Math.round(finalElapsed / 60) : null,
+                volume: volumeKnown && volume > 0 ? `${volumeHeadline(volume, unit)!.figure.toLocaleString()} ${unit === 'kg' ? 't' : 'lb'}` : null,
+                prs: sessionPrs, brand: appName,
+              })} />
+            </View>
+          ) : null}
           <Cta
             label={saveState === 'saving' ? 'Saving…' : saveState === 'failed' ? 'Close and Lose These Sets' : 'Done'}
             wide

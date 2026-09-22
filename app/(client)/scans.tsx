@@ -97,6 +97,8 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
+import { SharePostButton, ShareIconButton } from '../../src/ui/SharePost';
+import { progressPost, scanPost } from '../../src/lib/postCard';
 import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HeroCard } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
@@ -1896,6 +1898,15 @@ export default function Scans() {
                   <TonedChip tone={progressWas && progressGood ? 'brand' : 'neutral'} label={progressWas
                     ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit })
                     : 'First Reading'} />
+                  {progressWas && progressGood ? (
+                    <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                      <SharePostButton label="Share My Progress" make={() => progressPost({
+                        what: progressMetric === 'weight' ? 'Weight' : 'Body Fat',
+                        change: progressDelta == null || progressDelta === 0 ? null : deltaLabel(progressDelta, { since: null, unit }),
+                        since: `Since ${bodyDayLabel(progressWas.at)}`, brand: appName,
+                      })} />
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
               {/* Where a figure is stale, how stale: the member is the only
@@ -2468,7 +2479,10 @@ export default function Scans() {
                 {mInsights.improving.length > 0 ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                    <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.improving.length} Improving</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink, flex: 1 }}>{mInsights.improving.length} Improving</Text>
+                    <ShareIconButton a11yLabel="Share what is improving" make={() => scanPost({
+                      improving: mInsights.improving, date: latest ? bodyDayLabel(latest.takenAt) : '', brand: appName,
+                    })} />
                   </View>
                 ) : null}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
