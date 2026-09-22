@@ -29,7 +29,7 @@
 // replaces it CLEARS the gym's colour, which is a state the column can actually
 // hold and the honest opposite of having picked one.
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
@@ -38,6 +38,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, value, font } from
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
 import { useTenant } from '../../src/ui/tenant';
+import { useGymLogo, pickLogo, uploadGymLogo, clearGymLogo } from '../../src/ui/gymLogo';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { brandColorOf, parseGymName } from '../../src/lib/gymSettings';
@@ -55,6 +56,27 @@ export default function OwnerBrand() {
   const { palette, setPalette, palettes, setAccent } = useThemeControls();
   const { appName, adoptGymName } = useBrand();
   const { tenant, status, updateTenant, refresh } = useTenant();
+  const gymLogo = useGymLogo(tenant?.id);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const chooseLogo = async () => {
+    if (!tenant || logoBusy) return;
+    const { picked, error } = await pickLogo();
+    if (error) { Alert.alert('Logo Not Changed', error); return; }
+    if (!picked) return;
+    setLogoBusy(true);
+    const r = await uploadGymLogo(tenant.id, picked, gymLogo.path);
+    setLogoBusy(false);
+    if (r.error) Alert.alert('Logo Not Saved', r.error);
+    gymLogo.reload();
+  };
+  const removeLogo = async () => {
+    if (!tenant || logoBusy) return;
+    setLogoBusy(true);
+    const err = await clearGymLogo(tenant.id, gymLogo.path);
+    setLogoBusy(false);
+    if (err) Alert.alert('Logo Not Removed', err);
+    gymLogo.reload();
+  };
 
   // Under 'error' a null tenant means we could not find out, not that this
   // account has no gym — so nothing below may be offered as the gym's answer
@@ -240,7 +262,7 @@ export default function OwnerBrand() {
 
         <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 
-        {/* ── one flow, three steps ─────────────────────────────────────────
+        {/* ── one flow, four steps ─────────────────────────────────────────
             Name, colour, then look at what the two of them did. They were three
             unrelated cards and a fourth holding a lone "clear" button; the
             heads now number them, each head says in words whether its step is
@@ -342,7 +364,33 @@ export default function OwnerBrand() {
         </Section>
 
 
-        {/* ── step 3: the preview — controls, labels and status, no invented data ─
+        {/* ── step 3: the logo ───────────────────────────────────────────
+            `tenants.logo` had no writer until part 3270. It goes on the gym's
+            share cards (Growth → Share Kit). Stored privately; the gym's own
+            people can read it, nobody else. */}
+        <Section>
+          {stepHead(3, 'Logo', 'amber', !known || gymLogo.status !== 'ready' ? undefined : gymLogo.path ? { label: 'Set', done: true } : { label: 'Not Set Yet', done: false })}
+          {gymLogo.status === 'error' ? (
+            <Flag tone={t.warn}>Your logo could not be read. This is not a gym without one.</Flag>
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+              <View style={{ width: 72, height: 72, borderRadius: 14, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {gymLogo.dataUri
+                  ? <Image source={{ uri: gymLogo.dataUri }} style={{ width: 64, height: 64 }} resizeMode="contain" accessibilityLabel="Your gym's logo" />
+                  : <Icon name="camera" size={24} color={t.ink3} />}
+              </View>
+              <View style={{ flex: 1, gap: sp.sm }}>
+                <Cta label={logoBusy ? 'Saving…' : gymLogo.path ? 'Change Logo' : 'Add Logo'} disabled={logoBusy || !tenant} onPress={() => { void chooseLogo(); }} />
+                {gymLogo.path ? <Ghost label="Remove" onPress={() => { void removeLogo(); }} /> : null}
+              </View>
+            </View>
+          )}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            A square PNG or JPEG works best. It goes on the posts you make from the Share Kit on Growth.
+          </Text>
+        </Section>
+
+        {/* ── step 4: the preview — controls, labels and status, no invented data ─
             The preview was a header strip and one button, which shows a colour
             and not what the colour DOES. An accent is drawn on four kinds of
             thing in this app — the primary action, a selected control, an icon
@@ -352,7 +400,7 @@ export default function OwnerBrand() {
             mock of it. The words are the names of the controls; nothing here is
             a figure, a member or a session. */}
         <Section>
-          {stepHead(3, 'Check the Preview', 'teal')}
+          {stepHead(4, 'Check the Preview', 'teal')}
           {/* The approved look's own parts, in the live theme: the night hero
               with its bright action first, because that is what every tab now
               opens on and it is where an accent is drawn BRIGHT on near-black

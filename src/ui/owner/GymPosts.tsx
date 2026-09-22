@@ -7,7 +7,8 @@
 //
 // No member is named on any of them: the milestone is a count, never a person.
 // A read that fails says so on its row instead of posting a zero. The cards come
-// from src/lib/postCard.ts and carry the gym's name and brand colour.
+// from src/lib/postCard.ts and carry the gym's name, brand colour and logo
+// (set on the Brand screen, part 3270).
 import { useEffect, useState } from 'react';
 import { View, Text, TextInput } from 'react-native';
 import { useTheme } from '../components';
@@ -17,6 +18,7 @@ import { SharePostSheet } from '../SharePost';
 import { useTenant } from '../tenant';
 import { useClasses } from '../classes';
 import { usePromos } from '../promos';
+import { useGymLogo } from '../gymLogo';
 import { supabase } from '../../lib/supabase';
 import { fetchClasses, summariseAttendance, classesThatRan } from '../../lib/gymSchedule';
 import { reportError } from '../../lib/reportError';
@@ -31,6 +33,7 @@ export function GymPosts() {
   const { tenant, status: tenantStatus } = useTenant();
   const brand = tenantStatus === 'ready' ? (tenant?.name ?? '').trim() : '';
   const { classes, status: classStatus } = useClasses();
+  const logo = useGymLogo(tenant?.id);
   const { promos, status: promoStatus } = usePromos();
   const [visits, setVisits] = useState<{ visits: number; classes: number } | null | 'error'>(null);
   const [open, setOpen] = useState<'promo' | 'event' | null>(null);
@@ -103,7 +106,7 @@ export function GymPosts() {
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
         Each post is a picture in your gym’s name and colour, for your share sheet. The caption is copied for you. No member is named.
       </Text>
-      <SharePostSheet build={build} onClose={() => setBuild(null)} />
+      <SharePostSheet build={build} onClose={() => setBuild(null)} logo={logo.dataUri} />
     </Section>
   );
 }

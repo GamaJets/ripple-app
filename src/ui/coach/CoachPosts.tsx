@@ -18,6 +18,7 @@ import { SharePostSheet } from '../SharePost';
 import { useAuth } from '../auth';
 import { useTenant } from '../tenant';
 import { useAvailability } from '../availability';
+import { useMyCoachLogo } from '../coachLogo';
 import { fetchMyPackages, type TrainerPackage } from '../../lib/connect';
 import { fetchMyJoinCode } from '../joinCode';
 import { handOut } from '../../lib/handOutCode';
@@ -43,6 +44,7 @@ export function CoachPosts() {
   const { tenant, status: tenantStatus } = useTenant();
   const brand = tenantStatus === 'ready' ? (tenant?.name || user?.name || '').trim() : '';
   const { slots, status: slotStatus } = useAvailability();
+  const logo = useMyCoachLogo();
   const [pkgs, setPkgs] = useState<TrainerPackage[] | null>(null);
   const [link, setLink] = useState<{ code: string; link: string } | null | 'error'>(null);
   const [open, setOpen] = useState<'offer' | 'spots' | null>(null);
@@ -108,7 +110,7 @@ export function CoachPosts() {
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
         Each post is a picture for your share sheet, in your name. The caption is copied for you.
       </Text>
-      <SharePostSheet build={build} onClose={() => setBuild(null)} />
+      <SharePostSheet build={build} onClose={() => setBuild(null)} logo={logo.dataUri} />
     </Section>
   );
 }

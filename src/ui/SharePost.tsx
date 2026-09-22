@@ -7,7 +7,7 @@
 // same SVG → toDataURL → sharePngAsset path app/(trainer)/share-kit.tsx proved.
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, Alert, Platform, useWindowDimensions } from 'react-native';
-import Svg, { Rect, Text as SvgText, TSpan, Path, G } from 'react-native-svg';
+import Svg, { Rect, Text as SvgText, TSpan, Path, G, Image as SvgImage } from 'react-native-svg';
 import { useTheme } from './components';
 import { Cta, Ghost, Segmented } from './kit';
 import { Icon } from './Icon';
@@ -24,8 +24,8 @@ const INK = '#FFFFFF';
 const MUTED = 'rgba(255,255,255,0.62)';
 
 /** The card in export pixels. Drawn at preview size; `toDataURL` scales it up. */
-function PostArt({ card, shape, accent, width, ref }: {
-  card: PostCard; shape: CardShape; accent: string; width: number; ref?: React.Ref<Svg>;
+function PostArt({ card, shape, accent, width, logo, ref }: {
+  card: PostCard; shape: CardShape; accent: string; width: number; logo?: string | null; ref?: React.Ref<Svg>;
 }) {
   const { w, h } = cardSize(shape);
   const story = shape === 'story';
@@ -99,6 +99,12 @@ function PostArt({ card, shape, accent, width, ref }: {
           </G>
         );
       })() : null}
+      {/* The coach's own mark, top right. A data: URI only, so the export never
+          waits on the network and never captures a blank square. */}
+      {logo ? (
+        <SvgImage href={{ uri: logo }} x={w - pad - Math.round(w * 0.16)} y={pad} width={Math.round(w * 0.16)} height={Math.round(w * 0.16)}
+          preserveAspectRatio="xMaxYMin meet" />
+      ) : null}
       <Rect x={pad} y={footerY - footerSize * 0.85} width={Math.round(footerSize * 0.5)} height={Math.round(footerSize * 0.5)} rx={3} fill={accent} />
       <SvgText x={pad + footerSize} y={footerY - footerSize * 0.35} fill={MUTED} fontSize={footerSize} fontWeight="700">
         {wrapLines(card.footer, charsPerLine(contentW - qrSide - footerSize, footerSize), 1)[0] ?? ''}
@@ -118,7 +124,7 @@ const SHAPES = [
  * when the sheet first opens; a member with no code, or whose code could not
  * be read, simply gets no toggle.
  */
-export function SharePostSheet({ build, onClose, invite }: { build: PostBuild | null; onClose: () => void; invite?: boolean }) {
+export function SharePostSheet({ build, onClose, invite, logo }: { build: PostBuild | null; onClose: () => void; invite?: boolean; logo?: string | null }) {
   const t = useTheme();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const [shape, setShape] = useState<CardShape>('story');
@@ -192,7 +198,7 @@ export function SharePostSheet({ build, onClose, invite }: { build: PostBuild | 
             <View style={{ alignItems: 'center' }}
               accessible accessibilityLabel={`Card preview. ${card!.kicker}. ${card!.headline}. ${card!.big ? `${card!.big.value} ${card!.big.unit}. ` : ''}${card!.lines.join('. ')}`}>
               <View style={{ borderRadius: 14, overflow: 'hidden' }}>
-                <PostArt ref={svgRef} card={card!} shape={shape} accent={t.brandBright} width={previewW} />
+                <PostArt ref={svgRef} card={card!} shape={shape} accent={t.brandBright} width={previewW} logo={logo?.startsWith('data:') ? logo : null} />
               </View>
             </View>
             {invite && inviteLink && !build.card.qr ? (
