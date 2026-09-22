@@ -78,7 +78,8 @@ import { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Flag, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Flag, Ghost, Notice, SyncBadge } from '../../src/ui/kit';
+import { bubbleSync } from '../../src/ui/bubbleSync';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import {
   HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE, HAS_NATIVE_CLIPBOARD, copyToClipboard,
@@ -826,16 +827,15 @@ export default function Messages() {
                   </View>
                 ) : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, alignSelf: mine ? 'flex-end' : 'flex-start' }}>
-                  {/* Status colours never colour text — the mark carries it. */}
-                  {stage ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
-                  {/* One sentence, from one place. The failure wordings are
-                      still `unsentNote`'s — `deliveryLine` delegates them — and
-                      what is new is that a bubble the server HAS taken now says
-                      so ("Sent 09:41"), and says "· Read" once the coach's own
-                      watermark has passed it. */}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>
-                    {receipt.line(m, fmt(m.createdAt))}
-                  </Text>
+                  {/* Rule 6: an unconfirmed bubble (sending, waiting to send,
+                      refused) wears a SyncBadge carrying the receipt's own
+                      sentence; one the server has keeps the plain time line.
+                      Also stops a QUEUED bubble wearing the refused red dot. */}
+                  {(() => {
+                    const sync = bubbleSync(m, mine, stage);
+                    const words = receipt.line(m, fmt(m.createdAt));
+                    return sync ? <SyncBadge state={sync} label={words} /> : <Text style={{ ...ty.caption, color: t.ink3 }}>{words}</Text>;
+                  })()}
                 </View>
               </Pressable>
             );

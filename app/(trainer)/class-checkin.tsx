@@ -48,7 +48,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, PageHead, Ghost, fig, Flag, Ring, TonedChip } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Ghost, fig, Flag, Ring, TonedChip, SyncBadge } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
@@ -85,6 +85,10 @@ export default function ClassCheckin() {
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
+  // Rule 6: the rows whose last tap the server REFUSED, keyed class:member so a
+  // mark never follows a member into another class's register. The queue cannot
+  // say this — a refused act leaves it — so the tap that saw the answer records it.
+  const [refusedMarks, setRefusedMarks] = useState<string[]>([]);
   // The tick a trainer is PAID on, and the gym's payroll is built from it. This
   // screen is used standing in a studio, which is where the signal is worst.
   const auth = useAuth();
@@ -347,6 +351,8 @@ export default function ClassCheckin() {
     const out = await queue.attempt({
       kind: 'class-attendance', classId, userId: m.userId, memberName: m.name, present: next,
     });
+    const markKey = `${classId}:${m.userId}`;
+    setRefusedMarks((p) => (out === 'refused' ? [...p.filter((k) => k !== markKey), markKey] : p.filter((k) => k !== markKey)));
     if (out === 'refused') {
       // ── and now a refusal can mean the booking is gone ────────────────────
       //
@@ -537,14 +543,21 @@ export default function ClassCheckin() {
           ) : (<>
             {/* The instruction every booked row used to repeat, said once. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.xs, marginBottom: sp.xs }}>Tap a name when they arrive</Text>
-            {roster.map((m, i) => (
+            {roster.map((m, i) => {
+              // Rule 6, read off the queue itself (queued) and off the tap's own
+              // answer (refused); a mark the gym has shows nothing.
+              const sync = refusedMarks.includes(`${classId}:${m.userId}`) ? 'failed' as const
+                : queue.pending.some((q) => q.act.kind === 'class-attendance' && q.act.classId === classId && q.act.userId === m.userId) ? 'queued' as const
+                : null;
+              const syncWords = sync === 'failed' ? 'Not Saved · Tap to Try Again' : 'On This Phone · Waiting to Send';
+              return (
               // The state carries "present"; the WAITLIST was carried by an
               // amber dot and a caption, and a Pressable's label replaces both.
               // So a coach taking the register with VoiceOver heard a
               // waitlisted member exactly as they heard a booked one — and the
               // tap that tells them apart is the one that marks somebody in.
               <Pressable key={m.userId} onPress={() => toggle(m)} accessibilityRole="button"
-                accessibilityLabel={m.status === 'waitlist' ? `${m.name}, on the waiting list` : m.name}
+                accessibilityLabel={[m.status === 'waitlist' ? `${m.name}, on the waiting list` : m.name, sync ? syncWords : null].filter(Boolean).join('. ')}
                 accessibilityState={{ checked: m.attended, selected: m.attended }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
@@ -554,11 +567,15 @@ export default function ClassCheckin() {
                     end: green present, amber waitlist, blue booked. The
                     Pressable's label above still carries the waitlist in words
                     — a chip inside a button is drawn, not spoken. */}
-                <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 0 }}>{m.name}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{m.name}</Text>
+                  {sync ? <View style={{ marginTop: 3 }}><SyncBadge state={sync} label={syncWords} /></View> : null}
+                </View>
                 <TonedChip tone={m.status === 'waitlist' ? 'amber' : m.attended ? 'brand' : 'blue'}
                   label={m.status === 'waitlist' ? 'Waitlist' : m.attended ? 'Present' : 'Booked'} />
               </Pressable>
-            ))}
+              );
+            })}
           </>)}
         </Section>
 

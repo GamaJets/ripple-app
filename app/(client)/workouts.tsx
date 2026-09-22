@@ -77,7 +77,7 @@ import { useTheme } from '../../src/ui/components';
 import { SharePostButton } from '../../src/ui/SharePost';
 import { workoutPost, cardioPost } from '../../src/lib/postCard';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow, Segmented, TonedChip, Meter, HeroRing, CtaBright, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, SyncBadge, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow, Segmented, TonedChip, Meter, HeroRing, CtaBright, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, grown } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -5933,6 +5933,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             </View>
           ) : null}
           <Section>
+            {/* Rule 6: the write state beside the sets it is about. The runner
+                only knows the SESSION's outcome (one write for all of them), so
+                it is said once, over the figures, not invented per set. */}
+            {(saveState === 'queued' || saveState === 'failed') && totalSets > 0 ? (
+              <View style={{ marginBottom: sp.sm }}>
+                <SyncBadge state={saveState} label={saveState === 'queued' ? 'On This Phone · Waiting to Send' : 'Refused · Not in Your Log'} />
+              </View>
+            ) : null}
             <KpiRow items={[
               { label: 'Exercises', value: `${exDone}/${exercises.length}` },
               // The column names what it counts. With no warm-up or cool-down in
