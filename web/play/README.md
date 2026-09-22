@@ -1,8 +1,10 @@
 # Play Store graphics
 
 Generated, not hand-drawn, so they can be regenerated if the brand shifts.
-Same ripple and the same three tile colours as the app icons, so a listing and
-a home screen agree.
+The R≡PPLE mark as the app icons draw it, bars in each app's colour (green
+member, purple Coach, gold Studio, owner's choice 22 Sep 2026), on the same
+night ground, so a listing and a home screen agree. Rendered from
+assets/repple-icon-*.svg and the wordmark in src/ui/BrandMark.tsx.
 
     icon-512-<app>.png            512x512   required by Play for every listing
     feature-1024x500-<app>.png    1024x500  required by Play for every listing

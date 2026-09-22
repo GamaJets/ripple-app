@@ -106,6 +106,15 @@ const OWNER_REQUIRED_PLIST: Readonly<Record<string, string>> = {
  * the owner App ID, and the standing rule is that a non-interactive build
  * cannot do that.
  */
+/** The launch screen carries the app's own mark: the same wordmark with the
+ *  bars in its colour (green, purple, gold; owner's choice, 22 Sep 2026). */
+function withSplash(plugins: NonNullable<ExpoConfig['plugins']>, image: string | undefined): NonNullable<ExpoConfig['plugins']> {
+  if (!image) return plugins;
+  return plugins.map((entry) => (Array.isArray(entry) && entry[0] === 'expo-splash-screen'
+    ? ['expo-splash-screen', { ...(entry[1] as Record<string, unknown>), image }] as unknown as NonNullable<ExpoConfig['plugins']>[number]
+    : entry));
+}
+
 function ownerPlugins(plugins: NonNullable<ExpoConfig['plugins']>): NonNullable<ExpoConfig['plugins']> {
   const off = (name: string, opts: Record<string, unknown>) =>
     [name, opts] as unknown as NonNullable<ExpoConfig['plugins']>[number];
@@ -158,6 +167,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: id.name,
     scheme: id.scheme,
     icon: id.icon,
+    plugins: withSplash(config.plugins ?? [], id.splash),
     ios: {
       ...(config.ios ?? {}),
       bundleIdentifier: id.bundle,
@@ -229,7 +239,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           // when its option is false — the same mechanism that took the
           // Reminders keys out, so it is proven on this project rather than
           // assumed.
-          plugins: ownerPlugins(config.plugins ?? []),
+          plugins: ownerPlugins(withSplash(config.plugins ?? [], id.splash)),
         }
       : null),
     android: {
