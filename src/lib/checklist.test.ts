@@ -3,7 +3,7 @@
 // The assertions that matter here are the negative ones: that an absent target
 // produces NO row rather than a default one. A test that only checks the happy
 // path would have passed against the five-item constant this replaces.
-import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, type ChecklistInput } from './checklist';
+import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, OWN_HABITS, ownHabitsKey, parseOwnHabits, type ChecklistInput } from './checklist';
 import { buildProgram } from './programs';
 // The step, calorie, protein and sleep labels now go through `num` and `plain`,
 // which ask the reader's locale — so every assertion below that names a figure
@@ -160,6 +160,19 @@ ok(donePercent(1, 201) === 1, 'one habit ticked out of 201 is not nought per cen
 ok(donePercent(200, 201) === 99, 'one habit outstanding out of 201 is not a hundred per cent — a box is still open');
 ok(donePercent(0, 201) === 0, 'but nothing ticked on a long list is still a real nought');
 ok(donePercent(201, 201) === 100, 'and everything ticked on a long list is still a real hundred');
+
+// ── the member's own habits ──
+{
+  const base: ChecklistInput = { waterGoalGlasses: null, proteinTargetG: null, kcalTarget: null, stepGoal: null, sleepGoalHours: null, todaysTrainingFocus: null, coachItems: [] };
+  const own = buildChecklist({ ...base, ownHabits: ['own:read', 'own:meditate', 'own:nope', 'own:read'] }).items;
+  ok(own.map((i) => i.id).join() === 'own:read,own:meditate', 'own habits appear once each, unknown ids dropped');
+  ok(own.every((i) => i.source === 'own'), 'and are marked as the member\'s own');
+  ok(buildChecklist(base).items.length === 0, 'none unless chosen');
+  ok(parseOwnHabits('["own:read","own:meditate","x"]').join() === 'own:meditate,own:read', 'stored list kept in catalogue order');
+  ok(parseOwnHabits('not json').length === 0 && parseOwnHabits(null).length === 0, 'a bad store reads as nothing chosen');
+  ok(ownHabitsKey('u1') !== ownHabitsKey('u2') && ownHabitsKey(null) === null && ownHabitsKey('unknown') === null, 'the key is per account');
+  ok(OWN_HABITS.every((h) => h.id.startsWith('own:')) && !OWN_HABITS.some((h) => h.id.startsWith(COACH_ID_PREFIX)), 'own ids never collide with coach ids');
+}
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'CHECKLIST FAILURES:\n' + errors.join('\n') : 'ALL CHECKLIST TESTS PASSED');

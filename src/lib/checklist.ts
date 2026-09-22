@@ -50,7 +50,7 @@ import { num } from './format';
 import { plain } from './units';
 
 /** Where a line came from, so a screen can say so without guessing. */
-export type ChecklistSource = 'targets' | 'plan' | 'coach';
+export type ChecklistSource = 'targets' | 'plan' | 'coach' | 'own';
 
 export interface ChecklistItem {
   id: string;
@@ -88,6 +88,8 @@ export interface ChecklistInput {
    *  scheduledFocus. */
   todaysTrainingFocus: string | null;
   coachItems: readonly CoachChecklistItem[];
+  /** Habits the member switched on for themselves, as `OWN_HABITS` ids. */
+  ownHabits?: readonly string[];
 }
 
 export interface Checklist { items: ChecklistItem[]; gaps: ChecklistGap[] }
@@ -97,6 +99,39 @@ export interface Checklist { items: ChecklistItem[]; gaps: ChecklistGap[] }
 export const COACH_ID_PREFIX = 'coach:';
 
 export function coachHabitId(rowId: string): string { return COACH_ID_PREFIX + rowId; }
+
+/**
+ * Habits a member adds for themselves: nothing reads a target for these, so
+ * they are a plain daily tick, stored like every other tick as a `habit_logs`
+ * row under the id below. The board shows Meditate and Read beside water and
+ * steps; the member chooses which of these appear. The coach's adherence
+ * figures count only the coach's own items per habit, so these never move a
+ * coach's numbers beyond showing the day as one the member was active.
+ */
+export const OWN_HABIT_PREFIX = 'own:';
+export const OWN_HABITS: readonly { id: string; label: string; icon: string }[] = [
+  { id: 'own:meditate', label: 'Meditate', icon: '🧘' },
+  { id: 'own:read', label: 'Read', icon: '📖' },
+  { id: 'own:stretch', label: 'Stretch', icon: '🤸' },
+  { id: 'own:journal', label: 'Journal', icon: '✍️' },
+];
+
+/** Where one member's chosen habits live on this phone. Null for nobody signed
+ *  in, so an unknown account never writes a shared key. */
+export const OWN_HABITS_PREFIX = 'repple.ownHabits:';
+export function ownHabitsKey(uid: string | null | undefined): string | null {
+  const id = String(uid ?? '').trim();
+  return id && id !== 'unknown' ? OWN_HABITS_PREFIX + id : null;
+}
+
+/** The stored list, keeping only ids the catalogue still has, in catalogue order. */
+export function parseOwnHabits(raw: string | null | undefined): string[] {
+  let v: unknown = null;
+  try { v = raw ? JSON.parse(raw) : null; } catch { return []; }
+  if (!Array.isArray(v)) return [];
+  const want = new Set(v.map(String));
+  return OWN_HABITS.filter((h) => want.has(h.id)).map((h) => h.id);
+}
 
 // These labels go through the app's own formatters, and the reason the private
 // one below them was removed is the reason this file now imports two.
@@ -231,6 +266,12 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   else gaps.push({ id: 'sleep', note: 'Set a sleep goal below to track it here.' });
 
   const seen = new Set(items.map((i) => i.id));
+  for (const id of input.ownHabits ?? []) {
+    const h = OWN_HABITS.find((x) => x.id === id);
+    if (!h || seen.has(h.id)) continue;
+    seen.add(h.id);
+    items.push({ id: h.id, label: h.label, icon: h.icon, source: 'own' });
+  }
   for (const c of input.coachItems) {
     const label = String(c.label || '').trim();
     const id = coachHabitId(String(c.id || '').trim());

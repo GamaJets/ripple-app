@@ -84,7 +84,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { macrosFor, applyCoachAdjust } from '../lib/nutrition';
 import { buildProgram } from '../lib/programs';
-import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource, type CoachChecklistItem } from '../lib/checklist';
+import { buildChecklist, scheduledFocus, ownHabitsKey, parseOwnHabits, type ChecklistGap, type ChecklistSource, type CoachChecklistItem } from '../lib/checklist';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import {
@@ -125,6 +125,10 @@ interface HabitsValue {
    * with no way to ask again.
    */
   reload: () => void;
+  /** The personal habits (Meditate, Read…) this member switched on, as ids from
+   *  `OWN_HABITS`. Kept on this phone, per account; ticks go to the server. */
+  ownHabits: string[];
+  setOwnHabits: (ids: string[]) => void;
   /** Targets the checklist would carry if the app knew them, and what the
    *  client can do about it. Only raised where there is somewhere to go. */
   gaps: ChecklistGap[];
@@ -299,6 +303,21 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   const [readTick, setReadTick] = useState(0);
   const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const c = useClientData();
+  // The member's own habit choices, per account on this phone.
+  const ownKey = ownHabitsKey(c.id);
+  const [ownHabits, setOwnHabitsState] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    setOwnHabitsState([]);
+    if (!ownKey) return;
+    AsyncStorage.getItem(ownKey).then((r) => { if (alive) setOwnHabitsState(parseOwnHabits(r)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [ownKey]);
+  const setOwnHabits = useCallback((ids: string[]) => {
+    const next = parseOwnHabits(JSON.stringify(ids));
+    setOwnHabitsState(next);
+    if (ownKey) AsyncStorage.setItem(ownKey, JSON.stringify(next)).catch(() => {});
+  }, [ownKey]);
   const coachNutrition = useCoachNutrition();
   const assigned = useAssignedPrograms();
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
@@ -862,7 +881,8 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     sleepGoalHours: c.sleepGoalHours,
     todaysTrainingFocus: trainingFocus,
     coachItems,
-  }), [waterGoal, macros?.protein, macros?.kcal, c.stepGoal, c.sleepGoalHours, trainingFocus, coachItems]);
+    ownHabits,
+  }), [waterGoal, macros?.protein, macros?.kcal, c.stepGoal, c.sleepGoalHours, trainingFocus, coachItems, ownHabits]);
 
   const habits: Habit[] = useMemo(
     () => items.map((i) => ({ id: i.id, label: i.label, icon: i.icon, source: i.source, done: doneIds.has(i.id) })),
@@ -1151,7 +1171,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   const toggleHabitStable = useCallback((...a: Parameters<typeof toggleHabit>) => impl.current.toggleHabit(...a), []);
   const addWaterStable = useCallback((...a: Parameters<typeof addWater>) => impl.current.addWater(...a), []);
   const removeWaterStable = useCallback((...a: Parameters<typeof removeWater>) => impl.current.removeWater(...a), []);
-  const value = useMemo<HabitsValue>(() => ({ habits, toggleHabit: toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWater: addWaterStable, removeWater: removeWaterStable, unsent: pendingCount, reload, streaks, historyStatus, historyDays: STREAK_WINDOW_DAYS }), [habits, toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWaterStable, removeWaterStable, pendingCount, reload, streaks, historyStatus]);
+  const value = useMemo<HabitsValue>(() => ({ habits, toggleHabit: toggleHabitStable, status, ownHabits, setOwnHabits, gaps, doneCount, water, waterGoal, waterStatus, addWater: addWaterStable, removeWater: removeWaterStable, unsent: pendingCount, reload, streaks, historyStatus, historyDays: STREAK_WINDOW_DAYS }), [habits, toggleHabitStable, status, ownHabits, setOwnHabits, gaps, doneCount, water, waterGoal, waterStatus, addWaterStable, removeWaterStable, pendingCount, reload, streaks, historyStatus]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

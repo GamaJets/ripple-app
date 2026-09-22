@@ -63,7 +63,7 @@ import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { hydrationNote } from '../../src/lib/hydrationHero';
-import { donePercent } from '../../src/lib/checklist';
+import { donePercent, OWN_HABITS } from '../../src/lib/checklist';
 import { streakFor, habitStreakFigure, habitStreakNote, habitStreakCaveat } from '../../src/lib/habitStreaks';
 import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -687,6 +687,30 @@ export default function Habits() {
             no row for it. Water was the last to arrive because it was the one
             that never looked broken — it had a row, a hero arc and a readiness
             score built on it, all from a literal. */}
+        {/* ── the member's own habits ────────────────────────────────────
+            The board shows Meditate and Read beside water and steps. Nothing
+            measures these, so they are the member's choice and a daily tick. */}
+        <Section>
+          <SectionHead title="Your Own Habits" note="Tap to Add or Remove" />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+            {OWN_HABITS.map((o) => {
+              const on = h.ownHabits.includes(o.id);
+              return (
+                <Pressable key={o.id} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${o.label}, ${on ? "on your list" : "not on your list"}`}
+                  onPress={() => h.setOwnHabits(on ? h.ownHabits.filter((x) => x !== o.id) : [...h.ownHabits, o.id])}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.pill,
+                    backgroundColor: on ? t.brandSoft : t.surface2 }}>
+                  <Text style={{ ...ty.body }}>{o.icon}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            Added habits join your list above. Your ticks are saved to your account; which habits you chose stays on this phone.
+          </Text>
+        </Section>
+
         <Section>
           <SectionHead title="Your Daily Targets" note="Optional" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>

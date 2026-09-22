@@ -1482,6 +1482,17 @@ export default function Nutrition() {
   const targetSource = energyPlan.kind === 'derived'
     ? 'Targets built from your weight goal and date'
     : `Targets from your measurements and general goal (${GOAL_LABEL[c.goal]})`;
+  // The same fact as a label beside the ring, in the three words the review
+  // asks for — but only claims the code can make. A coach never SETS a
+  // target here: `coach_nutrition` holds deltas that `applyCoachAdjust`
+  // layers on the computed figure, so the coach's line is "Adjusted", and
+  // only when a delta is non-zero — a row carrying just a meal plan or a
+  // note leaves the numbers exactly as calculated. The base is the member's
+  // own weight goal and date where `energyPlan` derived it, and their
+  // measurements and general goal otherwise.
+  const coachMoved = !!coachAdjust && !!(coachAdjust.kcalDelta || coachAdjust.proteinDelta || coachAdjust.carbDelta || coachAdjust.fatDelta);
+  const targetBase = energyPlan.kind === 'derived' ? 'From Your Goal Settings' : 'Calculated From Your Profile';
+  const targetFrom = coachMoved ? `Adjusted by Your Coach · ${targetBase}` : targetBase;
   // ── water ──────────────────────────────────────────────────────────────
   // Two reads, as on Recovery: the count is the habits store's, the goal is
   // `clients.water_goal_glasses` and rides on the profile read. `hydrationNote`
@@ -1887,6 +1898,15 @@ export default function Nutrition() {
               <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
             </View>
           </View>
+          {/* Where the targets came from, directly under them: a target with
+              no source reads as a rule nobody set. See `targetFrom` for the
+              three answers and why the coach's is "Adjusted", never "Set". A
+              coach-moved target is marked with a coloured dot beside ink text. */}
+          <View accessible accessibilityLabel={`Targets ${targetFrom}`}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: sp.md }}>
+            {coachMoved ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', flexShrink: 1 }}>{targetFrom}</Text>
+          </View>
           {/* What is left, and the burn it counts: the sentence the stale
               burn warning below refers to. */}
           {dayWhole ? (
@@ -1900,14 +1920,6 @@ export default function Nutrition() {
           )}
           <View style={{ marginTop: sp.lg }}>
             <Cta label="Log Meal" wide onPress={() => router.push('/(client)/foodlog')} />
-          </View>
-          {/* Where the targets came from, in one line: a target with no
-              source reads as a rule nobody set. A coach-adjusted plan is
-              marked with a coloured dot beside ink text. */}
-          <View accessible accessibilityLabel={`${coachAdjust ? 'Coach-adjusted. ' : ''}${targetSource}`}
-            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: sp.md }}>
-            {coachAdjust ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} /> : null}
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', flexShrink: 1 }}>{coachAdjust ? 'Coach-adjusted · ' : ''}{targetSource}</Text>
           </View>
         </Section>
 

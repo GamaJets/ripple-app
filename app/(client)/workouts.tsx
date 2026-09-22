@@ -6353,7 +6353,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         <View style={{ width: 40 }} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: sp.md }}>
-        <Text style={{ ...ty.micro, color: t.nightInk2 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · Paused' : ''}</Text>
+        {/* The first thing the review's active-workout order asks for, so it
+            is drawn in label weight and full ink rather than as a micro
+            caption beside the clock: "which exercise am I on" is the question
+            a glance at the runner is for. */}
+        <Text style={{ ...ty.label, ...font('600'), ...numeric, color: t.nightInk }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · Paused' : ''}</Text>
         <Text accessibilityLabel={`Session time ${sessionClock}`} style={{ ...ty.micro, ...numeric, color: t.nightInk2 }}>{sessionClock}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>

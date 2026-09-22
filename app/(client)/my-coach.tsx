@@ -156,6 +156,23 @@ function monogram(name: string | null): string {
 export default function MyCoach() {
   const t = useTheme();
   const router = useRouter();
+  // Unread messages from the coach, counted on the server from the member's own
+  // read watermark (part 88, `client_unread_count`). Reading the count does not
+  // move the watermark, which is why it is this and not mounting the thread.
+  // Null until it answers, and null again on an error: no row is drawn then,
+  // because a failed count is not "nothing unread".
+  const [unread, setUnread] = useState<number | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase.rpc('client_unread_count');
+      if (!alive) return;
+      if (error) { reportError('myCoach.unread', error); setUnread(null); return; }
+      setUnread(typeof data === 'number' ? data : null);
+    })();
+    return () => { alive = false; };
+  }, []);
   const cd = useClientData();
   const ci = useCheckIns();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
@@ -527,9 +544,16 @@ export default function MyCoach() {
     const days = daysAgo(ci.latestSent.at);
     const age = checkInAge(ci.latestSent.at);
     const last = `Last sent ${fmtFullDay(ci.latestSent.at)}${age ? ` · ${age.toLowerCase()}` : ''}`;
-    return days != null && days >= 7
-      ? { title: 'Check-in Due', note: `${last}. This week’s has not been sent.`, flagged: true }
-      : { title: 'Weekly Check-in', note: last, flagged: false };
+    // The state goes in the title, where the row is scanned: "Due Today" on
+    // the seventh day, "Overdue by N Days" after it. Both are counted from the
+    // same whole days `daysAgo` gives the age line, so the two cannot disagree.
+    if (days == null || days < 7) return { title: 'Weekly Check-in', note: last, flagged: false };
+    const over = days - 7;
+    return {
+      title: over === 0 ? 'Check-in Due Today' : `Check-in Overdue by ${over} ${over === 1 ? 'Day' : 'Days'}`,
+      note: `${last}. This week’s has not been sent.`,
+      flagged: true,
+    };
     // `today` so a screen left open over midnight re-ages the line.
   }, [cd.coachingMode, ci.unsent, ci.status, ci.latestSent, today]);
 
@@ -586,7 +610,7 @@ export default function MyCoach() {
   const outbox = useOutbox();
   const queuedWords = outbox ? outbox.countOf('message') : 0;
   const queuedWordsNote = unsentNote(queuedWords, 'message', 'messages');
-  const showAsk = !!checkinAsk || !!queuedWordsNote;
+  const showAsk = !!checkinAsk || !!queuedWordsNote || (unread != null && unread > 0);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
@@ -694,27 +718,30 @@ export default function MyCoach() {
                 the unsent words on a row that opens the thread — rather than in
                 a banner.
 
-                There is deliberately no "unread from your coach" count. Nothing
-                in the client app reads one: `coach_unread_counts()` is the
-                coach's side only, and mounting `useThread` here to count would
-                move the read watermark — it would mark the thread read from a
-                screen that never showed it. A number is not invented to fill
-                the slot.
+                The unread count comes from `client_unread_count()` (part 88),
+                which counts past the member's own watermark without moving it.
+                Mounting `useThread` here to count would have marked the thread
+                read from a screen that never showed it.
 
                 The kit's `AttentionRow`, which is this shape — subject, reason,
                 and a `SyncBadge` on the row where the row IS the queued write. */}
             {showAsk ? (
               <Section>
                 <SectionHead title="Right Now" />
+                {unread != null && unread > 0 ? (
+                  <AttentionRow icon="message" name={`${unread} Unread ${unread === 1 ? 'Message' : 'Messages'}`}
+                    reason="From your coach" tone={t.brand}
+                    onPress={() => go('/(client)/messages')} />
+                ) : null}
                 {checkinAsk ? (
                   <AttentionRow icon="message" name={checkinAsk.title} reason={checkinAsk.note}
                     tone={checkinAsk.flagged ? t.warn : undefined}
-                    sync={ci.unsent > 0 ? 'queued' : undefined}
+                    sync={ci.unsent > 0 ? 'queued' : undefined} divider={unread != null && unread > 0}
                     onPress={() => go('/(client)/checkin')} />
                 ) : null}
                 {queuedWordsNote ? (
                   <AttentionRow icon="message" name="Messages to Your Coach" reason={queuedWordsNote}
-                    tone={t.warn} sync="queued" divider={!!checkinAsk}
+                    tone={t.warn} sync="queued" divider={!!checkinAsk || (unread != null && unread > 0)}
                     onPress={() => go('/(client)/messages')} />
                 ) : null}
               </Section>
