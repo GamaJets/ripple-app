@@ -1745,6 +1745,29 @@ export default function Builder() {
    *  no account there is no key and nothing to clear, which is the same answer
    *  as "nothing was ever written". */
   const clearDraft = () => { if (draftKey) AsyncStorage.removeItem(draftKey).catch(() => {}); };
+  /** Save Draft, the explicit form of the autosave above: the same write, to
+   *  the same key, awaited so the confirmation is only said once it landed.
+   *  It is the phone's copy and nothing else, which is why it is labelled
+   *  apart from Save as Template (the coach's library) and Assign (a client's
+   *  plan). There is no "Save Program" beside them: a program exists in this
+   *  app only as a template or as an assignment, and a third button writing
+   *  one of those two under a new name would be two labels for one write. */
+  const saveDraftNow = async () => {
+    // Before the stored draft has been read, a write here would overwrite it
+    // with whatever is on screen, which is the loss the autosave guards against.
+    if (!draftLoaded || !draftKey) {
+      Alert.alert('Draft Not Saved', 'This phone is still reading your last draft, or you are signed out. Try again in a moment.');
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(draftKey, writeBuilderDraft<BDay>({
+        title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
+      }));
+      Alert.alert('Draft Saved on This Phone', 'It is kept on this phone only and reaches nobody. Save as Template to reuse it, or Assign to send it to a client.');
+    } catch {
+      Alert.alert('Draft Not Saved', 'This phone could not store the draft. It is still on screen, so do not leave the builder yet.');
+    }
+  };
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
@@ -2682,8 +2705,11 @@ export default function Builder() {
                     ? `${num(onCount)} of ${num(roster.length)} clients on a program you assigned`
                     : reading ? 'Reading who is on a program' : 'Who is on a program could not be read'} />
               ) : undefined}
+              /* Save Draft here, Save as Template and Assign in the footer:
+                 three writes, three places, three names. This was a second
+                 Save as Template, the same button twice on one screen. */
               cta={blockExercises
-                ? { label: 'Save as Template', onPress: () => { setTplName(tplName || title); setSaveOpen(true); } }
+                ? { label: 'Save Draft', onPress: () => { void saveDraftNow(); } }
                 : { label: 'Start From a Template', onPress: () => setTplPick(true) }}>
               {readLine ? (
                 <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>{readLine}</Text>

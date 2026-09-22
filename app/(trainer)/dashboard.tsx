@@ -142,6 +142,8 @@ import { useChannelPrefs } from '../../src/ui/coachNotify';
 import { channelAllows } from '../../src/lib/coachNotify';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { blockEnding } from '../../src/lib/blockEnding';
+import { weekCount } from '../../src/lib/programBlock';
 import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle, type HomeMoney } from '../../src/lib/homeMoney';
 import { minorMoney } from '../../src/lib/coachMoney';
 // The day every expiry and every overdue judgement below is made against, kept
@@ -813,7 +815,7 @@ export default function TrainerClients() {
   // `assignProgramTo` rather than `assignProgram`: this screen assigns to a
   // whole segment at once and has to report on each write by name, which needs
   // the sentence saying why one of them did not land.
-  const { assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { assignProgramTo, getProgram, status: programStatus, startsOn: programStarts, reload: reloadPrograms } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   // Removing a whole segment is the one bulk action on this screen that cannot
@@ -1828,7 +1830,28 @@ export default function TrainerClients() {
   // draft prompt and the draft sheet have always been given, left word for
   // word as it was. They differ only for adherence, where the old sentence
   // ends in the state and would say "below target" twice on one row.
-  type Attn = { kind: 'drift' | 'adherence' | 'unread'; state: string; line: string; reason: string; tone: string };
+  //
+  // ── plan ending, money owed, no program ─────────────────────────────────
+  //
+  // Three more of the review's valid reasons, each off a read this screen
+  // already makes and each raised only when that read answered: the block's
+  // end off `startsOn` + `weekCount` (src/lib/blockEnding.ts) behind a whole
+  // program read, an overdue invoice off the same ageing book the Money Owed
+  // card draws behind a 'ready' invoice read, and "no program" behind the same
+  // `isWhole(programStatus)` the No Program chip waits for. They come AFTER
+  // the coaching reasons, so money never outranks a check-in owed. Session
+  // credits running low are not here: nothing coach-wide reads pack balances
+  // (see `packsRunningOut` above), and a guess is not a reason.
+  type Attn = { kind: 'drift' | 'adherence' | 'unread' | 'plan' | 'owed' | 'setup'; state: string; line: string; reason: string; tone: string };
+  const overdueBy = new Map<string, { n: number; oldest: string }>();
+  if (invoices.status === 'ready') {
+    // `overdue` is longest-overdue first, so the first seen is the oldest.
+    for (const { invoice, age } of invoiceAgeing.overdue) {
+      if (!invoice.clientId) continue;
+      const had = overdueBy.get(invoice.clientId);
+      overdueBy.set(invoice.clientId, { n: (had?.n ?? 0) + 1, oldest: had?.oldest ?? age.line });
+    }
+  }
   const attnFor = (c: RosterClient): Attn | null => {
     const d = driftFor(c);
     // Drift speaks first where it can, because it is the only signal that sees
@@ -1857,6 +1880,26 @@ export default function TrainerClients() {
     // only when the read behind it actually covered them.
     if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '%, below target', tone: t.warn };
     if (c.unread != null && c.unread > 0) { const said = c.unread + ' unread message' + (c.unread > 1 ? 's' : ''); return { kind: 'unread', state: 'Waiting on you', line: said + ' in your thread.', reason: said, tone: t.brand }; }
+    const prog = isWhole(programStatus) ? getProgram(c.id) : undefined;
+    if (prog) {
+      const end = blockEnding(programStarts[c.id], today, weekCount(prog));
+      if (end?.state === 'ended') {
+        const said = `${prog.title || 'Their block'} ended ${end.daysAgo === 1 ? 'yesterday' : end.daysAgo + ' days ago'}`;
+        return { kind: 'plan', state: 'Plan ended', line: said + '. Write the next block.', reason: said + ', next block not written yet', tone: t.warn };
+      }
+      if (end?.state === 'ending') {
+        const said = `${prog.title || 'Their block'} ends ${end.daysLeft === 0 ? 'today' : end.daysLeft === 1 ? 'tomorrow' : 'in ' + end.daysLeft + ' days'}`;
+        return { kind: 'plan', state: 'Plan ending', line: said + '.', reason: said, tone: t.brand };
+      }
+    }
+    const owedBy = overdueBy.get(c.id);
+    if (owedBy) {
+      const said = owedBy.n + ' overdue invoice' + (owedBy.n > 1 ? 's' : '');
+      return { kind: 'owed', state: 'Payment overdue', line: `${said}. ${owedBy.n > 1 ? 'The oldest is ' : ''}${owedBy.oldest}`, reason: said, tone: t.warn };
+    }
+    // Linked clients only: a hand-added name has no account to train from, and
+    // flagging every one of them forever is the badge nobody reads (see above).
+    if (prog === null && c.handAdded !== true) return { kind: 'setup', state: 'Setup missing', line: 'No program assigned yet.', reason: 'No program assigned yet', tone: t.ink3 };
     return null;
   };
   const attnReason = (c: RosterClient): string | null => attnFor(c)?.reason ?? null;
@@ -2686,7 +2729,8 @@ export default function TrainerClients() {
                        for a low figure, blue for somebody waiting on a reply.
                        The words beside it still carry the state. */
                     avatar={<Initials t={t} name={c.name} size={42}
-                      tone={a == null ? 'amber' : a.kind === 'unread' ? 'blue' : a.kind === 'adherence' ? 'amber'
+                      tone={a == null ? 'amber' : a.kind === 'unread' || a.kind === 'plan' ? 'blue' : a.kind === 'adherence' || a.kind === 'owed' ? 'amber'
+                        : a.kind === 'setup' ? 'purple'
                         : driftFor(c)?.status === 'idle' ? 'purple' : 'red'} />}
                     name={c.name}
                     reason={a ? a.line : 'Needs a review.'}
@@ -2700,6 +2744,10 @@ export default function TrainerClients() {
                     onPress={() => openProfile(c)}
                     action={a && a.kind === 'unread'
                       ? { label: 'Reply', onPress: () => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } }) }
+                      : a && (a.kind === 'plan' || a.kind === 'setup')
+                      ? { label: a.kind === 'setup' ? 'Build Program' : 'Next Block', onPress: () => router.push({ pathname: '/(trainer)/builder', params: { clientId: c.id, name: c.name, from: 'trainerDashboard' } }) }
+                      : a && a.kind === 'owed'
+                      ? { label: 'Invoices', onPress: () => router.push('/(trainer)/invoices') }
                       /* Drafts a check-in with AI for the coach to review, then
                          send — the same flow the old "Draft" button opened. */
                       : { label: 'Nudge', onPress: () => draftNudge(c) }} />

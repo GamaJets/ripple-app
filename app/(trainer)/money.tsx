@@ -716,6 +716,22 @@ export default function CoachMoney() {
   // went out, never by the day the row was written.
   const costTaken = useMemo(() => costsTaken(costs.rows), [costs.rows]);
 
+  /* ── the page's period and currencies, said before any figure ───────────
+     The data-layout review's first item for this screen. The currencies are
+     the ones ON what was read: owed, coming in, landed and going out, each
+     only where its read gave a figure. No default is assumed (white-label,
+     per-tenant currency), and while any of the four is unread the line says
+     "so far" rather than presenting a partial list as the whole of it. */
+  const currencyLine = useMemo(() => {
+    const sources = [owedBook.pots, allIn.total?.pots, landed.arrived?.pots, isWhole(costs.status) ? costTaken.pots : null];
+    const codes = [...new Set(sources.flatMap((p) => (p ?? []).map((x) => x.currency)))].sort();
+    const complete = sources.every((p) => p != null);
+    if (!codes.length) return complete ? 'Nothing recorded yet, so there is no currency to show.' : 'Currencies are shown once your money has been read.';
+    const list = codes.length === 1 ? codes[0] : `${codes.slice(0, -1).join(', ')} and ${codes[codes.length - 1]}`;
+    const lead = complete ? `In ${list}.` : `In ${list} so far. Not everything has been read.`;
+    return codes.length > 1 ? `${lead} Mixed currencies. Each is shown on its own and never added together.` : lead;
+  }, [owedBook.pots, allIn.total, landed.arrived, costs.status, costTaken]);
+
   /* ── which channels worked, which is a different question ──────────────── */
 
   // Two facts about the same rows, and they are not interchangeable. `spend`
@@ -834,6 +850,16 @@ export default function CoachMoney() {
             back to, so the leading slot is a blank of the control's width and
             the trailing one is the search every tab root now carries. */}
         <BusinessHead current="money" />
+
+        {/* Period and currency context, first. The hero is this calendar
+            month; the tiles and sections under it are all time, which the
+            tiles' own comment says and the coach could not see. */}
+        <View accessible style={{ marginTop: sp.md }}>
+          <Text style={{ ...ty.caption, color: t.ink2, ...font('600') }}>
+            Total Taken covers {period.label}. Coming In, Landed and Going Out are all time.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{currencyLine}</Text>
+        </View>
 
         {/* ── what is owed, before what was taken ─────────────────────────
             The tab leads with the question a coach opens it to ask. Every

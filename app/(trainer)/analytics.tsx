@@ -1203,37 +1203,6 @@ export default function TrainerAnalytics() {
           )}
         </WindowFigure>
 
-        {/* ── revenue by source ────────────────────────────────────────────
-            The mockup's third card. ONE DONUT PER CURRENCY and never one for
-            the month: a ring is a whole, and AED 6,000 beside GBP 400 is not
-            a whole of anything. `sourceDonuts` is empty unless `ledger()`
-            stated a total, which it does only when all three reads were whole
-            — a ring over two strands of three would draw the missing one as
-            nought per cent, in colour. The mockup's Classes slice is not
-            drawn: class takings are not a strand this app records apart from
-            packages, and a slice nobody measured is a made-up one. */}
-        <Section>
-          <SectionHead title="Revenue by Source" note="Money" onPress={() => router.push('/(trainer)/money')} />
-          {takenMonth.reason ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{takenMonth.reason}</Text>
-          ) : sourceDonuts.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing is recorded as taken this month, so there is no split to draw.</Text>
-          ) : sourceDonuts.map((d, i) => (
-            <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg }}>
-              <Donut slices={d.slices} centre={d.centre} sub="this month" spoken={d.spoken} />
-              <Legend items={d.slices} />
-            </View>
-          ))}
-          {sourceDonuts.length > 1 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One ring per currency. They are never added together.</Text>
-          ) : null}
-          {takenHoles > 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {num(takenHoles)} payment{takenHoles === 1 ? '' : 's'} with no currency or no amount {takenHoles === 1 ? 'is' : 'are'} in no ring.
-            </Text>
-          ) : null}
-        </Section>
-
         {/* ── the roster, as tiles ─────────────────────────────────────────
             On the ground between the cards, the way the kit means tiles to
             sit. All three are already computed below under a whole roster
@@ -1618,6 +1587,42 @@ export default function TrainerAnalytics() {
           ) : null}
         </Section>
 
+
+        {/* ── revenue by source ────────────────────────────────────────────
+            The mockup's third card. ONE DONUT PER CURRENCY and never one for
+            the month: a ring is a whole, and AED 6,000 beside GBP 400 is not
+            a whole of anything. `sourceDonuts` is empty unless `ledger()`
+            stated a total, which it does only when all three reads were whole
+            — a ring over two strands of three would draw the missing one as
+            nought per cent, in colour. The mockup's Classes slice is not
+            drawn: class takings are not a strand this app records apart from
+            packages, and a slice nobody measured is a made-up one.
+
+            It was the third card, above the at-risk clients and retention.
+            The review's order puts outcomes, who is at risk, how long people
+            stay and the coach's own delivery before money, so it sits here,
+            beside the takings figure it splits, and unchanged. */}
+        <Section>
+          <SectionHead title="Revenue by Source" note="Money" onPress={() => router.push('/(trainer)/money')} />
+          {takenMonth.reason ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{takenMonth.reason}</Text>
+          ) : sourceDonuts.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing is recorded as taken this month, so there is no split to draw.</Text>
+          ) : sourceDonuts.map((d, i) => (
+            <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg }}>
+              <Donut slices={d.slices} centre={d.centre} sub="this month" spoken={d.spoken} />
+              <Legend items={d.slices} />
+            </View>
+          ))}
+          {sourceDonuts.length > 1 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One ring per currency. They are never added together.</Text>
+          ) : null}
+          {takenHoles > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {num(takenHoles)} payment{takenHoles === 1 ? '' : 's'} with no currency or no amount {takenHoles === 1 ? 'is' : 'are'} in no ring.
+            </Text>
+          ) : null}
+        </Section>
 
         {/* ── the shape of the business ──────────────────────────────────── */}
         <Section>
