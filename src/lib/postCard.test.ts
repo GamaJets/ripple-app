@@ -1,7 +1,7 @@
 // The one rule a shareable card cannot break: nothing unread goes out as zero.
 import {
   workoutPost, cardioPost, badgePost, streakPost, liftPost, progressPost, scanPost, offerPost, spotsPost, joinPost,
-  classesPost, promoPost, milestonePost, eventPost, slug, MAX_LINES, type PostBuild,
+  classesPost, promoPost, withInvite, milestonePost, eventPost, slug, MAX_LINES, type PostBuild,
 } from './postCard';
 
 const errors: string[] = [];
@@ -48,6 +48,9 @@ const j = card(joinPost({ code: 'AB4K7M', link: 'https://repple.app/j/AB4K7M', b
 ok(j.qr === 'https://repple.app/j/AB4K7M' && j.caption.includes('AB4K7M'), 'join card carries the link as a QR');
 ok(card(offerPost({ name: 'Starter', price: '£120', detail: null, brand: 'G', link: null })).qr === null, 'no link, no QR');
 
+const inv = withInvite(w, 'https://repple.app/join?r=TIM4K9');
+ok(inv.qr === 'https://repple.app/join?r=TIM4K9' && inv.caption.endsWith('https://repple.app/join?r=TIM4K9') && inv.lines[inv.lines.length - 1] === 'Scan to Train With Me', 'invite added');
+ok(withInvite(w, null) === w && withInvite(j, 'https://x') === j, 'no link, or a card with its own QR, is untouched');
 ok(slug('  Leg Day!! ') === 'leg-day' && slug('!!!') === 'card', 'slug');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

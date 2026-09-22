@@ -786,7 +786,7 @@ export default function Profile() {
                 <Text style={{ ...ty.label, color: t.ink2 }}>{m.state === 'earned' ? `${how}. ${m.cheer}` : `To earn it: ${how}.`}</Text>
                 {m.state === 'earned' ? (
                   <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                    <SharePostButton label="Share This Badge" make={() => badgePost({ name: m.title, meaning: how, brand: appName })} />
+                    <SharePostButton invite label="Share This Badge" make={() => badgePost({ name: m.title, meaning: how, brand: appName })} />
                   </View>
                 ) : null}
               </View>

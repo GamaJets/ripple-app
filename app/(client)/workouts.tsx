@@ -4552,7 +4552,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
             </View>
           )}
           <View style={{ marginTop: sp.md, flexDirection: 'row', justifyContent: 'center', gap: sp.md }}>
-            {finalMins > 0 ? <SharePostButton label="Share" make={() => {
+            {finalMins > 0 ? <SharePostButton invite label="Share" make={() => {
               const d = readNumber(dist);
               return cardioPost({
                 activity: titleCaseName(activity), minutes: finalMins,
@@ -6078,7 +6078,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               standing in a gym waiting for signal they may not get. */}
           {(saveState === 'saved' || saveState === 'queued') && totalSets > 0 ? (
             <View style={{ alignItems: 'center', marginBottom: sp.md }}>
-              <SharePostButton label="Share My Workout" make={() => workoutPost({
+              <SharePostButton invite label="Share My Workout" make={() => workoutPost({
                 focus: titleCaseName(focus), sets: uncountedSets > 0 ? workingSets : totalSets,
                 minutes: finalElapsed >= 60 ? Math.round(finalElapsed / 60) : null,
                 volume: volumeKnown && volume > 0 ? `${volumeHeadline(volume, unit)!.figure.toLocaleString()} ${unit === 'kg' ? 't' : 'lb'}` : null,

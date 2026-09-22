@@ -200,7 +200,7 @@ export default function Social() {
  </Section>
 
  </ScrollView>
- <SharePostSheet build={build} onClose={() => setBuild(null)} />
+ <SharePostSheet invite build={build} onClose={() => setBuild(null)} />
  </SafeAreaView>
  );
 }

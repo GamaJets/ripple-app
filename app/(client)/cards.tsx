@@ -225,7 +225,7 @@ export default function Cards() {
             onPress={() => router.push('/(client)/social')} />
         </Section>
       </ScrollView>
-      <SharePostSheet build={build} onClose={() => setBuild(null)} />
+      <SharePostSheet invite build={build} onClose={() => setBuild(null)} />
     </SafeAreaView>
   );
 }

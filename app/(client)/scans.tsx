@@ -1900,7 +1900,7 @@ export default function Scans() {
                     : 'First Reading'} />
                   {progressWas && progressGood ? (
                     <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                      <SharePostButton label="Share My Progress" make={() => progressPost({
+                      <SharePostButton invite label="Share My Progress" make={() => progressPost({
                         what: progressMetric === 'weight' ? 'Weight' : 'Body Fat',
                         change: progressDelta == null || progressDelta === 0 ? null : deltaLabel(progressDelta, { since: null, unit }),
                         since: `Since ${bodyDayLabel(progressWas.at)}`, brand: appName,
@@ -2480,7 +2480,7 @@ export default function Scans() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
                     <Text style={{ ...ty.label, ...font('500'), color: t.ink, flex: 1 }}>{mInsights.improving.length} Improving</Text>
-                    <ShareIconButton a11yLabel="Share what is improving" make={() => scanPost({
+                    <ShareIconButton invite a11yLabel="Share what is improving" make={() => scanPost({
                       improving: mInsights.improving, date: latest ? bodyDayLabel(latest.takenAt) : '', brand: appName,
                     })} />
                   </View>

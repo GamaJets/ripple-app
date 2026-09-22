@@ -5,7 +5,7 @@
 // The card is composed in src/lib/postCard.ts, which refuses rather than print
 // a figure nobody read. This file only draws it and hands it over, through the
 // same SVG → toDataURL → sharePngAsset path app/(trainer)/share-kit.tsx proved.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, Alert, Platform, useWindowDimensions } from 'react-native';
 import Svg, { Rect, Text as SvgText, TSpan, Path, G } from 'react-native-svg';
 import { useTheme } from './components';
@@ -15,7 +15,9 @@ import { sp, type as ty, elevation } from '../theme/scale';
 import { cardSize, charsPerLine, wrapLines, type CardShape } from '../lib/shareAsset';
 import { encodeToMatrix, qrPath, QR_QUIET_ZONE } from '../lib/joinQr';
 import { sharePngAsset } from '../lib/social';
-import type { PostBuild, PostCard } from '../lib/postCard';
+import { withInvite, type PostBuild, type PostCard } from '../lib/postCard';
+import { myReferralCode } from '../lib/referrals';
+import { referralLink } from '../lib/referralLink';
 
 const GROUND = '#0B1D19';
 const INK = '#FFFFFF';
@@ -111,12 +113,27 @@ const SHAPES = [
 ];
 
 /** The preview sheet. `build` is null while closed. */
-export function SharePostSheet({ build, onClose }: { build: PostBuild | null; onClose: () => void }) {
+/**
+ * `invite`: a member's card, which may carry their own invite QR. Read once
+ * when the sheet first opens; a member with no code, or whose code could not
+ * be read, simply gets no toggle.
+ */
+export function SharePostSheet({ build, onClose, invite }: { build: PostBuild | null; onClose: () => void; invite?: boolean }) {
   const t = useTheme();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const [shape, setShape] = useState<CardShape>('story');
   const [busy, setBusy] = useState(false);
   const svgRef = useRef<Svg>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [addInvite, setAddInvite] = useState(true);
+  const open = !!build?.ok;
+  useEffect(() => {
+    if (!invite || !open || inviteLink) return;
+    let alive = true;
+    void myReferralCode().then((c) => { if (alive && c) setInviteLink(referralLink(c)); });
+    return () => { alive = false; };
+  }, [invite, open, inviteLink]);
+  const card = build?.ok ? (invite && addInvite ? withInvite(build.card, inviteLink) : build.card) : null;
 
   const size = cardSize(shape);
   // Fit the preview inside the sheet on a small phone and at large text.
@@ -149,7 +166,7 @@ export function SharePostSheet({ build, onClose }: { build: PostBuild | null; on
   const share = async () => {
     if (!build?.ok || busy) return;
     setBusy(true);
-    pending.current = { png: await capture(), card: build.card };
+    pending.current = { png: await capture(), card: card ?? build.card };
     setBusy(false);
     onClose();
     // Android has no onDismiss and no such restriction. On iOS the timer is
@@ -173,11 +190,24 @@ export function SharePostSheet({ build, onClose }: { build: PostBuild | null; on
           ) : build?.ok ? (<>
             <Segmented options={SHAPES} value={shape} onChange={setShape} />
             <View style={{ alignItems: 'center' }}
-              accessible accessibilityLabel={`Card preview. ${build.card.kicker}. ${build.card.headline}. ${build.card.big ? `${build.card.big.value} ${build.card.big.unit}. ` : ''}${build.card.lines.join('. ')}`}>
+              accessible accessibilityLabel={`Card preview. ${card!.kicker}. ${card!.headline}. ${card!.big ? `${card!.big.value} ${card!.big.unit}. ` : ''}${card!.lines.join('. ')}`}>
               <View style={{ borderRadius: 14, overflow: 'hidden' }}>
-                <PostArt ref={svgRef} card={build.card} shape={shape} accent={t.brandBright} width={previewW} />
+                <PostArt ref={svgRef} card={card!} shape={shape} accent={t.brandBright} width={previewW} />
               </View>
             </View>
+            {invite && inviteLink && !build.card.qr ? (
+              <Pressable onPress={() => setAddInvite((v) => !v)} accessibilityRole="switch" accessibilityState={{ checked: addInvite }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.md, borderRadius: 12, backgroundColor: t.surface2 }}>
+                <View style={{ width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: addInvite ? t.brand : 'transparent', borderWidth: addInvite ? 0 : 2, borderColor: t.ink3 }}>
+                  {addInvite ? <Icon name="check" size={14} color={t.surface} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.label, color: t.ink }}>Add My Invite QR</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Friends who scan it join with your code</Text>
+                </View>
+              </Pressable>
+            ) : null}
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
               The picture goes to your share sheet. The caption is copied, so paste it into your post.
             </Text>
@@ -190,17 +220,17 @@ export function SharePostSheet({ build, onClose }: { build: PostBuild | null; on
 }
 
 /** A button that builds its card on tap and opens the sheet. */
-export function SharePostButton({ label, make, wide }: { label: string; make: () => PostBuild; wide?: boolean }) {
+export function SharePostButton({ label, make, wide, invite }: { label: string; make: () => PostBuild; wide?: boolean; invite?: boolean }) {
   const [build, setBuild] = useState<PostBuild | null>(null);
   return (<>
     {wide ? <Cta label={label} wide onPress={() => setBuild(make())} />
       : <Ghost icon="share" label={label} onPress={() => setBuild(make())} />}
-    <SharePostSheet build={build} onClose={() => setBuild(null)} />
+    <SharePostSheet build={build} onClose={() => setBuild(null)} invite={invite} />
   </>);
 }
 
 /** A small icon-only share button, for a row or a header. */
-export function ShareIconButton({ a11yLabel, make }: { a11yLabel: string; make: () => PostBuild }) {
+export function ShareIconButton({ a11yLabel, make, invite }: { a11yLabel: string; make: () => PostBuild; invite?: boolean }) {
   const t = useTheme();
   const [build, setBuild] = useState<PostBuild | null>(null);
   return (<>
@@ -208,6 +238,6 @@ export function ShareIconButton({ a11yLabel, make }: { a11yLabel: string; make: 
       style={{ padding: 6 }}>
       <Icon name="share" size={20} color={t.brand} />
     </Pressable>
-    <SharePostSheet build={build} onClose={() => setBuild(null)} />
+    <SharePostSheet build={build} onClose={() => setBuild(null)} invite={invite} />
   </>);
 }

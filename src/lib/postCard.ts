@@ -252,3 +252,19 @@ export function eventPost(i: { title: string; when: string; note: string; brand:
     filename: `${i.title}-event`,
   });
 }
+
+/**
+ * A member's card with their own invite link on it as a QR. Only a card that
+ * has no QR of its own takes one, and the link goes in the caption too, for
+ * the networks that do not let anyone scan a picture.
+ */
+export function withInvite(card: PostCard, link: string | null): PostCard {
+  const l = clean(link);
+  if (!l || card.qr) return card;
+  return {
+    ...card,
+    qr: l,
+    lines: [...card.lines, 'Scan to Train With Me'].slice(-MAX_LINES),
+    caption: `${card.caption} Join me: ${l}`,
+  };
+}
