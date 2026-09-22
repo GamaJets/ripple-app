@@ -881,6 +881,8 @@
     "src/lib/postCard.test.ts",
     "src/lib/blockEnding.ts",
     "src/lib/blockEnding.test.ts",
+    "src/lib/musclePicker.ts",
+    "src/lib/musclePicker.test.ts",
     "src/lib/creditsLow.ts",
     "src/lib/creditsLow.test.ts",
     "src/lib/weeklyVolume.ts",

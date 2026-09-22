@@ -55,65 +55,20 @@ import { useClientData } from '../../src/ui/clientData';
 // is the one thing this screen must not get wrong.
 import { checkInjury, nextAlternative } from '../../src/lib/builtWorkout';
 import { groupTone } from '../../src/ui/groupTone';
-import { MUSCLE_GROUPS } from '../../src/ui/MuscleGroupPicker';
+import { MusclePicker } from '../../src/ui/MusclePicker';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
-import { grown, hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
+import { hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { FORWARD_CHAR } from '../../src/ui/direction';
 import { NO_KIT } from '../../src/lib/equipmentFacet';
 import {
-  targetedProgram, targetedCoverageNote, targetsUnder, type Target,
+  targetedProgram, targetedCoverageNote, type Target,
 } from '../../src/lib/targetedWorkout';
 
-/** A target as a key, so the chosen set can live in a `Set<string>`. */
-const keyOf = (x: Target) => `${x.kind}:${x.name}`;
 const parse = (k: string): Target =>
   ({ kind: k.slice(0, k.indexOf(':')) as Target['kind'], name: k.slice(k.indexOf(':') + 1) });
-
-/**
- * One target chip.
- *
- * The lit chip is the kit's `TonedChip` in the target's own hue — the same
- * colour that muscle group wears on the Train hero, in Muscle Focus and in the
- * runner — and the unlit one is the same geometry on `surface2`. Copied in
- * behaviour from src/ui/MuscleGroupPicker.tsx, which argues the case for the
- * shape; this one is a CHECKBOX rather than a radio, because more than one
- * target is the ordinary use of this screen.
- *
- * `kind` is spoken and not only drawn. "Arms" the group and "Triceps" the
- * muscle sit on the same row and produce different workouts, so a screen
- * reader has to be told which of the two a chip is.
- */
-function TargetChip({ label, kind, on, onPress }: {
-  label: string; kind: Target['kind']; on: boolean; onPress: () => void;
-}) {
-  const t = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: on }}
-      accessibilityLabel={kind === 'group' ? `${label}, the whole muscle group` : `${label}, one muscle`}
-      hitSlop={hitSlopFor(MIN_TARGET)}
-    >
-      {on ? (
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <TonedChip label={label} tone={groupTone(label)} icon="check" />
-        </View>
-      ) : (
-        <View style={{
-          minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3,
-          borderRadius: grown(26) / 2, backgroundColor: t.surface2,
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.ink2 }}>{label}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
 
 export default function BuildWorkout() {
   const t = useTheme();
@@ -137,11 +92,6 @@ export default function BuildWorkout() {
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const cd = useClientData();
 
-  const toggle = (x: Target) => {
-    const k = keyOf(x);
-    setChosen((xs) => (xs.includes(k) ? xs.filter((y) => y !== k) : [...xs, k]));
-  };
-
   const plan = useMemo(() => {
     if (!built || !built.targets.length) return null;
     return targetedProgram(cat.rows, built.targets.map(parse), { noKit: built.noKit });
@@ -163,38 +113,17 @@ export default function BuildWorkout() {
   const picker = () => (
     <>
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-        Pick a muscle group, or a single muscle inside it, and this builds a session out of the
-        movements the catalogue actually holds for it. Pick more than one and each becomes its own day.
+        Tap the body or pick a muscle group, or a single muscle inside it, and this builds a session
+        out of the movements the catalogue actually holds for it. Pick more than one and each becomes its own day.
       </Text>
 
       <Section>
         <SectionHead title="What Do You Want To Train?"
           note={chosen.length ? `${chosen.length} Picked` : undefined} />
 
-        {/* One row per group, the group chip first and the muscles under it
-            beside it. This is the whole point of the screen: a member who
-            wants triceps finds the word "Triceps" without having to know it is
-            filed under Arms, and a member who wants the whole of Arms taps
-            Arms. `MUSCLE_GROUPS` is the catalogue's own eleven, in the
-            catalogue's own spelling and its own order. */}
-        {MUSCLE_GROUPS.map((g, i) => {
-          const muscles = targetsUnder(g);
-          return (
-            <View key={g} style={{
-              paddingVertical: sp.md,
-              borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-            }}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, alignItems: 'center' }}>
-                <TargetChip label={g} kind="group" on={chosen.includes(`group:${g}`)}
-                  onPress={() => toggle({ kind: 'group', name: g })} />
-                {muscles.map((m) => (
-                  <TargetChip key={m.label} label={m.label} kind="muscle" on={chosen.includes(`muscle:${m.label}`)}
-                    onPress={() => toggle({ kind: 'muscle', name: m.label })} />
-                ))}
-              </View>
-            </View>
-          );
-        })}
+        {/* The body and the chips are one control; the menu, its order and
+            why no label appears twice are in src/lib/musclePicker.ts. */}
+        <MusclePicker chosen={chosen} onChange={setChosen} />
       </Section>
 
       <Rule />

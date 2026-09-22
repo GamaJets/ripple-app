@@ -85,6 +85,10 @@ import { buildProgram, type Program, type ProgramDay } from '../../src/lib/progr
 // drawn from the catalogue instead — and reports, by name, the muscle groups it
 // could not cover. See src/lib/noKitProgram.ts.
 import { noKitProgram, noKitCoverageNote } from '../../src/lib/noKitProgram';
+// Build From Muscles: the member's Build a Workout generator and its picker,
+// here so a coach can start a client's week (or their own) from target muscles.
+import { targetedProgram, targetedCoverageNote, type Target } from '../../src/lib/targetedWorkout';
+import { MusclePicker } from '../../src/ui/MusclePicker';
 // A program can now be more than one week. `programWeeks` is the ONE reader
 // that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
 // is what the shipped client app renders — in step with week one. Neither this
@@ -626,6 +630,8 @@ export default function Builder() {
    *  program before now assumed; it is NOT a claim that they own a rack, it is
    *  the absence of the restriction. Nothing is generated off it. */
   const [kit, setKit] = useState<'any' | 'none'>('any');
+  /** Muscles picked under Build From Muscles, as `kind:name` keys. */
+  const [targets, setTargets] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [tplName, setTplName] = useState('');
   /**
@@ -1089,6 +1095,30 @@ export default function Builder() {
     Alert.alert(
       'Replace What Is in the Builder?',
       `A no-equipment week loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
+  /** A week built from the picked muscles, one day per target, over the same
+   *  equipment answer as above. Whole catalogue reads only, as with no-kit. */
+  const byMuscle = useMemo(() => {
+    if (!targets.length || cat.status !== 'ready') return null;
+    const parsed = targets.map((k): Target => ({
+      kind: k.slice(0, k.indexOf(':')) as Target['kind'], name: k.slice(k.indexOf(':') + 1),
+    }));
+    return targetedProgram(cat.rows, parsed, { noKit: kit === 'none' });
+  }, [targets, cat.status, cat.rows, kit]);
+
+  const buildFromMuscles = () => {
+    if (!byMuscle?.program.days.length) return;
+    const land = () => loadFrom(byMuscle.program, null);
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `A week built from these muscles loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
       [
         { text: 'Keep What I Have', style: 'cancel' },
         { text: 'Replace It', style: 'destructive', onPress: land },
@@ -3115,6 +3145,34 @@ export default function Builder() {
             )}
         </Section>
 
+
+        {/* ── build from muscles ──────────────────────────────────────────
+            Owner feedback: the coach wanted the member's body picker when
+            building for a client or themselves. Same picker, same generator;
+            the week loads into the builder below to edit before assigning. */}
+        <Section>
+          <SectionHead title="Build From Muscles"
+            note={targets.length ? `${targets.length} Picked` : undefined} />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+            Tap the body or pick muscles below. Each one becomes a day, built from the catalogue and the equipment answer above.
+          </Text>
+          <MusclePicker chosen={targets} onChange={setTargets} />
+          {targets.length && cat.status !== 'ready' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {cat.status === 'loading' ? 'Reading the movement catalogue…'
+                : 'The whole movement catalogue has not come back, so nothing is built from it yet. Reopen this screen once you have signal.'}
+            </Text>
+          ) : null}
+          {byMuscle && targetedCoverageNote(byMuscle.coverage) ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{targetedCoverageNote(byMuscle.coverage)}</Flag>
+          ) : null}
+          <View style={{ height: sp.md }} />
+          <Cta label="Build From These Muscles" onPress={buildFromMuscles} wide
+            disabled={!byMuscle?.program.days.length}
+            a11yLabel={byMuscle?.program.days.length
+              ? `Build a ${byMuscle.program.days.length}-day week from the picked muscles. It loads into the builder below, over what is there.`
+              : 'Build from these muscles. Pick at least one muscle first'} />
+        </Section>
 
         <Section>
           <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} Saved` : undefined} />

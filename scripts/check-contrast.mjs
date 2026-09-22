@@ -178,6 +178,16 @@ const NEXT_COLOR_PROP = /[A-Za-z]Color\s*:/;
  */
 const MARKS = [
   {
+    file: 'src/ui/MusclePicker.tsx',
+    line: "{ no: 1, name: 'Partly Selected', color: t.warn, from: 0, to: 0.5 },",
+    why: 'a Band fill for the body figure (MuscleBody paints regions with it); the words beside it are the chips, in ink',
+  },
+  {
+    file: 'src/ui/MusclePicker.tsx',
+    line: "{ no: 2, name: 'Selected', color: t.good, from: 0.5, to: 1 },",
+    why: 'a Band fill for the body figure (MuscleBody paints regions with it); the words beside it are the chips, in ink',
+  },
+  {
     file: 'app/(trainer)/analytics.tsx',
     line: '{ label: STATUS_LABEL.watch, value: watch, color: t.warn },',
     why: 'a <DistBar> segment — a filled bar, which needs 3:1 and has it',

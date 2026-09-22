@@ -10,7 +10,7 @@ is paid again on every turn of the session that opened it.
 | lines | ~tok | file |
 | ----: | ---: | ---- |
 | 7,721 | 123k | `app/(client)/workouts.tsx` |
-| 5,391 | 84k | `app/(trainer)/builder.tsx` |
+| 5,449 | 84k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
 | 5,125 | 82k | `app/(trainer)/dashboard.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,055 lines, ~1724k tokens if every one were read whole.
+Total: 47 files, 119,113 lines, ~1724k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -235,141 +235,145 @@ Total: 47 files, 119,055 lines, ~1724k tokens if every one were read whole.
 
 ## `app/(trainer)/builder.tsx`
 
-5,391 lines · ~84k tokens · 132 anchors
+5,449 lines · ~84k tokens · 136 anchors
 
 ```
-23-162        §        The Assign button is now withheld, not warned about
-163-168       type     BWeek
-169-201       fn       s
-202-221       fn       nextKey
-222-245       fn       cloneWeek
-246-258       fn       toBuilderDays
-259-353       type     BEx
-354-355       type     BDay
-356-382       §        The goal that generates a program is now allowed to be unknown
-383-418       default  Builder
-419-433       fn         savedCount
-434-434       fn         usage
-435-435       fn         shortcuts
-436-437       fn           own
-438-445       fn           used
-446-660       §        Why the Back arrow is conditional here and not on every other screen
-661-679       fn         rosterIds
-680-686       fn             on
-687-826       fn         client
-827-839       §        the eighth read, which the refresh did not count
-840-872       §        This builder edits ONE person's copy
-873-903       fn         pull
-904-912       fn         retryReads
-913-950       fn         confirmInjuries
-951-974       fn         markSaved
-975-1001      fn         loadFrom
-1002-1014     fn         clearBuilder
-1015-1027     §        and it has to be the WHOLE block, for the same reason
-1028-1034     fn         hasDraft
-1035-1051     fn         builderDirty
-1052-1052     fn         startFromTemplate
-1053-1076     fn           land
-1077-1084     fn         noKit
-1085-1086     fn         buildNoKitWeek
-1087-1113     fn           land
-1114-1149     fn         loadTheirProgram
-1150-1190     fn           tpl
-1191-1209     fn         loadCues
-1210-1230     fn         cueFo
-1231-1242     fn         commitCue
-1243-1248     fn             rest
-1249-1261     fn         dropCue
-1262-1276     fn         setDayFocus
-1277-1291     fn         setDayCardio
-1292-1319     fn         addExercise
-1320-1330     fn         fillFromCues
-1331-1349     fn         removeExercise
-1350-1352     fn         moveExercise
-1353-1422     fn             at
-1423-1425     fn         heightsFor
-1426-1434     fn         beginDrag
-1435-1443     fn         moveDrag
-1444-1482     fn         endDrag
-1483-1493     fn         patchRows
-1494-1496     fn         groupWithNext
-1497-1505     fn             ids
-1506-1549     fn         ungroup
-1550-1578     fn         toggleDay
-1579-1728     fn         openDay
-1729-1746     fn           anyContent
-1747-1754     fn         clearDraft
-1755-1771     fn         saveDraftNow
-1772-1773     fn         patchEx
-1774-1779     fn         addDay
-1780-1780     fn             used
-1781-1791     fn             free
-1792-1797     fn         addDayOn
-1798-1811     fn         cycleDay
-1812-1833     fn         removeDay
-1834-1835     fn         applyWeekEdit
-1836-1851     fn           land
-1852-1870     fn         totalExercises
-1871-1887     fn         pickedIds
-1888-1888     fn         factFor
-1889-1894     fn           c
-1895-1895     fn         injuriesOf
-1896-1911     fn         asMember
-1912-1955     fn         neverAskedNames
-1956-1958     fn         injuryLoads
-1959-1980     fn           movements
-1981-1991     §        what the picker searches
-1992-1995     fn         ownList
-1996-2003     fn         ownShown
-2004-2021     fn         ownSlugs
-2022-2026     fn         catByName
-2027-2048     fn         rowFor
-2049-2056     fn         customAdd
-2057-2065     fn         weekVolume
-2066-2070     fn           groups
-2071-2071     fn         typeFill
-2072-2072     fn         typeOn
-2073-2073     fn         typesPresent
-2074-2074     fn         thumbRows
-2075-2079     fn           inDays
-2080-2090     fn           inOwn
-2091-2119     fn         previewExercise
-2120-2166     fn         composeDays
-2167-2201     fn         composeProgram
-2202-2235     fn         review
-2236-2260     fn         volumeLine
-2261-2289     fn         doSaveTemplate
-2290-2358     fn         recordInjuryChoice
-2359-2381     fn         assign
-2382-2396     fn           go
-2397-2398     fn           sending
-2399-2405     fn             lines
-2406-2406     fn             more
-2407-2428     fn             okd
-2429-2454     fn             mine
-2455-2488     fn           outstanding
-2489-2500     fn         unassign
-2501-2527     fn           go
-2528-2566     fn         revert
-2567-2593     fn         deleteTemplate
-2594-2594     fn         footWho
-2595-2598     fn           names
-2599-2600     fn         footWhere
-2601-2601     fn           day
-2602-2618     fn           ex
-2619-2682     fn         workflowFooter
-2683-2777     fn               onCount
-2778-2779     fn               di
-2780-2780     fn               sessions
-2781-2880     fn               exercises
-2881-3583     fn               ec
-3584-3687     fn               daySets
-3688-3688     fn               allSame
-3689-3689     fn               repsList
-3690-4630     fn               loadList
-4631-5251     fn               held
-5252-5305     fn               ec
-5306-5391     fn               cur
+23-166        §        The Assign button is now withheld, not warned about
+167-172       type     BWeek
+173-205       fn       s
+206-225       fn       nextKey
+226-249       fn       cloneWeek
+250-262       fn       toBuilderDays
+263-357       type     BEx
+358-359       type     BDay
+360-386       §        The goal that generates a program is now allowed to be unknown
+387-422       default  Builder
+423-437       fn         savedCount
+438-438       fn         usage
+439-439       fn         shortcuts
+440-441       fn           own
+442-449       fn           used
+450-666       §        Why the Back arrow is conditional here and not on every other screen
+667-685       fn         rosterIds
+686-692       fn             on
+693-832       fn         client
+833-845       §        the eighth read, which the refresh did not count
+846-878       §        This builder edits ONE person's copy
+879-909       fn         pull
+910-918       fn         retryReads
+919-956       fn         confirmInjuries
+957-980       fn         markSaved
+981-1007      fn         loadFrom
+1008-1020     fn         clearBuilder
+1021-1033     §        and it has to be the WHOLE block, for the same reason
+1034-1040     fn         hasDraft
+1041-1057     fn         builderDirty
+1058-1058     fn         startFromTemplate
+1059-1082     fn           land
+1083-1090     fn         noKit
+1091-1092     fn         buildNoKitWeek
+1093-1106     fn           land
+1107-1108     fn         byMuscle
+1109-1114     fn           parsed
+1115-1116     fn         buildFromMuscles
+1117-1143     fn           land
+1144-1179     fn         loadTheirProgram
+1180-1220     fn           tpl
+1221-1239     fn         loadCues
+1240-1260     fn         cueFo
+1261-1272     fn         commitCue
+1273-1278     fn             rest
+1279-1291     fn         dropCue
+1292-1306     fn         setDayFocus
+1307-1321     fn         setDayCardio
+1322-1349     fn         addExercise
+1350-1360     fn         fillFromCues
+1361-1379     fn         removeExercise
+1380-1382     fn         moveExercise
+1383-1452     fn             at
+1453-1455     fn         heightsFor
+1456-1464     fn         beginDrag
+1465-1473     fn         moveDrag
+1474-1512     fn         endDrag
+1513-1523     fn         patchRows
+1524-1526     fn         groupWithNext
+1527-1535     fn             ids
+1536-1579     fn         ungroup
+1580-1608     fn         toggleDay
+1609-1758     fn         openDay
+1759-1776     fn           anyContent
+1777-1784     fn         clearDraft
+1785-1801     fn         saveDraftNow
+1802-1803     fn         patchEx
+1804-1809     fn         addDay
+1810-1810     fn             used
+1811-1821     fn             free
+1822-1827     fn         addDayOn
+1828-1841     fn         cycleDay
+1842-1863     fn         removeDay
+1864-1865     fn         applyWeekEdit
+1866-1881     fn           land
+1882-1900     fn         totalExercises
+1901-1917     fn         pickedIds
+1918-1918     fn         factFor
+1919-1924     fn           c
+1925-1925     fn         injuriesOf
+1926-1941     fn         asMember
+1942-1985     fn         neverAskedNames
+1986-1988     fn         injuryLoads
+1989-2010     fn           movements
+2011-2021     §        what the picker searches
+2022-2025     fn         ownList
+2026-2033     fn         ownShown
+2034-2051     fn         ownSlugs
+2052-2056     fn         catByName
+2057-2078     fn         rowFor
+2079-2086     fn         customAdd
+2087-2095     fn         weekVolume
+2096-2100     fn           groups
+2101-2101     fn         typeFill
+2102-2102     fn         typeOn
+2103-2103     fn         typesPresent
+2104-2104     fn         thumbRows
+2105-2109     fn           inDays
+2110-2120     fn           inOwn
+2121-2149     fn         previewExercise
+2150-2196     fn         composeDays
+2197-2231     fn         composeProgram
+2232-2265     fn         review
+2266-2290     fn         volumeLine
+2291-2319     fn         doSaveTemplate
+2320-2388     fn         recordInjuryChoice
+2389-2411     fn         assign
+2412-2426     fn           go
+2427-2428     fn           sending
+2429-2435     fn             lines
+2436-2436     fn             more
+2437-2458     fn             okd
+2459-2484     fn             mine
+2485-2518     fn           outstanding
+2519-2530     fn         unassign
+2531-2557     fn           go
+2558-2596     fn         revert
+2597-2623     fn         deleteTemplate
+2624-2624     fn         footWho
+2625-2628     fn           names
+2629-2630     fn         footWhere
+2631-2631     fn           day
+2632-2648     fn           ex
+2649-2712     fn         workflowFooter
+2713-2807     fn               onCount
+2808-2809     fn               di
+2810-2810     fn               sessions
+2811-2910     fn               exercises
+2911-3641     fn               ec
+3642-3745     fn               daySets
+3746-3746     fn               allSame
+3747-3747     fn               repsList
+3748-4688     fn               loadList
+4689-5309     fn               held
+5310-5363     fn               ec
+5364-5449     fn               cur
 ```
 
 ## `src/lib/coverage.test.ts`

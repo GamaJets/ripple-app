@@ -133,6 +133,11 @@ export const MUSCLE_TARGETS: readonly MuscleTarget[] = [
   // The catalogue splits the deltoid three ways and the member does not.
   { label: 'Shoulders', muscles: ['anterior deltoid', 'lateral deltoid', 'posterior deltoid'], under: 'Shoulders' },
   { label: 'Rear Delts', muscles: ['posterior deltoid'], under: 'Shoulders' },
+  // After Shoulders and Rear Delts, so `targetForMuscle` still names the
+  // anterior and lateral heads "Shoulders". They are here for the picker's
+  // Shoulders row, which offers each head the catalogue actually files.
+  { label: 'Front Delts', muscles: ['anterior deltoid'], under: 'Shoulders' },
+  { label: 'Side Delts', muscles: ['lateral deltoid'], under: 'Shoulders' },
   { label: 'Chest', muscles: ['pectoralis major'], under: 'Chest' },
   { label: 'Lats', muscles: ['latissimus dorsi'], under: 'Back' },
   { label: 'Upper Back', muscles: ['trapezius', 'rhomboids'], under: 'Back' },
