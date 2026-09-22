@@ -45,6 +45,7 @@
 // the kcal, the level and the score do not, because they are not masses, and
 // each says which it is by its own declared unit rather than by its name.
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -614,10 +615,11 @@ export default function Scans() {
   const scansWhole = isWhole(cd.scansStatus);
   const scansReading = cd.scansStatus === 'loading';
   // The board's Progress opens on one metric at a time with a range under
-  // it. Which metric and which range are this screen's, not the account's:
-  // they reset with the tab, like a chart's zoom.
-  const [progressMetric, setProgressMetric] = useState<'weight' | 'bodyfat'>('weight');
-  const [progressRange, setProgressRange] = useState<'1M' | '3M' | '6M' | '1Y'>('1Y');
+  // it. Which metric and which range are this screen's, not the account's —
+  // but they are kept on the handset (review rule 8), so a member who reads
+  // body fat over 3M is not put back on weight over 1Y every visit.
+  const [progressMetric, setProgressMetric] = useStickyChoice('progress.metric', ['weight', 'bodyfat'] as const, 'weight');
+  const [progressRange, setProgressRange] = useStickyChoice('progress.range', ['1M', '3M', '6M', '1Y'] as const, '1Y');
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
   // A figure that arrived in kilograms — from the vision reader, from the OCR

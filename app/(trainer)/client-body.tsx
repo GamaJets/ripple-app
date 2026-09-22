@@ -106,6 +106,7 @@
 // has thirteen readings and no change — which is not a change of zero, and is
 // said in words rather than drawn as a dash.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -260,9 +261,9 @@ export default function ClientBody() {
   // with a range under it; both are ways of looking rather than facts about
   // the client, so they are local — and unlike `compOpen` they are kept
   // across subjects, because a coach reading two clients' weight in a row
-  // wants weight both times.
-  const [metric, setMetric] = useState<BodyMetricKey>('weight');
-  const [range, setRange] = useState<'1M' | '3M' | '6M' | '1Y'>('1Y');
+  // wants weight both times. Kept across visits too (review rule 8).
+  const [metric, setMetric] = useStickyChoice<BodyMetricKey>('coach.body.metric', ['weight', 'bodyfat', 'muscle'], 'weight');
+  const [range, setRange] = useStickyChoice('coach.body.range', ['1M', '3M', '6M', '1Y'] as const, '1Y');
   const moved = subjectChange(seenParam, clientId);
   if (moved) { setSeenParam(clientId); setPicked(moved.subject); setCompOpen(null); }
 

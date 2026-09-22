@@ -37,6 +37,7 @@
 // payroll became the screen's one hero figure, and the Georgia serif header and
 // the 12.5/11.5px font sizes are gone.
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -253,7 +254,8 @@ export default function OwnerClassAnalytics() {
   const cur = tenant?.currency ?? null;
   const t = useTheme();
   const router = useRouter();
-  const [range, setRange] = useState<Range>('week');
+  // Remembered between visits (review rule 8).
+  const [range, setRange] = useStickyChoice<Range>('studio.classes.range', RANGES.map(([k]) => k), 'week');
   // Null until the read returns, never []. An empty array here is a claim —
   // "no classes ran in this range" — and this screen made it on first paint and
   // again on every range change, before the query it depends on had answered.

@@ -13,6 +13,7 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { mealPhoto } from '../../src/ui/mealPhotos';
 import { CUISINES, type WireCuisine } from '../../src/lib/recipeWire';
 
@@ -594,7 +595,9 @@ export default function Nutrition() {
   // How far ahead the member is looking AND planning: one day, a week, a month.
   // The meal list, the shopping list and the recipe reads all follow it, so
   // "this month" is not a longer list drawn over a week's worth of shopping.
-  const [view, setView] = useState<Horizon>('today');
+  // Remembered between visits (review rule 8): somebody who plans by the week
+  // opens on the week.
+  const [view, setView] = useStickyChoice<Horizon>('meals.horizon', ['today', 'week', 'month'], 'today');
   // "How does a client build a meal plan for themselves? I don't see how to."
   // (owner, 21 Sep 2026). Every choice existed, scattered: meals per day inside
   // Swap or Search, diet and exclusions at the foot of the screen, the horizon

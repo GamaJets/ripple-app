@@ -27,6 +27,7 @@
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
@@ -901,7 +902,8 @@ export default function TrainerAnalytics() {
    * The delta is gated on the SAME three for the window before, separately,
    * so the figure a coach is looking at is not withheld because the comparison
    * behind it came back short. */
-  const [range, setRange] = useState<RangeKey>('30D');
+  // Remembered between visits (review rule 8): a coach who reads 90D reads it every time.
+  const [range, setRange] = useStickyChoice<RangeKey>('coach.analytics.range', RANGES.map((r) => r.key), '30D');
   // Bumped by the pull below, like `driftNonce`: the window read re-runs on
   // its own when the ids or the window change, and a refresh changes neither.
   const [rangeNonce, setRangeNonce] = useState(0);
