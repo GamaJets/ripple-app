@@ -1138,3 +1138,88 @@ The rest are recorded with their build sizes. Three need something only the
 owner can supply: an Apple/Google Wallet pass certificate, a transactional
 email channel for lead follow-up, and a background-location entitlement for
 GPS route tracking.
+
+---
+
+## 22 Sep 2026 — the ChatGPT handoff, re-checked against the code
+
+The handoff in `docs/claude-handoff/` (the data-layout review, the mockup
+implementation guide, the brief, the logo pack and the 60-page board) was
+re-audited screen by screen against this branch today. The copies the owner
+re-sent are the ones already in the repo; the only differences are three path
+corrections made when they were brought in. Everything below was checked by
+grep and file reads, not recalled.
+
+### Already done — do not re-brief
+
+- **The look.** Every screen in all three apps is on the approved kit (Sora and
+  Plus Jakarta Sans, night heroes, rings, meters, the floating duotone tab bar).
+  The board's R≡PPLE wordmark is drawn in `src/ui/BrandMark.tsx`; the owner
+  chose it over the logo pack's angular R on 19 Sep.
+- **Client, 18 of the board's 20 pages:** onboarding, Home, programs, workout,
+  exercise demo, tracking, Progress, wearables, Meals, Me, habits, calendar,
+  check-ins, messages, challenges, settings, dark mode. Review sections A, D, F
+  and G are done; B, C and E are done bar small items in Wave 1.
+- **Coach, 17 of 20:** every core page, and review sections A–G, with the
+  exceptions listed in Wave 1. Money and Analytics are one Business tab.
+- **Studio:** Trainers, Ops, Growth and Brand follow the review's order.
+  Brand gained a logo upload today (part 3270).
+- **Shared rules:** unknown is never zero, reason beside the alert, metric with
+  source and time, progressive disclosure, colour never the only signal. Each
+  has a kit part and most have a gate.
+- **Social sharing** in all three apps (22 Sep): Story and Post cards, member
+  invite QR, coach Share Kit on Business, gym Share Kit on Growth.
+
+### Wave 1 — small fixes the review still asks for (about 3 working days)
+
+| Item | Where |
+|---|---|
+| Studio Overview: Needs a Look above the revenue hero | `app/(owner)/dashboard.tsx` |
+| Coach attention queue: add plan ending, credits running out, setup missing | `app/(trainer)/dashboard.tsx` |
+| Program Builder: distinct Save Draft and Save Program beside Assign | `app/(trainer)/builder.tsx` |
+| Analytics: retention and capacity before revenue by source | `app/(trainer)/analytics.tsx` |
+| Money: a period and currency header first | `app/(trainer)/money.tsx` |
+| My Coach: unread and overdue check-ins first | `app/(client)/my-coach.tsx` |
+| Meals: say where the target comes from (coach plan, settings, calculated) | `app/(client)/nutrition.tsx` |
+| Workout: a visible "Exercise 2 of 5" header | `app/(client)/workouts.tsx` |
+| Habits: a Read habit beside Meditate | `app/(client)/habits.tsx` |
+| Resources hub, coach and member: one screen over templates, videos, documents | new routes |
+| `ListRow`: a second line and a sync slot | `src/ui/kit.tsx` |
+
+### Wave 2 — shared quality and the website (about 1 week)
+
+- **Filters that remember** (rule 8): one hook, applied to every segment and
+  range filter.
+- **Sync state beside the data** (rule 6): the existing `SyncBadge` on workout
+  sets, messages and attendance marks.
+- **The state matrix** (review Phase 6): a check that every screen renders at
+  the largest text size, in dark mode and in a non-default tenant colour, plus
+  a written offline, queued and refused pass per app.
+- **Website:** Contact and About pages, Features pointing at How It Works, a
+  Login page that sends people to the right app, real screenshots in place of
+  the "Illustrative" mock-ups. Success Stories waits for real quotes; Blog,
+  Careers and Press wait until there is something to put on them.
+
+### Wave 3 — new features the board shows (5 to 7 weeks, each needs a decision first)
+
+| Feature | Size | Decision needed from the owner |
+|---|---|---|
+| Coach Assessments: movement screen, strength test, mobility, custom | 1–2 weeks | Which tests, and whether clients see their scores |
+| Rewards and points | 1–2 weeks | What earns points, what they buy, who pays for it |
+| Community, member and coach | 2–3 weeks | Moderation: who reviews reports. Apple requires report, block and filtering for any feed |
+| Nutrition guides and client education | 3–5 days | Who writes them; reuses the coach documents upload |
+| Marketplace (coaches selling programs) | 2+ weeks | Revenue split and licensing; needs Stripe Connect live first |
+
+### Still open from before, unchanged
+
+Door hardware, load testing per role, form-check video (the privacy decision),
+and the Phase 5 items that wait for a real gym's year of data. Waiting on the
+owner: Stripe Connect in LIVE, the Fitbit and Garmin partner programs, a Wallet
+pass certificate.
+
+### Timeline
+
+Waves 1 and 2 need no decisions and take about **2 weeks**. Wave 3 adds
+**5 to 7 weeks** once its decisions are made, and its pieces are independent,
+so they can be done in whichever order the owner picks. The board's own
+estimate was 8–14 weeks for the whole redesign; most of that is done.
