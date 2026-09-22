@@ -11,6 +11,7 @@
 // version is preserved — only the presentation changed: one hero figure instead
 // of four competing 20px numbers, hairline-separated sections instead of eleven
 // stacked bordered cards, and a card spent only on the thing you can act on.
+import { GymBrandRow } from '../../src/ui/GymBrandRow';
 import { useState, useEffect, useCallback } from 'react';
 import { Fetched } from '../../src/ui/fetched';
 import { useReadStamp } from '../../src/ui/readStamp';
@@ -797,6 +798,7 @@ export default function Home() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
+        <GymBrandRow />
         <ScreenHeader
           greeting
           // "Good morning," over the name, as the board opens Home. A client
