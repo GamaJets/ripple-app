@@ -6,8 +6,8 @@
 // a figure nobody read. This file only draws it and hands it over, through the
 // same SVG → toDataURL → sharePngAsset path app/(trainer)/share-kit.tsx proved.
 import { useRef, useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, Alert, useWindowDimensions } from 'react-native';
-import Svg, { Rect, Text as SvgText, Path, G } from 'react-native-svg';
+import { View, Text, Modal, Pressable, ScrollView, Alert, Platform, useWindowDimensions } from 'react-native';
+import Svg, { Rect, Text as SvgText, TSpan, Path, G } from 'react-native-svg';
 import { useTheme } from './components';
 import { Cta, Ghost, Segmented } from './kit';
 import { Icon } from './Icon';
@@ -44,8 +44,7 @@ function PostArt({ card, shape, accent, width, ref }: {
   const footerSize = Math.round(w * 0.032);
   const footerY = h - pad;
 
-  // A story's top eighth sits under the app's own header, so start lower.
-  let y = pad + Math.round(h * (story ? 0.09 : 0.01));
+  let y = pad + Math.round(h * 0.01);
   const accentY = y;
   y += Math.round(h * 0.03) + kickerSize;
   const kickerY = y;
@@ -59,10 +58,15 @@ function PostArt({ card, shape, accent, width, ref }: {
   const floor = footerY - footerSize - (qrSide ? qrSide + Math.round(h * 0.02) : Math.round(h * 0.03));
   const room = Math.max(0, Math.floor((floor - linesTop) / lineLead) + 1);
   const lines = card.lines.slice(0, room).flatMap((l) => wrapLines(l, charsPerLine(contentW, lineSize), 2)).slice(0, room);
+  // A story is tall: centre the text in the space above the footer instead of
+  // leaving its lower half empty. A post is short enough to read top down.
+  const lastY = lines.length ? linesTop + (lines.length - 1) * lineLead : big ? bigY : headTop;
+  const shift = story ? Math.max(0, Math.round((floor - lastY) / 2 - h * 0.04)) : 0;
 
   return (
     <Svg ref={ref} width={width} height={Math.round(width * h / w)} viewBox={`0 0 ${w} ${h}`}>
       <Rect x={0} y={0} width={w} height={h} fill={GROUND} />
+      <G transform={`translate(0 ${shift})`}>
       <Rect x={pad} y={accentY} width={Math.round(w * 0.08)} height={Math.round(h * 0.006)} rx={4} fill={accent} />
       <SvgText x={pad} y={kickerY} fill={accent} fontSize={kickerSize} fontWeight="700" letterSpacing={kickerSize * 0.12}>
         {card.kicker.toUpperCase()}
@@ -73,12 +77,13 @@ function PostArt({ card, shape, accent, width, ref }: {
       {big ? (
         <SvgText x={pad} y={bigY} fill={accent} fontSize={bigSize} fontWeight="800">
           {big.value}
-          {big.unit ? <SvgText fill={MUTED} fontSize={Math.round(bigSize * 0.3)} fontWeight="600">{`  ${big.unit}`}</SvgText> : null}
+          {big.unit ? <TSpan fill={MUTED} fontSize={Math.round(bigSize * 0.36)} fontWeight="600" dx={Math.round(bigSize * 0.12)}>{big.unit}</TSpan> : null}
         </SvgText>
       ) : null}
       {lines.map((l, i) => (
         <SvgText key={`l${i}`} x={pad} y={linesTop + i * lineLead} fill={INK} fontSize={lineSize} fontWeight="600">{l}</SvgText>
       ))}
+      </G>
       {matrix ? (() => {
         const n = matrix.count + QR_QUIET_ZONE * 2;
         const s = qrSide / n;
@@ -127,19 +132,34 @@ export function SharePostSheet({ build, onClose }: { build: PostBuild | null; on
     catch { clearTimeout(timer); finish(null); }
   });
 
-  const share = async () => {
-    if (!build?.ok || busy) return;
-    setBusy(true);
-    const png = await capture();
-    const r = await sharePngAsset(png ?? '', build.card.filename, build.card.caption);
-    setBusy(false);
+  // The picture is made while this sheet is open, then the sheet closes and
+  // the system share sheet opens once it has gone. iOS will not present one
+  // sheet from another that is closing, and stacking them left a closed sheet
+  // behind that swallowed taps.
+  const pending = useRef<{ png: string | null; card: PostCard } | null>(null);
+  const handOver = async () => {
+    const p = pending.current;
+    pending.current = null;
+    if (!p) return;
+    const r = await sharePngAsset(p.png ?? '', p.card.filename, p.card.caption);
     if (r.sent === 'text') {
       Alert.alert('Sent as Text', 'This phone could not make the picture, so the words went on their own.');
     }
   };
+  const share = async () => {
+    if (!build?.ok || busy) return;
+    setBusy(true);
+    pending.current = { png: await capture(), card: build.card };
+    setBusy(false);
+    onClose();
+    // Android has no onDismiss and no such restriction. On iOS the timer is
+    // the backstop for an onDismiss that never fires; handOver runs once.
+    if (Platform.OS !== 'ios') void handOver();
+    else setTimeout(() => { void handOver(); }, 800);
+  };
 
   return (
-    <Modal visible={!!build} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={!!build} transparent animationType="slide" onRequestClose={onClose} onDismiss={() => { void handOver(); }}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
         accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '92%', ...elevation.e2 }}>

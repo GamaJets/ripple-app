@@ -73,6 +73,21 @@ export function workoutPost(i: { focus: string; sets: number; minutes: number | 
   });
 }
 
+/** A timed session: a run, a ride, a swim, a sauna. Figures already formatted. */
+export function cardioPost(i: { activity: string; minutes: number; distance: string | null; kcal: number | null; brand: string }): PostBuild {
+  if (!(i.minutes > 0)) return no('Under a minute on the clock is too short to share.');
+  const activity = clean(i.activity) || 'Session';
+  return post({
+    kicker: 'Session Complete',
+    headline: `${activity} Done.`,
+    big: { value: String(i.minutes), unit: i.minutes === 1 ? 'Minute' : 'Minutes' },
+    lines: [i.distance, i.kcal != null && i.kcal > 0 ? `${i.kcal.toLocaleString()} kcal` : null],
+    footer: i.brand,
+    caption: `${activity}: ${i.minutes} ${i.minutes === 1 ? 'minute' : 'minutes'}${clean(i.distance) ? `, ${clean(i.distance)}` : ''}. Training with ${clean(i.brand)}.`,
+    filename: `${activity}-session`,
+  });
+}
+
 export function badgePost(i: { name: string; meaning: string; brand: string }): PostBuild {
   if (!clean(i.name)) return no('This badge has not been earned yet.');
   return post({
@@ -82,6 +97,33 @@ export function badgePost(i: { name: string; meaning: string; brand: string }): 
     footer: i.brand,
     caption: `Earned the ${clean(i.name)} badge. Training with ${clean(i.brand)}.`,
     filename: `${i.name}-badge`,
+  });
+}
+
+export function streakPost(i: { days: number; best: number; brand: string }): PostBuild {
+  if (!(i.days > 0)) return no('There is no streak running right now. Log a workout to start one.');
+  return post({
+    kicker: 'Training Streak',
+    headline: 'Showing Up',
+    big: { value: String(i.days), unit: i.days === 1 ? 'Day' : 'Days' },
+    lines: [i.best > i.days ? `Best Ever ${i.best} Days` : 'My Best Ever'],
+    footer: i.brand,
+    caption: `${i.days}-day training streak with ${clean(i.brand)}.`,
+    filename: 'streak',
+  });
+}
+
+/** A lift already converted to the member's unit and formatted. */
+export function liftPost(i: { lift: string; figure: string; unit: string; brand: string }): PostBuild {
+  if (!clean(i.lift) || !clean(i.figure)) return no('Log a lift to unlock this card.');
+  return post({
+    kicker: 'Top Lift',
+    headline: clean(i.lift),
+    big: { value: clean(i.figure), unit: clean(i.unit) },
+    lines: ['Estimated One-Rep Max'],
+    footer: i.brand,
+    caption: `${clean(i.lift)}: estimated one-rep max ${clean(i.figure)} ${clean(i.unit)}. Training with ${clean(i.brand)}.`,
+    filename: `${i.lift}-top-lift`,
   });
 }
 

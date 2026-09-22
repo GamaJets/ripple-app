@@ -1,6 +1,6 @@
 // The one rule a shareable card cannot break: nothing unread goes out as zero.
 import {
-  workoutPost, badgePost, progressPost, scanPost, offerPost, spotsPost, joinPost,
+  workoutPost, cardioPost, badgePost, streakPost, liftPost, progressPost, scanPost, offerPost, spotsPost, joinPost,
   classesPost, promoPost, milestonePost, eventPost, slug, MAX_LINES, type PostBuild,
 } from './postCard';
 
@@ -21,6 +21,13 @@ refuses(promoPost({ code: 'SAVE', pct: 0, brand: 'Gym' }), 'zero discount');
 refuses(milestonePost({ visits: null, classes: 3, period: 'This Month', brand: 'Gym' }), 'unread visits');
 refuses(milestonePost({ visits: 0, classes: 3, period: 'This Month', brand: 'Gym' }), 'zero visits');
 refuses(eventPost({ title: ' ', when: 'Sat', note: '', brand: 'Gym' }), 'untitled event');
+
+refuses(streakPost({ days: 0, best: 12, brand: 'G' }), 'no streak');
+refuses(liftPost({ lift: 'Bench', figure: '', unit: 'kg', brand: 'G' }), 'unread lift');
+ok(card(streakPost({ days: 12, best: 12, brand: 'G' })).lines[0] === 'My Best Ever', 'streak at its best');
+
+refuses(cardioPost({ activity: 'Run', minutes: 0, distance: null, kcal: null, brand: 'G' }), 'no minutes');
+ok(card(cardioPost({ activity: 'Run', minutes: 30, distance: '5.2 km', kcal: 0, brand: 'G' })).lines.join('|') === '5.2 km', 'zero kcal left off');
 
 // A workout card carries its PRs and leaves unknown minutes and volume off.
 const w = card(workoutPost({ focus: 'Legs', sets: 15, minutes: null, volume: null, prs: ['Leg Extension 55 kg'], brand: 'Ironworks' }));
