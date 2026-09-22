@@ -121,6 +121,28 @@ export function consentFromStored(raw: string | null | undefined): 'yes' | 'no' 
 /** What is written back. A shape rather than a bare boolean so a later field —
  *  the date they answered, say — can be added without invalidating the answer
  *  already on every device. */
+/**
+ * The answer to use, given the account's record (part 2940) and this phone's.
+ *
+ *   · the account has an answer   → it wins; the phone is brought into line
+ *   · the account has none, the phone does → use the phone's, and carry it up
+ *     as an undated 'device' row (the phone never stored when it was given)
+ *   · the account could not be read → the phone's answer, as before part 2940
+ *
+ * `server` is null for "read, and no row", 'error' for "could not read".
+ */
+export function resolveConsent(
+  server: { share: boolean } | null | 'error',
+  local: 'yes' | 'no' | 'unasked',
+): { consent: 'yes' | 'no' | 'unasked'; carryUp: boolean; syncLocal: 'yes' | 'no' | null } {
+  if (server === 'error') return { consent: local, carryUp: false, syncLocal: null };
+  if (server) {
+    const a = server.share ? 'yes' : 'no';
+    return { consent: a, carryUp: false, syncLocal: a === local ? null : a };
+  }
+  return { consent: local, carryUp: local !== 'unasked', syncLocal: null };
+}
+
 export function storedConsent(answer: 'yes' | 'no'): string {
   return JSON.stringify({ shareHealth: answer === 'yes' });
 }

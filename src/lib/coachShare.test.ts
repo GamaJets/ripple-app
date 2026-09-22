@@ -16,7 +16,7 @@
 // to the screen tomorrow and forgets to declare here is not sent, and the test
 // proves that rather than trusting it.
 import {
-  consentFromStored, storedConsent, shareableContext, sharedInjuries,
+  consentFromStored, storedConsent, shareableContext, sharedInjuries, resolveConsent,
   FITNESS_KEYS, HEALTH_KEYS,
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT,
   WITHHELD_NOTE, NOT_MEDICAL_ADVICE, WHERE_IT_GOES,
@@ -315,6 +315,20 @@ eq(allergenFact(null), undefined, 'an unread list sends nothing, so the prompt s
 eq(allergenFact(undefined), undefined, 'and so does a list nobody could have been asked for');
 ok(/^none declared/.test(String(allergenFact([]))), 'a READ empty list is said as none declared');
 ok(/nuts/.test(String(allergenFact([]))), 'and names what the app records, so "none" is not a claim about sesame');
+
+// ── the account's record (part 2940) against this phone's ──
+{
+  const r1 = resolveConsent({ share: false }, 'yes');
+  ok(r1.consent === 'no' && !r1.carryUp && r1.syncLocal === 'no', 'the account wins, and the phone is brought into line');
+  const r2 = resolveConsent(null, 'no');
+  ok(r2.consent === 'no' && r2.carryUp, 'a phone answer the account has never seen is carried up');
+  const r3 = resolveConsent(null, 'unasked');
+  ok(r3.consent === 'unasked' && !r3.carryUp, 'nothing anywhere is still unasked, and nothing is written');
+  const r4 = resolveConsent('error', 'yes');
+  ok(r4.consent === 'yes' && !r4.carryUp && r4.syncLocal === null, 'an unread account falls back to the phone and writes nothing');
+  const r5 = resolveConsent({ share: true }, 'yes');
+  ok(r5.syncLocal === null, 'agreeing records need no write');
+}
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
