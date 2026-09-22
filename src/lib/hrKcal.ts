@@ -149,10 +149,8 @@ export type HrKcalUnknown =
   | 'no-age'
   /** No weight on file. */
   | 'no-weight'
-  /** No recorded sex. Today this is EVERY member: `clients.sex` is read here
-   *  and written by nothing in the product, so there is no way for anyone to
-   *  supply it. The sentence below says so, and whoever adds that field has to
-   *  come back and change it. */
+  /** No recorded sex. The member sets it in Edit Profile (Female, Male or
+   *  Not Say); Not Say, or never answering, leaves `clients.sex` null. */
   | 'no-sex'
   /** Every input present, and the equation still yields nothing — which the
    *  male equation does at a low heart rate for a light person. Not a small
@@ -200,17 +198,16 @@ const NEED: Record<NamedNeed, string> = {
 /**
  * What would produce the missing thing.
  *
- * Each of these is a claim about this app and has to stay true. 'no-sex' is
- * the one that is currently an admission rather than an instruction, because
- * nothing in the product writes `clients.sex` — telling a member to go and set
- * it somewhere would send them looking for a screen that does not exist.
+ * Each of these is a claim about this app and has to stay true. 'no-sex' was
+ * an admission until 22 Sep 2026, when Edit Profile gained a Sex control that
+ * writes `clients.sex`; it is an instruction now, and names that screen.
  */
 const FIX: Record<NamedNeed, string> = {
   'no-heart-rate': 'Pair a heart-rate monitor before a session and it is recorded for you.',
   'no-duration': 'A session has to run a full minute before there is anything to work from.',
   'no-age': 'Your date of birth is on your profile.',
   'no-weight': 'Your weight is on your profile.',
-  'no-sex': 'The two published equations behind this differ by sex, and there is nowhere to tell the app yours yet.',
+  'no-sex': 'The two published equations behind this differ by sex. Add yours in Edit Profile on the Me tab.',
 };
 
 /**

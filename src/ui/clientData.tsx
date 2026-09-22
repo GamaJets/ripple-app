@@ -76,10 +76,12 @@ interface Value {
    *  profile as their own height. */
   heightCm: number | null; setHeightCm: (v: number) => void;
   /** null unless `clients.sex` holds one of the two letters the calorie
-   *  equations have. Nothing in this product writes that column, so today it
-   *  is null for every member — app/(client)/workouts.tsx says so on the
-   *  screen rather than leaving a blank where the figure would be. */
+   *  equations have. The member sets it in Edit Profile (22 Sep 2026); null is
+   *  "Not Say" or never answered, and app/(client)/workouts.tsx then says the
+   *  figure needs it rather than leaving a blank. */
   sex: 'male' | 'female' | null;
+  /** The member's own answer, from Edit Profile. Null is "prefer not to say". */
+  setSex: (v: 'male' | 'female' | null) => void;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   /** Whether a coach is actually LINKED, which is a different question from
@@ -401,6 +403,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.name === 'string' && p.name) setName(p.name);
           if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
           if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
+          if (p.sex === 'male' || p.sex === 'female') setSex(p.sex);
           if (typeof p.goal === 'string') setGoal(p.goal);
           setCoachingMode(readCoachingMode(p.coachingMode));
           if (typeof p.diet === 'string') setDiet(readDiet(p.diet));
@@ -460,8 +463,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // those defaults as fact: `profileStatus` is 'error', which is what
     // `isWhole` gates on.
     if (!cacheRead.current) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid: ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, sex, goal, diet, avoid: ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, sex, goal, diet, ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -568,8 +571,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // below get. `if (readSex) setSex(readSex)` only ever moved this
           // field towards having a value: a column that is null, or holds
           // something outside the two letters, left whatever was already in
-          // state. Nothing in this app writes `clients.sex`, so it is null for
-          // every member today and that branch therefore NEVER fires — which
+          // state. Edit Profile now writes `clients.sex`; before 22 Sep 2026 nothing
+          // did, and that branch never fired — which
           // means the only way this field can hold a letter is by having been
           // set for somebody else earlier in the process, and the only way it
           // can be let go of is this line. src/lib/hrKcal.ts picks a different
@@ -773,6 +776,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
             supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,
+              // The column's own letters (part 01: 'f' | 'm'); null is the
+              // member choosing not to say, which the calorie model reads as unknown.
+              sex: sex === 'female' ? 'f' : sex === 'male' ? 'm' : null,
               // The member's OWN list only. `coach_avoid` is their coach's and
               // `dislikes` is written on its own (setDislikes below), so this
               // whole-row push can never overwrite either with a stale copy.
@@ -815,7 +821,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, ownAvoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
+  }, [name, photo, dob, heightCm, sex, goal, diet, ownAvoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
 
   // Try the profile write again when the app can reach the server again.
   //
@@ -1313,7 +1319,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Value>(() => ({
     id: sbUid ?? 'unknown', name, init: initials(name), setName,
-    dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
+    dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex, setSex,
     goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes,
     injuries,
     focusAreas, setFocusAreas,
@@ -1330,7 +1336,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
     status,
   }), [
-    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
+    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex, setSex,
     goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes, injuries, focusAreas, setFocusAreas,
     addInjuryStable, updateInjuryStable, removeInjuryStable,
     coachingMode, setCoachingMode, coachLinked, trainerId, mealsPerDay, setMealsPerDay,

@@ -329,6 +329,8 @@ export default function Profile() {
   const [nameVal, setNameVal] = useState(cd.name);
   const [bfVal, setBfVal] = useState(cd.bodyFatPct != null ? String(round1(cd.bodyFatPct)) : '');
   const [saved, setSaved] = useState(false);
+  // Sex, for the calorie estimates (clients.sex). The member's answer; 'Not Say' stores nothing.
+  const [sexVal, setSexVal] = useState<'Female' | 'Male' | 'Not Say'>('Not Say');
 
   const asText = (n: number | null) => (n == null ? '' : plain(n));
   const openEdit = () => {
@@ -337,6 +339,7 @@ export default function Profile() {
     setWeightVal(asText(shownWeight));
     if (lu === 'cm') { setHeightVal(asText(heightAs(cd.heightCm, 'cm'))); setHeightInVal(''); }
     else { const p = heightParts(cd.heightCm); setHeightVal(p ? String(p.feet) : ''); setHeightInVal(p ? String(p.inches) : ''); }
+    setSexVal(cd.sex === 'female' ? 'Female' : cd.sex === 'male' ? 'Male' : 'Not Say');
     setShowEdit(true);
   };
 
@@ -441,6 +444,8 @@ export default function Profile() {
     cd.setName(nameVal.trim() || cd.name);
     if (enteredKg != null && weightVal !== asText(shownWeight)) cd.setWeightKg(enteredKg);
     if (enteredCm != null && heightEdited) cd.setHeightCm(enteredCm);
+    const nextSex = sexVal === 'Female' ? 'female' : sexVal === 'Male' ? 'male' : null;
+    if (nextSex !== cd.sex) cd.setSex(nextSex);
     // `readBodyFat` reads a decimal comma and rounds to the one decimal place
     // the column holds, so there is nothing left for `round1` to do here.
     if (bfRead.ok && bfRead.pct != null && bfEdited) cd.setBodyFat(bfRead.pct);
@@ -954,6 +959,15 @@ export default function Profile() {
               </View>
             </View>
             {lengthNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{lengthNote}</Text> : null}
+
+            {/* Only the calorie estimates read this: the published equations
+                differ by sex. Not saying is a real answer, and those figures
+                then say they need it rather than guessing. */}
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Sex</Text>
+            <View style={{ alignSelf: 'flex-start', marginBottom: sp.sm }}>
+              <Seg options={['Female', 'Male', 'Not Say']} value={sexVal} onChange={(v) => setSexVal(v as 'Female' | 'Male' | 'Not Say')} t={t} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Used only to estimate the calories you burn. Choose Not Say and those estimates will ask for it instead of guessing.</Text>
 
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
               <Field label="Current Weight" hint={wu} a11y={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}>

@@ -153,10 +153,9 @@ eq(hrKcalUnknownNote(hrKcalUnknown(RIDE)), null, 'and no sentence to show under 
   eq(why.join(','), 'no-sex', 'a session missing only a sex says only that');
   const note = hrKcalUnknownNote(why)!;
   ok(/sex/.test(note), 'the sentence names it');
-  // It must not send them looking for a setting that does not exist. Nothing
-  // in the product writes `clients.sex`; if that ever changes, this assertion
-  // is the reminder that the sentence changes with it.
-  ok(!/profile/i.test(note), 'and does not point at a screen that cannot record it');
+  // Edit Profile has recorded `clients.sex` since 22 Sep 2026, so the sentence
+  // now sends them there; before that it had to say there was nowhere.
+  ok(/Edit Profile/.test(note), 'and points at the screen that records it');
 }
 
 // A figure the equations decline to produce is not a missing input.
