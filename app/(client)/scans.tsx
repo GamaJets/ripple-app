@@ -150,6 +150,7 @@ import { clientReportDoc, reportShareBlurb, type ReportInjury } from '../../src/
 import { useMeasurements, METRICS as MEASURE_METRICS } from '../../src/ui/measurements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useNow } from '../../src/ui/today';
+import { WeeklyVolumeCard, TopLiftsCard } from '../../src/ui/progressCards';
 // The Progress tab is where a member looks for "what have I worked" — reported
 // as exactly that. The full screen lives at /(client)/muscles; this is the
 // picture that gets somebody to it, because a list row named "Your Muscles"
@@ -2017,6 +2018,11 @@ export default function Scans() {
             </View>
           ) : null}
         </View>
+
+        {/* Training under the body: Trends' ten weeks and the Records board's
+            top three, each a shortcut to its screen (src/ui/progressCards). */}
+        <WeeklyVolumeCard />
+        <TopLiftsCard />
 
         {/* ── Body Composition: the latest scan as one picture ─────────────
             Fat, skeletal muscle and body water off the NEWEST scan, and only

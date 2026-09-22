@@ -59,6 +59,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
+import { TrainingDaysCard, WatchImportRow } from '../../src/ui/progressCards';
 import { shownStreak, longestStreak, thisWeekStats, streakRisk, freezeBudget } from '../../src/lib/streaks';
 // The one hydration rule: whether the glass count may be shown, whether it has
 // a goal to fill against, and the sentence for when it has not. Recovery and
@@ -1080,6 +1081,11 @@ export default function Home() {
             </ChartShell>
           </Section>
         ) : null}
+
+        {/* The last twelve weeks as Consistency draws them, then one row when
+            the watch holds workouts the log does not (src/ui/progressCards). */}
+        <TrainingDaysCard />
+        <WatchImportRow />
 
         {/* ── coming up: the booking, then the check-in ─────────────────────
             What is left of the Today card. Its adaptive row — Ready to Train,
