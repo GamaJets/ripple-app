@@ -1305,6 +1305,9 @@ export default function CoachProfile() {
           <ListRow icon="pencil" tone="teal" title="Your Documents"
             note="Your waivers and forms, and who accepted them"
             onPress={() => router.push('/(trainer)/documents')} />
+          <ListRow icon="grid" tone="brand" title="Resources"
+            note="Templates, videos, forms and the exercise library"
+            onPress={() => router.push('/(trainer)/resources')} />
         </Section>
 
 

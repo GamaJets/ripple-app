@@ -879,6 +879,8 @@
     "src/lib/recipePlan.test.ts",
     "src/lib/postCard.ts",
     "src/lib/postCard.test.ts",
+    "src/lib/blockEnding.ts",
+    "src/lib/blockEnding.test.ts",
     "src/lib/mealHorizon.ts",
     "src/lib/mealHorizon.test.ts",
     "src/lib/groceryPacks.test.ts",

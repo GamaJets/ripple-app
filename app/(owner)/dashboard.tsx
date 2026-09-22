@@ -483,6 +483,60 @@ export default function OwnerOverview() {
           </>}
         />
 
+        {/* Attention first (the Studio review, A): the setup prompts and
+            Needs a Look sit above the revenue hero and the week, so what
+            wants a decision is read before what only wants a glance. */}
+        {/* ── interrupts: things that need a decision now ─────────────────── */}
+        <View style={{ marginTop: sp.lg }}>
+          {/* First, because for a gym in this state everything under it is a
+              dash and this is the reason for all of them. Draws nothing at all
+              once the six are set — and nothing while the reads are in flight,
+              since an unsettled read leaves every item 'unknown' rather than
+              outstanding. */}
+          <SetUp items={setup} onGo={(r) => router.push(r as never)} />
+        </View>
+
+        {!loading && roll.trainers === 0 ? (
+          <Card style={{ marginTop: sp.sm }}>
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              {trainersUnread
+                ? 'Your trainers could not be read, so this is not "no trainers".'
+                : 'No trainers yet. Clients, delivered sessions and trainer health fill in as they join your gym.'}
+            </Text>
+            {trainersUnread ? (
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={refresh} />
+              </View>
+            ) : null}
+          </Card>
+        ) : null}
+
+        {/* ── needs a look: who, and WHY, on the row ────────────────────────
+            Was a Notice carrying a count, the most urgent name and a Review
+            button. A count sends an owner into a sheet to learn what the
+            warning is about; the sentence that flagged each trainer is already
+            in hand (`trainerHealth().reason`), so each one is a row that says
+            it. High before watch before idle, and within each the worst score
+            — the order `ranked` and `urgent` were already in.
+
+            The counts keep the `=== 1` form: "1 client ARE with them" shipped
+            from a `> 1`, and on a small gym one is the commonest case. */}
+        {!trainersUnknown && roll.atRiskCount > 0 ? (
+          <Section>
+            <SectionHead title="Needs a Look"
+              note={`${roll.atRiskCount} Trainer${roll.atRiskCount === 1 ? '' : 's'} · ${roll.atRiskClients} Client${roll.atRiskClients === 1 ? '' : 's'}`} />
+            {[...ranked.filter((r) => r.h.risk === 'high'), ...ranked.filter((r) => r.h.risk === 'watch'), ...ranked.filter((r) => r.h.risk !== 'ok' && r.h.risk !== 'high' && r.h.risk !== 'watch')]
+              .map(({ tr, h }, i) => (
+                <AttentionRow key={tr.id} divider={i > 0}
+                  icon="bell" name={tr.name} reason={h.reason}
+                  status={riskLabel(h.risk)}
+                  tone={h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : t.ink3}
+                  age={`${tr.clients} client${tr.clients === 1 ? '' : 's'} with them`}
+                  onPress={() => setSel(tr)} />
+              ))}
+          </Section>
+        ) : null}
+
         {/* ── the hero ───────────────────────────────────────────────────── */}
         {/* ── "Delivered" was the one word this figure could not carry ─────
             `roll.sessions30` is every booking whose clock has passed, WHATEVER
@@ -610,30 +664,6 @@ export default function OwnerOverview() {
             viewport — the same move Home made. */}
         <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
 
-        {/* ── interrupts: things that need a decision now ─────────────────── */}
-        <View style={{ marginTop: sp.lg }}>
-          {/* First, because for a gym in this state everything under it is a
-              dash and this is the reason for all of them. Draws nothing at all
-              once the six are set — and nothing while the reads are in flight,
-              since an unsettled read leaves every item 'unknown' rather than
-              outstanding. */}
-          <SetUp items={setup} onGo={(r) => router.push(r as never)} />
-        </View>
-
-        {!loading && roll.trainers === 0 ? (
-          <Card style={{ marginTop: sp.sm }}>
-            <Text style={{ ...ty.label, color: t.ink2 }}>
-              {trainersUnread
-                ? 'Your trainers could not be read, so this is not "no trainers".'
-                : 'No trainers yet. Clients, delivered sessions and trainer health fill in as they join your gym.'}
-            </Text>
-            {trainersUnread ? (
-              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-                <Ghost label="Try Again" onPress={refresh} />
-              </View>
-            ) : null}
-          </Card>
-        ) : null}
 
         {/* ── sessions by day: the last seven days of the diary ────────────
             The rota's own read (`fetchDemand`), over the seven gym days ending
@@ -663,31 +693,6 @@ export default function OwnerOverview() {
           ) : null}
         </Section>
 
-        {/* ── needs a look: who, and WHY, on the row ────────────────────────
-            Was a Notice carrying a count, the most urgent name and a Review
-            button. A count sends an owner into a sheet to learn what the
-            warning is about; the sentence that flagged each trainer is already
-            in hand (`trainerHealth().reason`), so each one is a row that says
-            it. High before watch before idle, and within each the worst score
-            — the order `ranked` and `urgent` were already in.
-
-            The counts keep the `=== 1` form: "1 client ARE with them" shipped
-            from a `> 1`, and on a small gym one is the commonest case. */}
-        {!trainersUnknown && roll.atRiskCount > 0 ? (
-          <Section>
-            <SectionHead title="Needs a Look"
-              note={`${roll.atRiskCount} Trainer${roll.atRiskCount === 1 ? '' : 's'} · ${roll.atRiskClients} Client${roll.atRiskClients === 1 ? '' : 's'}`} />
-            {[...ranked.filter((r) => r.h.risk === 'high'), ...ranked.filter((r) => r.h.risk === 'watch'), ...ranked.filter((r) => r.h.risk !== 'ok' && r.h.risk !== 'high' && r.h.risk !== 'watch')]
-              .map(({ tr, h }, i) => (
-                <AttentionRow key={tr.id} divider={i > 0}
-                  icon="bell" name={tr.name} reason={h.reason}
-                  status={riskLabel(h.risk)}
-                  tone={h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : t.ink3}
-                  age={`${tr.clients} client${tr.clients === 1 ? '' : 's'} with them`}
-                  onPress={() => setSel(tr)} />
-              ))}
-          </Section>
-        ) : null}
 
         {/* ── trainer health board ───────────────────────────────────────── */}
         <Section>

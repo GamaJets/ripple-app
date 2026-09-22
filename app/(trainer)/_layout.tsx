@@ -129,6 +129,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
         <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
         <Tabs.Screen name="videos" options={{ href: null, title: 'Videos' }} />
+        <Tabs.Screen name="resources" options={{ href: null, title: 'Resources' }} />
         <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
         <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
         <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />

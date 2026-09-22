@@ -712,13 +712,19 @@ export function ActionCard({
  * before the mockups passes, keeps the quiet circle and tints the icon, because
  * those callers mean "this row's read failed", and that is a status mark and
  * not decoration.
+ *
+ * `meta` is a third, smaller line under the note (a date, an amount) and is
+ * spoken after it. `trailing` is a slot before the chevron for a badge or a
+ * chip; it is drawn, not spoken, so anything it says that matters belongs in
+ * `note` or `meta` too.
  */
-export function ListRow({ icon, title, note, onPress, tone }: {
-  icon: IconName; title: string; note?: string; onPress: () => void; tone?: Tone | string;
+export function ListRow({ icon, title, note, meta, trailing, onPress, tone }: {
+  icon: IconName; title: string; note?: string; meta?: string; trailing?: ReactNode;
+  onPress: () => void; tone?: Tone | string;
 }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={note ? `${title}. ${note}` : title}
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={[title, note, meta].filter(Boolean).join('. ')}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: 6 }}>
       {isTone(tone) ? <IconPlate icon={icon} tone={tone} /> : (
         <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -728,7 +734,9 @@ export function ListRow({ icon, title, note, onPress, tone }: {
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
         {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
+        {meta ? <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{meta}</Text> : null}
       </View>
+      {trailing ? <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>{trailing}</View> : null}
       <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
     </Pressable>
   );

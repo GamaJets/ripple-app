@@ -369,6 +369,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // 'consent' are in the keywords because those are the words printed on the
   // thing the member is holding when they come looking for it.
   { key: 'coach-documents', label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents', icon: 'pencil', area: 'me', meGroup: 'coaching', keywords: 'document documents waiver par-q parq form consent house rules paperwork sign accept read coach studio' },
+  { key: 'resources', label: 'Resources', note: "Your coach's documents, the exercise library and every screen", route: '/(client)/resources', icon: 'grid', area: 'me', meGroup: 'coaching', keywords: 'resources resource library documents videos guides reading material hub' },
   // The bell in the dashboard header still opens the message thread, so this
   // row and the hub row are the only ways in. Listed as an inbox rather than as
   // "notifications", which in this app is also the name of a settings toggle —
@@ -514,6 +515,7 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'my-register', label: 'Your Register', note: 'What the registers you took actually say', route: '/(trainer)/my-register', icon: 'check', keywords: 'register attendance check in checkin checked in turned up showed up show rate fill rate headcount how many came walk in walkins waitlist my classes classes i taught taught teaching pay payroll per attendee per head paid right am i owed numbers from my check ins' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
   { key: 'library', label: 'Exercise Library', note: 'What you can program, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'resources', label: 'Resources', note: 'Templates, videos, forms and the exercise library in one place', route: '/(trainer)/resources', icon: 'grid', keywords: 'resources resource hub library templates videos documents forms guides material' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
   { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
