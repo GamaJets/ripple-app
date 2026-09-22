@@ -120,6 +120,7 @@ import { useTheme } from '../../src/ui/components';
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow, useToday } from '../../src/ui/today';
 import { BusinessHead } from '../../src/ui/BusinessSwitch';
+import { CoachPosts } from '../../src/ui/coach/CoachPosts';
 import { Rule, Section, SectionHead, PageHead, Ghost, Card, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
@@ -1708,6 +1709,8 @@ export default function CoachMoney() {
             note="The clients who referred somebody, and what those referrals have been worth"
             onPress={() => router.push('/(trainer)/referrals')} />
         </Section>
+
+        <CoachPosts />
 
 
         <Section>
