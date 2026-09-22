@@ -1426,7 +1426,7 @@ export default function FoodLog() {
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{f.name}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
- {`P ${num(f.protein)} · C ${num(f.carbs)} · F ${num(f.fat)}`}{f.count > 1 ? ` · logged ${num(f.count)} times` : ''}
+ {macroWords(f.protein, f.carbs, f.fat)}{f.count > 1 ? ` · logged ${num(f.count)} times` : ''}
  </Text>
  </View>
  <TonedChip tone="orange" label={`${num(f.kcal)} kcal`} />
