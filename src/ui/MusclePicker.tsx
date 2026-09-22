@@ -127,7 +127,7 @@ export function MusclePicker({ chosen, onChange }: {
           <View key={r.key}>
             {heading && i > 0 ? (
               <Text accessibilityRole="header"
-                style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>{heading}</Text>
+                style={{ ...ty.micro, ...font('700'), color: t.ink2, marginTop: sp.lg }}>{heading}</Text>
             ) : null}
             <View style={{
               paddingVertical: sp.md,
