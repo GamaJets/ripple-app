@@ -193,6 +193,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="my-coach" options={{ href: null, title: 'Your Coach' }} />
       <Tabs.Screen name="coach-documents" options={{ href: null, title: 'Paperwork' }} />
       <Tabs.Screen name="resources" options={{ href: null, title: 'Resources' }} />
+      <Tabs.Screen name="assessments" options={{ href: null, title: 'My Assessments' }} />
       <Tabs.Screen name="agreements" options={{ href: null, title: 'Gym Paperwork' }} />
       <Tabs.Screen name="standing" options={{ href: null, title: 'Standing Appointments' }} />
       <Tabs.Screen name="notices" options={{ href: null, title: 'Notices' }} />

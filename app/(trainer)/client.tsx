@@ -2237,6 +2237,11 @@ export default function ClientScreen() {
             tone={scansFailed ? t.warn : 'blue'}
             onPress={go('/(trainer)/client-body')} />
 
+          {/* Movement, strength, mobility and custom tests. The client reads
+              the same rows under My Assessments. */}
+          <ListRow icon="target" title="Assessments" note="Record a test and compare to last time"
+            tone="teal" onPress={go('/(trainer)/assessments')} />
+
           {/* Directly under the body composition and above the plan, because
               this is the only row on the screen about what has already
               happened. Everything else here is an intention — a goal, a marked

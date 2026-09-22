@@ -9,17 +9,17 @@ is paid again on every turn of the session that opened it.
 
 | lines | ~tok | file |
 | ----: | ---: | ---- |
-| 7,713 | 123k | `app/(client)/workouts.tsx` |
+| 7,721 | 123k | `app/(client)/workouts.tsx` |
 | 5,391 | 84k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
 | 5,103 | 81k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
-| 3,313 | 50k | `app/(trainer)/client.tsx` |
+| 3,318 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
-| 3,204 | 54k | `app/(client)/nutrition.tsx` |
-| 3,134 | 51k | `app/(client)/scans.tsx` |
+| 3,207 | 54k | `app/(client)/nutrition.tsx` |
+| 3,136 | 51k | `app/(client)/scans.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
 | 2,574 | 38k | `app/(trainer)/log-session.tsx` |
@@ -34,7 +34,7 @@ is paid again on every turn of the session that opened it.
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
 | 2,074 | 31k | `app/(trainer)/client-training.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
-| 2,003 | 33k | `app/(trainer)/analytics.tsx` |
+| 2,005 | 33k | `app/(trainer)/analytics.tsx` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
 | 1,793 | 23k | `src/ui/messaging.ts` |
 | 1,792 | 23k | `studio-web/app/analytics/page.tsx` |
@@ -55,13 +55,13 @@ is paid again on every turn of the session that opened it.
 | 1,554 | 23k | `app/(owner)/members.tsx` |
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
-| 1,506 | 23k | `app/(trainer)/client-body.tsx` |
+| 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
+Total: 47 files, 119,027 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
-7,713 lines · ~123k tokens · 167 anchors
+7,721 lines · ~123k tokens · 167 anchors
 
 ```
 54-103        §        the block, the week of it this client is on, and the three fields a set
@@ -215,22 +215,22 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 5827-5837     fn           counts
 5838-5869     §        and why a bodyweight set is not a zero
 5870-5874     fn           workingSets
-5875-6110     fn           exDone
-6111-6144     §        the two things this movement is, beyond its name
-6145-6173     fn         variedPlan
-6174-6191     fn         tickPlanned
-6192-6339     fn         untickLast
-6340-6377     fn         nav
-6378-7362     fn         repsWord
-7363-7381     §        What was already here, and what the report actually asked for
-7382-7401     §        What happens to the sets, and to a PR
-7402-7420     §        The unit
-7421-7464     fn       EditEntrySheet
-7465-7466     fn         setAt
-7467-7484     fn         flagAt
-7485-7491     fn         dayLabel
-7492-7531     fn         save
-7532-7713     fn         setCount
+5875-6118     fn           exDone
+6119-6152     §        the two things this movement is, beyond its name
+6153-6181     fn         variedPlan
+6182-6199     fn         tickPlanned
+6200-6347     fn         untickLast
+6348-6385     fn         nav
+6386-7370     fn         repsWord
+7371-7389     §        What was already here, and what the report actually asked for
+7390-7409     §        What happens to the sets, and to a PR
+7410-7428     §        The unit
+7429-7472     fn       EditEntrySheet
+7473-7474     fn         setAt
+7475-7492     fn         flagAt
+7493-7499     fn         dayLabel
+7500-7539     fn         save
+7540-7721     fn         setCount
 ```
 
 ## `app/(trainer)/builder.tsx`
@@ -1065,7 +1065,7 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(trainer)/client.tsx`
 
-3,313 lines · ~50k tokens · 40 anchors
+3,318 lines · ~50k tokens · 40 anchors
 
 ```
 3-14          §        Why this screen exists
@@ -1107,7 +1107,7 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 1551-1605     fn         reloadEverything
 1606-1618     fn         go
 1619-1643     fn         sendAsk
-1644-3313     fn         askIntake
+1644-3318     fn         askIntake
 ```
 
 ## `studio-web/app/close/page.tsx`
@@ -1171,189 +1171,189 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(client)/nutrition.tsx`
 
-3,204 lines · ~54k tokens · 101 anchors
+3,207 lines · ~54k tokens · 101 anchors
 
 ```
-20-154        fn       cuisineLabel
-155-189       §        where the calorie target came from (TF-29)
-190-194       fn       rateIn
-195-204       fn       onDate
-205-208       fn       targetBasis
-209-252       fn         w
-253-258       §        real recipes in the list
-259-261       fn       sameDish
-262-266       fn       dishKey
-267-284       fn       openLink
-285-299       type     PlannedRead
-300-308       fn       PlannedRecipeRead
-309-405       default  Nutrition
-406-434       §        real recipes
-435-458       fn         onRecipeRead
-459-479       fn         logPlanned
-480-494       §        whose shop, and which week
-495-507       fn         grocWeekKey
-508-555       §        whose swaps
-556-615       §        and whose planned recipes
-616-616       fn         toggleCuisine
-617-633       fn           next
-634-634       fn         saveDislikes
-635-663       fn         addDislike
-664-677       fn         pull
-678-730       fn         removeMeal
-731-755       fn         photoLog
-756-807       fn         runPhotoLog
-808-808       fn         barcodeLog
-809-827       fn         describeLog
-828-849       fn           whole
-850-851       fn             outs
-852-852       fn             refused
-853-882       fn             unsent
-883-884       fn         adjustFor
-885-893       fn         cyclingAdjust
-894-894       fn         openWeightGoal
-895-910       §        and why every one of these is memoised
-911-928       fn         energyPlan
-929-949       §        which day of the coach's week the member is standing in
-950-952       fn         coachOverride
-953-958       fn         input
-959-959       fn         snacks
-960-960       fn         planHasSnacks
-961-962       fn         planSlots
-963-986       §        the plan, with the planned recipes in it
-987-998       fn         recipeDish
-999-1007      §        the days on screen
-1008-1020     fn         days
-1021-1025     fn         coachRefs
-1026-1029     fn         plannedSrc
-1030-1031     fn         refAt
-1032-1042     fn         withRecipes
-1043-1045     fn         waitingIn
-1046-1047     fn         todayPlan
-1048-1048     fn         todayWaiting
-1049-1053     fn         slotMeals
-1054-1061     fn         genSlotMeals
-1062-1069     fn         choose
-1070-1086     fn         openMeal
-1087-1097     fn         planRecipe
-1098-1105     fn         unplanRecipe
-1106-1122     fn         slotOptions
-1123-1139     fn           flavour
-1140-1141     fn         coachPick
-1142-1156     fn         swap
-1157-1190     §        the recipe search, and only when asked
-1191-1211     §        Today's meals are real recipes
-1212-1222     fn           open
-1223-1245     fn               pick
-1246-1258     fn         recipeInPlan
-1259-1260     fn         coachWeekDay
-1261-1270     fn         week
-1271-1277     fn         weekPlan
-1278-1278     fn         weekWaiting
-1279-1281     fn         weekUnread
-1282-1282     fn         recipeWeek
-1283-1300     fn         groc
-1301-1303     fn         repeatsOn
-1304-1310     §        the exclusions that could not be honoured, computed once
-1311-1316     fn         gapNote
-1317-1327     fn         dislikeNote
-1328-1334     fn         weekAllergens
-1335-1335     fn         grocCount
-1336-1337     fn         grocKeys
-1338-1340     fn         grocNeed
-1341-1341     fn         grocLine
-1342-1342     fn         grocChecked
-1343-1350     fn         toggleGroc
-1351-1401     fn         shareGrocery
-1402-1404     fn         sharePlan
-1405-1405     fn           rows
-1406-1451     fn           labels
-1452-1495     §        and whether that burn is a CURRENT reading
-1496-1573     §        water
-1574-1581     §        today's list: the rows, and how one is drawn
-1582-1599     fn         matchesQuery
-1600-1606     fn         macroLines
-1607-1616     fn         mealRow
-1617-1726     fn           planned
-1727-3204     §        what a horizon costs, and the bound on it
+21-155        fn       cuisineLabel
+156-190       §        where the calorie target came from (TF-29)
+191-195       fn       rateIn
+196-205       fn       onDate
+206-209       fn       targetBasis
+210-253       fn         w
+254-259       §        real recipes in the list
+260-262       fn       sameDish
+263-267       fn       dishKey
+268-285       fn       openLink
+286-300       type     PlannedRead
+301-309       fn       PlannedRecipeRead
+310-406       default  Nutrition
+407-435       §        real recipes
+436-459       fn         onRecipeRead
+460-480       fn         logPlanned
+481-495       §        whose shop, and which week
+496-508       fn         grocWeekKey
+509-556       §        whose swaps
+557-618       §        and whose planned recipes
+619-619       fn         toggleCuisine
+620-636       fn           next
+637-637       fn         saveDislikes
+638-666       fn         addDislike
+667-680       fn         pull
+681-733       fn         removeMeal
+734-758       fn         photoLog
+759-810       fn         runPhotoLog
+811-811       fn         barcodeLog
+812-830       fn         describeLog
+831-852       fn           whole
+853-854       fn             outs
+855-855       fn             refused
+856-885       fn             unsent
+886-887       fn         adjustFor
+888-896       fn         cyclingAdjust
+897-897       fn         openWeightGoal
+898-913       §        and why every one of these is memoised
+914-931       fn         energyPlan
+932-952       §        which day of the coach's week the member is standing in
+953-955       fn         coachOverride
+956-961       fn         input
+962-962       fn         snacks
+963-963       fn         planHasSnacks
+964-965       fn         planSlots
+966-989       §        the plan, with the planned recipes in it
+990-1001      fn         recipeDish
+1002-1010     §        the days on screen
+1011-1023     fn         days
+1024-1028     fn         coachRefs
+1029-1032     fn         plannedSrc
+1033-1034     fn         refAt
+1035-1045     fn         withRecipes
+1046-1048     fn         waitingIn
+1049-1050     fn         todayPlan
+1051-1051     fn         todayWaiting
+1052-1056     fn         slotMeals
+1057-1064     fn         genSlotMeals
+1065-1072     fn         choose
+1073-1089     fn         openMeal
+1090-1100     fn         planRecipe
+1101-1108     fn         unplanRecipe
+1109-1125     fn         slotOptions
+1126-1142     fn           flavour
+1143-1144     fn         coachPick
+1145-1159     fn         swap
+1160-1193     §        the recipe search, and only when asked
+1194-1214     §        Today's meals are real recipes
+1215-1225     fn           open
+1226-1248     fn               pick
+1249-1261     fn         recipeInPlan
+1262-1263     fn         coachWeekDay
+1264-1273     fn         week
+1274-1280     fn         weekPlan
+1281-1281     fn         weekWaiting
+1282-1284     fn         weekUnread
+1285-1285     fn         recipeWeek
+1286-1303     fn         groc
+1304-1306     fn         repeatsOn
+1307-1313     §        the exclusions that could not be honoured, computed once
+1314-1319     fn         gapNote
+1320-1330     fn         dislikeNote
+1331-1337     fn         weekAllergens
+1338-1338     fn         grocCount
+1339-1340     fn         grocKeys
+1341-1343     fn         grocNeed
+1344-1344     fn         grocLine
+1345-1345     fn         grocChecked
+1346-1353     fn         toggleGroc
+1354-1404     fn         shareGrocery
+1405-1407     fn         sharePlan
+1408-1408     fn           rows
+1409-1454     fn           labels
+1455-1498     §        and whether that burn is a CURRENT reading
+1499-1576     §        water
+1577-1584     §        today's list: the rows, and how one is drawn
+1585-1602     fn         matchesQuery
+1603-1609     fn         macroLines
+1610-1619     fn         mealRow
+1620-1729     fn           planned
+1730-3207     §        what a horizon costs, and the bound on it
 ```
 
 ## `app/(client)/scans.tsx`
 
-3,134 lines · ~51k tokens · 72 anchors
+3,136 lines · ~51k tokens · 72 anchors
 
 ```
-140-224       §        the handover document
-225-244       fn       consentWhen
-245-287       §        The two invokes that used to live here
-288-288       fn       Wheel
-289-342       fn         step
-343-347       fn       coachSubject
-348-362       default  Scans
-363-375       §        sharing and exporting this record
-376-394       fn         exportRows
-395-395       fn         sendPdf
-396-396       fn         sendCsv
-397-398       fn         sendSummary
-399-433       §        the handover document
-434-445       fn         muscleBoard7
-446-453       fn         muscleShading7
-454-474       fn         muscleWeek
-475-536       fn         buildReport
-537-551       fn         shareForProfessional
-552-580       fn         shareProgress
-581-626       fn           options
-627-640       fn         fieldFromKg
-641-712       §        who can see these
-713-730       fn         _connectedKey
-731-761       fn         devWeight
-762-764       fn         pull
-765-795       §        Correcting a scan
-796-817       §        the correction sheet's own date wheel
-818-818       fn         scanDateISO
-819-834       fn         scanDateLabel
-835-843       fn         pick
-844-936       fn         runSheetRead
-937-954       fn         saveScan
-955-998       §        the muscle figure, against the weight beside it
-999-1095      §        what the OTHER scans say, and whether we heard them
-1096-1109     fn           sign
-1110-1113     §        progress photos
-1114-1130     fn         loadPhotos
-1131-1149     fn         loadShares
-1150-1168     fn         loadPubs
-1169-1195     fn         allowPublishing
-1196-1216     fn         stopPublishing
-1217-1230     fn         savePhoto
-1231-1281     §        The three arguments this call has always accepted and never been
-1282-1282     fn         physiqueCheck
-1283-1342     fn           keep
-1343-1354     fn         exifTakenAt
-1355-1388     fn         addPhoto
-1389-1428     fn         removePhoto
-1429-1455     fn         sendToCoach
-1456-1481     fn         takeBackFromCoach
-1482-1485     fn         photoActions
-1486-1504     fn           buttons
-1505-1506     fn         toggleCmp
-1507-1508     fn         chrono
-1509-1527     fn         wsv
-1528-1529     fn         editing
-1530-1560     fn         openEdit
-1561-1566     fn         eWheelISO
-1567-1580     fn         saveEdit
-1581-1603     §        the date, and the consequence said before it happens
-1604-1644     fn               proceed
-1645-1683     fn         removeScan
-1684-1702     §        where each figure came from, and when
-1703-1726     fn         priorOf
-1727-1761     fn         progressTrendReads
-1762-1787     fn         dlt
-1788-1794     §        the latest scan as one picture
-1795-2249     fn         comp
-2250-2301     fn               p
-2302-2520     fn               p
-2521-2547     §        this row, in the member's own unit
-2548-3134     fn               series
+141-225       §        the handover document
+226-245       fn       consentWhen
+246-288       §        The two invokes that used to live here
+289-289       fn       Wheel
+290-343       fn         step
+344-348       fn       coachSubject
+349-363       default  Scans
+364-376       §        sharing and exporting this record
+377-395       fn         exportRows
+396-396       fn         sendPdf
+397-397       fn         sendCsv
+398-399       fn         sendSummary
+400-434       §        the handover document
+435-446       fn         muscleBoard7
+447-454       fn         muscleShading7
+455-475       fn         muscleWeek
+476-537       fn         buildReport
+538-552       fn         shareForProfessional
+553-581       fn         shareProgress
+582-628       fn           options
+629-642       fn         fieldFromKg
+643-714       §        who can see these
+715-732       fn         _connectedKey
+733-763       fn         devWeight
+764-766       fn         pull
+767-797       §        Correcting a scan
+798-819       §        the correction sheet's own date wheel
+820-820       fn         scanDateISO
+821-836       fn         scanDateLabel
+837-845       fn         pick
+846-938       fn         runSheetRead
+939-956       fn         saveScan
+957-1000      §        the muscle figure, against the weight beside it
+1001-1097     §        what the OTHER scans say, and whether we heard them
+1098-1111     fn           sign
+1112-1115     §        progress photos
+1116-1132     fn         loadPhotos
+1133-1151     fn         loadShares
+1152-1170     fn         loadPubs
+1171-1197     fn         allowPublishing
+1198-1218     fn         stopPublishing
+1219-1232     fn         savePhoto
+1233-1283     §        The three arguments this call has always accepted and never been
+1284-1284     fn         physiqueCheck
+1285-1344     fn           keep
+1345-1356     fn         exifTakenAt
+1357-1390     fn         addPhoto
+1391-1430     fn         removePhoto
+1431-1457     fn         sendToCoach
+1458-1483     fn         takeBackFromCoach
+1484-1487     fn         photoActions
+1488-1506     fn           buttons
+1507-1508     fn         toggleCmp
+1509-1510     fn         chrono
+1511-1529     fn         wsv
+1530-1531     fn         editing
+1532-1562     fn         openEdit
+1563-1568     fn         eWheelISO
+1569-1582     fn         saveEdit
+1583-1605     §        the date, and the consequence said before it happens
+1606-1646     fn               proceed
+1647-1685     fn         removeScan
+1686-1704     §        where each figure came from, and when
+1705-1728     fn         priorOf
+1729-1763     fn         progressTrendReads
+1764-1789     fn         dlt
+1790-1796     §        the latest scan as one picture
+1797-2251     fn         comp
+2252-2303     fn               p
+2304-2522     fn               p
+2523-2549     §        this row, in the member's own unit
+2550-3136     fn               series
 ```
 
 ## `studio-web/app/door/page.tsx`
@@ -2277,53 +2277,53 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(trainer)/analytics.tsx`
 
-2,003 lines · ~33k tokens · 44 anchors
+2,005 lines · ~33k tokens · 44 anchors
 
 ```
-11-107        §        Every figure here waits for a whole read
-108-145       fn       WindowFigure
-146-219       default  TrainerAnalytics
-220-291       fn         driftSubjects
-292-372       fn         month
-373-396       fn         payingClients
-397-401       fn         _adhKnown
-402-428       fn         avgAdh
-429-429       fn         onTrack
-430-430       fn         watch
-431-452       fn         riskCount
-453-465       fn         noRecord
-466-466       fn         _atRiskIds
-467-510       fn         atRiskMonth
-511-528       fn         loadCurrency
-529-531       fn         noCur
-532-556       fn         priced
-557-572       fn         loadTakings
-573-586       fn         takenRows
-587-594       fn         takingsReads
-595-599       fn         takenStrands
-600-646       fn         takenMonth
-647-648       fn         sourceDonuts
-649-682       fn             part
-683-698       fn         saveGoals
-699-830       fn         genDigest
-831-852       §        AND THE KEY CHANGED, WHICH IS NOT A DETAIL
-853-907       fn         chartMonths
-908-910       fn         rangeDef
-911-911       fn         win
-912-912       fn         prevWin
-913-913       fn         buckets
-914-917       fn         prevBuckets
-918-921       fn         rangeIds
-922-940       fn         rangeGap
-941-944       fn         curFigures
-945-948       fn         prevFigures
-949-953       fn         rangeLabels
-954-974       fn         rangeDeltaLine
-975-981       fn         rangeChip
-982-987       fn         upward
-988-1001      fn         countOf
-1002-1021     fn         pull
-1022-2003     fn         exportAnalytics
+11-108        §        Every figure here waits for a whole read
+109-146       fn       WindowFigure
+147-220       default  TrainerAnalytics
+221-292       fn         driftSubjects
+293-373       fn         month
+374-397       fn         payingClients
+398-402       fn         _adhKnown
+403-429       fn         avgAdh
+430-430       fn         onTrack
+431-431       fn         watch
+432-453       fn         riskCount
+454-466       fn         noRecord
+467-467       fn         _atRiskIds
+468-511       fn         atRiskMonth
+512-529       fn         loadCurrency
+530-532       fn         noCur
+533-557       fn         priced
+558-573       fn         loadTakings
+574-587       fn         takenRows
+588-595       fn         takingsReads
+596-600       fn         takenStrands
+601-647       fn         takenMonth
+648-649       fn         sourceDonuts
+650-683       fn             part
+684-699       fn         saveGoals
+700-831       fn         genDigest
+832-853       §        AND THE KEY CHANGED, WHICH IS NOT A DETAIL
+854-909       fn         chartMonths
+910-912       fn         rangeDef
+913-913       fn         win
+914-914       fn         prevWin
+915-915       fn         buckets
+916-919       fn         prevBuckets
+920-923       fn         rangeIds
+924-942       fn         rangeGap
+943-946       fn         curFigures
+947-950       fn         prevFigures
+951-955       fn         rangeLabels
+956-976       fn         rangeDeltaLine
+977-983       fn         rangeChip
+984-989       fn         upward
+990-1003      fn         countOf
+1004-1023     fn         pull
+1024-2005     fn         exportAnalytics
 ```
 
 ## `studio-web/app/export/page.tsx`
@@ -3369,7 +3369,7 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(trainer)/client-body.tsx`
 
-1,506 lines · ~23k tokens · 24 anchors
+1,507 lines · ~23k tokens · 24 anchors
 
 ```
 3-20          §        Why this screen exists
@@ -3379,21 +3379,21 @@ Total: 47 files, 119,006 lines, ~1723k tokens if every one were read whole.
 54-73         §        The rest of the sheet
 74-81         §        And the tape, which is the other half of "updated measurements"
 82-94         §        The voice
-95-198        §        Four states, kept apart
-199-223       type     CompositionScanRow
-224-307       default  ClientBody
-308-425       fn         load
-426-469       fn         client
-470-513       fn         pull
-514-523       fn         board
-524-524       fn         compTrends
-525-528       fn         compInsights
-529-532       fn         compScans
-533-544       fn         tape
-545-557       fn         wellnessView
-558-588       fn         chip
-589-609       fn         heroSection
-610-812       fn           vals
-813-890       fn         compRow
-891-1506      fn         siteRow
+95-199        §        Four states, kept apart
+200-224       type     CompositionScanRow
+225-308       default  ClientBody
+309-426       fn         load
+427-470       fn         client
+471-514       fn         pull
+515-524       fn         board
+525-525       fn         compTrends
+526-529       fn         compInsights
+530-533       fn         compScans
+534-545       fn         tape
+546-558       fn         wellnessView
+559-589       fn         chip
+590-610       fn         heroSection
+611-813       fn           vals
+814-891       fn         compRow
+892-1507      fn         siteRow
 ```
