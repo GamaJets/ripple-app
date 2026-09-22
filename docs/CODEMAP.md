@@ -19,7 +19,7 @@ is paid again on every turn of the session that opened it.
 | 3,318 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
 | 3,207 | 54k | `app/(client)/nutrition.tsx` |
-| 3,136 | 51k | `app/(client)/scans.tsx` |
+| 3,142 | 51k | `app/(client)/scans.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
 | 2,574 | 38k | `app/(trainer)/log-session.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,027 lines, ~1723k tokens if every one were read whole.
+Total: 47 files, 119,033 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1279,81 +1279,81 @@ Total: 47 files, 119,027 lines, ~1723k tokens if every one were read whole.
 
 ## `app/(client)/scans.tsx`
 
-3,136 lines · ~51k tokens · 72 anchors
+3,142 lines · ~51k tokens · 72 anchors
 
 ```
-141-225       §        the handover document
-226-245       fn       consentWhen
-246-288       §        The two invokes that used to live here
-289-289       fn       Wheel
-290-343       fn         step
-344-348       fn       coachSubject
-349-363       default  Scans
-364-376       §        sharing and exporting this record
-377-395       fn         exportRows
-396-396       fn         sendPdf
-397-397       fn         sendCsv
-398-399       fn         sendSummary
-400-434       §        the handover document
-435-446       fn         muscleBoard7
-447-454       fn         muscleShading7
-455-475       fn         muscleWeek
-476-537       fn         buildReport
-538-552       fn         shareForProfessional
-553-581       fn         shareProgress
-582-628       fn           options
-629-642       fn         fieldFromKg
-643-714       §        who can see these
-715-732       fn         _connectedKey
-733-763       fn         devWeight
-764-766       fn         pull
-767-797       §        Correcting a scan
-798-819       §        the correction sheet's own date wheel
-820-820       fn         scanDateISO
-821-836       fn         scanDateLabel
-837-845       fn         pick
-846-938       fn         runSheetRead
-939-956       fn         saveScan
-957-1000      §        the muscle figure, against the weight beside it
-1001-1097     §        what the OTHER scans say, and whether we heard them
-1098-1111     fn           sign
-1112-1115     §        progress photos
-1116-1132     fn         loadPhotos
-1133-1151     fn         loadShares
-1152-1170     fn         loadPubs
-1171-1197     fn         allowPublishing
-1198-1218     fn         stopPublishing
-1219-1232     fn         savePhoto
-1233-1283     §        The three arguments this call has always accepted and never been
-1284-1284     fn         physiqueCheck
-1285-1344     fn           keep
-1345-1356     fn         exifTakenAt
-1357-1390     fn         addPhoto
-1391-1430     fn         removePhoto
-1431-1457     fn         sendToCoach
-1458-1483     fn         takeBackFromCoach
-1484-1487     fn         photoActions
-1488-1506     fn           buttons
-1507-1508     fn         toggleCmp
-1509-1510     fn         chrono
-1511-1529     fn         wsv
-1530-1531     fn         editing
-1532-1562     fn         openEdit
-1563-1568     fn         eWheelISO
-1569-1582     fn         saveEdit
-1583-1605     §        the date, and the consequence said before it happens
-1606-1646     fn               proceed
-1647-1685     fn         removeScan
-1686-1704     §        where each figure came from, and when
-1705-1728     fn         priorOf
-1729-1763     fn         progressTrendReads
-1764-1789     fn         dlt
-1790-1796     §        the latest scan as one picture
-1797-2251     fn         comp
-2252-2303     fn               p
-2304-2522     fn               p
-2523-2549     §        this row, in the member's own unit
-2550-3136     fn               series
+141-226       §        the handover document
+227-246       fn       consentWhen
+247-289       §        The two invokes that used to live here
+290-290       fn       Wheel
+291-344       fn         step
+345-349       fn       coachSubject
+350-364       default  Scans
+365-377       §        sharing and exporting this record
+378-396       fn         exportRows
+397-397       fn         sendPdf
+398-398       fn         sendCsv
+399-400       fn         sendSummary
+401-435       §        the handover document
+436-447       fn         muscleBoard7
+448-455       fn         muscleShading7
+456-476       fn         muscleWeek
+477-538       fn         buildReport
+539-553       fn         shareForProfessional
+554-582       fn         shareProgress
+583-629       fn           options
+630-643       fn         fieldFromKg
+644-715       §        who can see these
+716-733       fn         _connectedKey
+734-764       fn         devWeight
+765-767       fn         pull
+768-798       §        Correcting a scan
+799-820       §        the correction sheet's own date wheel
+821-821       fn         scanDateISO
+822-837       fn         scanDateLabel
+838-846       fn         pick
+847-939       fn         runSheetRead
+940-957       fn         saveScan
+958-1001      §        the muscle figure, against the weight beside it
+1002-1098     §        what the OTHER scans say, and whether we heard them
+1099-1112     fn           sign
+1113-1116     §        progress photos
+1117-1133     fn         loadPhotos
+1134-1152     fn         loadShares
+1153-1171     fn         loadPubs
+1172-1198     fn         allowPublishing
+1199-1219     fn         stopPublishing
+1220-1233     fn         savePhoto
+1234-1284     §        The three arguments this call has always accepted and never been
+1285-1285     fn         physiqueCheck
+1286-1345     fn           keep
+1346-1357     fn         exifTakenAt
+1358-1391     fn         addPhoto
+1392-1431     fn         removePhoto
+1432-1458     fn         sendToCoach
+1459-1484     fn         takeBackFromCoach
+1485-1488     fn         photoActions
+1489-1507     fn           buttons
+1508-1509     fn         toggleCmp
+1510-1511     fn         chrono
+1512-1530     fn         wsv
+1531-1532     fn         editing
+1533-1563     fn         openEdit
+1564-1569     fn         eWheelISO
+1570-1583     fn         saveEdit
+1584-1606     §        the date, and the consequence said before it happens
+1607-1647     fn               proceed
+1648-1686     fn         removeScan
+1687-1705     §        where each figure came from, and when
+1706-1729     fn         priorOf
+1730-1764     fn         progressTrendReads
+1765-1790     fn         dlt
+1791-1797     §        the latest scan as one picture
+1798-2257     fn         comp
+2258-2309     fn               p
+2310-2528     fn               p
+2529-2555     §        this row, in the member's own unit
+2556-3142     fn               series
 ```
 
 ## `studio-web/app/door/page.tsx`

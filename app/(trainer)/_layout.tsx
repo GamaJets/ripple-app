@@ -102,6 +102,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="client" options={{ href: null, title: 'Client' }} />
         <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
         <Tabs.Screen name="assessments" options={{ href: null, title: 'Assessments' }} />
+        <Tabs.Screen name="community" options={{ href: null, title: 'Coach Community' }} />
         <Tabs.Screen name="client-training" options={{ href: null, title: 'Their Training' }} />
         <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
         <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
@@ -131,6 +132,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
         <Tabs.Screen name="videos" options={{ href: null, title: 'Videos' }} />
         <Tabs.Screen name="resources" options={{ href: null, title: 'Resources' }} />
+        <Tabs.Screen name="marketplace" options={{ href: null, title: 'Marketplace' }} />
         <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
         <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
         <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />

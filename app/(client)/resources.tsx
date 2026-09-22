@@ -24,6 +24,8 @@ export default function Resources() {
             onPress={() => router.push({ pathname: '/(client)/coach-documents', params: { kind: 'paperwork' } })} />
           <ListRow icon="video" tone="blue" title="Exercise Library" note="How-to videos from your coach"
             onPress={() => router.push('/(client)/library')} />
+          <ListRow icon="trending" tone="amber" title="Marketplace" note="Programs you can buy from coaches at your gym"
+            onPress={() => router.push('/(client)/marketplace')} />
         </Section>
 
         {/* Guides are coach documents of their own kind (part 3290): the

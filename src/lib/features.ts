@@ -290,6 +290,7 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'goal', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal', icon: 'target', area: 'progress', meGroup: 'body', keywords: 'target projection' },
   { key: 'measurements', label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements', icon: 'ruler', area: 'progress', meGroup: 'body', keywords: 'waist chest arms tape' },
   { key: 'achievements', label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements', icon: 'trophy', area: 'progress', meGroup: 'body', keywords: 'badges milestones' },
+  { key: 'community', label: 'Community', note: 'Your gym’s private board: posts, likes and comments', route: '/(client)/community', icon: 'chat', area: 'me', meGroup: 'gym', keywords: 'community feed post posts social board wall group members gym friends comment like share chat forum' },
   { key: 'challenges', label: 'Challenges', note: 'Join challenges · climb the leaderboard', route: '/(client)/challenges', icon: 'trophy', area: 'progress', keywords: 'challenge leaderboard competition streak rankings compete' },
   { key: 'cards', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards', icon: 'share', area: 'progress', meGroup: 'body', keywords: 'share card' },
   // Takes `before` and `after` and is listed anyway, which the rule at the top
@@ -370,6 +371,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // 'consent' are in the keywords because those are the words printed on the
   // thing the member is holding when they come looking for it.
   { key: 'coach-documents', label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents', icon: 'pencil', area: 'me', meGroup: 'coaching', keywords: 'document documents waiver par-q parq form consent house rules paperwork sign accept read coach studio' },
+  { key: 'marketplace', label: 'Marketplace', note: 'Programs your gym’s coaches sell, and the ones you bought', route: '/(client)/marketplace', icon: 'grid', area: 'me', meGroup: 'coaching', keywords: 'marketplace shop store buy program programs plan purchase coach sell' },
   { key: 'resources', label: 'Resources', note: "Your coach's documents, the exercise library and every screen", route: '/(client)/resources', icon: 'grid', area: 'me', meGroup: 'coaching', keywords: 'resources resource library documents videos guides reading material hub' },
   // The bell in the dashboard header still opens the message thread, so this
   // row and the hub row are the only ways in. Listed as an inbox rather than as
@@ -516,6 +518,7 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'my-register', label: 'Your Register', note: 'What the registers you took actually say', route: '/(trainer)/my-register', icon: 'check', keywords: 'register attendance check in checkin checked in turned up showed up show rate fill rate headcount how many came walk in walkins waitlist my classes classes i taught taught teaching pay payroll per attendee per head paid right am i owed numbers from my check ins' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
   { key: 'library', label: 'Exercise Library', note: 'What you can program, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'marketplace', label: 'Marketplace', note: 'Sell your programs to members of your gym', route: '/(trainer)/marketplace', icon: 'grid', keywords: 'marketplace shop store sell program programs template listing price sales' },
   { key: 'resources', label: 'Resources', note: 'Templates, videos, forms and the exercise library in one place', route: '/(trainer)/resources', icon: 'grid', keywords: 'resources resource hub library templates videos documents forms guides material' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
@@ -747,6 +750,7 @@ export const TRAINER_NAV: NavItem[] = [
   // the two they were thinking of. Both rows carry it and their notes are what
   // separate them.
   { key: 'templates-messages', label: 'Saved Messages', note: 'The replies you write once and send again', route: '/(trainer)/templates-messages', icon: 'message', keywords: 'saved messages message template templates canned reply quick reply snippet shortcut boilerplate welcome message check in message write once reuse again standard wording' },
+  { key: 'community', label: 'Coach Community', note: 'Members and Coaches boards, and reports to moderate', route: '/(trainer)/community', icon: 'chat', keywords: 'community feed post posts board discussion forum members coaches staff moderate moderation report reports hide block social' },
 ];
 
 export const OWNER_NAV: NavItem[] = [
@@ -782,6 +786,7 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'feedback', label: 'Feedback Inbox', note: 'What testers are saying', route: '/(owner)/feedback', icon: 'message', keywords: 'feedback testers bugs ideas reviews' },
   { key: 'settings', label: 'Settings', note: 'Who you are signed in as, your data, and deleting your account', route: '/(owner)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export data delete account' },
   { key: 'notifications', label: 'Notifications', note: 'What the gym has been told, in one list', route: '/(owner)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
+  { key: 'community', label: 'Community', note: 'Reports to moderate, and your members’ board', route: '/(owner)/community', icon: 'chat', keywords: 'community feed post posts board forum members moderate moderation report reports hide block social ugc' },
 ];
 
 export function searchNav(list: NavItem[], q: string): NavItem[] {

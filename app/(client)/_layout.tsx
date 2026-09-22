@@ -193,6 +193,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="my-coach" options={{ href: null, title: 'Your Coach' }} />
       <Tabs.Screen name="coach-documents" options={{ href: null, title: 'Paperwork' }} />
       <Tabs.Screen name="resources" options={{ href: null, title: 'Resources' }} />
+      <Tabs.Screen name="marketplace" options={{ href: null, title: 'Marketplace' }} />
       <Tabs.Screen name="assessments" options={{ href: null, title: 'My Assessments' }} />
       <Tabs.Screen name="agreements" options={{ href: null, title: 'Gym Paperwork' }} />
       <Tabs.Screen name="standing" options={{ href: null, title: 'Standing Appointments' }} />
@@ -216,6 +217,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="trainers" options={{ href: null, title: 'Find a Trainer' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="challenges" options={{ href: null, title: 'Challenges' }} />
+      <Tabs.Screen name="community" options={{ href: null, title: 'Community' }} />
       {/* ── setup is a door, not a tab ────────────────────────────────────
           `href: null` takes the BUTTON out of the bar; it does not take the
           BAR off the screen. So a member part-way through setup still had Home,

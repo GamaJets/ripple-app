@@ -26,6 +26,8 @@ export default function Resources() {
             onPress={() => router.push('/(trainer)/library')} />
           <ListRow icon="video" tone="purple" title="Video Library" note="The exercise clips you have uploaded"
             onPress={() => router.push('/(trainer)/videos')} />
+          <ListRow icon="trending" tone="amber" title="Marketplace" note="Sell your programs to members of your gym"
+            onPress={() => router.push('/(trainer)/marketplace')} />
         </Section>
 
         <Section>

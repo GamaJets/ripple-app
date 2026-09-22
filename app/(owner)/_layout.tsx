@@ -99,6 +99,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="class-analytics" options={{ href: null, title: 'Classes & Payroll' }} />
       <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="orders" options={{ href: null, title: 'Online Orders' }} />
+      <Tabs.Screen name="community" options={{ href: null, title: 'Community' }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
     </>
