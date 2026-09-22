@@ -121,9 +121,10 @@ export function MusclePicker({ chosen, onChange }: {
    *  channel: every chip carries a tick and the figure speaks each region's
    *  state. */
   const colorOf = useCallback((layer: string, band: Band): string | undefined => {
-    const r = layerRegion(layer);
-    if (!r) return undefined;
-    const mark = toneOf(t, groupTone(r.label)).mark;
+    // A layer no region owns is one only Full Body lights — the shin, the
+    // upper back between the shoulder blades, the neck — so it takes Full
+    // Body's colour rather than falling back to the ramp's.
+    const mark = toneOf(t, groupTone(layerRegion(layer)?.label ?? 'Full Body')).mark;
     return band.no === 1 ? mixHex(mark, ground, 0.45) : mark;
   }, [t, ground]);
 

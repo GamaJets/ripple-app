@@ -5,10 +5,16 @@
 // Glutes and Calves each drawn twice, and "Lower back" beside "Lower Back",
 // because a group and a muscle of the same name were both listed.
 import {
-  PICKER_REGIONS, optionKey, pickedLayers, regionAt, regionSpoken, regionState, regionsOn,
-  toggleOption, toggleRegion,
+  ALL_DRAWN_LAYERS, PICKER_REGIONS, optionKey, pickedLayers, regionAt, regionSpoken,
+  regionState, regionsOn, toggleOption, toggleRegion,
 } from './musclePicker';
 import { MUSCLE_TARGETS } from './targetedWorkout';
+
+// `require`, not `import`, for the reason src/lib/bodyHeat.test.ts gives: this
+// compiles under the app's tsconfig, which has no node types.
+const { readFileSync } = require('node:fs') as {
+  readFileSync: (p: string, enc: string) => string;
+};
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -84,6 +90,37 @@ const options = PICKER_REGIONS.flatMap((r) => r.options);
   eq(regionAt('front', 0.5, 0.02), null, 'the head is nothing');
   eq(regionsOn('front').map((r) => r.key), ['chest', 'back', 'shoulders', 'arms', 'core', 'legs'], 'front regions');
   eq(regionsOn('back').map((r) => r.key), ['back', 'shoulders', 'arms', 'glutes', 'legs'], 'back regions');
+}
+
+/* ── Full Body lights the whole drawing ──────────────────────────────────
+ *
+ * It used to light the union of the regions, and six of the artwork's 32
+ * layers belong to no target at all — the shin, the upper back between the
+ * shoulder blades, the neck, the anconeus, the IT band and the
+ * gracilis/gastrocnemius overlap. A member who picked Full Body got a body
+ * with grey patches on it, which reads as a claim that those parts are not in
+ * the workout. Asserted against the artwork's own manifest in BOTH directions,
+ * so a layer added to the drawing and missed in the list fails here rather
+ * than going quietly dark on a phone. */
+{
+  const manifest = JSON.parse(readFileSync('assets/muscle-heatmap/manifest.json', 'utf8'));
+  const drawn = new Set<string>();
+  for (const side of ['front', 'back'] as const) {
+    for (const m of manifest.sides[side].muscles) drawn.add(m.name);
+  }
+  for (const l of drawn) {
+    ok(ALL_DRAWN_LAYERS.includes(l), `${l} is in the artwork and missing from ALL_DRAWN_LAYERS, so Full Body would leave it grey`);
+  }
+  for (const l of ALL_DRAWN_LAYERS) {
+    ok(drawn.has(l), `${l} is listed as drawn and the artwork has no such layer`);
+  }
+
+  const lit = pickedLayers([optionKey({ kind: 'group', name: 'Full Body' })]);
+  eq(Object.keys(lit).length, drawn.size, 'Full Body lights every layer the body can draw');
+  ok(Object.values(lit).every((v) => v === 1), 'and lights all of them whole, never half');
+  // The two the owner spotted on the simulator, named so a regression says why.
+  ok(lit.tibialis_anterior === 1, 'including the front of the shin');
+  ok(lit.infraspinatus_teres_minor === 1, 'and the upper back between the shoulder blades');
 }
 
 if (errors.length) {

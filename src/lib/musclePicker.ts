@@ -106,6 +106,39 @@ export function regionLayers(r: PickerRegion): string[] {
 }
 
 /**
+ * Every layer the artwork can draw, which is what FULL BODY lights.
+ *
+ * Not the union of the regions below, which is what it used to be and what
+ * left a body with grey patches on it: six of the 32 drawn layers belong to no
+ * target, because the catalogue files no movement under them —
+ * `tibialis_anterior` (the front of the shin), `infraspinatus_teres_minor`
+ * (the upper back between the shoulder blades), `anconeus`, `iliotibial_band`,
+ * `gracilis_gastrocnemius` and `sternocleidomastoid`. A member picking Full
+ * Body is picking the whole body and is entitled to see the whole body lit;
+ * the gaps read as "these bits are not included", which was not true of the
+ * workout and is not true of the picture.
+ *
+ * Written out rather than read from `assets/muscle-heatmap/manifest.json` for
+ * the reason src/ui/muscleArt.ts gives for its own hand-written table: this is
+ * a lib file, the manifest is 6 KB of JSON whose only other runtime fact is an
+ * aspect ratio, and bundling it to read a list of names would put a second
+ * copy of that list in the app. The test compares the two in BOTH directions,
+ * so a layer added to the artwork and missed here fails rather than going
+ * quietly dark.
+ */
+export const ALL_DRAWN_LAYERS: readonly string[] = [
+  'abdominals', 'adductor_longus', 'adductor_magnus', 'anconeus',
+  'biceps_brachii', 'biceps_femoris', 'brachioradialis', 'deltoids',
+  'erector_spinae', 'extensor_carpi', 'gastrocnemius', 'gluteus_maximus',
+  'gluteus_medius', 'gracilis', 'gracilis_gastrocnemius', 'iliotibial_band',
+  'infraspinatus_teres_minor', 'latissimus_dorsi', 'obliques',
+  'palmaris_longus', 'pectineus_sartorius', 'pectoralis_major',
+  'rectus_femoris', 'semimembranosus', 'semitendinosus', 'soleus',
+  'sternocleidomastoid', 'tibialis_anterior', 'trapezius', 'triceps',
+  'vastus_lateralis', 'vastus_medialis',
+];
+
+/**
  * The region a drawn layer belongs to, for colouring it in that region's own
  * colour. First match wins and the order of `PICKER_REGIONS` decides it, which
  * matters for the layers two regions share — `brachioradialis` is in Arms
@@ -122,10 +155,12 @@ export function layerRegion(layer: string): PickerRegion | null {
  */
 export function pickedLayers(chosen: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};
-  // Full Body has no layers of its own; picked, it is every region.
+  // Full Body is the whole drawing, not the union of the regions — see
+  // `ALL_DRAWN_LAYERS` for the six layers that difference used to leave grey.
   const all = chosen.includes(optionKey(PICKER_REGIONS[0].options[0].target));
+  if (all) for (const l of ALL_DRAWN_LAYERS) out[l] = 1;
   for (const r of PICKER_REGIONS) {
-    if (all || regionState(r, chosen) === 'full') for (const l of regionLayers(r)) out[l] = 1;
+    if (regionState(r, chosen) === 'full') for (const l of regionLayers(r)) out[l] = 1;
   }
   for (const r of PICKER_REGIONS) {
     if (regionState(r, chosen) !== 'partial') continue;
