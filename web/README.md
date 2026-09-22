@@ -1,6 +1,6 @@
 # repplefitness.com
 
-The public site. Twenty-one static pages, one stylesheet, no build step — so it
+The public site. Twenty-four static pages, one stylesheet, no build step — so it
 can be dropped on any static host as-is.
 
 Two of these pages are not optional marketing: `/support` and `/privacy` are the
@@ -24,6 +24,8 @@ The rest of the marketing site:
     pricing.html          what can honestly be said about money today
     download.html         which app you want, and where to get it
     support.html          Support URL for the App Store listings
+    contact.html          /contact — who to write to, by kind of question
+    about.html            /about — what Repple is and the rules it is built by
     security.html         RLS, what a coach cannot see, what deletion reaches
     privacy.html          Privacy Policy URL for the App Store listings
     terms.html            terms of use
@@ -33,6 +35,7 @@ The rest of the marketing site:
 Account and hand-off pages, all `noindex`:
 
     signup.html           create an account from the web
+    login.html            /login — signing in happens in the apps; this says where
     forgot-password.html  request a reset link
     reset-password.html   where the reset link lands; sets the new password
     confirmed.html        where the confirmation link lands
@@ -50,7 +53,7 @@ Everything that is not a page:
                           /client, /trainer and /studio each carry their own
     badges/               App Store and Google Play badges
     play/                 Play Store listing assets, not used by any page
-    sitemap.xml, robots.txt, _headers, .well-known/
+    sitemap.xml, robots.txt, _headers, _redirects (/features, /sign-in), .well-known/
 
 `coach.html` is the only page here that has no content of its own. It reads
 `?h=` and asks the database for that coach through `public_coach_page`, which is

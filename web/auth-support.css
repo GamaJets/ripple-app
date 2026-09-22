@@ -3,12 +3,9 @@
    this file only composes them into the quieter, product-led layouts used by
    the redesigned homepage. No form or script selector depends on these rules. */
 
-body.flow-page {
-  background:
-    radial-gradient(circle at 82% 5%, color-mix(in srgb, var(--accent) 10%, transparent) 0, transparent 30rem),
-    radial-gradient(circle at 8% 34%, color-mix(in srgb, var(--client) 7%, transparent) 0, transparent 27rem),
-    var(--bg);
-}
+
+
+body.flow-page { background: var(--bg); }
 
 .flow-page main { min-width: 0; }
 .flow-page .page { padding-top: clamp(42px, 7vw, 84px); }
@@ -19,16 +16,9 @@ body.flow-page {
   position: relative;
   overflow: hidden;
   border: var(--rule);
-  border-radius: 18px;
+  border-radius: 14px;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   box-shadow: var(--shadow);
-}
-.flow-page .flow-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 3px;
-  background: linear-gradient(90deg, var(--client), var(--coach), var(--studio));
 }
 
 /* ── account forms ─────────────────────────────────────────────────────── */
@@ -45,9 +35,9 @@ body.flow-page {
 }
 .auth-page .fl,
 .signup-page .fl {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 600;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -101,18 +91,10 @@ body.flow-page {
 .signup-page .signup-grid > :first-child {
   position: relative;
   border: var(--rule);
-  border-radius: 18px;
+  border-radius: 14px;
   padding: clamp(24px, 4vw, 40px);
   background: color-mix(in srgb, var(--panel) 96%, transparent);
   box-shadow: var(--shadow);
-}
-.signup-page .signup-grid > :first-child::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 3px;
-  border-radius: 18px 18px 0 0;
-  background: linear-gradient(90deg, var(--client), var(--coach), var(--studio));
 }
 .signup-page .assure { padding-top: 10px; }
 .signup-page .assure .surface,
@@ -146,7 +128,7 @@ body.flow-page {
   min-width: 0;
   transition: transform .18s ease, background .18s ease, border-color .18s ease;
 }
-.download-page .tile:hover { transform: translateY(-3px); background: var(--panel2); }
+.download-page .tile:hover { background: var(--panel2); }
 .download-page .tile .btn-row { margin-top: auto; padding-top: 12px; }
 .download-page .store:focus-visible,
 .flow-page .btn:focus-visible,
@@ -172,7 +154,6 @@ body.flow-page {
     border-radius: 0;
     margin-inline: calc(var(--gut) * -1);
   }
-  .signup-page .signup-grid > :first-child::before { border-radius: 0; }
   .auth-page .auth-card { padding-inline: var(--gut); }
   .download-page .tile:hover { transform: none; }
 }
