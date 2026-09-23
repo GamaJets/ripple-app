@@ -22,7 +22,7 @@ import { VARIANT } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
-import { Card, Cta, CtaBright, HeroCard, Segmented } from '../src/ui/kit';
+import { Card, Cta, CtaBright, Flag, HeroCard, Segmented } from '../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, font } from '../src/theme/scale';
 import { BrandMark, BrandWordmark, useMarkSignal } from '../src/ui/BrandMark';
 import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
@@ -52,6 +52,11 @@ export default function Welcome() {
   const role = VARIANT;
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
+  /** The same password typed again, signing UP only. Signing in never asks:
+   *  there is nothing to protect against — a mistyped sign-in is refused on
+   *  the spot and tried again, where a mistyped SIGNUP creates the account
+   *  with the typo in it and is not discovered until the next sign-in. */
+  const [pw2, setPw2] = useState('');
   const [busy, setBusy] = useState(false);
   const [refCode, setRefCode] = useState('');
   // A code a referral link left behind, put into the field rather than only
@@ -103,8 +108,9 @@ export default function Welcome() {
   // on today's rules would lock them out of their own account with no way
   // forward. Only signing UP has to satisfy what the server will demand.
   const pwOkForSignUp = passwordMeetsLocalRules(pw);
+  const pwMatches = pw === pw2;
   const canGo = email.trim().length > 3
-    && (mode === 'in' ? pw.length > 0 : pwOkForSignUp)
+    && (mode === 'in' ? pw.length > 0 : pwOkForSignUp && pwMatches)
     && (mode === 'in' || name.trim().length > 0);
   const go = async () => {
     if (!canGo || busy) return;
@@ -198,6 +204,7 @@ export default function Welcome() {
     const openForm = (nextMode: 'in' | 'up') => {
       setMode(nextMode);
       setNotice(null);
+      setPw2('');
       setShowForm(true);
     };
     return (
@@ -318,7 +325,7 @@ export default function Welcome() {
               handler is the one the hand-built toggle had: switch, and clear
               whatever the last attempt said. */}
           <Segmented style={{ marginBottom: sp.xl }} value={mode}
-            onChange={(m) => { setMode(m); setNotice(null); }}
+            onChange={(m) => { setMode(m); setNotice(null); setPw2(''); }}
             options={[{ key: 'up', label: 'Create Account' }, { key: 'in', label: 'Sign In' }] as const} />
 
           {notice ? (
@@ -377,6 +384,20 @@ export default function Welcome() {
           {mode === 'up' ? <PasswordRules value={pw} /> : null}
           {mode === 'up' ? (
             <>
+              <Text style={lab}>Confirm Password</Text>
+              <PasswordField value={pw2} onChangeText={(v) => { setPw2(v); if (notice) setNotice(null); }}
+                placeholder="Type it again" style={inp} accessibilityLabel="Confirm Password" />
+              {/* Said while it is being typed, and only once there is something
+                  to say: a screen that reports a mismatch before the first
+                  character has landed is arguing with the reader. The Cta above
+                  is already disabled until the two agree — this is the sentence
+                  that tells them why, because a disabled button explains
+                  nothing on its own. */}
+              {pw2.length > 0 && !pwMatches ? (
+                <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>
+                  These two do not match yet.
+                </Flag>
+              ) : null}
               <Text style={lab}>Referral Code (Optional)</Text>
               <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral Code (Optional)" />
             </>
