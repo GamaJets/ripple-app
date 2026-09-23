@@ -31,8 +31,10 @@
   color: var(--ink);
 }
 
-.audience-page header.site .wrap { min-height: 74px; height: auto; }
-.audience-page nav.site a { font-size: 15px; }
+/* The header is the site's, at its own size: one bar, one type size, every
+   page. Owner review 23 Sep 2026 — these two lines shrank it to 74px and 15px
+   here and nowhere else, so /client, /trainer, /studio, /how-it-works and
+   /pricing wore a smaller header than the page you reached them from. */
 
 .audience-page .hero {
   display: grid;

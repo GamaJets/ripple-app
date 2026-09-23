@@ -309,3 +309,63 @@ em{font-family:inherit;font-style:normal;font-weight:inherit;color:var(--green)}
   .hero h1{font-size:clamp(40px,11vw,52px)}
   .section-heading h2,.connected h2,.attention-copy h2,.apps-heading h2,.final-cta h2{font-size:34px}
 }
+
+/* ── the site header, the one every other page already carries ─────────────
+   Owner review, 23 Sep 2026: "this is how the headers should look on all the
+   pages". The homepage wore a header of its own — 13px white links on a dark
+   bar positioned over the hero — while the rest of the site carried the light
+   90px bar with 17px links from styles.css. Two headers is two sites.
+   The numbers below were read off the live /support header rather than
+   guessed, and are written as literals because this stylesheet keeps its own
+   palette and shares none of styles.css's tokens. */
+.site-header{
+  position:sticky;inset:auto;top:0;
+  color:var(--ink);
+  background:rgba(244,246,245,.86);
+  backdrop-filter:saturate(160%) blur(14px);
+  -webkit-backdrop-filter:saturate(160%) blur(14px);
+  border-bottom:1px solid rgba(11,29,25,.12);
+}
+.site-header .site-nav{width:min(1180px,calc(100% - 40px));min-height:90px;gap:24px}
+.site-header .brand{color:var(--ink);gap:15px}
+.site-header .brand-word{height:18px}
+.site-header .nav-links{gap:4px}
+.site-header .nav-links a,.site-header .nav-actions>a:first-child{
+  color:#44544f;font-size:17px;font-weight:500;padding:10px 15px;border-radius:8px;
+}
+.site-header .nav-links a:hover,.site-header .nav-actions>a:first-child:hover{
+  color:var(--ink);background:rgba(11,29,25,.06);
+}
+.site-header .nav-links a[aria-current="page"]{color:var(--ink);background:rgba(11,29,25,.06)}
+.site-header .nav-actions{gap:8px}
+.site-header .nav-actions .button{
+  min-height:auto;padding:11px 20px;border-radius:8px;
+  font-size:17px;font-weight:600;background:#22c55e;color:#052e16;
+}
+.site-header .nav-actions .button:hover{filter:brightness(1.08);background:#22c55e;transform:none}
+.site-header .nav-toggle{border-color:rgba(11,29,25,.2)}
+.site-header .nav-toggle span{background:var(--ink)}
+/* The bar is in the flow now, so the hero no longer has to leave room for a
+   header floating over it. */
+.hero-grid{padding-top:40px}
+
+@media(max-width:1180px){
+  /* The collapsed menu was a dark panel because the bar above it was dark. */
+  .site-header .nav-links{
+    top:90px;border-color:rgba(11,29,25,.12);background:#f4f6f5;
+    box-shadow:0 24px 60px rgba(6,19,15,.14);
+  }
+  .site-header .nav-links a{padding:12px 14px}
+}
+@media(max-width:620px){
+  .site-header .site-nav{min-height:74px}
+  .site-header .nav-links{top:75px}
+  .site-header .brand-word{height:16px}
+  .hero-grid{padding-top:56px}
+}
+/* The icon beside "Get the apps", the same one the rest of the site carries —
+   styles.css gives it these rules under `nav.site a.get`, which this page does
+   not load. */
+.site-header .nav-actions a.get{display:inline-flex;align-items:center;gap:7px}
+.site-header .nav-actions a.get .getico{flex:none;opacity:.9}
+.site-header .nav-actions a.get:hover .getico{opacity:1}
