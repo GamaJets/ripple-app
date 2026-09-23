@@ -141,6 +141,20 @@ addEventListener('DOMContentLoaded', function () {
           <button type="button" class="eye" data-for="pw" aria-label="Show password" aria-pressed="false"></button>
         </div>
 
+        <!-- Typed twice, because this is the only place the password is set and
+             there is no way back into it: the account is created with whatever
+             was typed here, the address then has to be confirmed by email
+             before a first sign-in, and a typo is discovered days later at a
+             sign-in screen that cannot say what went wrong. `pw2` carries its
+             own eye for the same reason `pw` does — a reader who cannot see the
+             field they are copying cannot check it either. -->
+        <label class="fl" for="pw2" style="margin-top:14px">Confirm password</label>
+        <div class="pw">
+          <input id="pw2" type="password" autocomplete="new-password" required placeholder="Type it again" aria-describedby="pw2-note">
+          <button type="button" class="eye" data-for="pw2" aria-label="Show password" aria-pressed="false"></button>
+        </div>
+        <p id="pw2-note" class="tiny" style="margin:8px 0 0"></p>
+
         <button id="go" type="submit" class="contact" style="width:100%;margin-top:18px;border:none;font-size:16px;justify-content:center">
           Create account
         </button>
@@ -441,6 +455,22 @@ addEventListener('DOMContentLoaded', function () {
   $('pw').addEventListener('input', paintRules);
   paintRules();
 
+  /* The second password, said as it is typed rather than at submit.
+     Only ever after the reader has typed something in it: telling somebody the
+     two do not match before they have finished typing the first character is a
+     page arguing with them. */
+  const pw2Note = $('pw2-note');
+  const pwMatch = () => $('pw').value === $('pw2').value;
+  function paintMatch() {
+    const second = $('pw2').value;
+    if (!second) { pw2Note.textContent = ''; pw2Note.className = 'tiny'; return; }
+    const ok = pwMatch();
+    pw2Note.className = ok ? 'tiny ok' : 'tiny bad';
+    pw2Note.textContent = ok ? 'Both match.' : 'These two do not match yet.';
+  }
+  $('pw2').addEventListener('input', paintMatch);
+  $('pw').addEventListener('input', paintMatch);
+
   /* What the greyed-out button would have said if a button could talk. */
   const unmetRules = () => RULES.filter(([, t]) => !t($('pw').value)).map(([label]) => label);
 
@@ -453,6 +483,14 @@ addEventListener('DOMContentLoaded', function () {
         + (missing.length === 1 ? missing[0] : missing.slice(0, -1).join(', ') + ' and ' + missing[missing.length - 1])
         + '. It has to have all five, because the account refuses anything less.';
       $('pw').focus();
+      return;
+    }
+    if (!pwMatch()) {
+      msg.className = 'bad';
+      msg.textContent = 'The two passwords do not match. The account is created with what you '
+        + 'type here and the address has to be confirmed by email before you can sign in, so a '
+        + 'typo would not surface until then.';
+      $('pw2').focus();
       return;
     }
     msg.className = ''; msg.textContent = '';

@@ -80,11 +80,11 @@ export default function Welcome() {
    * The address a confirmation code has just been sent to, or null.
    *
    * Set ONLY when we know an email actually went out — signUp reporting
-   * `needsConfirmation`, or a resend that came back ok. Never inferred: with
-   * confirmation switched off (which is where the project is today, see
-   * docs/LAUNCH-CHECKLIST.md item 1) signUp hands back a live session and
-   * nothing is sent, so this stays null and the person goes straight in. A code
-   * screen shown on a guess is a screen no email will ever satisfy.
+   * `needsConfirmation`, or a resend that came back ok. Never inferred: the
+   * setting is a switch in the project (it was OFF until 1 Sep 2026 and is ON
+   * now), and with it off signUp hands back a live session and sends nothing,
+   * so this stays null and the person goes straight in. A code screen shown on
+   * a guess is a screen no email will ever satisfy.
    */
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
