@@ -52,7 +52,7 @@
 // kilograms, and hands back the sentence that says whose unit is on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -80,8 +80,8 @@ import {
 } from '../../src/lib/clientTraining';
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { fetchFormClipsFor, formClipUrl, type FormClip } from '../../src/ui/formClips';
-import { clipNoteLine } from '../../src/lib/formCheck';
+import { fetchFormClipsFor, formClipUrl, replyToFormClip, type FormClip } from '../../src/ui/formClips';
+import { clipNoteLine, replyText, MAX_REPLY_CHARS } from '../../src/lib/formCheck';
 // ── the two modules the coach could not reach ──────────────────────────────
 //
 // P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
@@ -2051,11 +2051,85 @@ function FormChecks({ memberId }: { memberId: string }) {
                 }} />
             </View>
           )}
+          {/* The answer, on the question. Part 3350.
+              A form check is a question about one set — "does my knee cave on
+              rep 4" — and until this the only way to answer it was to leave
+              this screen, open the chat thread and describe which set was
+              meant. The question and the answer lived in two places and
+              neither pointed at the other. Writing it here sends the member a
+              notification that their coach answered, and the reply travels
+              with the clip: if they take the video back, the answer goes with
+              it, because it is a sentence about a video nobody can watch any
+              more. */}
+          <FormClipReply clip={c} onSaved={(saved) => {
+            setClips((prev) => (prev ?? []).map((x) => (x.id === saved.id ? saved : x)));
+          }} />
         </View>
       ))}
       {said ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{said}</Text> : null}
     </Section>
   </>);
+}
+
+/**
+ * The coach's answer to one form check.
+ *
+ * Its own component because each clip needs its own draft — one piece of state
+ * shared across the list would put the sentence being typed about somebody's
+ * squat underneath their deadlift the moment the coach scrolled.
+ *
+ * An answer already written is shown as written and can be edited: a coach who
+ * re-reads a clip and changes their mind should not have to send a second
+ * message contradicting the first. Saving the same sentence again sends the
+ * member nothing — the trigger in part 3350 fires only when the text actually
+ * changes.
+ */
+function FormClipReply({ clip, onSaved }: { clip: FormClip; onSaved: (c: FormClip) => void }) {
+  const t = useTheme();
+  const [draft, setDraft] = useState(clip.coachReply ?? '');
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const body = replyText(draft);
+  const changed = (body ?? '') !== (clip.coachReply ?? '');
+
+  return (
+    <View style={{ marginTop: sp.md }}>
+      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>Your Answer</Text>
+      <TextInput
+        value={draft}
+        onChangeText={(v: string) => { setDraft(v); if (said) setSaid(null); }}
+        placeholder="What you want them to change, in your words"
+        placeholderTextColor={t.ink3}
+        multiline
+        maxLength={MAX_REPLY_CHARS}
+        accessibilityLabel="Your answer to this form check"
+        style={{
+          ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+          paddingHorizontal: sp.md, paddingVertical: sp.sm, minHeight: 72, textAlignVertical: 'top',
+        }}
+      />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
+        <Ghost label={busy ? 'Sending…' : clip.coachReply ? 'Save Your Answer' : 'Send Your Answer'}
+          icon="check"
+          a11yLabel={changed && !busy ? 'Send this answer to them' : 'Write an answer first'}
+          onPress={async () => {
+            if (busy || !changed || !body) return;
+            setBusy(true); setSaid(null);
+            const out = await replyToFormClip(clip, body);
+            setBusy(false);
+            if (!out.ok) { setSaid(out.error); return; }
+            onSaved({ ...clip, coachReply: body, coachRepliedAt: new Date().toISOString() });
+            setSaid('Sent. They have been told you answered.');
+          }} />
+        {clip.coachRepliedAt && !changed ? (
+          <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+            {`Answered ${fmtRelativeDay(clip.coachRepliedAt)}`}
+          </Text>
+        ) : null}
+      </View>
+      {said ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{said}</Text> : null}
+    </View>
+  );
 }
 
 /** One clip, playing. Its own component because `useVideoPlayer` is a hook and

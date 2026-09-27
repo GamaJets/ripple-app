@@ -892,6 +892,25 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   // the body is as narrow as the photo's, for the same reason. A check-in row
   // holds a weight and four self-ratings about somebody's mood and sleep, and
   // none of it goes on a lock screen: that a form arrived, and who from.
+  // ── the form check, both ways (part 3350) ──────────────────────────────
+  //
+  // A member films one set and asks a question about it; the coach answers on
+  // the clip. Two messages, because it is a conversation and each end has to
+  // know the other spoke. Neither carries the words: the question is the
+  // member's and often names a body part, the answer is about how their body
+  // moves under a bar, and both are one tap away inside the app.
+  {
+    where: 'supabase/parts/3350 · form_clip_notify_coach',
+    when: 'a client attaches a form-check clip to a logged set (an insert on form_clips)',
+    to: 'trainer', title: 'A client has sent a form check',
+    route: '/(trainer)/client-training?clientId=00000000-0000-0000-0000-000000000000', icon: 'dumbbell',
+  },
+  {
+    where: 'supabase/parts/3350 · form_clip_notify_member',
+    when: 'the coach writes back on a form-check clip (coach_reply changes to something non-empty)',
+    to: 'client', title: 'Your coach answered your form check',
+    route: '/(client)/workouts', icon: 'dumbbell',
+  },
   {
     where: 'supabase/parts/3340 · check_in_notify_coach',
     when: 'a client fills in their weekly check-in (an insert on check_ins), and they have a coach',

@@ -73,7 +73,7 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // up seeing two different pieces of artwork.
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
-import { catalogueValue as cap } from '../../src/lib/format';
+import { catalogueValue as cap, fmtRelativeDay } from '../../src/lib/format';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET, evalAnimationUrl } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
@@ -91,7 +91,7 @@ import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 import { pickFormClip, sendFormClip, fetchFormClip, deleteFormClip, type FormClip } from '../../src/ui/formClips';
-import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine } from '../../src/lib/formCheck';
+import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine, replyLine } from '../../src/lib/formCheck';
 import { useSettings } from '../../src/ui/settings';
 import { exerciseIndex, exerciseOutings } from '../../src/lib/exerciseHistory';
 import { bestSetLabel } from '../../src/lib/bestSet';
@@ -929,6 +929,23 @@ export default function ExerciseScreen() {
             <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>Sending your clip…</Text>
           ) : clipSaid ? (
             <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{clipSaid}</Text>
+          ) : null}
+          {/* The coach's answer, under the clip it answers. Part 3350.
+              Only when there is one: an unanswered clip says nothing rather
+              than "no reply yet", which reads as the coach having refused
+              rather than not having watched it yet. The words are theirs and
+              are drawn in a quote block for that reason — this screen does not
+              summarise them, shorten them or add to them. */}
+          {clipSent?.coachReply ? (
+            <View style={{ marginTop: sp.md }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>
+                {replyLine(clipSent.coachReply, clipSent.coachRepliedAt ? fmtRelativeDay(clipSent.coachRepliedAt) : null) ?? 'Your coach answered.'}
+              </Text>
+              <View accessible accessibilityLabel={`Your coach answered: ${clipSent.coachReply}`}
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+                <Text style={{ ...ty.body, color: t.ink }}>{clipSent.coachReply}</Text>
+              </View>
+            </View>
           ) : null}
           {clipSent ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>

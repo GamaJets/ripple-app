@@ -17,7 +17,7 @@ import { reportError } from '../lib/reportError';
 import { ensureMediaPermission } from './permissions';
 import {
   FORM_CLIP_BUCKET, formClipPath, isOwnClipPath, clipRefusal, clipRefusalLine,
-  MAX_CLIP_SECONDS, MAX_CLIP_BYTES,
+  MAX_CLIP_SECONDS, MAX_CLIP_BYTES, replyText,
 } from '../lib/formCheck';
 
 /** One clip as a screen holds it. */
@@ -28,6 +28,13 @@ export interface FormClip {
   path: string;
   note: string | null;
   createdAt: string;
+  /** What the coach wrote back, or null while the question is unanswered.
+   *  Part 3350. Null and the empty string are the same event — a clip nobody
+   *  has answered — and a screen drawing an empty quote block for one of them
+   *  looks broken. */
+  coachReply: string | null;
+  /** When that answer was written. Null whenever `coachReply` is. */
+  coachRepliedAt: string | null;
 }
 
 /** A clip chosen and not yet sent. */
@@ -178,7 +185,7 @@ export async function fetchFormClip(workoutId: string, setIndex: number): Promis
   try {
     const { data, error } = await supabase
       .from('form_clips')
-      .select('id, workout_id, set_index, path, note, created_at')
+      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at')
       .eq('workout_id', workoutId)
       .eq('set_index', setIndex)
       .maybeSingle();
@@ -191,6 +198,8 @@ export async function fetchFormClip(workoutId: string, setIndex: number): Promis
       path: String(r.path),
       note: typeof r.note === 'string' && r.note.trim() ? r.note : null,
       createdAt: String(r.created_at),
+      coachReply: typeof r.coach_reply === 'string' && r.coach_reply.trim() ? r.coach_reply : null,
+      coachRepliedAt: typeof r.coach_replied_at === 'string' ? r.coach_replied_at : null,
     };
   } catch (e) {
     reportError('formClips.read', e);
@@ -215,7 +224,7 @@ export async function fetchFormClipsFor(memberId: string, limit = 20): Promise<F
   try {
     const { data, error } = await supabase
       .from('form_clips')
-      .select('id, workout_id, set_index, path, note, created_at')
+      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at')
       .eq('user_id', memberId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -227,6 +236,8 @@ export async function fetchFormClipsFor(memberId: string, limit = 20): Promise<F
       path: String(r.path),
       note: typeof r.note === 'string' && r.note.trim() ? r.note : null,
       createdAt: String(r.created_at),
+      coachReply: typeof r.coach_reply === 'string' && r.coach_reply.trim() ? r.coach_reply : null,
+      coachRepliedAt: typeof r.coach_replied_at === 'string' ? r.coach_replied_at : null,
     }));
   } catch (e) {
     reportError('formClips.list', e);
@@ -279,5 +290,37 @@ export async function deleteFormClip(clip: FormClip): Promise<{ ok: boolean; err
   void supabase.storage.from(FORM_CLIP_BUCKET).remove([clip.path]).catch((e) => {
     reportError('formClips.delete-object', e, { path: clip.path });
   });
+  return { ok: true, error: null };
+}
+
+/**
+ * The coach's answer to one clip.
+ *
+ * Counts the rows it changed, for the reason `deleteFormClip` above counts
+ * them: PostgREST answers an update that matched nothing as a success, and a
+ * coach told "sent" over a reply that reached no row is a coach who believes
+ * they have answered somebody. Zero rows here means the clip was deleted while
+ * they were typing — the member took their video back — and that is what it
+ * says, because it is the one explanation that is both true and actionable.
+ *
+ * The write names two columns and no others, which is the whole of what the
+ * column grant in supabase/parts/3350 permits: a coach cannot touch the
+ * member's own question or the path the video lives at.
+ */
+export async function replyToFormClip(clip: FormClip, reply: string): Promise<{ ok: boolean; error: string | null }> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build has no server.' };
+  const body = replyText(reply);
+  if (!body) return { ok: false, error: 'Write something first. An empty reply is not an answer.' };
+  const { error, count } = await supabase
+    .from('form_clips')
+    .update({ coach_reply: body, coach_replied_at: new Date().toISOString() }, { count: 'exact' })
+    .eq('id', clip.id);
+  if (error) {
+    reportError('formClips.reply', error, { clipId: clip.id });
+    return { ok: false, error: 'That reply was not saved, so they have not been told anything. Try again once you have signal.' };
+  }
+  if ((count ?? 0) === 0) {
+    return { ok: false, error: 'That clip is no longer there. They may have taken it back, and your reply was not saved.' };
+  }
   return { ok: true, error: null };
 }

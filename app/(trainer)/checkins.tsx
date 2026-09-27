@@ -252,7 +252,7 @@ export default function CoachCheckIns() {
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
                   {only
                     ? 'They have not sent a check-in yet. The form is on their Progress tab, and it is theirs to fill in when they want to.'
-                    : 'Nobody has sent a check-in yet. The form is on your clients’ own Progress tab — it is theirs to fill in, and there is nothing here to chase from this screen.'}
+                    : 'Nobody has sent a check-in yet. The form is on your clients’ own Progress tab. It is theirs to fill in, and there is nothing to chase from this screen.'}
                 </Text>
               ) : shown.map(row)}
             </Section>
@@ -261,7 +261,7 @@ export default function CoachCheckIns() {
                 the read and it belongs under the rows it describes. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
               Check-ins from everybody on your book, newest first. Nothing here is marked as read, and
-              opening one tells the client nothing — replying does.
+              opening one tells the client nothing. Replying does.
             </Text>
           </>
         )}

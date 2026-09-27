@@ -29,10 +29,10 @@ is paid again on every turn of the session that opened it.
 | 2,417 | 32k | `src/ui/kit.tsx` |
 | 2,260 | 30k | `studio-web/app/timetable/page.tsx` |
 | 2,189 | 34k | `supabase/functions/stripe-webhook/index.ts` |
+| 2,148 | 32k | `app/(trainer)/client-training.tsx` |
 | 2,110 | 29k | `src/ui/sessions.tsx` |
 | 2,104 | 34k | `app/(client)/calendar.tsx` |
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
-| 2,074 | 31k | `app/(trainer)/client-training.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
 | 2,005 | 33k | `app/(trainer)/analytics.tsx` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,175 lines, ~1725k tokens if every one were read whole.
+Total: 47 files, 119,249 lines, ~1726k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1942,6 +1942,69 @@ Total: 47 files, 119,175 lines, ~1725k tokens if every one were read whole.
 2123-2189     §        DEPLOYMENT: what this file cannot do for itself
 ```
 
+## `app/(trainer)/client-training.tsx`
+
+2,148 lines · ~32k tokens · 56 anchors
+
+```
+3-16          §        The hole this closes
+17-27         §        The permission was already there
+28-36         §        Nothing here works anything out
+37-44         §        The dashes
+45-84         §        Whose kilograms
+85-97         §        the two modules the coach could not reach
+98-114        §        the finer grain, and the picture of it
+115-140       §        the four things this screen could not say before
+141-151       §        the speed they actually moved at
+152-213       §        the program the client rewrote
+214-256       default  ClientTraining
+257-260       fn         replaceEntry
+261-354       fn         load
+355-379       fn         client
+380-393       fn         reloadLog
+394-396       fn         sessions
+397-400       fn         board
+401-462       fn         pick
+463-464       fn         lastSeven
+465-471       fn           byDay
+472-488       fn         position
+489-505       fn         compareWeek
+506-528       fn         oldestDay
+529-542       fn         muscleWindowRead
+543-546       fn           p
+547-556       fn         muscles
+557-570       fn         muscleNote
+571-574       fn         cells
+575-575       fn         lifetime
+576-576       fn         arc
+577-577       fn         best
+578-578       fn         trainedCells
+579-585       fn         worstGap
+586-587       fn         stage
+588-611       fn         pva
+612-644       fn         askTempo
+645-700       fn         review
+701-730       fn         loadPlanEdits
+731-735       fn         pull
+736-753       fn         hist
+754-759       fn         editDiff
+760-771       fn         editAged
+772-779       fn         editWhen
+780-788       fn         editNote
+789-793       fn         editLoad
+794-807       fn         findingLoads
+808-813       fn         seg
+814-859       fn         chip
+860-898       fn         exerciseRow
+899-965       fn           asked
+966-1027      fn         sessionBlock
+1028-2006     fn         dayBlock
+2007-2086     fn       FormChecks
+2087-2136     fn       FormClipReply
+2137-2137     fn       FormClipPlayer
+2138-2148     fn         player
+```
+
 ## `src/ui/sessions.tsx`
 
 2,110 lines · ~29k tokens · 63 anchors
@@ -2115,68 +2178,6 @@ Total: 47 files, 119,175 lines, ~1725k tokens if every one were read whole.
 2003-2014     fn       slugOf
 2015-2073     fn       Part
 2074-2085     fn       Section
-```
-
-## `app/(trainer)/client-training.tsx`
-
-2,074 lines · ~31k tokens · 55 anchors
-
-```
-3-16          §        The hole this closes
-17-27         §        The permission was already there
-28-36         §        Nothing here works anything out
-37-44         §        The dashes
-45-84         §        Whose kilograms
-85-97         §        the two modules the coach could not reach
-98-114        §        the finer grain, and the picture of it
-115-140       §        the four things this screen could not say before
-141-151       §        the speed they actually moved at
-152-213       §        the program the client rewrote
-214-256       default  ClientTraining
-257-260       fn         replaceEntry
-261-354       fn         load
-355-379       fn         client
-380-393       fn         reloadLog
-394-396       fn         sessions
-397-400       fn         board
-401-462       fn         pick
-463-464       fn         lastSeven
-465-471       fn           byDay
-472-488       fn         position
-489-505       fn         compareWeek
-506-528       fn         oldestDay
-529-542       fn         muscleWindowRead
-543-546       fn           p
-547-556       fn         muscles
-557-570       fn         muscleNote
-571-574       fn         cells
-575-575       fn         lifetime
-576-576       fn         arc
-577-577       fn         best
-578-578       fn         trainedCells
-579-585       fn         worstGap
-586-587       fn         stage
-588-611       fn         pva
-612-644       fn         askTempo
-645-700       fn         review
-701-730       fn         loadPlanEdits
-731-735       fn         pull
-736-753       fn         hist
-754-759       fn         editDiff
-760-771       fn         editAged
-772-779       fn         editWhen
-780-788       fn         editNote
-789-793       fn         editLoad
-794-807       fn         findingLoads
-808-813       fn         seg
-814-859       fn         chip
-860-898       fn         exerciseRow
-899-965       fn           asked
-966-1027      fn         sessionBlock
-1028-2006     fn         dayBlock
-2007-2062     fn       FormChecks
-2063-2063     fn       FormClipPlayer
-2064-2074     fn         player
 ```
 
 ## `src/lib/coachStatement.ts`
