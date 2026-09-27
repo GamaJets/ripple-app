@@ -177,6 +177,10 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   ['/(trainer)/client-goals', 'clients'],
   ['/(trainer)/client-training', 'clients'],
   ['/(trainer)/client-photos', 'clients'],
+  // Part 3340: the weekly check-in. Same switch as the photo and for the same
+  // reading of it — this is a client telling their coach how their week went,
+  // which is the thing 'clients' has always meant.
+  ['/(trainer)/checkins', 'clients'],
   // The client's side of the same conversation. Handset-pushed today.
   ['/(client)/my-coach', 'clients'],
   ['/(client)/trainers', 'clients'],
