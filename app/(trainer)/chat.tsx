@@ -31,7 +31,7 @@
 // The bubble keeps sending, not-sent and unreadable apart for the reason the
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -58,6 +58,9 @@ import {
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
 import { useVoiceNote } from '../../src/ui/voiceNote';
+import {
+  searchThread, threadSearchA11y, threadSearchActive, threadSearchLine,
+} from '../../src/lib/threadSearch';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
@@ -266,6 +269,24 @@ export default function CoachChat() {
    */
   const receipt = useReadReceipt({ threadId, role: 'coach', messages: msgs, unsent, atEnd, them: firstName ?? 'they' });
 
+  /* Searching this thread. src/lib/threadSearch.ts was written for the
+     member's copy of this screen and imported by nothing else, which had it
+     backwards: a member has one coach and one conversation, and a coach has
+     forty of them, each years long. "What did I tell her about the knee" is a
+     coach's question.
+
+     `msgs` is deliberately left alone. `receipt`, `waiting` and the unread
+     watermark are all computed from it above, and a coach searching a thread
+     has not read anything new — filtering the list must not change any claim
+     this screen makes about what the other person can see. */
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const searchOn = searching && threadSearchActive(query);
+  const found = useMemo(() => (searchOn ? searchThread(msgs, query) : msgs), [searchOn, msgs, query]);
+  const searchLine = searchOn
+    ? threadSearchLine({ query, matched: found.length, searched: msgs.length, hasOlder, status })
+    : null;
+
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
     // A cancel carries neither, and must raise nothing at anybody.
@@ -465,6 +486,17 @@ export default function CoachChat() {
             in the client's: a moderation path somebody has to go looking for is
             one they reach for after it has already gone wrong. The icon carries
             no status colour — the state is said in words under the composer. */}
+        {/* Beside the safety control rather than above the thread, so the
+            screen still opens on the newest message. Closing it clears the
+            query: a field holding a word the coach cannot see is a
+            conversation that looks half-missing next time they open it. */}
+        <Pressable onPress={() => setSearching((v) => { if (v) setQuery(''); return !v; })}
+          accessibilityRole="button" hitSlop={8}
+          accessibilityState={{ selected: searching }}
+          accessibilityLabel={searching ? 'Stop searching this conversation' : 'Search this conversation'}
+          style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: searching ? t.brand : t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+          <Icon name="search" size={18} color={searching ? t.brandInk : t.ink2} />
+        </Pressable>
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
@@ -472,6 +504,38 @@ export default function CoachChat() {
           <Icon name="lock" size={18} color={t.ink2} />
         </Pressable>
       </View>
+
+      {/* ── the search field ──────────────────────────────────────────────
+          Drawn only while the control above is on. The sentence under it is
+          the half that matters: this screen holds the recent end of a
+          conversation that may be much longer, and "no match" said over the
+          part that happens to be loaded is a claim about the whole thread. */}
+      {searching ? (
+        <View style={{ paddingHorizontal: G, paddingTop: sp.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.md, ...elevation.card }}>
+            <Icon name="search" size={16} color={t.ink3} />
+            <TextInput
+              value={query} onChangeText={setQuery} autoFocus
+              placeholder="Find a word in this conversation" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel="Find a word in this conversation"
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            {query ? (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Clear the search">
+                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {searchLine ? (
+            // A live region: the thread below changes under the coach's thumb
+            // as they type, and nothing else would tell a screen reader it had.
+            <Text accessibilityLiveRegion="polite"
+              accessibilityLabel={[threadSearchA11y({ query, matched: found.length }), searchLine].filter(Boolean).join(' ')}
+              style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{searchLine}</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* The compose bar is lifted by measurement rather than by
           KeyboardAvoidingView, which under-lifted it by the height of the
@@ -545,7 +609,7 @@ export default function CoachChat() {
               </Text>
             </View>
           ) : null}
-          {msgs.map((m) => {
+          {found.map((m: ThreadMessage) => {
             const mine = m.sender === 'coach';
             // Local-only: the upload or the insert was refused, so the client
             // cannot see it. The stage says which, because "the video did not

@@ -115,7 +115,7 @@ export function FileBubble({ url, name }: { url: string; name: string | null }) 
             await Linking.openURL(url);
           } catch (e) {
             reportError('fileBubble.open', e);
-            setSaid('That file could not be opened. It may have expired — pull down to refresh the conversation.');
+            setSaid('That file could not be opened. The link may have expired, so pull down to refresh the conversation.');
           }
         }}
         accessibilityRole="button"
