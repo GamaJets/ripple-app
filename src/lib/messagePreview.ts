@@ -41,6 +41,11 @@ import type { AttachmentKind } from './messageAttachments';
 export const PREVIEW_FOR_KIND: Readonly<Record<AttachmentKind, string>> = {
   image: 'Sent you a photo',
   video: 'Sent you a video',
+  // Part 3360. Neither says what is IN it: a push renders on a lock screen,
+  // and a filename is the sender's own text. "Sent you a file" is what the
+  // recipient needs in order to decide whether to open the app now.
+  audio: 'Sent you a voice note',
+  file: 'Sent you a file',
 };
 
 /**

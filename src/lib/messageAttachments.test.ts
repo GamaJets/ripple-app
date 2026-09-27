@@ -16,6 +16,7 @@ import {
   messageAttachmentPath, isThreadAttachmentPath, attachmentUploaderId,
   attachmentContentType, attachmentExtension, attachmentKindFor,
   readAttachment, attachmentRefusal, attachmentNoun, hasSomethingToSend, unsentNote,
+  attachmentName, MESSAGE_NAME_MAX_CHARS, MESSAGE_AUDIO_MAX_SECONDS,
 } from './messageAttachments';
 
 const errors: string[] = [];
@@ -122,9 +123,45 @@ const STRANGER = '1efee95c-f17d-47b7-bff8-fcc11c7c8d65';
   eq(attachmentKindFor('video/quicktime', 'IMG_4822.MOV'), 'video', 'and an iPhone clip is a video');
   eq(attachmentKindFor('image/jpeg'), 'image', 'a mime type alone is enough');
   eq(attachmentKindFor(null, 'squat.mp4'), 'video', 'a filename alone is enough');
-  eq(attachmentKindFor(null, 'report.pdf'), null, 'a PDF is neither, and is refused rather than sent');
+  // Part 3360 added the two kinds this line used to refuse. What is still
+  // refused is the point of the list being short: a .docx is a zip, and a zip
+  // is a container whose contents this app cannot state.
+  eq(attachmentKindFor('application/pdf', 'report.pdf'), 'file', 'a PDF is a file now, and goes');
+  eq(attachmentKindFor(null, 'report.pdf'), 'file', 'named alone is enough for one');
+  eq(attachmentKindFor('audio/m4a', 'note.m4a'), 'audio', 'a recording is a voice note');
+  eq(attachmentKindFor(null, 'plan.docx'), null, 'a Word document is refused rather than sent');
+  eq(attachmentKindFor('application/zip', 'photos.zip'), null, 'and so is an archive');
   eq(attachmentKindFor(null, null), null, 'and a picker that said nothing at all is not guessed at');
   eq(attachmentKindFor('application/octet-stream', 'clip'), null, 'nor is a nameless blob');
+}
+
+// ── the sender's filename is the one piece of their text we draw ───────────
+{
+  eq(attachmentName('  blood panel.pdf  '), 'blood panel.pdf', 'a name is stored trimmed');
+  eq(attachmentName(''), null, 'and nothing is nothing');
+  eq(attachmentName('   '), null, 'as is whitespace');
+  // A name cannot draw a second line in a bubble, and cannot look like a path.
+  ok(!/\n/.test(attachmentName('two\nlines.pdf') ?? ''), 'a newline in a name cannot break the bubble');
+  ok(!(attachmentName('../../etc/passwd') ?? '').includes('/'), 'and a name cannot read as a path');
+  eq(attachmentName('x'.repeat(400))?.length, MESSAGE_NAME_MAX_CHARS,
+    'an over-long name is capped here rather than refused by the database');
+  ok(MESSAGE_NAME_MAX_CHARS <= 120, 'and the cap matches the check constraint in part 3360');
+}
+
+// ── every kind has a word, and a refusal that uses it ──────────────────────
+{
+  for (const k of ['image', 'video', 'audio', 'file'] as const) {
+    ok((attachmentNoun(k) ?? '').length > 0, `${k} has a word for a sentence`);
+    const tooBig = attachmentRefusal(MESSAGE_MEDIA_MAX_BYTES + 1, k) ?? '';
+    ok(tooBig.length > 0, `${k} that is too large is refused`);
+    ok(/limit/.test(tooBig), `and the refusal says what the limit is — ${k}`);
+    ok((attachmentRefusal(0, k) ?? '').length > 0, `an empty ${k} is refused too`);
+    eq(attachmentRefusal(1024, k), null, `and an ordinary ${k} is not`);
+  }
+  // A voice note has a length rule as well as a size one, and it is the
+  // recorder that stops rather than a refusal afterwards.
+  ok(MESSAGE_AUDIO_MAX_SECONDS > 0 && MESSAGE_AUDIO_MAX_SECONDS <= 600,
+    'a voice note is capped at something that is still a voice note');
 }
 
 // ── the extension states what the bytes ARE ────────────────────────────────

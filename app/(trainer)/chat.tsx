@@ -56,6 +56,8 @@ import {
   UNFILLED_TOKEN_NOTE,
 } from '../../src/lib/messageTemplates';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { useVoiceNote } from '../../src/ui/voiceNote';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
@@ -116,6 +118,10 @@ function Attachment({ m }: { m: ThreadMessage }) {
         {m.local.kind === 'image'
           ? <Image source={{ uri: m.local.uri }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
               accessibilityLabel={m.sending ? 'The photo you are sending' : delivered ? 'The photo you sent' : 'A photo that did not send'} />
+          : m.local.kind === 'audio'
+            ? note(m.sending ? 'Sending your voice note…' : delivered ? 'Voice note sent' : 'This voice note did not send.')
+          : m.local.kind === 'file'
+            ? note(m.sending ? 'Sending your file…' : delivered ? 'File sent' : 'This file did not send.')
           : m.sending ? note('Sending your video…')
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
@@ -132,6 +138,14 @@ function Attachment({ m }: { m: ThreadMessage }) {
   if (status === 'loading') return note(`Loading this ${attachmentNoun(stored.kind)}…`);
   if (!url) return note(`This ${attachmentNoun(stored.kind)} could not be loaded.`);
 
+  // Part 3360. Neither is a picture, so neither goes in the media box: a voice
+  // note is a control and a file is a name with a way to open it.
+  if (stored.kind === 'audio') {
+    return <VoiceNoteBubble url={url} label="voice note in this conversation" />;
+  }
+  if (stored.kind === 'file') {
+    return <FileBubble url={url} name={stored.name ?? null} />;
+  }
   if (stored.kind === 'image') {
     return <Image source={{ uri: url }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
       accessibilityLabel="Photo in this conversation" />;
@@ -259,11 +273,34 @@ export default function CoachChat() {
     if (attachment) setPending(attachment);
   };
 
+  /* The voice note, and why it is on the same menu as the camera.
+     Part 3360. Explaining why a knee caves takes forty seconds to say and four
+     paragraphs to type, and a coach between clients types neither. The
+     recorder stops itself at three minutes — see src/ui/voiceNote.ts — and a
+     take under a second is discarded rather than sent, because a notification
+     for silence is worse than no message. */
+  const voice = useVoiceNote();
+  const onRecord = async () => {
+    if (voice.recording) {
+      const took = await voice.stop();
+      if (!took) { Alert.alert('Nothing to Send', 'That recording was too short. Hold the thought and try again.'); return; }
+      setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
+      return;
+    }
+    const refused = await voice.start();
+    if (refused) Alert.alert('Cannot Record', refused);
+  };
+
   const onAttach = () => {
     Alert.alert('Add to Your Message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
       { text: 'Take a Photo', onPress: () => { attach('photo'); } },
       { text: 'Record a Form Check', onPress: () => { attach('video'); } },
       { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
+      // A PDF or a plain text file: a blood panel, a physio's report, an
+      // induction sheet. The files app greys out everything else, because the
+      // bucket would refuse it (part 3360).
+      { text: 'Send a File', onPress: () => { attach('document'); } },
+      ...(voice.available ? [{ text: 'Record a Voice Note', onPress: () => { void onRecord(); } }] : []),
       { text: 'Cancel', style: 'cancel' },
     ]);
   };

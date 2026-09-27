@@ -43,6 +43,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import { pickDocument } from './nativeModules';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -73,7 +74,8 @@ import {
 import {
   MESSAGE_MEDIA_BUCKET, MESSAGE_MEDIA_TTL_S, MESSAGE_IMAGE_WIDTH, MESSAGE_VIDEO_MAX_SECONDS,
   messageAttachmentPath, attachmentContentType, attachmentExtension, attachmentKindFor,
-  attachmentNoun, attachmentRefusal, hasSomethingToSend, readAttachment,
+  attachmentNoun, attachmentRefusal, hasSomethingToSend, readAttachment, attachmentName,
+  MESSAGE_AUDIO_MAX_SECONDS,
   type AttachmentKind, type AttachmentRead, type MessageAttachment,
 } from '../lib/messageAttachments';
 
@@ -150,8 +152,9 @@ export interface PendingAttachment {
 
 /** Where the file is coming from. The library offers both kinds at once,
  *  because a person opening it is looking for "that thing I took", not for a
- *  category. */
-export type AttachSource = 'library' | 'photo' | 'video';
+ *  category. 'document' is the one that opens the files app rather than the
+ *  camera roll (part 3360). */
+export type AttachSource = 'library' | 'photo' | 'video' | 'document';
 
 /**
  * Open the picker.
@@ -165,6 +168,11 @@ export type AttachSource = 'library' | 'photo' | 'video';
 export async function pickMessageAttachment(
   source: AttachSource,
 ): Promise<{ attachment: PendingAttachment | null; error: string | null }> {
+  // A document lives in the files app, not in the photo library, and needs no
+  // media permission at all: the OS picker hands back one file the person
+  // chose and grants access to nothing else.
+  if (source === 'document') return pickMessageDocument();
+
   const permission = source === 'library' ? 'library' : 'camera';
   const purpose = source === 'video' ? 'send a video in a message' : 'send a photo in a message';
   // ensureMediaPermission says its own piece — including offering Settings when
@@ -196,6 +204,53 @@ export async function pickMessageAttachment(
     reportError('messaging.pick', e);
     return { attachment: null, error: 'The picker could not be opened. Try again.' };
   }
+}
+
+/**
+ * The files app, for the one kind that is not a picture.
+ *
+ * `type` names exactly what supabase/parts/3360 lets into the bucket, so the
+ * OS itself greys out anything that would be refused — a person never picks a
+ * .docx and then reads a sentence explaining why it was pointless. The refusal
+ * below still exists for the picker that ignores the filter, which some
+ * Android file providers do.
+ *
+ * `copyToCacheDirectory` because the uri a provider hands back can be a
+ * permission-scoped handle that is closed the moment the picker dismisses, and
+ * the upload happens after that.
+ */
+async function pickMessageDocument(): Promise<{ attachment: PendingAttachment | null; error: string | null }> {
+  // Through src/ui/nativeModules.ts, never `import * as DocumentPicker`.
+  // expo-document-picker calls requireNativeModule at module scope, so a
+  // direct import throws while THIS FILE is loading on any install made
+  // before the dependency landed — and an over-the-air update ships the
+  // JavaScript without the native half, so that install is the normal case
+  // rather than a hypothesis. A thrown import takes the whole messaging
+  // screen, not the one button. scripts/check-native.mjs is the gate.
+  const picked = await pickDocument({ type: ['application/pdf', 'text/plain'] });
+  if (picked.outcome === 'cancelled') return { attachment: null, error: null };
+  if (picked.outcome === 'unavailable') {
+    return {
+      attachment: null,
+      error: 'This version of the app was installed before file sending was added, so the picker is not in it. Updating to the latest build adds it.',
+    };
+  }
+  if (picked.outcome === 'error') {
+    reportError('messaging.pickDocument', picked.error);
+    return { attachment: null, error: 'The files app could not be opened. Try again.' };
+  }
+  const a = picked.file;
+  const kind = attachmentKindFor(a.mimeType, a.name);
+  if (kind !== 'file') {
+    return {
+      attachment: null,
+      error: 'Only a PDF or a plain text file can be sent in a message. Anything else is best sent by email.',
+    };
+  }
+  return {
+    attachment: { uri: a.uri, kind, mimeType: a.mimeType ?? null, fileName: a.name || null },
+    error: null,
+  };
 }
 
 function newToken(): string {
@@ -850,7 +905,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
     }
 
     // ── 1 · the file ──────────────────────────────────────────────────────
-    let stored: { path: string; kind: AttachmentKind } | null = null;
+    let stored: { path: string; kind: AttachmentKind; name: string | null } | null = null;
     if (att) {
       const { data: auth, error: authErr } = await supabase.auth.getUser();
       const uid = auth?.user?.id ?? null;
@@ -866,7 +921,16 @@ export function useThread(clientId: string | null, role: ChatRole) {
         markUnsent(localId, 'upload');
         return { ok: false, reason: up.error ?? `That ${attachmentNoun(att.kind)} could not be sent.` };
       }
-      stored = { path: up.path, kind: att.kind };
+      // The sender's own filename travels with the row for the one kind where
+      // it is how somebody decides whether to open the thing (part 3360). It
+      // is cleaned here rather than trusted: `attachmentName` strips the
+      // characters that would let a filename draw a second line in a bubble or
+      // read as a path.
+      stored = {
+        path: up.path,
+        kind: att.kind,
+        name: att.kind === 'file' ? attachmentName(att.fileName) : null,
+      };
     }
 
     // ── 2 · the row ───────────────────────────────────────────────────────
@@ -874,6 +938,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       const { data, error } = await supabase.from('messages').insert({
         client_id: tid.current, sender: role, body: b,
         attachment_path: stored?.path ?? null, attachment_kind: stored?.kind ?? null,
+        attachment_name: stored?.name ?? null,
       }).select().single();
       if (error || !data) {
         // The file is up and nothing points at it. Take it back out rather than

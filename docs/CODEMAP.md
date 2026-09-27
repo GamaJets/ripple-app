@@ -35,8 +35,8 @@ is paid again on every turn of the session that opened it.
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
 | 2,005 | 33k | `app/(trainer)/analytics.tsx` |
+| 1,858 | 24k | `src/ui/messaging.ts` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
-| 1,793 | 23k | `src/ui/messaging.ts` |
 | 1,792 | 23k | `studio-web/app/analytics/page.tsx` |
 | 1,774 | 21k | `studio-web/app/retention/page.tsx` |
 | 1,758 | 23k | `studio-web/app/coach/earnings/page.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,249 lines, ~1726k tokens if every one were read whole.
+Total: 47 files, 119,314 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -2333,6 +2333,70 @@ Total: 47 files, 119,249 lines, ~1726k tokens if every one were read whole.
 1024-2005     fn         exportAnalytics
 ```
 
+## `src/ui/messaging.ts`
+
+1,858 lines · ~24k tokens · 57 anchors
+
+```
+5-20          §        Two silences this hook used to keep
+21-81         §        Attachments, and the third way to fail
+82-97         type     ChatRole
+98-101        type     QueuedMessage
+102-123       fn       asQueuedMessage
+124-133       type     ThreadMessage
+134-145       fn       rowToMsg
+146-156       type     PendingAttachment
+157-167       type     AttachSource
+168-221       fn       pickMessageAttachment
+222-255       fn       pickMessageDocument
+256-274       fn       newToken
+275-350       fn       uploadMessageAttachment
+351-355       fn       flushSignQueue
+356-384       fn         paths
+385-421       fn       signAttachment
+422-441       fn       removeMessageAttachment
+442-468       fn       useAttachmentUrl
+469-494       type     SendResult
+495-502       type     UnsentStage
+503-661       fn       useThread
+662-801       §        this device's copy of the thread, before the network
+802-820       fn         queuedHere
+821-844       fn         markUnsent
+845-846       fn         keepForLater
+847-889       fn           failed
+890-906       fn         send
+907-935       §        1 · the file
+936-977       §        2 · the row
+978-1065      §        THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S
+1066-1088     fn         loadOlder
+1089-1117     fn             fresh
+1118-1120     fn         shown
+1121-1143     fn           have
+1144-1202     fn         shownUnsent
+1203-1204     fn       refusedListeners
+1205-1221     fn       refusedChanged
+1222-1240     fn       refusedUid
+1241-1265     fn       keepRefusal
+1266-1284     type     RefusedRecord
+1285-1290     fn       useRefusedMessages
+1291-1331     fn         load
+1332-1337     fn           run
+1338-1344     fn         forget
+1345-1368     fn               next
+1369-1432     fn       MessageOutboxHandler
+1433-1478     type     CoachSendResult
+1479-1494     fn       sendCoachMessages
+1495-1578     fn         results
+1579-1584     type     ThreadPeer
+1585-1698     fn       useThreadPeerName
+1699-1729     type     ThreadSafety
+1730-1736     fn       useThreadSafety
+1737-1772     fn         reload
+1773-1796     fn         block
+1797-1820     fn         unblock
+1821-1858     fn         report
+```
+
 ## `studio-web/app/export/page.tsx`
 
 1,829 lines · ~22k tokens · 69 anchors
@@ -2407,69 +2471,6 @@ Total: 47 files, 119,249 lines, ~1726k tokens if every one were read whole.
 1803-1821     fn       Section
 1822-1825     fn       Banner
 1826-1829     fn       capitalise
-```
-
-## `src/ui/messaging.ts`
-
-1,793 lines · ~23k tokens · 56 anchors
-
-```
-5-20          §        Two silences this hook used to keep
-21-79         §        Attachments, and the third way to fail
-80-95         type     ChatRole
-96-99         type     QueuedMessage
-100-121       fn       asQueuedMessage
-122-131       type     ThreadMessage
-132-143       fn       rowToMsg
-144-153       type     PendingAttachment
-154-164       type     AttachSource
-165-200       fn       pickMessageAttachment
-201-219       fn       newToken
-220-295       fn       uploadMessageAttachment
-296-300       fn       flushSignQueue
-301-329       fn         paths
-330-366       fn       signAttachment
-367-386       fn       removeMessageAttachment
-387-413       fn       useAttachmentUrl
-414-439       type     SendResult
-440-447       type     UnsentStage
-448-606       fn       useThread
-607-746       §        this device's copy of the thread, before the network
-747-765       fn         queuedHere
-766-789       fn         markUnsent
-790-791       fn         keepForLater
-792-834       fn           failed
-835-851       fn         send
-852-871       §        1 · the file
-872-912       §        2 · the row
-913-1000      §        THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S
-1001-1023     fn         loadOlder
-1024-1052     fn             fresh
-1053-1055     fn         shown
-1056-1078     fn           have
-1079-1137     fn         shownUnsent
-1138-1139     fn       refusedListeners
-1140-1156     fn       refusedChanged
-1157-1175     fn       refusedUid
-1176-1200     fn       keepRefusal
-1201-1219     type     RefusedRecord
-1220-1225     fn       useRefusedMessages
-1226-1266     fn         load
-1267-1272     fn           run
-1273-1279     fn         forget
-1280-1303     fn               next
-1304-1367     fn       MessageOutboxHandler
-1368-1413     type     CoachSendResult
-1414-1429     fn       sendCoachMessages
-1430-1513     fn         results
-1514-1519     type     ThreadPeer
-1520-1633     fn       useThreadPeerName
-1634-1664     type     ThreadSafety
-1665-1671     fn       useThreadSafety
-1672-1707     fn         reload
-1708-1731     fn         block
-1732-1755     fn         unblock
-1756-1793     fn         report
 ```
 
 ## `studio-web/app/analytics/page.tsx`

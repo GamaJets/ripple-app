@@ -104,6 +104,8 @@ import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
+import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { useVoiceNote } from '../../src/ui/voiceNote';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   useRefusedMessages,
@@ -173,6 +175,10 @@ function Attachment({ m }: { m: ThreadMessage }) {
         {m.local.kind === 'image'
           ? <Image source={{ uri: m.local.uri }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
               accessibilityLabel={m.sending ? 'The photo you are sending' : delivered ? 'The photo you sent' : 'A photo that did not send'} />
+          : m.local.kind === 'audio'
+            ? note(m.sending ? 'Sending your voice note…' : delivered ? 'Voice note sent' : 'This voice note did not send.')
+          : m.local.kind === 'file'
+            ? note(m.sending ? 'Sending your file…' : delivered ? 'File sent' : 'This file did not send.')
           : m.sending ? note('Sending your video…')
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
@@ -191,6 +197,14 @@ function Attachment({ m }: { m: ThreadMessage }) {
   // could not be given a way to open it.
   if (!url) return note(`This ${attachmentNoun(stored.kind)} could not be loaded.`);
 
+  // Part 3360. Neither is a picture, so neither goes in the media box: a voice
+  // note is a control and a file is a name with a way to open it.
+  if (stored.kind === 'audio') {
+    return <VoiceNoteBubble url={url} label="voice note in this conversation" />;
+  }
+  if (stored.kind === 'file') {
+    return <FileBubble url={url} name={stored.name ?? null} />;
+  }
   if (stored.kind === 'image') {
     return <Image source={{ uri: url }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
       accessibilityLabel="Photo in this conversation" />;
@@ -383,11 +397,29 @@ export default function Messages() {
     if (attachment) setPending(attachment);
   };
 
+  /* Part 3360, and the member needs both as much as the coach does: a voice
+     note is how somebody describes a pain they have no word for, and the file
+     is usually a blood panel or a physio's report they were handed as a PDF.
+     The recorder stops itself at three minutes (src/ui/voiceNote.ts). */
+  const voice = useVoiceNote();
+  const onRecord = async () => {
+    if (voice.recording) {
+      const took = await voice.stop();
+      if (!took) { Alert.alert('Nothing to Send', 'That recording was too short. Hold the thought and try again.'); return; }
+      setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
+      return;
+    }
+    const refused = await voice.start();
+    if (refused) Alert.alert('Cannot Record', refused);
+  };
+
   const onAttach = () => {
     Alert.alert('Add to Your Message', 'Your coach will be able to see this, and nobody else.', [
       { text: 'Take a Photo', onPress: () => { attach('photo'); } },
       { text: 'Record a Video', onPress: () => { attach('video'); } },
       { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
+      { text: 'Send a File', onPress: () => { attach('document'); } },
+      ...(voice.available ? [{ text: 'Record a Voice Note', onPress: () => { void onRecord(); } }] : []),
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
