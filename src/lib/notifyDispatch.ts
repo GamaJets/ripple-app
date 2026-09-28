@@ -177,9 +177,19 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   ['/(trainer)/client-goals', 'clients'],
   ['/(trainer)/client-training', 'clients'],
   ['/(trainer)/client-photos', 'clients'],
+  // Part 3340: the weekly check-in. Same switch as the photo and for the same
+  // reading of it — this is a client telling their coach how their week went,
+  // which is the thing 'clients' has always meant.
+  ['/(trainer)/checkins', 'clients'],
   // The client's side of the same conversation. Handset-pushed today.
   ['/(client)/my-coach', 'clients'],
   ['/(client)/trainers', 'clients'],
+  // Part 3350: the coach answered the set this member filmed. 'clients' on the
+  // member's side is their coaching relationship — the same switch that
+  // carries a coach's assessment below — and an answer about how they move
+  // under a bar belongs to it rather than to the chat thread it did not
+  // travel through.
+  ['/(client)/workouts', 'clients'],
   // Part 3320: a coach's assessment of a client, and the community board's
   // replies and reports, written by triggers.
   ['/(client)/assessments', 'clients'],

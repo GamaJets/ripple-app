@@ -522,6 +522,19 @@ const REACH_SHORTCUTS: Shortcut[] = [
   ['bell', 'Broadcast', '/(trainer)/broadcast'],
 ];
 
+/** What the book has SENT the coach, which is a different question from what
+ *  the coach can go and read. Check-Ins is here rather than under the book
+ *  because it is a queue with people waiting at the end of it: twelve clients
+ *  filled in a form and are waiting to hear back, and until this screen existed
+ *  the only way to reach one was to open a named client and look. An online
+ *  coach's whole week runs through it, which is why it is not in
+ *  IN_PERSON_SHORTCUTS — a coach who never sees their clients needs it MORE
+ *  than one who does. supabase/parts/3340 is what tells them a form arrived,
+ *  and it opens this same screen on the person who sent it. */
+const SENT_SHORTCUTS: Shortcut[] = [
+  ['heart', 'Check-Ins', '/(trainer)/checkins'],
+];
+
 /** Reading the book as a whole. Leaderboard and Referrals are read for the same
  *  reason — who on this book is worth more than the sessions they buy — and
  *  Referrals had the same problem Your Register had: `/(trainer)/referrals` was
@@ -3496,7 +3509,7 @@ export default function TrainerClients() {
           <ChipGrid
             tone={t.brand}
             items={[
-              ...[...REACH_SHORTCUTS, ...(showsInPerson(delivery) ? IN_PERSON_SHORTCUTS : [])]
+              ...[...REACH_SHORTCUTS, ...SENT_SHORTCUTS, ...(showsInPerson(delivery) ? IN_PERSON_SHORTCUTS : [])]
                 .map(([ic, label, route]) => ({
                   icon: ic, label, key: route, onPress: () => router.push(route as any),
                 })),

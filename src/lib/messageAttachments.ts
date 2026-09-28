@@ -33,12 +33,17 @@
 
 /** What to draw with the path. The database check constraint on
  *  `messages.attachment_kind` allows exactly these two. */
-export type AttachmentKind = 'image' | 'video';
+export type AttachmentKind = 'image' | 'video' | 'audio' | 'file';
 
 export interface MessageAttachment {
   /** Storage key in the private `message-media` bucket. */
   path: string;
   kind: AttachmentKind;
+  /** The sender's own filename, for the one kind where a name is how somebody
+   *  decides whether to open it. Null for a photo, a video or a voice note:
+   *  see supabase/parts/3360 on why a name invented from a storage key is
+   *  worse than no name at all. */
+  name?: string | null;
 }
 
 /** Private. Read through a signed URL, never getPublicUrl() — which hands back
@@ -101,7 +106,49 @@ const EXT_MIME: Record<string, { mime: string; kind: AttachmentKind }> = {
   png: { mime: 'image/png', kind: 'image' },
   mp4: { mime: 'video/mp4', kind: 'video' },
   mov: { mime: 'video/quicktime', kind: 'video' },
+  // Part 3360. What expo-audio records, and the two documents this app is
+  // willing to hand between two people's phones. A .docx is a zip and a zip is
+  // a container whose contents this app cannot state, so it is not here.
+  m4a: { mime: 'audio/m4a', kind: 'audio' },
+  mp3: { mime: 'audio/mpeg', kind: 'audio' },
+  pdf: { mime: 'application/pdf', kind: 'file' },
+  txt: { mime: 'text/plain', kind: 'file' },
 };
+
+/** The longest voice note this app will send.
+ *
+ *  Not a technical limit — the size cap would allow far more — but the one
+ *  that keeps a voice note a voice note. Three minutes of talking is a
+ *  conversation somebody should be having live, and a five-minute recording
+ *  arriving on a phone is a thing the other person puts off listening to. The
+ *  recorder stops itself here rather than refusing afterwards, which is the
+ *  difference between a rule and a punishment. */
+export const MESSAGE_AUDIO_MAX_SECONDS = 180;
+
+/** The longest filename stored, matching `messages_attachment_name_chk` in
+ *  supabase/parts/3360. Checked here as well so an over-long name is trimmed
+ *  before the insert rather than refused by the database as a 400 the screen
+ *  has to explain. */
+export const MESSAGE_NAME_MAX_CHARS = 120;
+
+/**
+ * A sender's filename as it will be stored, or null when there is nothing
+ * worth storing.
+ *
+ * Trimmed, capped, and stripped of the characters that make a name read as
+ * something other than a name: newlines and control characters, which would
+ * let a filename draw two lines in a bubble, and the directory separators that
+ * make "../" look like a path. This is the one piece of sender-controlled text
+ * this app renders beside a message, and it is rendered as text.
+ */
+export function attachmentName(raw: string | null | undefined): string | null {
+  const s = String(raw ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[\/\\]/g, ' ')
+    .trim();
+  if (!s) return null;
+  return s.length > MESSAGE_NAME_MAX_CHARS ? s.slice(0, MESSAGE_NAME_MAX_CHARS) : s;
+}
 
 /** Build the key. `atMs` and `token` together are what make it unique, so an
  *  upload is always a new object and never an overwrite — there is no UPDATE
@@ -154,6 +201,19 @@ export function attachmentContentType(path: string): string | null {
  */
 export function attachmentExtension(kind: AttachmentKind, mimeType?: string | null, name?: string | null): string {
   if (kind === 'image') return 'jpg';
+  if (kind === 'audio' || kind === 'file') {
+    // Neither is re-encoded, so the extension has to state what the bytes
+    // actually are. The mime type is the recorder's or the picker's own
+    // answer and is trusted first; the filename is the fallback; and anything
+    // the bucket would refuse resolves to the default for that kind rather
+    // than being passed through to fail at the far end as a 400.
+    const mime = String(mimeType ?? '').toLowerCase();
+    const byMime = Object.entries(EXT_MIME).find(([, v]) => v.mime === mime && v.kind === kind)?.[0];
+    if (byMime) return byMime;
+    const named = String(name ?? '').toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1];
+    if (named && EXT_MIME[named]?.kind === kind) return named;
+    return kind === 'audio' ? 'm4a' : 'pdf';
+  }
   const mime = String(mimeType ?? '').toLowerCase();
   if (mime === 'video/quicktime') return 'mov';
   if (mime === 'video/mp4') return 'mp4';
@@ -203,7 +263,7 @@ export type AttachmentRead =
 const UNREADABLE = 'This message has an attachment this version of the app cannot show.';
 
 export function readAttachment(
-  row: { attachment_path?: unknown; attachment_kind?: unknown },
+  row: { attachment_path?: unknown; attachment_kind?: unknown; attachment_name?: unknown },
   threadId: string,
 ): AttachmentRead {
   const path = typeof row?.attachment_path === 'string' ? row.attachment_path : null;
@@ -213,14 +273,19 @@ export function readAttachment(
   // does not exist, which is the exact lie this whole feature is built around
   // not telling.
   if (!path || !kind) return { state: 'unreadable', why: UNREADABLE };
-  if (kind !== 'image' && kind !== 'video') return { state: 'unreadable', why: UNREADABLE };
+  if (kind !== 'image' && kind !== 'video' && kind !== 'audio' && kind !== 'file') {
+    return { state: 'unreadable', why: UNREADABLE };
+  }
   if (!isThreadAttachmentPath(path, threadId)) return { state: 'unreadable', why: UNREADABLE };
-  return { state: 'ok', attachment: { path, kind } };
+  return { state: 'ok', attachment: { path, kind, name: attachmentName(row?.attachment_name as string) } };
 }
 
 /** The word for this kind, for use in a sentence. */
 export function attachmentNoun(kind: AttachmentKind): string {
-  return kind === 'image' ? 'photo' : 'video';
+  return kind === 'image' ? 'photo'
+    : kind === 'video' ? 'video'
+    : kind === 'audio' ? 'voice note'
+    : 'file';
 }
 
 /**
@@ -236,9 +301,16 @@ export function attachmentRefusal(bytes: number, kind: AttachmentKind): string |
   }
   if (bytes > MESSAGE_MEDIA_MAX_BYTES) {
     const mb = Math.round(MESSAGE_MEDIA_MAX_BYTES / (1024 * 1024));
-    return kind === 'video'
-      ? `That video is too large to send (the limit is ${mb} MB). A shorter clip of the movement itself will go through.`
-      : `That photo is too large to send (the limit is ${mb} MB).`;
+    if (kind === 'video') {
+      return `That video is too large to send (the limit is ${mb} MB). A shorter clip of the movement itself will go through.`;
+    }
+    if (kind === 'file') {
+      return `That file is too large to send (the limit is ${mb} MB). Email is the way to send something this big.`;
+    }
+    if (kind === 'audio') {
+      return `That recording is too large to send (the limit is ${mb} MB).`;
+    }
+    return `That photo is too large to send (the limit is ${mb} MB).`;
   }
   return null;
 }

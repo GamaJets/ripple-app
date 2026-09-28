@@ -31,7 +31,7 @@
 // The bubble keeps sending, not-sent and unreadable apart for the reason the
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -56,6 +56,11 @@ import {
   UNFILLED_TOKEN_NOTE,
 } from '../../src/lib/messageTemplates';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { useVoiceNote } from '../../src/ui/voiceNote';
+import {
+  searchThread, threadSearchA11y, threadSearchActive, threadSearchLine,
+} from '../../src/lib/threadSearch';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
@@ -116,6 +121,10 @@ function Attachment({ m }: { m: ThreadMessage }) {
         {m.local.kind === 'image'
           ? <Image source={{ uri: m.local.uri }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
               accessibilityLabel={m.sending ? 'The photo you are sending' : delivered ? 'The photo you sent' : 'A photo that did not send'} />
+          : m.local.kind === 'audio'
+            ? note(m.sending ? 'Sending your voice note…' : delivered ? 'Voice note sent' : 'This voice note did not send.')
+          : m.local.kind === 'file'
+            ? note(m.sending ? 'Sending your file…' : delivered ? 'File sent' : 'This file did not send.')
           : m.sending ? note('Sending your video…')
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
@@ -132,6 +141,14 @@ function Attachment({ m }: { m: ThreadMessage }) {
   if (status === 'loading') return note(`Loading this ${attachmentNoun(stored.kind)}…`);
   if (!url) return note(`This ${attachmentNoun(stored.kind)} could not be loaded.`);
 
+  // Part 3360. Neither is a picture, so neither goes in the media box: a voice
+  // note is a control and a file is a name with a way to open it.
+  if (stored.kind === 'audio') {
+    return <VoiceNoteBubble url={url} label="voice note in this conversation" />;
+  }
+  if (stored.kind === 'file') {
+    return <FileBubble url={url} name={stored.name ?? null} />;
+  }
   if (stored.kind === 'image') {
     return <Image source={{ uri: url }} style={box} resizeMode="cover" accessibilityIgnoresInvertColors
       accessibilityLabel="Photo in this conversation" />;
@@ -252,6 +269,24 @@ export default function CoachChat() {
    */
   const receipt = useReadReceipt({ threadId, role: 'coach', messages: msgs, unsent, atEnd, them: firstName ?? 'they' });
 
+  /* Searching this thread. src/lib/threadSearch.ts was written for the
+     member's copy of this screen and imported by nothing else, which had it
+     backwards: a member has one coach and one conversation, and a coach has
+     forty of them, each years long. "What did I tell her about the knee" is a
+     coach's question.
+
+     `msgs` is deliberately left alone. `receipt`, `waiting` and the unread
+     watermark are all computed from it above, and a coach searching a thread
+     has not read anything new — filtering the list must not change any claim
+     this screen makes about what the other person can see. */
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const searchOn = searching && threadSearchActive(query);
+  const found = useMemo(() => (searchOn ? searchThread(msgs, query) : msgs), [searchOn, msgs, query]);
+  const searchLine = searchOn
+    ? threadSearchLine({ query, matched: found.length, searched: msgs.length, hasOlder, status })
+    : null;
+
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
     // A cancel carries neither, and must raise nothing at anybody.
@@ -259,11 +294,34 @@ export default function CoachChat() {
     if (attachment) setPending(attachment);
   };
 
+  /* The voice note, and why it is on the same menu as the camera.
+     Part 3360. Explaining why a knee caves takes forty seconds to say and four
+     paragraphs to type, and a coach between clients types neither. The
+     recorder stops itself at three minutes — see src/ui/voiceNote.ts — and a
+     take under a second is discarded rather than sent, because a notification
+     for silence is worse than no message. */
+  const voice = useVoiceNote();
+  const onRecord = async () => {
+    if (voice.recording) {
+      const took = await voice.stop();
+      if (!took) { Alert.alert('Nothing to Send', 'That recording was too short. Hold the thought and try again.'); return; }
+      setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
+      return;
+    }
+    const refused = await voice.start();
+    if (refused) Alert.alert('Cannot Record', refused);
+  };
+
   const onAttach = () => {
     Alert.alert('Add to Your Message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
       { text: 'Take a Photo', onPress: () => { attach('photo'); } },
       { text: 'Record a Form Check', onPress: () => { attach('video'); } },
       { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
+      // A PDF or a plain text file: a blood panel, a physio's report, an
+      // induction sheet. The files app greys out everything else, because the
+      // bucket would refuse it (part 3360).
+      { text: 'Send a File', onPress: () => { attach('document'); } },
+      ...(voice.available ? [{ text: 'Record a Voice Note', onPress: () => { void onRecord(); } }] : []),
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -428,6 +486,17 @@ export default function CoachChat() {
             in the client's: a moderation path somebody has to go looking for is
             one they reach for after it has already gone wrong. The icon carries
             no status colour — the state is said in words under the composer. */}
+        {/* Beside the safety control rather than above the thread, so the
+            screen still opens on the newest message. Closing it clears the
+            query: a field holding a word the coach cannot see is a
+            conversation that looks half-missing next time they open it. */}
+        <Pressable onPress={() => setSearching((v) => { if (v) setQuery(''); return !v; })}
+          accessibilityRole="button" hitSlop={8}
+          accessibilityState={{ selected: searching }}
+          accessibilityLabel={searching ? 'Stop searching this conversation' : 'Search this conversation'}
+          style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: searching ? t.brand : t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+          <Icon name="search" size={18} color={searching ? t.brandInk : t.ink2} />
+        </Pressable>
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
@@ -435,6 +504,38 @@ export default function CoachChat() {
           <Icon name="lock" size={18} color={t.ink2} />
         </Pressable>
       </View>
+
+      {/* ── the search field ──────────────────────────────────────────────
+          Drawn only while the control above is on. The sentence under it is
+          the half that matters: this screen holds the recent end of a
+          conversation that may be much longer, and "no match" said over the
+          part that happens to be loaded is a claim about the whole thread. */}
+      {searching ? (
+        <View style={{ paddingHorizontal: G, paddingTop: sp.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.md, ...elevation.card }}>
+            <Icon name="search" size={16} color={t.ink3} />
+            <TextInput
+              value={query} onChangeText={setQuery} autoFocus
+              placeholder="Find a word in this conversation" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel="Find a word in this conversation"
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            {query ? (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Clear the search">
+                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {searchLine ? (
+            // A live region: the thread below changes under the coach's thumb
+            // as they type, and nothing else would tell a screen reader it had.
+            <Text accessibilityLiveRegion="polite"
+              accessibilityLabel={[threadSearchA11y({ query, matched: found.length }), searchLine].filter(Boolean).join(' ')}
+              style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{searchLine}</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* The compose bar is lifted by measurement rather than by
           KeyboardAvoidingView, which under-lifted it by the height of the
@@ -508,7 +609,7 @@ export default function CoachChat() {
               </Text>
             </View>
           ) : null}
-          {msgs.map((m) => {
+          {found.map((m: ThreadMessage) => {
             const mine = m.sender === 'coach';
             // Local-only: the upload or the insert was refused, so the client
             // cannot see it. The stage says which, because "the video did not

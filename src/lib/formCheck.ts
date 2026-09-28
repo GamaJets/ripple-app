@@ -142,3 +142,39 @@ export function clipNoteLine(note: string | null | undefined, whenLabel: string 
   if (!q) return `They attached a clip of this set${when}, without a question.`;
   return `They asked${when}: “${q}”`;
 }
+
+/* ── the coach's answer ─────────────────────────────────────────────────────
+ *
+ * Part 3350 gave `form_clips` a reply column. These are the two rules about
+ * what may go in it, here rather than on the screen so the write and the
+ * button that enables it cannot disagree — which is the same reason
+ * `clipRefusal` above is not in app/(client)/exercise.tsx.
+ */
+
+/** The longest reply the column is asked to hold.
+ *
+ *  Not a database constraint: `coach_reply` is `text` and a coach writing a
+ *  long answer about somebody's knee should not be truncated by a number
+ *  nobody chose on purpose. This is the point past which the input stops
+ *  accepting keystrokes, and it is generous — four or five paragraphs. */
+export const MAX_REPLY_CHARS = 2000;
+
+/** A reply as it will be stored, or null when there is nothing to store.
+ *
+ *  Trimmed, because a reply of three spaces is not an answer and would render
+ *  as an empty quote block under the member's own question. Null and the empty
+ *  string are the same event everywhere this value is read. */
+export function replyText(raw: string | null | undefined): string | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  return s.length > MAX_REPLY_CHARS ? s.slice(0, MAX_REPLY_CHARS) : s;
+}
+
+/** What the member's screen says under their own question, for the ear and for
+ *  the eye. Null when the coach has not answered yet: an unanswered clip says
+ *  nothing rather than "no reply", which reads as a refusal. */
+export function replyLine(reply: string | null | undefined, whenLabel: string | null): string | null {
+  const body = replyText(reply);
+  if (!body) return null;
+  return whenLabel ? `Your coach answered ${whenLabel}.` : 'Your coach answered.';
+}

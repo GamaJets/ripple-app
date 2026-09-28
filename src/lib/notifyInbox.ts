@@ -335,6 +335,14 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // anything. The bell would say "we have no idea what this is" over a
   // notification about the most exposed thing a client does in this product.
   ['/(trainer)/client-photos', 'heart'],
+  // ── and the screen part 3340 sends a coach to ────────────────────────────
+  //
+  // Same shape and the same reason: a check-in is a member's own account of
+  // their week — mood, sleep, energy, and a paragraph — so it belongs to the
+  // one shape in this table that is about a person rather than about a
+  // document or a figure. The bell would say "we have no idea what this is"
+  // over the most personal thing a client writes.
+  ['/(trainer)/checkins', 'heart'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -871,6 +879,43 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     when: 'a client shares a progress photo with their coach (an insert on progress_photo_shares)',
     to: 'trainer', title: 'A client has sent you a progress photo',
     route: '/(trainer)/client-photos?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
+  },
+  // ── the check-in a client filled in (part 3340) ─────────────────────────
+  //
+  // The same silence, one table over: until this, the ONLY way a coach learned
+  // that twelve people had written to them on Monday was to open twelve named
+  // clients and look. It matters most to a coach whose clients are online,
+  // where the check-in and the chat thread are the whole relationship.
+  //
+  // The route carries the client id for the same reason the two above it do —
+  // without it a message about a named person opens a list of everybody — and
+  // the body is as narrow as the photo's, for the same reason. A check-in row
+  // holds a weight and four self-ratings about somebody's mood and sleep, and
+  // none of it goes on a lock screen: that a form arrived, and who from.
+  // ── the form check, both ways (part 3350) ──────────────────────────────
+  //
+  // A member films one set and asks a question about it; the coach answers on
+  // the clip. Two messages, because it is a conversation and each end has to
+  // know the other spoke. Neither carries the words: the question is the
+  // member's and often names a body part, the answer is about how their body
+  // moves under a bar, and both are one tap away inside the app.
+  {
+    where: 'supabase/parts/3350 · form_clip_notify_coach',
+    when: 'a client attaches a form-check clip to a logged set (an insert on form_clips)',
+    to: 'trainer', title: 'A client has sent a form check',
+    route: '/(trainer)/client-training?clientId=00000000-0000-0000-0000-000000000000', icon: 'dumbbell',
+  },
+  {
+    where: 'supabase/parts/3350 · form_clip_notify_member',
+    when: 'the coach writes back on a form-check clip (coach_reply changes to something non-empty)',
+    to: 'client', title: 'Your coach answered your form check',
+    route: '/(client)/workouts', icon: 'dumbbell',
+  },
+  {
+    where: 'supabase/parts/3340 · check_in_notify_coach',
+    when: 'a client fills in their weekly check-in (an insert on check_ins), and they have a coach',
+    to: 'trainer', title: 'A client has sent a check-in',
+    route: '/(trainer)/checkins?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
   },
 ];
 

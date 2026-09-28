@@ -7,6 +7,7 @@
 import {
   formClipPath, isOwnClipPath, clipRefusal, clipRefusalLine, clipNoteLine,
   MEMBER_CONSENT_NOTE, MAX_CLIP_SECONDS, MAX_CLIP_BYTES, FORM_CLIP_BUCKET,
+  replyText, replyLine, MAX_REPLY_CHARS,
 } from './formCheck';
 
 const errors: string[] = [];
@@ -92,5 +93,30 @@ ok(/without a question/.test(clipNoteLine('   ', 'Tue')), 'and whitespace is not
 
 eq(FORM_CLIP_BUCKET, 'form-checks', 'the bucket is named once and matches supabase/parts/2617');
 
+/* ── what the coach writes back (part 3350) ───────────────────────────────── */
+
+eq(replyText('  form is good, brace harder  '), 'form is good, brace harder', 'a reply is stored trimmed');
+eq(replyText('   '), null, 'whitespace is not an answer');
+eq(replyText(''), null, 'and neither is nothing');
+eq(replyText(null), null, 'nor a missing value');
+// Null and the empty string are the same event, so a screen branching on one
+// of them cannot draw an empty quote block for the other.
+eq(replyText(undefined), replyText(''), 'an absent reply and an empty one are the same event');
+{
+  const long = 'x'.repeat(MAX_REPLY_CHARS + 500);
+  eq(replyText(long)?.length, MAX_REPLY_CHARS, 'a very long answer is capped rather than refused');
+  ok(MAX_REPLY_CHARS > 500, 'and the cap is generous enough for a real explanation');
+}
+
+// The sentence over the member's own question. Null while unanswered: "no
+// reply yet" on a clip nobody has watched reads as a refusal.
+eq(replyLine(null, 'Tue'), null, 'an unanswered clip says nothing at all');
+eq(replyLine('   ', 'Tue'), null, 'and a blank reply is unanswered');
+ok(/Tue/.test(replyLine('brace harder', 'Tue') ?? ''), 'an answered one says when');
+ok((replyLine('brace harder', null) ?? '').length > 0, 'and still says so when the day is unknown');
+// It never quotes the answer: the words are drawn in full underneath, and a
+// line that both summarises and repeats them says it twice.
+ok(!/brace harder/.test(replyLine('brace harder', 'Tue') ?? ''), 'the line introduces the answer rather than repeating it');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('formCheck: ok (the key cannot leave the member’s folder, no coach means no clip, and consent is said before the camera opens)');
+console.log('formCheck: ok (the key cannot leave the member’s folder, no coach means no clip, consent is said before the camera opens, and an empty answer is not an answer)');

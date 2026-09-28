@@ -73496,3 +73496,460 @@ create policy communitymedia_obj_delete on storage.objects for delete to authent
 
 -- Grants: community_posts keeps part 3300's table-level grants, which cover
 -- the new columns. No new functions are exposed.
+
+-- ▶ a-check-in-nobody-was-told-about.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A client filled in their weekly check-in and nothing told the coach.
+--
+-- ── What was silent, and how that was established ────────────────────────
+--
+-- `check_ins` is the spine of online coaching: once a week a client sits down
+-- and writes their coach a weight, four self-ratings and a paragraph about
+-- their week. src/lib/coachCheckins.ts was written on 20 Sep 2026 precisely
+-- because nothing on the coach side had ever read the note, and its header
+-- records the measurement — four coach-side reads existed, and between them
+-- they took the weight, the timestamp and the adherence number. That module
+-- fixed the READING. It did not fix the TELLING, and this is that half.
+--
+-- Grep `check_ins` across supabase/parts: part 02 creates the table, part 202
+-- counts rows off it for the nightly "gone quiet" sweep, and nothing anywhere
+-- fires on the insert. Grep `SERVER_WRITTEN` in src/lib/notifyInbox.ts and
+-- there is no check-in row. So the discovery mechanism for a check-in is the
+-- coach remembering to open a named client and look — one person at a time, on
+-- the off-chance, which is the same failure part 614 closed for a progress
+-- photo and part 159 closed for an intake form.
+--
+-- It costs most where the product is weakest. A coach with a gym floor sees
+-- their clients; a coach with twelve online clients has the check-in and the
+-- chat thread and nothing else, and a check-in read on Thursday is a week of
+-- coaching that did not happen.
+--
+-- ══ WHAT THIS MESSAGE MAY CONTAIN ════════════════════════════════════════
+--
+-- A push renders on a LOCK SCREEN, read by whoever is standing near the
+-- coach's phone. Part 614 settles what that means for a progress photo and the
+-- same reasoning decides every word here, because a check-in row is health
+-- data about a named person:
+--
+--   NO WEIGHT. `check_ins.weight_kg` is on the row and is nobody's business on
+--     a lock screen. It is also the number most likely to be read over a
+--     shoulder and understood instantly.
+--   NO RATINGS. Energy, sleep, mood and adherence are four statements about a
+--     person's state, and "Sarah rated her mood 2 out of 5" is a sentence this
+--     app will not put on a lock screen.
+--   NO NOTE. It is a paragraph written to one person. Quoting even its first
+--     line is quoting it.
+--   NO STREAK OR COUNT. How many weeks somebody has or has not checked in is a
+--     shape of their habits, and part 614 refuses the same thing for photos.
+--
+-- What is left is the whole of the message: a check-in exists, and who from.
+-- The name is the coach's to read already — `profiles_trainer_r_clients` — and
+-- without it the notification opens a queue the coach then has to search.
+--
+-- ── One message per client per hour ──────────────────────────────────────
+--
+-- The same guard part 614 uses, for a different reason. A check-in is weekly,
+-- so a duplicate is not a batch send — it is somebody submitting twice because
+-- the first one did not look like it saved. Two identical pushes for that is
+-- the app reporting its own uncertainty, so the earlier row suppresses the
+-- later one.
+--
+-- ── Who this is sent to ──────────────────────────────────────────────────
+--
+-- `clients.trainer_id`, which is the live coaching link and the same join part
+-- 202 uses. A client with no coach produces no notification and no error: the
+-- majority of members have no coach, their check-ins are their own, and a
+-- trigger that raised on them would fail the insert and lose the check-in.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.check_in_notify_coach()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_coach uuid;
+  v_name  text;
+begin
+  -- This fires inside the transaction of a client pressing Send on their own
+  -- check-in. An exception here rolls that back and they would watch the form
+  -- do nothing, so every reachable failure is guarded rather than raised — and
+  -- not with `exception when others then null`, which swallows a real defect
+  -- silently and forever (part 158).
+
+  select c.trainer_id into v_coach
+    from public.clients c
+   where c.id = new.user_id
+     and c.trainer_id is not null;
+
+  -- A member with no coach. The common case, and not a failure.
+  if v_coach is null then
+    return null;
+  end if;
+
+  -- An earlier check-in from the same client in the last hour has already sent
+  -- this coach to the same screen. Ordering on `(at, id)` is what makes exactly
+  -- one win, for the reason part 614 sets out at length.
+  if exists (
+    select 1 from public.check_ins ci
+     where ci.user_id = new.user_id
+       and ci.id <> new.id
+       and ci.at > now() - interval '1 hour'
+       and (ci.at, ci.id) < (new.at, new.id)
+  ) then
+    return null;
+  end if;
+
+  select nullif(btrim(coalesce(p.full_name, '')), '')
+    into v_name
+    from public.profiles p
+   where p.id = new.user_id;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (
+    v_coach,
+    'A client has sent a check-in',
+    left(
+      -- A blank or missing name falls back to "A client" rather than to an
+      -- empty string, which would render a sentence opening with a space.
+      coalesce(v_name, 'A client')
+      || ' has filled in their check-in.'
+      -- Said out loud, for the coach and for whoever is reading their lock
+      -- screen over their shoulder.
+      || ' What they wrote is not in this message — it opens on your Check-Ins page.',
+      500),
+    'heart',
+    -- The parameter is the point: the queue opens on the person the message is
+    -- about, and falls back to the whole list when it is missing.
+    '/(trainer)/checkins?clientId=' || new.user_id::text
+  );
+
+  return null;
+end $fn$;
+
+comment on function public.check_in_notify_coach() is
+  'Tells the COACH that a named client has filled in their weekly check-in. Carries NO weight, no ratings and no note — a push renders on a lock screen and every figure on that row is health data about a named person. One message per client per hour, so a double submission is one event. Silent for a member with no coach, which is most members.';
+
+drop trigger if exists check_ins_notify_coach on public.check_ins;
+create trigger check_ins_notify_coach
+  after insert on public.check_ins
+  for each row execute function public.check_in_notify_coach();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires (parts 51, 141, 158, 202), so a
+-- trigger function needs no grant to anybody; Postgres grants EXECUTE to PUBLIC
+-- on every new function and `anon` resolves through that grant, so both are
+-- named.
+revoke all on function public.check_in_notify_coach() from public;
+revoke all on function public.check_in_notify_coach() from anon;
+revoke all on function public.check_in_notify_coach() from authenticated;
+
+-- ▶ the-coach-answers-the-form-check.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A member filmed one set, asked a question, and had no way of being answered.
+--
+-- ── What part 2617 built, and the half it left ───────────────────────────
+--
+-- `form_clips` is the member's side of a form check and it is complete: they
+-- film one set, attach it to the logged set, and write the question that is
+-- most of the value — "does my knee cave on rep 4". The coach watches it on
+-- app/(trainer)/client-training.tsx.
+--
+-- Then nothing. The table has no reply column, the coach's grant is
+-- `for select` only, and there is no trigger on the insert — so a coach is not
+-- told a clip arrived, and when they do find it the only way to answer the
+-- question attached to it is to leave the screen, open the chat thread and
+-- describe which set they mean. The question and the answer live in two
+-- different places and neither one points at the other.
+--
+-- For a coach whose clients are online this is the whole review loop, and it
+-- was open at both ends.
+--
+-- ── What this adds ───────────────────────────────────────────────────────
+--
+-- One column for the answer, one for when it was written, an update policy
+-- narrow enough that a coach can write those two and nothing else, and the two
+-- notifications that make it a conversation: the coach is told a clip arrived,
+-- and the member is told their coach answered.
+--
+-- ── Why the column grant is written the way it is ────────────────────────
+--
+-- `grant update (coach_reply, coach_replied_at)` and NOT a table-level update.
+-- In PostgreSQL a table-wide UPDATE grant supersedes a column-level one, so a
+-- bare `grant update on form_clips to authenticated` would let a coach rewrite
+-- the member's own `note` — the question they asked — and even the `path`, the
+-- object the video lives at. Part 131 learned this on `public.trainers` and
+-- part 2200 records it. A column grant is the only thing that actually holds
+-- the line here, and the policy beside it decides WHOSE row, not which column.
+--
+-- The member keeps `for all` from part 2617, so they can still delete the clip
+-- and the reply goes with it. That is the right way round: it is their video
+-- and their body, and taking it back has to take everything about it back.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.form_clips
+  add column if not exists coach_reply text,
+  add column if not exists coach_replied_at timestamptz;
+
+comment on column public.form_clips.coach_reply is
+  'What the coach wrote back about this set. Written only by the coach who currently coaches the member, through a column-level UPDATE grant — a table-wide grant would also let them rewrite the member''s own question and the storage path.';
+
+-- The coach writes the answer, and only the answer.
+drop policy if exists form_clips_coach_reply on public.form_clips;
+create policy form_clips_coach_reply on public.form_clips for update
+  using (is_my_client(user_id))
+  with check (is_my_client(user_id));
+
+-- Columns, not the table — for UPDATE. See the header.
+--
+-- SELECT, INSERT and DELETE stay TABLE-WIDE, and that is deliberate rather
+-- than an oversight the next reader should tidy up. check:grants exists
+-- because a column-level grant does not extend to a column added later, and
+-- naming a column grant here for reading would mean every future column of
+-- this table has to be remembered in two places or PostgREST answers 403 for
+-- everybody. The narrow grant belongs on the one verb where the narrowness is
+-- the point: a coach may WRITE two columns and no others.
+grant select, insert, delete on public.form_clips to authenticated;
+
+-- The revoke is the part that actually does anything, and leaving it out is the
+-- mistake this comment exists to prevent. `authenticated` already held UPDATE
+-- on this table from the blanket grant in part 02, and in PostgreSQL a
+-- table-wide grant SUPERSEDES a column-level one — so adding the column grant
+-- below on its own changed nothing at all. Checked on the live database
+-- immediately after the first apply: `information_schema.column_privileges`
+-- still reported UPDATE on all nine columns, which is a coach who could
+-- rewrite the member's question and the path their video lives at. The same
+-- fact part 131 records for `public.trainers`, from the other direction.
+revoke update on public.form_clips from authenticated;
+-- The member's own question stays theirs to change. Their `for all` policy
+-- from part 2617 is what keeps it to their own row.
+grant update (note) on public.form_clips to authenticated;
+grant update (coach_reply, coach_replied_at) on public.form_clips to authenticated;
+
+-- The other six columns are readable and deliberately unwritable by anybody,
+-- and they need no `grant-ok:` marker because the table-wide SELECT above
+-- already names them: that marker is for a column NO grant reaches, and
+-- check:grants rejects one that excuses nothing. Why they are unwritable:
+-- `id`, `user_id`, `workout_id` and `set_index` say which set of whose workout
+-- this clip belongs to, and rewriting one would move a video onto another
+-- person's record; `path` is the object in the bucket, and a row pointed at a
+-- different object is how one member's video gets served under another
+-- member's grant. Nothing in the app updates any of them — a member who wants
+-- a different clip deletes this one and sends another.
+
+-- ── the clip arriving ────────────────────────────────────────────────────
+--
+-- Same rule as parts 614 and 3340 about what a push may say: a lock screen is
+-- read by whoever is standing near the coach's phone. That a clip exists, and
+-- who from. NOT the question the member asked — it is theirs, it often names a
+-- body part, and it is two taps away on a screen that is already private.
+create or replace function public.form_clip_notify_coach()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_coach uuid;
+  v_name  text;
+begin
+  select c.trainer_id into v_coach
+    from public.clients c
+   where c.id = new.user_id
+     and c.trainer_id is not null;
+
+  -- No coach, no message. `clipRefusal` in src/lib/formCheck.ts already refuses
+  -- to let a member film one with nobody to send it to, so this is the case
+  -- where a coaching link ended between the filming and the upload.
+  if v_coach is null then
+    return null;
+  end if;
+
+  select nullif(btrim(coalesce(p.full_name, '')), '')
+    into v_name
+    from public.profiles p
+   where p.id = new.user_id;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (
+    v_coach,
+    'A client has sent a form check',
+    left(
+      coalesce(v_name, 'A client')
+      || ' filmed a set and asked you about it.'
+      || ' The clip and their question are on their Training page.',
+      500),
+    'dumbbell',
+    '/(trainer)/client-training?clientId=' || new.user_id::text
+  );
+
+  return null;
+end $fn$;
+
+comment on function public.form_clip_notify_coach() is
+  'Tells the COACH that a named client attached a form-check clip to a set. Carries no video, no storage path, no clip id and not the question the member wrote — a push renders on a lock screen. One per clip, because part 2617 already allows one clip per set.';
+
+drop trigger if exists form_clips_notify_coach on public.form_clips;
+create trigger form_clips_notify_coach
+  after insert on public.form_clips
+  for each row execute function public.form_clip_notify_coach();
+
+-- ── the answer coming back ───────────────────────────────────────────────
+--
+-- Fires only when the reply actually CHANGES to something non-empty. An update
+-- that touches `coach_replied_at` alone, or that rewrites the same sentence, is
+-- not a new answer and the member has already been told about the old one.
+create or replace function public.form_clip_notify_member()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_coach text;
+begin
+  if nullif(btrim(coalesce(new.coach_reply, '')), '') is null
+     or btrim(coalesce(new.coach_reply, '')) is not distinct from btrim(coalesce(old.coach_reply, '')) then
+    return null;
+  end if;
+
+  -- Who answered. The member can already read their own coach's name
+  -- (`my_coach`), so naming them here tells them nothing new — and a reply
+  -- from nobody in particular is the shape that makes somebody open an app to
+  -- find out who is talking to them.
+  select nullif(btrim(coalesce(p.full_name, '')), '')
+    into v_coach
+    from public.clients c
+    join public.profiles p on p.id = c.trainer_id
+   where c.id = new.user_id;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (
+    new.user_id,
+    'Your coach answered your form check',
+    left(
+      coalesce(v_coach, 'Your coach')
+      || ' has written back about the set you filmed.'
+      -- Not the answer itself: it is about how their body moves under a bar,
+      -- and it is one tap away in the app that is already theirs.
+      || ' It is on the movement you sent it from.',
+      500),
+    'dumbbell',
+    '/(client)/workouts'
+  );
+
+  return null;
+end $fn$;
+
+comment on function public.form_clip_notify_member() is
+  'Tells the MEMBER their coach answered the set they filmed. Fires only when coach_reply changes to something non-empty, so re-saving the same sentence or stamping the time does not send a second message. Carries the coach''s name and not the answer.';
+
+drop trigger if exists form_clips_notify_member on public.form_clips;
+create trigger form_clips_notify_member
+  after update of coach_reply on public.form_clips
+  for each row execute function public.form_clip_notify_member();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires (parts 51, 141, 158, 202, 614), so a
+-- trigger function needs no grant to anybody; Postgres grants EXECUTE to PUBLIC
+-- on every new function and `anon` resolves through that grant, so both are
+-- named.
+revoke all on function public.form_clip_notify_coach() from public;
+revoke all on function public.form_clip_notify_coach() from anon;
+revoke all on function public.form_clip_notify_coach() from authenticated;
+revoke all on function public.form_clip_notify_member() from public;
+revoke all on function public.form_clip_notify_member() from anon;
+revoke all on function public.form_clip_notify_member() from authenticated;
+
+-- ▶ a-voice-note-and-a-document-on-a-thread.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two more things a coach and a client hand each other: a voice note, and a
+-- document.
+--
+-- ── What part 124 built, and what it left out ────────────────────────────
+--
+-- `messages.attachment_kind` has been `in ('image', 'video')` since part 124,
+-- and the bucket accepts four mime types: JPEG, PNG, MP4, QuickTime. That was
+-- the right first pair — "a photo of the machine" is the thing that screen was
+-- written for.
+--
+-- It leaves two everyday acts of coaching with nowhere to go:
+--
+--   A VOICE NOTE. Explaining why a knee is caving takes forty seconds to say
+--   and four paragraphs to type, and a coach on a gym floor between clients
+--   types neither. Every messaging product a coach already uses has this; ours
+--   answered with a text box.
+--
+--   A DOCUMENT. A client's blood panel, a physio's report, a gym's induction
+--   PDF. app/(trainer)/chat.tsx already DRAWS the file-card shape — it was
+--   built from the board, where the card reads "Week 4 Plan.pdf" — and until
+--   now nothing could ever fill it, because a PDF picked from a phone was
+--   refused by `attachmentKindFor` and would have been refused by the bucket
+--   behind it.
+--
+-- ── What a file may be, and what it may not ──────────────────────────────
+--
+-- The mime list stays a real limit rather than a default, for part 124's
+-- reason. Four more types and no more:
+--
+--   audio/m4a and audio/mpeg — what expo-audio records on iOS and Android.
+--   application/pdf — the document people actually send each other.
+--   text/plain — a note exported from somewhere else, and the one plain format
+--     that cannot carry anything executable.
+--
+-- NOT office documents, not archives, not anything else. A .docx is a zip, a
+-- zip is a container, and a container is a thing this app would be handing
+-- between two people's phones without being able to say what is in it. A coach
+-- who needs to send one has email; the refusal says so.
+--
+-- ── The name is stored, and it is the sender's ───────────────────────────
+--
+-- A photo needs no name. A document does: "the file your coach sent" is not
+-- something anybody can act on, and the name is how a person decides whether
+-- to open it. So `attachment_name` is added — nullable, because the first two
+-- kinds have never needed one and a name invented from a storage key
+-- ("1738-x9.pdf") is worse than none.
+--
+-- It is the ONE piece of attacker-controlled text this table will render, so
+-- it is capped and it is the app's job to draw it as text and never as
+-- anything else. The cap is 120 characters, which is longer than any real
+-- document name and short enough that it cannot be used as a message body
+-- that bypasses the body's own rules.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.messages add column if not exists attachment_name text;
+
+alter table public.messages drop constraint if exists messages_attachment_name_chk;
+alter table public.messages add constraint messages_attachment_name_chk
+  check (attachment_name is null or char_length(attachment_name) <= 120);
+
+comment on column public.messages.attachment_name is
+  'The sender''s own filename, for the kinds where a name is how you decide whether to open it (file, and nothing else today). Null for a photo, a video or a voice note, where the name would be a storage key nobody wrote. Capped at 120 characters: it is the one piece of sender-controlled text drawn beside a message, and a screen renders it as text and never as anything else.';
+
+-- The two new kinds. Written as a replacement of the whole constraint rather
+-- than an addition, because a check constraint is one expression and the list
+-- of what an attachment may BE belongs in one place.
+alter table public.messages drop constraint if exists messages_attachment_kind_chk;
+alter table public.messages add constraint messages_attachment_kind_chk
+  check (attachment_kind is null or attachment_kind in ('image', 'video', 'audio', 'file'));
+
+-- Four more mime types, and no more. See the header for why the list is short
+-- and why a .docx is not on it.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('message-media', 'message-media', false, 67108864,
+        array['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime',
+              'audio/m4a', 'audio/mpeg', 'application/pdf', 'text/plain'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- The object policies are unchanged and deliberately so: they match on the
+-- thread id in the first path segment and the uploader's uid in the second,
+-- and neither of those depends on what the file IS. A voice note is on a
+-- thread exactly as a photo is, it stops being readable at the same moment,
+-- and it is deleted by the same sweep.

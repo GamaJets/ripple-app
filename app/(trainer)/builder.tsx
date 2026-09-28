@@ -1583,6 +1583,23 @@ export default function Builder() {
   // rows above it carry truthful counts, so a coach can see the block's shape
   // without the four-thousand-line editor under it.
   const [editorOpen, setEditorOpen] = useState(false);
+  /* Opening the editor scrolls to it. Without this the row toggled a section
+     that begins below the fold on every handset — the page did not move, so a
+     coach tapped, saw nothing change, and reported the row as dead. `editorY`
+     is measured on layout rather than assumed, because the cards above it
+     (templates, the block line, the client picker) are all conditional and
+     none of them is a fixed height. Same shape as `jumpToNotifications` in
+     app/(trainer)/settings.tsx. */
+  const pageRef = useRef<ScrollView>(null);
+  const editorY = useRef(0);
+  const openEditor = () => {
+    const next = !editorOpen;
+    setEditorOpen(next);
+    // After the state lands and the section has laid out. A bare
+    // requestAnimationFrame fires before the new rows have a height and
+    // scrolls to where the editor USED to start.
+    if (next) setTimeout(() => pageRef.current?.scrollTo({ y: Math.max(0, editorY.current - sp.md), animated: true }), 80);
+  };
   const toggleDay = (di: number) => setOpenDays((p) => ({ ...p, [di]: !p[di] }));
   /**
    * The ONE exercise whose prescription is open, by key, or null.
@@ -2679,7 +2696,7 @@ export default function Builder() {
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: (footInline ? 0 : footH) + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView ref={pageRef} scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: (footInline ? 0 : footH) + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header: the board's compact opening ──────────────────────────
             The kit's `PageHead` — a round back control at the leading edge,
@@ -2944,16 +2961,25 @@ export default function Builder() {
           </View>
         ) : null}
 
-        {/* Three rows with truthful counts, and the editor behind the first.
-            Supersets are counted the way the editor badges them — a set-group
-            of two or more, see src/lib/setGroups.ts. */}
+        {/* Two rows: the editor, and a place to start from.
+            ── why there is no Supersets row ────────────────────────────────
+            There was one, counting grouped exercises, and a coach asked what
+            it was for. The answer is that it was not for anything: a superset
+            is not a kind of thing a program contains, it is a way two
+            exercises are performed, and it is made where it is made — in the
+            day, by joining one movement to the next (`joinNext` in
+            src/lib/setGroups.ts, the Join control at the foot of an exercise).
+            The row had no destination of its own, so it opened the editor,
+            which the row above it already did; on a week with no groups it
+            read "Supersets · 0" and did nothing at all when tapped. A row that
+            counts something a coach cannot go to is a row that teaches them
+            tapping is pointless. The count still exists where it means
+            something: the editor badges each group, A/B/C, on the exercises
+            themselves. */}
         <Section>
           <ListRow icon="dumbbell" tone="brand" title="Exercises"
-            note={blockExercises === 0 ? 'None yet. Open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
-            onPress={() => setEditorOpen((o) => !o)} />
-          <ListRow icon="swap" tone="blue" title="Supersets"
-            note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
-            onPress={() => setEditorOpen(true)} />
+            note={blockExercises === 0 ? 'None yet. Open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'tap to hide the week' : 'tap to show the week, a row a day'}`}
+            onPress={openEditor} />
           {/* A START SOURCE, which is what the review asks a template to be on
               this screen: the row opens the sheet that loads one into the
               builder. It used to push the library — a second screen with its
@@ -3553,6 +3579,10 @@ export default function Builder() {
 
 
         {/* ── days ───────────────────────────────────────────────────────── */}
+        {/* Zero-height: it measures where the editor begins, so the Exercises
+            row can scroll to it. It sits OUTSIDE the conditional because a
+            section that is not drawn has no offset to read. */}
+        <View onLayout={(e) => { editorY.current = e.nativeEvent.layout.y; }} />
         {editorOpen ? (<>
         <Section>
           <SectionHead title={blockWeeks.length > 1 ? weekLabel(blockWeeks[weekIdx], weekIdx + 1) : 'Training Days'}

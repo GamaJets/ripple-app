@@ -10,10 +10,10 @@ is paid again on every turn of the session that opened it.
 | lines | ~tok | file |
 | ----: | ---: | ---- |
 | 7,721 | 123k | `app/(client)/workouts.tsx` |
-| 5,468 | 85k | `app/(trainer)/builder.tsx` |
+| 5,498 | 85k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
-| 5,125 | 82k | `app/(trainer)/dashboard.tsx` |
+| 5,138 | 82k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
 | 3,318 | 50k | `app/(trainer)/client.tsx` |
@@ -29,14 +29,14 @@ is paid again on every turn of the session that opened it.
 | 2,417 | 32k | `src/ui/kit.tsx` |
 | 2,260 | 30k | `studio-web/app/timetable/page.tsx` |
 | 2,189 | 34k | `supabase/functions/stripe-webhook/index.ts` |
+| 2,148 | 32k | `app/(trainer)/client-training.tsx` |
 | 2,110 | 29k | `src/ui/sessions.tsx` |
 | 2,104 | 34k | `app/(client)/calendar.tsx` |
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
-| 2,074 | 31k | `app/(trainer)/client-training.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
 | 2,005 | 33k | `app/(trainer)/analytics.tsx` |
+| 1,858 | 24k | `src/ui/messaging.ts` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
-| 1,793 | 23k | `src/ui/messaging.ts` |
 | 1,792 | 23k | `studio-web/app/analytics/page.tsx` |
 | 1,774 | 21k | `studio-web/app/retention/page.tsx` |
 | 1,758 | 23k | `studio-web/app/coach/earnings/page.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
+Total: 47 files, 119,314 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -235,7 +235,7 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 
 ## `app/(trainer)/builder.tsx`
 
-5,468 lines · ~85k tokens · 136 anchors
+5,498 lines · ~85k tokens · 137 anchors
 
 ```
 23-166        §        The Assign button is now withheld, not warned about
@@ -298,82 +298,83 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 1519-1529     fn         patchRows
 1530-1532     fn         groupWithNext
 1533-1541     fn             ids
-1542-1585     fn         ungroup
-1586-1614     fn         toggleDay
-1615-1764     fn         openDay
-1765-1782     fn           anyContent
-1783-1790     fn         clearDraft
-1791-1807     fn         saveDraftNow
-1808-1809     fn         patchEx
-1810-1815     fn         addDay
-1816-1816     fn             used
-1817-1827     fn             free
-1828-1833     fn         addDayOn
-1834-1847     fn         cycleDay
-1848-1869     fn         removeDay
-1870-1871     fn         applyWeekEdit
-1872-1887     fn           land
-1888-1906     fn         totalExercises
-1907-1923     fn         pickedIds
-1924-1924     fn         factFor
-1925-1930     fn           c
-1931-1931     fn         injuriesOf
-1932-1947     fn         asMember
-1948-1991     fn         neverAskedNames
-1992-1994     fn         injuryLoads
-1995-2016     fn           movements
-2017-2027     §        what the picker searches
-2028-2031     fn         ownList
-2032-2039     fn         ownShown
-2040-2057     fn         ownSlugs
-2058-2062     fn         catByName
-2063-2084     fn         rowFor
-2085-2092     fn         customAdd
-2093-2101     fn         weekVolume
-2102-2106     fn           groups
-2107-2107     fn         typeFill
-2108-2108     fn         typeOn
-2109-2109     fn         typesPresent
-2110-2110     fn         thumbRows
-2111-2115     fn           inDays
-2116-2126     fn           inOwn
-2127-2155     fn         previewExercise
-2156-2202     fn         composeDays
-2203-2237     fn         composeProgram
-2238-2271     fn         review
-2272-2296     fn         volumeLine
-2297-2325     fn         doSaveTemplate
-2326-2394     fn         recordInjuryChoice
-2395-2417     fn         assign
-2418-2432     fn           go
-2433-2434     fn           sending
-2435-2441     fn             lines
-2442-2442     fn             more
-2443-2464     fn             okd
-2465-2490     fn             mine
-2491-2524     fn           outstanding
-2525-2536     fn         unassign
-2537-2563     fn           go
-2564-2602     fn         revert
-2603-2629     fn         deleteTemplate
-2630-2630     fn         footWho
-2631-2634     fn           names
-2635-2636     fn         footWhere
-2637-2637     fn           day
-2638-2654     fn           ex
-2655-2718     fn         workflowFooter
-2719-2813     fn               onCount
-2814-2815     fn               di
-2816-2816     fn               sessions
-2817-2916     fn               exercises
-2917-3660     fn               ec
-3661-3764     fn               daySets
-3765-3765     fn               allSame
-3766-3766     fn               repsList
-3767-4707     fn               loadList
-4708-5328     fn               held
-5329-5382     fn               ec
-5383-5468     fn               cur
+1542-1594     fn         ungroup
+1595-1602     fn         openEditor
+1603-1631     fn         toggleDay
+1632-1781     fn         openDay
+1782-1799     fn           anyContent
+1800-1807     fn         clearDraft
+1808-1824     fn         saveDraftNow
+1825-1826     fn         patchEx
+1827-1832     fn         addDay
+1833-1833     fn             used
+1834-1844     fn             free
+1845-1850     fn         addDayOn
+1851-1864     fn         cycleDay
+1865-1886     fn         removeDay
+1887-1888     fn         applyWeekEdit
+1889-1904     fn           land
+1905-1923     fn         totalExercises
+1924-1940     fn         pickedIds
+1941-1941     fn         factFor
+1942-1947     fn           c
+1948-1948     fn         injuriesOf
+1949-1964     fn         asMember
+1965-2008     fn         neverAskedNames
+2009-2011     fn         injuryLoads
+2012-2033     fn           movements
+2034-2044     §        what the picker searches
+2045-2048     fn         ownList
+2049-2056     fn         ownShown
+2057-2074     fn         ownSlugs
+2075-2079     fn         catByName
+2080-2101     fn         rowFor
+2102-2109     fn         customAdd
+2110-2118     fn         weekVolume
+2119-2123     fn           groups
+2124-2124     fn         typeFill
+2125-2125     fn         typeOn
+2126-2126     fn         typesPresent
+2127-2127     fn         thumbRows
+2128-2132     fn           inDays
+2133-2143     fn           inOwn
+2144-2172     fn         previewExercise
+2173-2219     fn         composeDays
+2220-2254     fn         composeProgram
+2255-2288     fn         review
+2289-2313     fn         volumeLine
+2314-2342     fn         doSaveTemplate
+2343-2411     fn         recordInjuryChoice
+2412-2434     fn         assign
+2435-2449     fn           go
+2450-2451     fn           sending
+2452-2458     fn             lines
+2459-2459     fn             more
+2460-2481     fn             okd
+2482-2507     fn             mine
+2508-2541     fn           outstanding
+2542-2553     fn         unassign
+2554-2580     fn           go
+2581-2619     fn         revert
+2620-2646     fn         deleteTemplate
+2647-2647     fn         footWho
+2648-2651     fn           names
+2652-2653     fn         footWhere
+2654-2654     fn           day
+2655-2671     fn           ex
+2672-2735     fn         workflowFooter
+2736-2830     fn               onCount
+2831-2832     fn               di
+2833-2833     fn               sessions
+2834-2933     fn               exercises
+2934-3690     fn               ec
+3691-3794     fn               daySets
+3795-3795     fn               allSame
+3796-3796     fn               repsList
+3797-4737     fn               loadList
+4738-5358     fn               held
+5359-5412     fn               ec
+5413-5498     fn               cur
 ```
 
 ## `src/lib/coverage.test.ts`
@@ -794,7 +795,7 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 
 ## `app/(trainer)/dashboard.tsx`
 
-5,125 lines · ~82k tokens · 88 anchors
+5,138 lines · ~82k tokens · 88 anchors
 
 ```
 163-168       fn       sheet
@@ -810,81 +811,81 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 337-383       fn       Flag
 384-406       fn       Fold
 407-511       fn         toggle
-512-575       type     Shortcut
-576-634       fn       UnmarkedSessions
-635-671       fn       MoneyOwed
-672-735       default  TrainerClients
-736-769       §        who is drifting
-770-770       fn         driftFor
-771-807       fn         driftActionable
-808-835       fn         openInviteEmails
-836-847       §        finding one person
-848-857       §        who the bulk controls act on
-858-862       fn         togglePick
-863-877       fn         stopPicking
-878-896       fn         acceptJoin
-897-917       fn         cancelInvite
-918-938       §        bringing a whole book across
-939-943       fn         resetImport
-944-984       fn         chooseRosterFile
-985-987       fn         runImport
-988-1017      fn           invited
-1018-1068     fn         copyJoinLink
-1069-1094     fn         loadCodes
-1095-1153     fn         openInvite
-1154-1162     fn           c
-1163-1185     fn         saveSpend
-1186-1300     fn         namedCodes
-1301-1354     §        progress photos this client SENT
-1355-1439     §        the coach's own sessions, read once for the two figures that need them ─
-1440-1452     fn         nextBooked
-1453-1477     fn         nextBookedLine
-1478-1492     §        Nothing prompted the coach to clear this
-1493-1536     §        the other three things about a coach's own book
-1537-1550     fn         lowCredits
-1551-1557     fn         invoiceAgeing
-1558-1558     fn         owed
-1559-1599     fn         bookState
-1600-1616     §        and the test is over the rows that CAN carry a count
-1617-1631     fn         threaded
-1632-1646     fn         lowAdherence
-1647-1664     fn         driftNote
-1665-1668     fn         segN
-1669-1690     fn         noProgram
-1691-1744     §        who is waiting on a reply
-1745-1787     fn         matchSeg
-1788-1796     fn         pickedRoster
-1797-1798     fn           pairs
-1799-1817     fn           assessed
-1818-1824     fn         deliverMessage
-1825-1848     fn         sendNudge
-1849-1869     §        plan ending, money owed, no program
-1870-1924     fn         attnFor
-1925-1925     fn         attnReason
-1926-1941     fn         needsAttention
-1942-1946     fn         adherenceValues
-1947-1958     §        the client's name used to go to a model, and now does not
-1959-2012     fn         draftNudge
-2013-2088     fn         sendDraft
-2089-2090     fn         nameOf
-2091-2103     fn         openBulkMessage
-2104-2130     fn         deliverBulk
-2131-2140     fn         bulkAssign
-2141-2189     fn           go
-2190-2198     fn         bulkEnd
-2199-2242     fn           go
-2243-2278     fn         exportRoster
-2279-2293     §        and the same for the weekly summary
-2294-2382     fn         genSummary
-2383-2434     fn         reloadEverything
-2435-2455     fn         nextUp
-2456-2461     fn         openProfile
-2462-3375     fn         openAdd
-3376-3400     §        what used to be here, and why it is gone
-3401-4774     §        and each of the three now goes somewhere
-4775-5035     fn               problem
-5036-5076     fn               on
-5077-5125     fn       CoachSetupRow
+512-588       type     Shortcut
+589-647       fn       UnmarkedSessions
+648-684       fn       MoneyOwed
+685-748       default  TrainerClients
+749-782       §        who is drifting
+783-783       fn         driftFor
+784-820       fn         driftActionable
+821-848       fn         openInviteEmails
+849-860       §        finding one person
+861-870       §        who the bulk controls act on
+871-875       fn         togglePick
+876-890       fn         stopPicking
+891-909       fn         acceptJoin
+910-930       fn         cancelInvite
+931-951       §        bringing a whole book across
+952-956       fn         resetImport
+957-997       fn         chooseRosterFile
+998-1000      fn         runImport
+1001-1030     fn           invited
+1031-1081     fn         copyJoinLink
+1082-1107     fn         loadCodes
+1108-1166     fn         openInvite
+1167-1175     fn           c
+1176-1198     fn         saveSpend
+1199-1313     fn         namedCodes
+1314-1367     §        progress photos this client SENT
+1368-1452     §        the coach's own sessions, read once for the two figures that need them ─
+1453-1465     fn         nextBooked
+1466-1490     fn         nextBookedLine
+1491-1505     §        Nothing prompted the coach to clear this
+1506-1549     §        the other three things about a coach's own book
+1550-1563     fn         lowCredits
+1564-1570     fn         invoiceAgeing
+1571-1571     fn         owed
+1572-1612     fn         bookState
+1613-1629     §        and the test is over the rows that CAN carry a count
+1630-1644     fn         threaded
+1645-1659     fn         lowAdherence
+1660-1677     fn         driftNote
+1678-1681     fn         segN
+1682-1703     fn         noProgram
+1704-1757     §        who is waiting on a reply
+1758-1800     fn         matchSeg
+1801-1809     fn         pickedRoster
+1810-1811     fn           pairs
+1812-1830     fn           assessed
+1831-1837     fn         deliverMessage
+1838-1861     fn         sendNudge
+1862-1882     §        plan ending, money owed, no program
+1883-1937     fn         attnFor
+1938-1938     fn         attnReason
+1939-1954     fn         needsAttention
+1955-1959     fn         adherenceValues
+1960-1971     §        the client's name used to go to a model, and now does not
+1972-2025     fn         draftNudge
+2026-2101     fn         sendDraft
+2102-2103     fn         nameOf
+2104-2116     fn         openBulkMessage
+2117-2143     fn         deliverBulk
+2144-2153     fn         bulkAssign
+2154-2202     fn           go
+2203-2211     fn         bulkEnd
+2212-2255     fn           go
+2256-2291     fn         exportRoster
+2292-2306     §        and the same for the weekly summary
+2307-2395     fn         genSummary
+2396-2447     fn         reloadEverything
+2448-2468     fn         nextUp
+2469-2474     fn         openProfile
+2475-3388     fn         openAdd
+3389-3413     §        what used to be here, and why it is gone
+3414-4787     §        and each of the three now goes somewhere
+4788-5048     fn               problem
+5049-5089     fn               on
+5090-5138     fn       CoachSetupRow
 ```
 
 ## `studio-web/app/accounting/page.tsx`
@@ -1941,6 +1942,69 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 2123-2189     §        DEPLOYMENT: what this file cannot do for itself
 ```
 
+## `app/(trainer)/client-training.tsx`
+
+2,148 lines · ~32k tokens · 56 anchors
+
+```
+3-16          §        The hole this closes
+17-27         §        The permission was already there
+28-36         §        Nothing here works anything out
+37-44         §        The dashes
+45-84         §        Whose kilograms
+85-97         §        the two modules the coach could not reach
+98-114        §        the finer grain, and the picture of it
+115-140       §        the four things this screen could not say before
+141-151       §        the speed they actually moved at
+152-213       §        the program the client rewrote
+214-256       default  ClientTraining
+257-260       fn         replaceEntry
+261-354       fn         load
+355-379       fn         client
+380-393       fn         reloadLog
+394-396       fn         sessions
+397-400       fn         board
+401-462       fn         pick
+463-464       fn         lastSeven
+465-471       fn           byDay
+472-488       fn         position
+489-505       fn         compareWeek
+506-528       fn         oldestDay
+529-542       fn         muscleWindowRead
+543-546       fn           p
+547-556       fn         muscles
+557-570       fn         muscleNote
+571-574       fn         cells
+575-575       fn         lifetime
+576-576       fn         arc
+577-577       fn         best
+578-578       fn         trainedCells
+579-585       fn         worstGap
+586-587       fn         stage
+588-611       fn         pva
+612-644       fn         askTempo
+645-700       fn         review
+701-730       fn         loadPlanEdits
+731-735       fn         pull
+736-753       fn         hist
+754-759       fn         editDiff
+760-771       fn         editAged
+772-779       fn         editWhen
+780-788       fn         editNote
+789-793       fn         editLoad
+794-807       fn         findingLoads
+808-813       fn         seg
+814-859       fn         chip
+860-898       fn         exerciseRow
+899-965       fn           asked
+966-1027      fn         sessionBlock
+1028-2006     fn         dayBlock
+2007-2086     fn       FormChecks
+2087-2136     fn       FormClipReply
+2137-2137     fn       FormClipPlayer
+2138-2148     fn         player
+```
+
 ## `src/ui/sessions.tsx`
 
 2,110 lines · ~29k tokens · 63 anchors
@@ -2116,68 +2180,6 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 2074-2085     fn       Section
 ```
 
-## `app/(trainer)/client-training.tsx`
-
-2,074 lines · ~31k tokens · 55 anchors
-
-```
-3-16          §        The hole this closes
-17-27         §        The permission was already there
-28-36         §        Nothing here works anything out
-37-44         §        The dashes
-45-84         §        Whose kilograms
-85-97         §        the two modules the coach could not reach
-98-114        §        the finer grain, and the picture of it
-115-140       §        the four things this screen could not say before
-141-151       §        the speed they actually moved at
-152-213       §        the program the client rewrote
-214-256       default  ClientTraining
-257-260       fn         replaceEntry
-261-354       fn         load
-355-379       fn         client
-380-393       fn         reloadLog
-394-396       fn         sessions
-397-400       fn         board
-401-462       fn         pick
-463-464       fn         lastSeven
-465-471       fn           byDay
-472-488       fn         position
-489-505       fn         compareWeek
-506-528       fn         oldestDay
-529-542       fn         muscleWindowRead
-543-546       fn           p
-547-556       fn         muscles
-557-570       fn         muscleNote
-571-574       fn         cells
-575-575       fn         lifetime
-576-576       fn         arc
-577-577       fn         best
-578-578       fn         trainedCells
-579-585       fn         worstGap
-586-587       fn         stage
-588-611       fn         pva
-612-644       fn         askTempo
-645-700       fn         review
-701-730       fn         loadPlanEdits
-731-735       fn         pull
-736-753       fn         hist
-754-759       fn         editDiff
-760-771       fn         editAged
-772-779       fn         editWhen
-780-788       fn         editNote
-789-793       fn         editLoad
-794-807       fn         findingLoads
-808-813       fn         seg
-814-859       fn         chip
-860-898       fn         exerciseRow
-899-965       fn           asked
-966-1027      fn         sessionBlock
-1028-2006     fn         dayBlock
-2007-2062     fn       FormChecks
-2063-2063     fn       FormClipPlayer
-2064-2074     fn         player
-```
-
 ## `src/lib/coachStatement.ts`
 
 2,041 lines · ~28k tokens · 95 anchors
@@ -2331,6 +2333,70 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 1024-2005     fn         exportAnalytics
 ```
 
+## `src/ui/messaging.ts`
+
+1,858 lines · ~24k tokens · 57 anchors
+
+```
+5-20          §        Two silences this hook used to keep
+21-81         §        Attachments, and the third way to fail
+82-97         type     ChatRole
+98-101        type     QueuedMessage
+102-123       fn       asQueuedMessage
+124-133       type     ThreadMessage
+134-145       fn       rowToMsg
+146-156       type     PendingAttachment
+157-167       type     AttachSource
+168-221       fn       pickMessageAttachment
+222-255       fn       pickMessageDocument
+256-274       fn       newToken
+275-350       fn       uploadMessageAttachment
+351-355       fn       flushSignQueue
+356-384       fn         paths
+385-421       fn       signAttachment
+422-441       fn       removeMessageAttachment
+442-468       fn       useAttachmentUrl
+469-494       type     SendResult
+495-502       type     UnsentStage
+503-661       fn       useThread
+662-801       §        this device's copy of the thread, before the network
+802-820       fn         queuedHere
+821-844       fn         markUnsent
+845-846       fn         keepForLater
+847-889       fn           failed
+890-906       fn         send
+907-935       §        1 · the file
+936-977       §        2 · the row
+978-1065      §        THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S
+1066-1088     fn         loadOlder
+1089-1117     fn             fresh
+1118-1120     fn         shown
+1121-1143     fn           have
+1144-1202     fn         shownUnsent
+1203-1204     fn       refusedListeners
+1205-1221     fn       refusedChanged
+1222-1240     fn       refusedUid
+1241-1265     fn       keepRefusal
+1266-1284     type     RefusedRecord
+1285-1290     fn       useRefusedMessages
+1291-1331     fn         load
+1332-1337     fn           run
+1338-1344     fn         forget
+1345-1368     fn               next
+1369-1432     fn       MessageOutboxHandler
+1433-1478     type     CoachSendResult
+1479-1494     fn       sendCoachMessages
+1495-1578     fn         results
+1579-1584     type     ThreadPeer
+1585-1698     fn       useThreadPeerName
+1699-1729     type     ThreadSafety
+1730-1736     fn       useThreadSafety
+1737-1772     fn         reload
+1773-1796     fn         block
+1797-1820     fn         unblock
+1821-1858     fn         report
+```
+
 ## `studio-web/app/export/page.tsx`
 
 1,829 lines · ~22k tokens · 69 anchors
@@ -2405,69 +2471,6 @@ Total: 47 files, 119,132 lines, ~1725k tokens if every one were read whole.
 1803-1821     fn       Section
 1822-1825     fn       Banner
 1826-1829     fn       capitalise
-```
-
-## `src/ui/messaging.ts`
-
-1,793 lines · ~23k tokens · 56 anchors
-
-```
-5-20          §        Two silences this hook used to keep
-21-79         §        Attachments, and the third way to fail
-80-95         type     ChatRole
-96-99         type     QueuedMessage
-100-121       fn       asQueuedMessage
-122-131       type     ThreadMessage
-132-143       fn       rowToMsg
-144-153       type     PendingAttachment
-154-164       type     AttachSource
-165-200       fn       pickMessageAttachment
-201-219       fn       newToken
-220-295       fn       uploadMessageAttachment
-296-300       fn       flushSignQueue
-301-329       fn         paths
-330-366       fn       signAttachment
-367-386       fn       removeMessageAttachment
-387-413       fn       useAttachmentUrl
-414-439       type     SendResult
-440-447       type     UnsentStage
-448-606       fn       useThread
-607-746       §        this device's copy of the thread, before the network
-747-765       fn         queuedHere
-766-789       fn         markUnsent
-790-791       fn         keepForLater
-792-834       fn           failed
-835-851       fn         send
-852-871       §        1 · the file
-872-912       §        2 · the row
-913-1000      §        THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S
-1001-1023     fn         loadOlder
-1024-1052     fn             fresh
-1053-1055     fn         shown
-1056-1078     fn           have
-1079-1137     fn         shownUnsent
-1138-1139     fn       refusedListeners
-1140-1156     fn       refusedChanged
-1157-1175     fn       refusedUid
-1176-1200     fn       keepRefusal
-1201-1219     type     RefusedRecord
-1220-1225     fn       useRefusedMessages
-1226-1266     fn         load
-1267-1272     fn           run
-1273-1279     fn         forget
-1280-1303     fn               next
-1304-1367     fn       MessageOutboxHandler
-1368-1413     type     CoachSendResult
-1414-1429     fn       sendCoachMessages
-1430-1513     fn         results
-1514-1519     type     ThreadPeer
-1520-1633     fn       useThreadPeerName
-1634-1664     type     ThreadSafety
-1665-1671     fn       useThreadSafety
-1672-1707     fn         reload
-1708-1731     fn         block
-1732-1755     fn         unblock
-1756-1793     fn         report
 ```
 
 ## `studio-web/app/analytics/page.tsx`

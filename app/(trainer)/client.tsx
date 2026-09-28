@@ -2319,7 +2319,7 @@ export default function ClientScreen() {
               check-in is, how many messages are unread — and is left off
               rather than written as a nought when there is nothing to say. */}
           {id ? (
-            <ListRow icon="check" title="Check-ins" tone="brand"
+            <ListRow icon="check" title="Check-Ins" tone="brand"
               note={unasked ? undefined : latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined}
               onPress={() => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); }} />
           ) : null}
