@@ -2284,6 +2284,16 @@ export default function ClientScreen() {
               arrives from here is not asked twice. */}
           <ListRow icon="meals" title="Nutrition" tone="orange"
             onPress={go('/(trainer)/client-nutrition')} />
+          {/* The plan above is what the coach proposed; this is what the
+              client actually logged. Two rows because they are two different
+              claims, and client-nutrition.tsx refuses to hold both — its
+              header explains that mixing a coach's authoring into a record
+              only the client may add to is the thing that screen will not do.
+              Until this existed the entire coach-side read of `food_logs` was
+              six rows on the dashboard sheet. */}
+          <ListRow icon="meals" title="What They Logged" tone="orange"
+            note="Their own food log, day by day"
+            onPress={go('/(trainer)/client-food')} />
 
           {/* This carried a comment saying `checklists.tsx` "starts on its own
               client picker and does not read `clientId` off the route", so the
