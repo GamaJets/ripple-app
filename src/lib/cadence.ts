@@ -44,8 +44,22 @@
 // pattern would have put them on. It is not a forecast of behaviour, it is
 // arithmetic on their last visit, and the field is named for the arithmetic.
 import { localDayKey, activeDayLog, type ActivityEvent } from './clientDrift';
+import { localDate } from './localDate';
 
 const DAY = 86_400_000;
+
+/** Whole days from one local calendar day to another, floored at zero.
+ *
+ *  Both ends are built as local midnights, so a daylight-saving change costs
+ *  exactly the days it is and not the hour it moved. Null day keys resolve to
+ *  zero rather than to a wrong number: an unreadable date is not a lateness. */
+function calendarDaysLate(fromDay: string, toDay: string): number | null {
+  const from = localDate(fromDay);
+  const to = localDate(toDay);
+  if (!from || !to) return null;
+  const days = Math.round((to.getTime() - from.getTime()) / DAY);
+  return days > 0 ? days : null;
+}
 
 /**
  * Fewer active days than this and there are not enough intervals to call
@@ -234,7 +248,17 @@ export function assessCadence(
     expectedDay,
     // Only for the states where being late is the fact. Negative is never
     // returned: "−3 days overdue" is a number every reader gets wrong.
-    overdueDays: late > 0 ? Math.floor(late) : null,
+    //
+    // Counted in CALENDAR days rather than from `late`, which is elapsed
+    // milliseconds over 86,400,000. Those two disagree by an hour across a
+    // daylight-saving change, and an hour is enough: eight calendar days
+    // measures 7.958 and floors to seven. Found on 28 Sep 2026, the day after
+    // New Zealand went onto daylight saving, when the zone suite turned red in
+    // Pacific/Auckland alone — so for the week after every spring-forward,
+    // every coach in that zone was told a client was a day less overdue than
+    // they were. `localDate` builds both ends as local midnights, which is the
+    // same reasoning `daysApart` in src/lib/photoTimeline.ts is written on.
+    overdueDays: late > 0 ? calendarDaysLate(expectedDay, todayKey) : null,
     activeDays: days.length,
     spanDays,
     noPattern: null,
