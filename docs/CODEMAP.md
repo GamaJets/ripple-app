@@ -16,7 +16,7 @@ is paid again on every turn of the session that opened it.
 | 5,138 | 82k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
-| 3,318 | 50k | `app/(trainer)/client.tsx` |
+| 3,328 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
 | 3,207 | 54k | `app/(client)/nutrition.tsx` |
 | 3,142 | 51k | `app/(client)/scans.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,314 lines, ~1727k tokens if every one were read whole.
+Total: 47 files, 119,324 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1071,7 +1071,7 @@ Total: 47 files, 119,314 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(trainer)/client.tsx`
 
-3,318 lines · ~50k tokens · 40 anchors
+3,328 lines · ~50k tokens · 40 anchors
 
 ```
 3-14          §        Why this screen exists
@@ -1113,7 +1113,7 @@ Total: 47 files, 119,314 lines, ~1727k tokens if every one were read whole.
 1551-1605     fn         reloadEverything
 1606-1618     fn         go
 1619-1643     fn         sendAsk
-1644-3318     fn         askIntake
+1644-3328     fn         askIntake
 ```
 
 ## `studio-web/app/close/page.tsx`
