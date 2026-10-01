@@ -35,6 +35,7 @@
 // value a parse failure lands on.
 import { num, num1 } from './format';
 import type { LoadStatus } from '../ui/loadStatus';
+import { calendarDaysBetween } from './localDate';
 
 /** The three things a challenge can measure. Mirrors the `challenges_metric_known`
  *  check constraint; a row carrying anything else is dropped rather than drawn,
@@ -317,15 +318,18 @@ export const cohortLabel = (c: ChallengeRow): string =>
 export function windowLine(c: ChallengeRow, now: number = Date.now()): string {
   const phase = challengePhase(c, now);
   if (phase === 'upcoming') {
-    const d = Math.ceil((c.startsAt - now) / DAY);
+    // Calendar days, not milliseconds: "starts in 3 days" is a claim about
+    // dates, and across a daylight-saving change ms arithmetic makes it two.
+    // See `calendarDaysBetween` in src/lib/localDate.ts.
+    const d = calendarDaysBetween(now, c.startsAt) ?? Math.ceil((c.startsAt - now) / DAY);
     return d <= 1 ? 'Starts tomorrow' : `Starts in ${num(d)} days`;
   }
   if (phase === 'finished') {
-    const d = Math.floor((now - c.endsAt) / DAY);
+    const d = calendarDaysBetween(c.endsAt, now) ?? Math.floor((now - c.endsAt) / DAY);
     if (d < 1) return 'Finished today';
     return d === 1 ? 'Finished yesterday' : `Finished ${num(d)} days ago`;
   }
-  const d = Math.ceil((c.endsAt - now) / DAY);
+  const d = calendarDaysBetween(now, c.endsAt) ?? Math.ceil((c.endsAt - now) / DAY);
   return d <= 1 ? 'Last day' : `${num(d)} days left`;
 }
 

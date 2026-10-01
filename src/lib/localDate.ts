@@ -50,3 +50,38 @@ export function localDate(iso?: string | null): Date | null {
   const bare = /^\d{4}-\d{2}-\d{2}$/.test(String(iso).trim());
   return bare ? new Date(p[0], p[1], p[2]) : new Date(Date.parse(String(iso)));
 }
+
+/**
+ * Whole local calendar days from one instant to another.
+ *
+ * ── Why this exists, and what it is not ────────────────────────────────────
+ *
+ * `(b - a) / 86_400_000` is the obvious way to count days and it is wrong for
+ * every sentence that says "days" about a CALENDAR. A spring-forward makes a
+ * week 167 hours and an autumn fall-back makes it 169, so eight calendar days
+ * measures 7.958 and floors to seven — which is exactly what happened on
+ * 28 Sep 2026, the day after New Zealand's change, when `overdueDays` in
+ * src/lib/cadence.ts told every coach in that zone their client was a day less
+ * late than they were. It was caught by `npm run test:zones` and by nothing
+ * else.
+ *
+ * This counts the days BETWEEN THE TWO LOCAL DATES, by taking each instant's
+ * own local midnight first. So Friday 23:00 to Sunday 01:00 is two days,
+ * which is what a person reading "2 days left" means by it.
+ *
+ * It is NOT for durations. "Waited 71 hours" genuinely is two days and
+ * `waitedLabel` in src/lib/awaitingReply.ts is right to divide milliseconds:
+ * that sentence is about elapsed time and not about a calendar. The test for
+ * which one a number is: would it change if the reader flew to another
+ * timezone? A deadline would. A stopwatch would not.
+ */
+export function calendarDaysBetween(fromMs: number, toMs: number): number | null {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
+  const a = new Date(fromMs);
+  const b = new Date(toMs);
+  const from = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
+  const to = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
+  // Rounded, not floored: both ends are local midnights, so the only thing
+  // left to absorb is the hour a daylight-saving change moves them by.
+  return Math.round((to - from) / 86_400_000);
+}
