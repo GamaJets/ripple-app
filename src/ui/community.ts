@@ -42,9 +42,20 @@ async function wrote(where: string, what: string, run: () => PromiseLike<{ error
   }
 }
 
-/** One board: `kind` 'post' is the discussion, 'resource' the coaches' links,
- *  'event' the upcoming events soonest first (past ones are not asked for). */
-export function useCommunityFeed(channel: Channel, kind: PostKind = 'post') {
+/**
+ * One board.
+ *
+ * `kind` 'post' is the discussion, 'resource' the coaches' links, 'event' the
+ * upcoming events soonest first (past ones are not asked for).
+ *
+ * `coachId` names a COACH'S OWN board rather than a gym's — part 3370. Absent,
+ * this is the gym's, and the query says so explicitly rather than relying on
+ * the policy to sort it out: both boards are readable by the same person (a
+ * client of a coach who also belongs to a gym is on two), so without the
+ * filter a gym's feed would quietly include their coach's cohort and nobody
+ * would be able to tell which room they were posting in.
+ */
+export function useCommunityFeed(channel: Channel, kind: PostKind = 'post', coachId?: string | null) {
   const rev = useAuthRevision();
   const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
@@ -57,7 +68,8 @@ export function useCommunityFeed(channel: Channel, kind: PostKind = 'post') {
     if (!USE_SUPABASE) { setPosts([]); setStatus('ready'); setLikeStatus('ready'); return; }
     setStatus('loading');
     try {
-      const q = supabase.from('community_posts').select(POST_COLS).eq('channel', channel).eq('kind', kind);
+      const base = supabase.from('community_posts').select(POST_COLS).eq('channel', channel).eq('kind', kind);
+      const q = coachId ? base.eq('coach_id', coachId) : base.is('coach_id', null);
       const { data, error } = await (kind === 'event'
         ? q.gt('event_at', new Date().toISOString()).order('event_at').order('id')
         : q.order('created_at', { ascending: false }).order('id', { ascending: false })
@@ -82,7 +94,7 @@ export function useCommunityFeed(channel: Channel, kind: PostKind = 'post') {
       reportError('community.feed', e);
       setStatus('error');
     }
-  }, [channel, kind]);
+  }, [channel, kind, coachId]);
 
   useEffect(() => { setPosts([]); setLikes([]); void reload(); }, [reload, rev]);
 
@@ -91,7 +103,10 @@ export function useCommunityFeed(channel: Channel, kind: PostKind = 'post') {
   return {
     posts, status, likes, likeStatus, reload,
     publish: async (body: string, extra?: PostExtra) => after(await wrote('community.post', 'Your post', () =>
-      supabase.from('community_posts').insert({ channel, body: body.trim(), kind, ...extra }, { count: 'exact' }))),
+      supabase.from('community_posts').insert(
+        { channel, body: body.trim(), kind, ...(coachId ? { coach_id: coachId } : {}), ...extra },
+        { count: 'exact' },
+      ))),
     like: async (postId: string, on: boolean, me: string) => after(await wrote('community.like', 'That like', () =>
       on
         ? supabase.from('community_likes').insert({ post_id: postId }, { count: 'exact' })
