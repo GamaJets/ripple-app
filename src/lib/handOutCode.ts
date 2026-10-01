@@ -146,6 +146,26 @@ export const HOW_THEY_USE_IT =
   'They enter it in the app under Find a trainer, at the top. It works whoever they are and whatever address they signed up with. You still approve them before they are on your roster, so check your notifications afterwards.';
 
 /**
+ * The same thing, for a coach whose clients are not standing in front of them.
+ *
+ * This screen's header says it is the one asked "on a gym floor with a person
+ * waiting", and six characters read aloud is exactly right for that. A coach
+ * who works online hands the same code over in a direct message, a bio or an
+ * email, where the LINK is the thing that works and the characters are a
+ * thing somebody has to retype. Both have always been on this screen; only
+ * the sentence above them assumed which one they wanted.
+ */
+export const HOW_THEY_USE_IT_REMOTE =
+  'Send them the link. It opens the app, or the store if they do not have it yet, and carries the code so there is nothing to type. The six characters still work if they would rather enter them under Find a trainer. You approve them either way before they are on your roster, so check your notifications afterwards.';
+
+/** Which of the two to print. `remote` is `deliveryFact(...).shape`, which
+ *  resolves every unknown to in-person — so a coach whose roster has not been
+ *  read is told the thing that is true of everybody. */
+export function howTheyUseIt(remote: boolean): string {
+  return remote ? HOW_THEY_USE_IT_REMOTE : HOW_THEY_USE_IT;
+}
+
+/**
  * What the screen draws where the code goes.
  *
  * An empty string under 'ready' is treated as unread rather than rendered.

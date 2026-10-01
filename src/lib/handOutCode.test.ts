@@ -26,6 +26,7 @@ import {
   copyBlockedNote, copyFailedNote, handOut, keptReason, namedCodesLine,
   spokenCode, type CodeRead,
   codeUptakeLine, uptakeNeedsAnswering,
+  howTheyUseIt,
 } from './handOutCode';
 import { normaliseCode, joinLink, inviteMessage } from './joinCode';
 // The reading `fetchJoinCodeStats` puts in front of `codeUptakeLine`. See the
@@ -303,6 +304,19 @@ for (const stats of [{ joined: 12, pending: 0 }, { joined: 12, pending: 5 }, { j
 // the wrong figure while refusing to state it.
 ok(!/\bthis code\b/.test(codeUptakeLine(null)),
   'and the unread sentence names the same set the figure would have covered');
+
+/* ── the sentence depends on how the coach works (remote framing) ────────── */
+
+{
+  const floor = howTheyUseIt(false);
+  const online = howTheyUseIt(true);
+  ok(floor !== online, 'a coach on a gym floor and a coach online are told different things');
+  ok(/Find a trainer/.test(floor), 'the in-person sentence sends them to the code box');
+  ok(/link/i.test(online), 'the remote one leads with the link, which is what a DM carries');
+  ok(/six characters/i.test(online), 'and still says the code works, because it does');
+  // Both ends say the part that catches people out.
+  for (const s of [floor, online]) ok(/approve/i.test(s), 'both say you still approve them');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`handOutCode: ok (${hand.length} live named codes offered, ${new Set(lines.values()).size} distinct states)`);

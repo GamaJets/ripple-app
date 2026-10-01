@@ -64,11 +64,12 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fetchMyJoinCode, fetchMyJoinCodes, fetchJoinCodeStats, type JoinCodesRead } from '../../src/ui/joinCode';
 import { shareText } from '../../src/lib/exportShare';
+import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { HAS_NATIVE_CLIPBOARD, copyToClipboard } from '../../src/ui/nativeModules';
 import {
   codeToGive, codesToHandOut, namedCodesLine, handOut,
-  copyBlockedNote, copiedNote, copyFailedNote,
-  HOW_THEY_USE_IT, codeUptakeLine, uptakeNeedsAnswering, type CodeRead,
+  copyBlockedNote, copiedNote, copyFailedNote, howTheyUseIt,
+  codeUptakeLine, uptakeNeedsAnswering, type CodeRead,
 } from '../../src/lib/handOutCode';
 import { codeCountLine } from '../../src/lib/joinCodes';
 import { joinQr, qrPath, QR_QUIET_ZONE } from '../../src/lib/joinQr';
@@ -165,6 +166,7 @@ export default function CoachJoinCode() {
   const named = codesToHandOut(codes.rows);
   const namedLine = namedCodesLine(codes.status, codes.rows);
   const clipboardNote = copyBlockedNote(HAS_NATIVE_CLIPBOARD);
+  const delivery = useDeliveryFact();
 
   /**
    * The bare link onto the clipboard, and the destination sentence after it.
@@ -324,7 +326,10 @@ export default function CoachJoinCode() {
         {/* ── what the person in front of them does next ──────────────────── */}
         <Section>
           <SectionHead title="What They Do with It" />
-          <Text style={{ ...ty.label, color: t.ink2 }}>{HOW_THEY_USE_IT}</Text>
+          {/* Which sentence depends on how this coach works. `useDeliveryFact`
+              resolves every unknown to in-person, so a roster that has not
+              been read gets the wording that is true of everybody. */}
+          <Text style={{ ...ty.label, color: t.ink2 }}>{howTheyUseIt(delivery.shape === 'remote')}</Text>
           {/* Above the button, because it is the reason to press it. Held back
               until the read has happened at all: `undefined` is "not asked",
               and printing the could-not-be-read sentence on open would be the
