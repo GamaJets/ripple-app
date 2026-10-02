@@ -44,6 +44,10 @@ import { useRouter } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
+import { useLoggingCoach } from '../../src/ui/coachLogQueries';
+import { useCheckinQuestions, saveAnswers } from '../../src/ui/checkinQuestions';
+import { liveQuestions } from '../../src/lib/checkinQuestions';
+import { useAuth } from '../../src/ui/auth';
 import type { Theme } from '../../src/theme/tokens';
 import { Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, MiniRing, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value, font } from '../../src/theme/scale';
@@ -255,6 +259,7 @@ export default function CheckIn() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const { user } = useAuth();
   const ci = useCheckIns();
   const today = useToday();
   // The history under the form — what was sent, and whether the coach has it —
@@ -300,6 +305,15 @@ export default function CheckIn() {
   const [mood, setMood] = useState(0);
   const [adherence, setAdherence] = useState(0);
   const [note, setNote] = useState('');
+  /* The coach's own questions, and what has been typed into them. Keyed by
+     question id rather than by position: a coach who retires one between this
+     screen opening and the send must not shift somebody's answers onto the
+     wrong questions. */
+  const myCoach = useLoggingCoach(user?.id ?? null);
+  const coachName = myCoach?.name ? myCoach.name.split(' ')[0] : null;
+  const mine = useCheckinQuestions(myCoach?.id ?? null);
+  const liveMine = useMemo(() => liveQuestions(mine.questions), [mine.questions]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   // What the line under the title says. See the note on the PageHead below.
   const waitingNote = unsentNote(ci.unsent, 'check-in', 'check-ins');
@@ -369,11 +383,26 @@ export default function CheckIn() {
       );
       return;
     }
+    /* The answers go AFTER the check-in and only once it is on the server.
+       The order is the error design: a failure here costs the coach's extra
+       questions and never the check-in, and `lastStoredId` is null after
+       anything but a 'stored', so answers can never be attached to a row the
+       server does not have. A partial write is said out loud rather than
+       folded into the success — the whole point of this form is that somebody
+       believes their coach has what they sent. */
+    let answersLanded = true;
+    const storedCheckInId = ci.lastStoredId();
+    if (storedCheckInId && liveMine.length) {
+      answersLanded = await saveAnswers(storedCheckInId, liveMine, answers);
+    }
+
     Alert.alert(
       'Check-in Sent',
-      weightStored
+      (!answersLanded
+        ? `Your coach can see this week's check-in${weightStored ? ' and your weight has been updated' : ''}. The answers to ${coachName ? `${coachName}'s` : 'their'} own questions did not save, so those are the one thing they cannot see. Send it again once you have signal to add them.`
+        : weightStored
         ? 'Your coach can see this week\'s check-in and your weight has been updated.'
-        : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight, the one your targets and your goal are worked out from, could not be updated just now, so record it again on Body when you have signal.',
+        : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight, the one your targets and your goal are worked out from, could not be updated just now, so record it again on Body when you have signal.'),
       [{ text: 'Done', onPress: () => router.back() }],
     );
   };
@@ -453,6 +482,38 @@ export default function CheckIn() {
               style={{ ...field, ...numeric }} />
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
           </View>
+
+          {/* ── what this client's own coach asks ──────────────────────────
+              Part 3380. Under the six everybody answers, never instead of
+              them: the fixed six have history behind them and four screens
+              read them by name. A question left alone is a SKIP and writes no
+              row — "they skipped it" and "they answered nought" are different
+              facts, and the first is the common one. */}
+          {liveMine.length ? (
+            <View style={{ marginBottom: sp.xl }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
+                {coachName ? `${coachName} also asks` : 'Your coach also asks'}
+              </Text>
+              {liveMine.map((q) => (
+                <View key={q.id} style={{ marginBottom: sp.lg }}>
+                  <FieldLabel t={t} label={q.prompt}
+                    note={q.kind === 'number' && q.unit ? q.unit : q.kind === 'rating' ? '1 to 5' : undefined} />
+                  <TextInput
+                    value={String(answers[q.id] ?? '')}
+                    onChangeText={(v: string) => setAnswers((p) => ({ ...p, [q.id]: v }))}
+                    keyboardType={q.kind === 'text' ? 'default' : 'decimal-pad'}
+                    multiline={q.kind === 'text'}
+                    placeholder={q.kind === 'rating' ? '1 to 5' : q.kind === 'number' ? (q.unit ?? 'A figure') : 'Your answer…'}
+                    placeholderTextColor={t.ink3}
+                    accessibilityLabel={q.prompt}
+                    style={{ ...field, ...(q.kind === 'text' ? {} : numeric) }} />
+                </View>
+              ))}
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                Leave any of these blank if you would rather not answer. The rest of your check-in still goes.
+              </Text>
+            </View>
+          ) : null}
 
         {/* Guarded, and the label says why. `submit` awaits two network
             writes before it says anything, and on a gym's wifi that window is
