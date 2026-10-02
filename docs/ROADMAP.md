@@ -1223,3 +1223,76 @@ Waves 1 and 2 need no decisions and take about **2 weeks**. Wave 3 adds
 **5 to 7 weeks** once its decisions are made, and its pieces are independent,
 so they can be done in whichever order the owner picks. The board's own
 estimate was 8–14 weeks for the whole redesign; most of that is done.
+
+## 2 Oct 2026 — the online coach, and the five gaps that were closed
+
+*Written at the end of the work rather than before it, so every line below is a
+thing that exists. The audit that produced the list is in the session above;
+what follows is what came of it, and — more usefully — the three items the
+audit itself got wrong.*
+
+### What the audit was for
+
+The question was "what is missing for a coach whose clients are online". The
+survey found the platform already knew about them — `src/lib/coachDelivery.ts`
+has had a declared delivery mode and a remote shape since it was written — and
+that the gaps were not permissions but READERS. Every one of the five below had
+its RLS policy already in place and its data already arriving; what did not
+exist was the screen, or the sentence, that put it in front of somebody.
+
+That is the fourth time this document has recorded that shape. It is worth
+stating as a rule: **in this codebase a missing feature is more often an
+unwritten query than a closed door.** Check the policy before scoping the work.
+
+### Closed
+
+| Gap | What exists now |
+|---|---|
+| Nothing told a coach a check-in had arrived, and there was no queue | `supabase/parts/3340-a-check-in-nobody-was-told-about.sql` is the trigger and `app/(trainer)/checkins.tsx` the queue, across the whole book, newest first. The push carries no weight, no ratings and no note: a lock screen is read by whoever is standing near the phone, which is part 614's argument applied to health data. |
+| A coach could watch a form-check clip and not answer it | `supabase/parts/3350-the-coach-answers-the-form-check.sql` adds the reply and tells each end the other spoke. The UPDATE grant is column-level — and the first apply proved why that matters: `authenticated` already held table-wide UPDATE from part 02, which in PostgreSQL supersedes a column grant, so the narrow grant changed nothing until an explicit `revoke update` went in front of it. Checked against `information_schema.column_privileges` after applying, not assumed. |
+| No voice notes, no documents | `supabase/parts/3360-a-voice-note-and-a-document-on-a-thread.sql` widens the kinds to `audio` and `file`; `src/ui/voiceNote.ts` records (stopping itself at three minutes) and `src/ui/AttachmentBubbles.tsx` draws them. A `.docx` is refused: a zip is a container whose contents this app cannot describe. |
+| An independent coach's clients were not a group | `supabase/parts/3370-a-coachs-own-group-is-not-a-gyms.sql`. `community_posts.tenant_id` was `not null`, so a board was a *building* and a coach without one had nothing group-shaped. A post now belongs to a gym or to a coach, never both and never neither. |
+| The six check-in fields were the same six for everybody | `supabase/parts/3380-a-coach-asks-their-own-questions.sql`, with `src/lib/checkinQuestions.ts` for the rules and `src/ui/coach/CheckinQuestionEditor.tsx` for the authoring. Added UNDER the fixed six, never replacing them: a configurable form that replaces a fixed one stops being comparable the first time somebody edits it. |
+
+Two more readers that were pure absence, not permission: `app/(trainer)/client-food.tsx`
+(the whole coach-side use of `food_logs` had been six food names on the
+dashboard sheet) and `app/(trainer)/book-week.tsx` (`src/lib/bookFeed.ts`),
+which is the question "what happened this week" that neither the one-client
+screen nor the drift bands answered.
+
+### What the audit got wrong
+
+Recorded because the correction is the useful part, and because this is now the
+fifth such entry in this file.
+
+| Claimed open | Actually |
+|---|---|
+| `src/lib/scanCadence.ts` has no importer | Wired. `src/ui/ScanCadencePanel.tsx` renders it into the coach's client-body and my-progress screens. |
+| The coach has no side-by-side photo comparison | Built. `app/(trainer)/client-photos.tsx` pairs two photographs a coach can already open, captioned with the days between them and nothing else. |
+| `src/lib/threadSearch.ts` belongs on the coach's message LIST | Half right. It searches within a thread, so the coach's equivalent of the member's screen is the thread itself; it is now on `app/(trainer)/chat.tsx`. |
+
+### A defect the zone suite caught, and what it taught
+
+`npm run test:zones` turned red in Pacific/Auckland alone on 28 Sep, the day
+after New Zealand's spring-forward: `overdueDays` divided elapsed milliseconds
+by 86,400,000, so eight calendar days measured 7.958 and floored to **seven**.
+For the week after every such change, every coach in that zone was told a
+client was a day less late than they were. `npm test` is green on this in every
+zone the developer happens to be sitting in, which is the whole argument for
+the zone suite being in `preflight`.
+
+`calendarDaysBetween` in `src/lib/localDate.ts` is now the one way to count
+days on a calendar, and it carries the test for which kind of figure is being
+counted: **would it change if the reader flew to another timezone?** A deadline
+would; a stopwatch would not. Two figures in the tree are stopwatches and still
+divide milliseconds on purpose — the booking screen's "days left" (whose own
+test states the rule, "a day and twenty hours is one whole day") and
+`waitedLabel`. Both now say so in a comment, because the next sweep will be
+tempted by them.
+
+### Also, and for the same reason
+
+`scripts/check-site-caps.mjs` is new and in `check:all`. The marketing site had
+drifted to sentence case on 25 pages while the apps stayed Title Case, because
+`check:caps` walks `app`, `src/ui` and `studio-web` and has never walked `web`.
+A sweep without a gate is a sweep that gets done again in a month.
