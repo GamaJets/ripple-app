@@ -93,9 +93,11 @@ export function CheckInReview({ checkIn, who, weightUnit, onReply, questions = [
    *  answer still needs the question it was given to, so a retired one is
    *  drawn here whenever there is an answer against it. */
   questions?: readonly Question[];
-  /** Answers by question id, or null when that read failed. Null and {} are
-   *  kept apart on purpose: {} is "they answered none of them", null is "we do
-   *  not know", and only one of those may be drawn as silence. */
+  /** Answers by question id, or null when they are not here — still being
+   *  read, or a read that failed. Null and {} are kept apart on purpose: {} is
+   *  "they answered none of them" and prints "Not answered" against every
+   *  question, null is "we do not know", and only one of those is a claim
+   *  about what somebody wrote. */
   answers?: Record<string, Answer> | null;
 }) {
   const t = useTheme();
@@ -140,7 +142,8 @@ export function CheckInReview({ checkIn, who, weightUnit, onReply, questions = [
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your Own Questions</Text>
           {answers === null ? (
             <Text style={{ ...ty.caption, color: t.ink2 }}>
-              The answers to your own questions could not be read. That is this screen, not their check-in.
+              Their answers to your own questions are not here. They are either still being read or could not be,
+              and either way this is this screen rather than their check-in.
             </Text>
           ) : asked.map((q) => {
             const line = answerLine(q, answers[q.id] ?? null);

@@ -168,7 +168,7 @@ export default function ClientFood() {
         ) : status === 'error' ? (
           <Notice tone={t.warn} kicker="Food Log" title="This could not be read"
             note="This is our end, not yours. It says nothing about whether they have been logging. Pull down to try again once you have signal." />
-        ) : !isWhole(rosterStatus) && roster.length === 0 ? (
+        ) : isWhole(rosterStatus) && roster.length === 0 ? (
           <EmptyRoster lacks="there is nobody whose food log you could read" />
         ) : (
           <>

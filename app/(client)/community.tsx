@@ -34,11 +34,19 @@ export default function Community() {
   const hasGym = !!tenant?.id;
   const hasCoach = !!coach?.id;
   /* Opens on the gym when there is one, because that is where this screen has
-     always opened and a member who has used it should not find it moved. A
-     member with only a coach opens on their coach; one with neither sees the
-     gym's empty state, which already says what it means. */
-  const [board, setBoard] = useState<Board>(hasGym ? 'gym' : 'coach');
-  const onCoach = (!hasGym || board === 'coach') && hasCoach;
+     always opened and a member who has used it should not find it moved.
+
+     `null` until the member picks, and NOT `useState(hasGym ? 'gym' : 'coach')`:
+     a useState initialiser runs on the first render only, and on that render
+     the tenant provider is still 'loading' with `tenant: null`, so `hasGym`
+     was false for everybody and every gym member landed on their coach's
+     board instead. The default is therefore computed on each render from
+     whatever is known by then, and the member's own choice overrides it the
+     moment they make one. */
+  const [picked, setPicked] = useState<Board | null>(null);
+  const board: Board = picked ?? (hasGym ? 'gym' : 'coach');
+  const setBoard = setPicked;
+  const onCoach = board === 'coach' && hasCoach;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>

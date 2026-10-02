@@ -88,7 +88,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, font } from '../..
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
-import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { attachmentNoun, MESSAGE_AUDIO_MAX_SECONDS } from '../../src/lib/messageAttachments';
 import { atBottom, isLocalId } from '../../src/lib/readReceipt';
 import { useReadReceipt } from '../../src/ui/readReceipts';
 // How long this member has been waiting, when they have been waiting at all.
@@ -104,7 +104,7 @@ import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
-import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { VoiceNoteBubble, FileBubble, RecordingBar } from '../../src/ui/AttachmentBubbles';
 import { useVoiceNote } from '../../src/ui/voiceNote';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
@@ -401,7 +401,12 @@ export default function Messages() {
      note is how somebody describes a pain they have no word for, and the file
      is usually a blood panel or a physio's report they were handed as a PDF.
      The recorder stops itself at three minutes (src/ui/voiceNote.ts). */
-  const voice = useVoiceNote();
+  // The callback is what catches a recording the three-minute cap stopped:
+  // without it the take is made and thrown away, which is worse than
+  // refusing to start one.
+  const voice = useVoiceNote((took) => {
+    setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
+  });
   const onRecord = async () => {
     if (voice.recording) {
       const took = await voice.stop();
@@ -905,6 +910,14 @@ export default function Messages() {
         </ScrollView>
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
+        {/* The microphone, while it is open. Nothing said so before this: the
+            take started from inside an action sheet and the sheet closed. */}
+        {voice.recording ? (
+          <View style={{ marginHorizontal: G, marginTop: sp.md }}>
+            <RecordingBar seconds={voice.seconds} max={MESSAGE_AUDIO_MAX_SECONDS}
+              onStop={() => { void onRecord(); }} />
+          </View>
+        ) : null}
         {pending ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingTop: sp.md }}>
             {pending.kind === 'image'
@@ -913,7 +926,10 @@ export default function Messages() {
                   <Icon name="video" size={18} color={t.ink3} />
                 </View>}
             <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
-              {pending.kind === 'image' ? 'Photo ready to send' : 'Video ready to send'}
+              {/* `attachmentNoun` names all four. This line used to be a
+                  two-way ternary, so a voice note and a PDF both sat in the
+                  composer announcing themselves as a video. */}
+              {`${attachmentNoun(pending.kind).replace(/^./, (c) => c.toUpperCase())} ready to send`}
             </Text>
             <Pressable onPress={() => setPending(null)} accessibilityRole="button"
               accessibilityLabel={`Remove the ${attachmentNoun(pending.kind)}`} hitSlop={8}>

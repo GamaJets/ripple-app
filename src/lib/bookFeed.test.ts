@@ -68,7 +68,11 @@ const ev = (clientId: string, name: string, kind: BookEvent['kind'], at: number)
   // only; the line below is what adds them back together.
   eq(tally.workouts, 1, 'a personal record is not also counted as a workout');
   eq(tally.prs, 1, 'it is counted as a record');
-  eq(activePeople(events), 2, 'two people did something, however many things they did');
+  eq(activePeople(events, NOW), 2, 'two people did something, however many things they did');
+  // It windows for itself: the caller used to pass the CAPPED feed, which put
+  // a people figure and a tally measured over different sets in one sentence.
+  eq(activePeople([...events, ev('z', 'Zoe', 'workout', NOW - 30 * DAY)], NOW), 2,
+    'somebody active only outside the week is not in it');
 }
 
 /* ── the line, and the two things it refuses to say ───────────────────────── */

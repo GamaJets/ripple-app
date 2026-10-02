@@ -27,6 +27,19 @@ export const UNIT_MAX = 12;
 export const ANSWER_TEXT_MAX = 1000;
 
 /**
+ * The largest figure an answer may carry, because `check_in_answers.number` is
+ * `numeric(10,2)` (supabase/parts/3380) and 10 digits with 2 after the point is
+ * eight before it.
+ *
+ * Without this, a mistyped figure — a phone number in a box asking for a waist
+ * — raised 22003 on the insert, and `saveAnswers` runs AFTER the check-in row,
+ * so what it cost was every one of the coach's questions on that check-in while
+ * the check-in itself landed looking complete. A figure this big is a typo, and
+ * the module already treats what it cannot read as a skip.
+ */
+export const ANSWER_NUMBER_MAX = 99_999_999;
+
+/**
  * How many a coach may ask at once.
  *
  * Not a database constraint, and deliberately a number rather than "as many as
@@ -133,7 +146,7 @@ export function answerValue(kind: QuestionKind, raw: unknown): AnswerValue | nul
     const typed = typeof raw === 'number' ? raw : String(raw ?? '').trim().replace(',', '.');
     if (typed === '') return null;
     const n = typeof typed === 'number' ? typed : Number(typed);
-    if (!Number.isFinite(n)) return null;
+    if (!Number.isFinite(n) || Math.abs(n) > ANSWER_NUMBER_MAX) return null;
     // Rounded to the two decimals the column stores, here rather than at the
     // far end: a figure that comes back changed from what somebody typed is a
     // figure they will not trust twice.

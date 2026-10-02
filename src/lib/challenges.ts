@@ -311,9 +311,18 @@ export const cohortLabel = (c: ChallengeRow): string =>
 /**
  * How long is left, in the words a person would use.
  *
- * Whole days from `now`, rounded UP while the challenge is running: with eight
- * hours left, "1 day left" is true and "0 days left" reads as over. Once it is
- * over it says so rather than counting negative days.
+ * CALENDAR days, and that is what every threshold here is written against.
+ * Switching this function off millisecond arithmetic changed what the number
+ * means — `calendarDaysBetween` counts midnights crossed, not 24-hour blocks —
+ * and the thresholds were left as they were, so each branch moved by a day:
+ *
+ *   · a challenge ending tomorrow at 21:00, read this morning, is 1 midnight
+ *     away and said "Last day". It is not; today is the second-to-last.
+ *   · one starting later today is 0 midnights away and said "Starts tomorrow".
+ *
+ * So the day the thing happens on is 0, and the words follow from that: 0 is
+ * today, 1 is tomorrow or yesterday, and anything else is counted. Nothing
+ * here ever prints a negative count or "1 days".
  */
 export function windowLine(c: ChallengeRow, now: number = Date.now()): string {
   const phase = challengePhase(c, now);
@@ -322,7 +331,8 @@ export function windowLine(c: ChallengeRow, now: number = Date.now()): string {
     // dates, and across a daylight-saving change ms arithmetic makes it two.
     // See `calendarDaysBetween` in src/lib/localDate.ts.
     const d = calendarDaysBetween(now, c.startsAt) ?? Math.ceil((c.startsAt - now) / DAY);
-    return d <= 1 ? 'Starts tomorrow' : `Starts in ${num(d)} days`;
+    if (d <= 0) return 'Starts today';
+    return d === 1 ? 'Starts tomorrow' : `Starts in ${num(d)} days`;
   }
   if (phase === 'finished') {
     const d = calendarDaysBetween(c.endsAt, now) ?? Math.floor((now - c.endsAt) / DAY);
@@ -330,7 +340,8 @@ export function windowLine(c: ChallengeRow, now: number = Date.now()): string {
     return d === 1 ? 'Finished yesterday' : `Finished ${num(d)} days ago`;
   }
   const d = calendarDaysBetween(now, c.endsAt) ?? Math.ceil((c.endsAt - now) / DAY);
-  return d <= 1 ? 'Last day' : `${num(d)} days left`;
+  if (d <= 0) return 'Last day';
+  return d === 1 ? 'Ends tomorrow' : `${num(d)} days left`;
 }
 
 /**

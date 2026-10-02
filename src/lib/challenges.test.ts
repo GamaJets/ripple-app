@@ -142,12 +142,41 @@ eq(canJoin(row({ startsAt: NOW + DAY, endsAt: NOW + 2 * DAY }), NOW), true,
 /* ── the countdown never counts a day that is not there ────────────────── */
 
 eq(windowLine(row({ endsAt: NOW + 12 * DAY }), NOW), '12 days left', 'whole days left');
-// Rounded up while it runs: with eight hours to go, "0 days left" reads as over.
-eq(windowLine(row({ endsAt: NOW + DAY / 3 }), NOW), 'Last day', 'the final hours are the last day, not zero days');
-eq(windowLine(row({ endsAt: NOW + DAY }), NOW), 'Last day', 'exactly one day left is the last day');
 eq(windowLine(row({ startsAt: NOW + 3 * DAY, endsAt: NOW + 30 * DAY }), NOW), 'Starts in 3 days', 'before it starts');
-eq(windowLine(row({ startsAt: NOW + DAY / 2, endsAt: NOW + 30 * DAY }), NOW), 'Starts tomorrow', 'starting within a day');
 eq(windowLine(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - 2 * DAY }), NOW), 'Finished 2 days ago', 'after it ends');
+
+/* ── the near thresholds, anchored to LOCAL dates ───────────────────────── */
+//
+// Every one of these used to be written as an offset from NOW — `NOW + DAY / 3`
+// for "eight hours to go" — and that is unsound twice over. Under
+// scripts/test-zones.mjs NOW is 12:00 UTC read in six zones, so eight hours on
+// is the same evening in one and the next morning in another; and the thing
+// being asserted is a count of MIDNIGHTS, which an offset in milliseconds
+// cannot express. The dates are therefore built locally and the hours chosen so
+// no zone can move them across a boundary.
+{
+  const atLocal = (y: number, m: number, d: number, h: number) => new Date(y, m, d, h, 0).getTime();
+  const morning = atLocal(2026, 7, 31, 9);        // Mon 31 Aug 2026, 09:00 local
+
+  // Ends later the same day. This is the last day, and the only case that is.
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 7, 31, 21) }), morning),
+    'Last day', 'the final hours of the closing day are the last day');
+  // Ends tomorrow evening. One midnight away, so today is NOT the last day —
+  // the bug this block exists for: the threshold stayed at `d <= 1` when the
+  // arithmetic moved to calendar days, and every challenge spent its
+  // penultimate day claiming to be ending.
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 8, 1, 21) }), morning),
+    'Ends tomorrow', 'the day before the last day says so, and never says "1 days left"');
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 8, 2, 21) }), morning),
+    '2 days left', 'and the day before that is counted');
+
+  // The same off-by-one on the other end: something starting this evening is
+  // zero midnights away and used to be announced for tomorrow.
+  eq(windowLine(row({ startsAt: atLocal(2026, 7, 31, 18), endsAt: morning + 30 * DAY }), morning),
+    'Starts today', 'a challenge starting this evening starts today');
+  eq(windowLine(row({ startsAt: atLocal(2026, 8, 1, 6), endsAt: morning + 30 * DAY }), morning),
+    'Starts tomorrow', 'and one starting tomorrow morning starts tomorrow');
+}
 // ── "today" and "yesterday" are CALENDAR words ─────────────────────────────
 //
 // These two are built as LOCAL instants rather than as offsets from NOW, and

@@ -44,7 +44,7 @@ import { useToday } from '../../src/ui/today';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import { capLimit } from '../../src/lib/rowCap';
+import { capLimit, ROW_CAP } from '../../src/lib/rowCap';
 import { num, fmtRelativeDay } from '../../src/lib/format';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
@@ -103,9 +103,15 @@ export default function BookWeek() {
         setWorkouts(null); setCheckins(null); setStatus('error');
         return;
       }
-      setWorkouts((w.data ?? []) as Record<string, unknown>[]);
-      setCheckins((c.data ?? []) as Record<string, unknown>[]);
-      setStatus('ready');
+      const got = { w: (w.data ?? []) as Record<string, unknown>[], c: (c.data ?? []) as Record<string, unknown>[] };
+      setWorkouts(got.w);
+      setCheckins(got.c);
+      // Either half hitting the row cap makes the week a sample of itself, and
+      // this used to say 'ready' regardless — so `whole` was true, `bookLine`
+      // printed its figures, and a coach with thirty clients read a count of
+      // the newest 500 workouts as the count of the week. `isWhole` excludes
+      // 'partial', so one word here is what stops the sentence being written.
+      setStatus(got.w.length >= ROW_CAP || got.c.length >= ROW_CAP ? 'partial' : 'ready');
     })();
     return () => { live = false; };
   }, [ids, rosterStatus, tick]);
@@ -137,7 +143,11 @@ export default function BookWeek() {
   const whole = isWhole(status) && isWhole(rosterStatus);
   const line = bookLine({
     tally,
-    people: activePeople(feed),
+    // `events`, not `feed`: the feed is capped at 60 rows and the tally is
+    // counted over the whole window, so counting people off the capped list
+    // put "190 workouts … from 11 of your 30" in one sentence, where the two
+    // figures were measured on different sets.
+    people: activePeople(events, nowMs),
     onBook: isWhole(rosterStatus) ? roster.length : null,
     whole,
   });
@@ -184,6 +194,9 @@ export default function BookWeek() {
           <>
             {!isWhole(rosterStatus) ? (
               <PartialRead what="clients" shown={roster.length} onPress={reload} />
+            ) : null}
+            {status === 'partial' ? (
+              <PartialRead what="this week’s records" shown={feed.length} onPress={reload} />
             ) : null}
 
             <Section>

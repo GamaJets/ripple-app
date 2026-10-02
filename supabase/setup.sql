@@ -74329,3 +74329,392 @@ create policy check_in_answers_coach_read on public.check_in_answers
 revoke all on public.check_in_answers from anon, authenticated, public;
 grant select, insert, update, delete on public.check_in_answers to authenticated;
 grant all on public.check_in_answers to service_role;
+
+-- ▶ three-things-parts-3340-to-3380-got-wrong.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Three defects in parts 3340-3380, found by reviewing them after they were
+-- applied.
+--
+-- All three are the same mistake wearing different clothes: a part that
+-- created something new, correctly, and did not look at what already existed
+-- around it. Recorded in that shape because the next part to add a route, a
+-- board or a policy will be tempted by each one again.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Neither new notification was ever pushed
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Parts 3340 and 3350 insert rows into `notifications` with routes
+-- '/(trainer)/checkins' and '/(client)/workouts'. `notification_channel` —
+-- last defined in part 3320 — has never heard of either, so both fell to its
+-- `else null`, and `notifications_dispatch_push` (part 900) filters on
+-- `n.channel is not null`. Part 900's own comment says it: an unclassified row
+-- is never pushed.
+--
+-- So the rows landed in the in-app bell and nothing reached a phone, which is
+-- the entire stated purpose of both parts. "A check-in reaches the coach" did
+-- not.
+--
+-- ── Why this was not caught ──────────────────────────────────────────────
+--
+-- There are two copies of this mapping and only one of them was updated.
+-- src/lib/notifyDispatch.ts carries `CHANNEL_BY_ROUTE` for the app's own
+-- switches and got both routes; this function is the half the DATABASE reads
+-- when deciding whether to send, and it did not. Every test over
+-- `SERVER_WRITTEN` passed, because the tests read the TypeScript copy.
+--
+-- The duplication is deliberate and documented (an edge function under Deno
+-- cannot import the app's modules), so the lesson is not "remove one". It is
+-- that a new server-written notification is TWO edits, and this part is the
+-- second half of two of them.
+create or replace function public.notification_channel(p_route text, p_title text)
+returns text
+language plpgsql
+immutable
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  r text := split_part(btrim(coalesce(p_route, '')), '?', 1);
+  t text := btrim(coalesce(p_title, ''));
+begin
+  if r <> '' then
+    return case r
+      when '/(client)/messages'         then 'chat'
+      when '/(trainer)/chat'            then 'chat'
+
+      when '/(trainer)/calendar'        then 'bookings'
+      when '/(client)/calendar'         then 'bookings'
+      when '/(client)/bookings'         then 'bookings'
+      when '/(client)/pt-sessions'      then 'bookings'
+      when '/(client)/classes'          then 'bookings'
+      when '/(client)/request-session'  then 'bookings'
+      when '/(trainer)/sessions'        then 'bookings'
+
+      when '/(trainer)/payments'        then 'money'
+      when '/(client)/packages'         then 'money'
+      when '/(client)/explore'          then 'money'
+      when '/(client)/offers'           then 'money'
+
+      when '/(trainer)/dashboard'       then 'clients'
+      when '/(trainer)/leads'           then 'clients'
+      when '/(trainer)/client-goals'    then 'clients'
+      when '/(trainer)/client-training' then 'clients'
+      when '/(trainer)/client-photos'   then 'clients'
+      when '/(client)/my-coach'         then 'clients'
+      when '/(client)/trainers'         then 'clients'
+      -- Part 3320.
+      when '/(client)/assessments'      then 'clients'
+      when '/(client)/community'        then 'clients'
+      when '/(trainer)/community'       then 'clients'
+      when '/(owner)/community'         then 'clients'
+      -- Part 3390, closing parts 3340 and 3350. The check-in a client sent
+      -- and the coach's answer to a form check: both are the coaching
+      -- relationship, which is what 'clients' has always meant, and both
+      -- already carry that switch in src/lib/notifyDispatch.ts.
+      when '/(trainer)/checkins'        then 'clients'
+      when '/(client)/workouts'         then 'clients'
+
+      when '/(trainer)/documents'       then 'admin'
+      when '/(trainer)/client-intake'   then 'admin'
+      when '/(trainer)/credentials'     then 'admin'
+      when '/(client)/intake'           then 'admin'
+      when '/(client)/injuries'         then 'admin'
+
+      when '/(trainer)/invoices'        then 'book'
+      when '/(trainer)/nudges'          then 'book'
+      when '/(trainer)/builder'         then 'book'
+
+      -- '/(client)/notices' stays deliberately unclassified; see part 1870.
+      else null
+    end;
+  end if;
+
+  return case t
+    when 'An invoice from your gym'        then 'money'
+    when 'Your coaching has ended'         then 'clients'
+    when 'A client has signed the release' then 'admin'
+    else null
+  end;
+end
+$function$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A member could post an EVENT to their gym's board
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3330 added `and (kind = 'post' or public.community_moderates(tenant_id))`
+-- to `community_posts_insert`, under a heading saying resources and events are
+-- staff's. Part 3370 recreated that policy to widen it for a coach's board and
+-- rebuilt it from part 3300's text — the version BEFORE 3330 — so the clause
+-- was dropped without anybody deciding to drop it.
+--
+-- The hole: any member of a gym could insert `kind = 'event'` on the members
+-- channel, and it would then draw in `UpcomingEvents` on every member's
+-- Community screen as a gym event. ('resource' stayed shut, but only by
+-- accident: it requires the coaches channel, which `community_can_read`
+-- already denies a client.)
+--
+-- The lesson is the one `git log -p -- <file>` answers and reading the latest
+-- part does not: a policy may have been rewritten since the part that created
+-- it, and recreating it from the original is a silent revert.
+drop policy if exists community_posts_insert on public.community_posts;
+create policy community_posts_insert on public.community_posts
+  for insert to authenticated
+  with check (
+    author_id = (select auth.uid())
+    and (
+      (tenant_id is not null and public.community_can_read(tenant_id, channel))
+      or (coach_id is not null and public.coach_board_can_read(coach_id))
+    )
+    -- Restored from part 3330, widened for a coach's own board: on a gym's
+    -- board the staff decide what is an event, and on a coach's board the
+    -- coach does.
+    and (
+      kind = 'post'
+      or (tenant_id is not null and public.community_moderates(tenant_id))
+      or (coach_id is not null and public.coach_board_moderates(coach_id))
+    )
+    and exists (select 1 from public.community_rules_acceptance a
+                 where a.user_id = (select auth.uid()) and a.version >= 1)
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · On a coach's board, nobody could reply to a post or report one
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `community_comments.tenant_id` and `community_reports.tenant_id` are both
+-- `not null`, and both stamp triggers copy the value off the post. Part 3370
+-- made a coach-scoped post's `tenant_id` null, so every comment and every
+-- report on one failed with 23502 and the app drew its generic "could not be
+-- saved" sentence.
+--
+-- Blocks and hides were unaffected, because they key on the post id and the
+-- author id alone — which is why the commit claimed, wrongly, that a coach's
+-- board had "the same reports, blocks and hides a gym's has". Two of the four
+-- worked. REPORTING is the one that matters most: it is the moderation path
+-- Apple requires of any feed, and part 3370's own header invokes it.
+--
+-- Both columns become nullable and carry the post's scope instead. The
+-- policies are untouched: they are keyed on the post through
+-- `community_can_read`-style EXISTS clauses over `community_posts`, which the
+-- post's own SELECT policy already narrows correctly for both kinds of board.
+alter table public.community_comments alter column tenant_id drop not null;
+alter table public.community_reports  alter column tenant_id drop not null;
+
+comment on column public.community_comments.tenant_id is
+  'The gym whose board the parent post is on, or NULL when the post is on a coach''s own board (part 3370). Stamped from the post and never trusted from the client.';
+comment on column public.community_reports.tenant_id is
+  'The gym whose board the reported post is on, or NULL when it is on a coach''s own board (part 3370). Stamped from the post.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · A NULL tenant made the image-path CHECK pass anything
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `community_posts_image_own_folder` (part 3330) is
+-- `check (image_path is null or image_path like tenant_id::text || '/' || author_id::text || '/%')`.
+-- With `tenant_id` null the pattern is null, the comparison is null, and a
+-- CHECK constraint passes on null — so a coach-scoped post could name any
+-- object key at all. The read policy on the bucket grants a read to anybody
+-- who can read a post naming that object, so a fabricated key would be a
+-- grant over somebody else's folder. It is hard to exploit (the key carries a
+-- random token and has to be known exactly) and it is still wrong.
+--
+-- Rewritten so the scope decides the folder: a gym's post is under its tenant,
+-- a coach's board post is under the coach. Photos on a coach's board are NOT
+-- enabled by this — `communitymedia_obj_insert` still requires the uploader's
+-- own tenant as the first folder, and `uploadCommunityImage` refuses without
+-- one. Closing that properly is a storage-policy change and a decision about
+-- whose folder a coach's cohort photo belongs in; this constraint is written
+-- so that it cannot be the thing standing in the way, and so that a null
+-- tenant can never again mean "any path is fine".
+alter table public.community_posts drop constraint if exists community_posts_image_own_folder;
+alter table public.community_posts add constraint community_posts_image_own_folder
+  check (
+    image_path is null
+    or (tenant_id is not null and image_path like tenant_id::text || '/' || author_id::text || '/%')
+    or (coach_id is not null and image_path like coach_id::text || '/' || author_id::text || '/%')
+  );
+
+-- ▶ what-a-column-grant-cannot-say-and-two-coach-board-gaps.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Three more from the same review as part 3390, and the first of them is the
+-- interesting one: a grant written carefully, checked against the live
+-- database, documented at length — and still not enforcing what its own header
+-- claims. The other two are the coach's board finishing what part 3370 opened.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · A coach could still rewrite the question their client asked
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3350's header says it plainly: "a coach may WRITE two columns and no
+-- others". It does not hold, and the reason is worth keeping, because the part
+-- that got it wrong got the hard half right.
+--
+-- A column grant is held by a ROLE. Part 3350 revoked table-wide UPDATE from
+-- `authenticated` and granted back three columns:
+--
+--     grant update (note) on public.form_clips to authenticated;
+--     grant update (coach_reply, coach_replied_at) ...
+--
+-- `note` is granted so the MEMBER can edit their own question, and the comment
+-- beside it says "their `for all` policy from part 2617 is what keeps it to
+-- their own row". That is true of the member. It says nothing about the coach,
+-- who holds the identical column grant — every `authenticated` session does —
+-- and whose own policy `form_clips_coach_reply` is `using (is_my_client(...))`
+-- with no mention of columns, because a policy cannot mention columns.
+--
+-- So a coach could rewrite "does my knee cave on rep 4" into anything at all,
+-- on a video of their client's body, with no record that it had been changed.
+-- Nothing in the app does this. The point is that the database allowed it while
+-- documenting that it did not.
+--
+-- ── Why a trigger and not more policy ────────────────────────────────────
+--
+-- The two mechanisms PostgreSQL offers each see half of what is needed. A
+-- column grant knows the column and not the row; an RLS policy knows the row
+-- and not the column. "This column, by this person only" is outside both, and a
+-- BEFORE UPDATE trigger is the only place both facts are in scope at once.
+--
+-- `path` is frozen in the same breath. It was never granted to anybody but is
+-- in the member's own `for all` policy, so they could repoint their own clip --
+-- harmless on its own, and not something worth leaving reachable on a row that
+-- also carries a coach's written answer.
+create or replace function public.form_clips_freeze_members_own()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- The member's row is the member's. They may edit their question; nobody
+  -- else may, whatever grants their role happens to hold.
+  if auth.uid() is distinct from old.user_id then
+    if new.note is distinct from old.note then
+      raise exception 'The question on a form check belongs to the person who asked it.'
+        using errcode = '42501';
+    end if;
+    if new.path is distinct from old.path then
+      raise exception 'A form check''s video cannot be repointed.'
+        using errcode = '42501';
+    end if;
+    if new.user_id is distinct from old.user_id or new.set_id is distinct from old.set_id then
+      raise exception 'A form check cannot be moved to another person or another set.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+revoke execute on function public.form_clips_freeze_members_own() from public, anon, authenticated;
+
+drop trigger if exists form_clips_freeze_members_own on public.form_clips;
+create trigger form_clips_freeze_members_own
+  before update on public.form_clips
+  for each row execute function public.form_clips_freeze_members_own();
+
+comment on column public.form_clips.note is
+  'The member''s own question about the set. Theirs to edit and nobody else''s: enforced by the trigger form_clips_freeze_members_own, because the column-level grant in part 3350 is held by the role and so by the coach too.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A photo on a coach's own board had nowhere to go
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3390 left this open on purpose and said why: the folder question had not
+-- been decided. Deciding it — the first folder is the BOARD, which on a gym's
+-- board is the tenant and on a coach's board is the coach.
+--
+-- That keeps the one property the original policy was built around: the first
+-- folder names who the object belongs with and the second names who put it
+-- there, so an object's own key is enough to decide both questions without
+-- reading a single row.
+--
+-- A coach's client uploads under the coach's folder, which looks odd written
+-- down and is right: it is the coach's board, it is the coach who answers for
+-- what is on it, and `coach_board_can_read` is the same roster the posts use.
+-- ── A folder name is text, and a uuid cast on text that is not one RAISES ──
+--
+-- `nullif(folder, '')::uuid` inside a policy looked fine and is not: an object
+-- key whose first folder is not a uuid would abort the statement with 22P02
+-- instead of failing the check, and PostgreSQL promises no evaluation order
+-- that would stop it. A guarded helper is the whole of the fix — it returns
+-- false for anything that is not a uuid, which is what a policy wants.
+create or replace function public.coach_board_can_read_folder(f text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select case
+    when f ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then public.coach_board_can_read(f::uuid)
+    else false
+  end;
+$$;
+
+revoke execute on function public.coach_board_can_read_folder(text) from public, anon;
+grant  execute on function public.coach_board_can_read_folder(text) to authenticated;
+
+drop policy if exists communitymedia_obj_insert on storage.objects;
+create policy communitymedia_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'community-media'
+    and (storage.foldername(name))[2] = (select auth.uid())::text
+    and array_length(storage.foldername(name), 1) = 2
+    and (
+      -- A gym's board: the uploader's own tenant, exactly as before.
+      (storage.foldername(name))[1] = (select public.my_tenant())::text
+      -- Or a board belonging to a coach they are on the roster of — or their
+      -- own, since `coach_board_can_read` admits the coach first.
+      or public.coach_board_can_read_folder((storage.foldername(name))[1])
+    )
+  );
+
+-- The read side needs the same second clause, or an uploader cannot see the
+-- object they just put there until a post names it — which is the state the
+-- composer is in between the upload and the insert.
+drop policy if exists communitymedia_obj_read on storage.objects;
+create policy communitymedia_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'community-media'
+    and (
+      exists (select 1 from public.community_posts p where p.image_path = objects.name)
+      or ((storage.foldername(name))[2] = (select auth.uid())::text
+          and (
+            (storage.foldername(name))[1] = (select public.my_tenant())::text
+            or public.coach_board_can_read_folder((storage.foldername(name))[1])
+          ))
+    )
+  );
+
+-- And the delete, which had the same shape and so the same gap: on a coach's
+-- board nobody could take their own photo back down.
+drop policy if exists communitymedia_obj_delete on storage.objects;
+create policy communitymedia_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'community-media'
+    and (
+      -- Your own object, on either kind of board.
+      ((storage.foldername(name))[2] = (select auth.uid())::text
+       and (
+         (storage.foldername(name))[1] = (select public.my_tenant())::text
+         or public.coach_board_can_read_folder((storage.foldername(name))[1])
+       ))
+      -- Or you moderate the board it is on. A gym's staff, as before; and the
+      -- coach whose board it is, which is the clause that was missing.
+      or exists (select 1 from public.tenants t
+                  where t.id::text = (storage.foldername(name))[1] and public.community_moderates(t.id))
+      or (storage.foldername(name))[1] = (select auth.uid())::text
+    )
+  );

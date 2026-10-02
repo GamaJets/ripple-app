@@ -77,10 +77,26 @@ export function bookTally(events: readonly BookEvent[], now: number): CatchUp {
   return catchUp(events, now, BOOK_WINDOW_DAYS);
 }
 
-/** How many different people are in the week. The figure a coach actually
- *  reads first: "nine of your twelve did something". */
-export function activePeople(events: readonly BookEvent[]): number {
-  return new Set(events.map((e) => e.clientId)).size;
+/**
+ * How many different people are in the week. The figure a coach actually reads
+ * first: "nine of your twelve did something".
+ *
+ * Takes `now` and windows the events ITSELF rather than trusting the caller to
+ * hand it the right list. It used to be called with the output of `bookFeed`,
+ * which is capped at 60 rows, while the tally beside it in the same sentence
+ * was counted over everything — so a busy book read "190 workouts … from 11 of
+ * your 30", two figures measured on different sets. A function that can only
+ * be called correctly is a function that will eventually be called wrongly.
+ */
+export function activePeople(events: readonly BookEvent[], now: number): number {
+  const from = now - BOOK_WINDOW_DAYS * 86_400_000;
+  const ids = new Set<string>();
+  for (const e of events) {
+    const t = Date.parse(e.at);
+    if (!Number.isFinite(t) || t < from || t > now) continue;
+    ids.add(e.clientId);
+  }
+  return ids.size;
 }
 
 /**

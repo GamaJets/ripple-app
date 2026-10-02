@@ -27,15 +27,44 @@ import { MIN_TARGET, hitSlopFor } from '../lib/a11y';
 import { sp, radius, type as ty, font } from '../theme/scale';
 
 /* eslint-disable @typescript-eslint/no-var-requires, global-require */
-function player(uri: string): { play: () => void; pause: () => void; release: () => void } | null {
+/**
+ * The player, wrapped so the BUBBLE is told when the sound ends.
+ *
+ * Nothing used to tell it. `playing` was set on the tap and cleared only by a
+ * second tap, so a forty-second note left the button reading "Playing… Tap to
+ * Stop" for the rest of the conversation, and the tap that followed paused a
+ * player already sitting at its end — two taps to hear it again, with the first
+ * doing nothing audible. `onEnd` is the fix, and `play` rewinds first for the
+ * same reason: a player left at the end plays silence.
+ */
+function player(uri: string, onEnd: () => void): {
+  play: () => void; pause: () => void; release: () => void;
+} | null {
   try {
     const m = require('expo-audio');
     if (!m?.createAudioPlayer) return null;
     const p = m.createAudioPlayer({ uri });
+    // Guarded: this is an optional part of the module's surface, and a build
+    // without it should lose the auto-reset rather than the playback.
+    let sub: { remove?: () => void } | null = null;
+    try {
+      sub = p.addListener?.('playbackStatusUpdate', (st: { didJustFinish?: boolean }) => {
+        if (st?.didJustFinish) onEnd();
+      }) ?? null;
+    } catch { /* no listener, so the button is cleared by the next tap as before */ }
     return {
-      play: () => { try { p.play(); } catch (e) { reportError('voiceBubble.play', e); } },
+      play: () => {
+        // Rewind, then play. `seekTo` is a promise on expo-audio and the
+        // rejection is of no interest: the worst case is the note replaying
+        // from wherever it was paused, which is what a pause means anyway.
+        try { void p.seekTo?.(0)?.catch?.(() => {}); } catch { /* as above */ }
+        try { p.play(); } catch (e) { reportError('voiceBubble.play', e); }
+      },
       pause: () => { try { p.pause(); } catch { /* a pause that fails is a sound that keeps going, not a crash */ } },
-      release: () => { try { p.remove?.(); } catch { /* nothing to do about it */ } },
+      release: () => {
+        try { sub?.remove?.(); } catch { /* nothing to do about it */ }
+        try { p.remove?.(); } catch { /* nothing to do about it */ }
+      },
     };
   } catch {
     return null;
@@ -55,8 +84,12 @@ export function VoiceNoteBubble({ url, label }: { url: string; label: string }) 
   const p = useRef<ReturnType<typeof player>>(null);
 
   useEffect(() => {
-    p.current = player(url);
-    return () => { p.current?.release(); p.current = null; };
+    let live = true;
+    // Through the `live` flag: the listener outlives nothing, but a status
+    // update that arrives while the screen is unmounting would otherwise set
+    // state on a gone component.
+    p.current = player(url, () => { if (live) setPlaying(false); });
+    return () => { live = false; p.current?.release(); p.current = null; };
   }, [url]);
 
   const toggle = () => {
@@ -131,6 +164,52 @@ export function FileBubble({ url, name }: { url: string; name: string | null }) 
         <Text numberOfLines={1} style={{ ...ty.label, ...font('600'), color: t.ink, flexShrink: 1 }}>{shown}</Text>
       </Pressable>
       {said ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs, maxWidth: 260 }}>{said}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * The bar that says the microphone is open, and the only way to close it.
+ *
+ * Recording starts from inside an action sheet, and once the sheet closed there
+ * was NOTHING on screen to say it had started: no counter, no indicator, and no
+ * stop — to end a take somebody had to find the attach menu again and tap an
+ * item still labelled "Record a Voice Note", which reads as starting another
+ * one. `useVoiceNote` returned `recording` and `seconds` all along and neither
+ * composer drew them.
+ *
+ * A microphone that is open with nothing on screen saying so is the defect
+ * src/ui/voiceNote.ts calls "a microphone left open in a gym". The cap stops it
+ * at three minutes either way; this is what makes the first three minutes
+ * visible.
+ */
+export function RecordingBar({ seconds, onStop, max }: {
+  seconds: number; onStop: () => void; max: number;
+}) {
+  const t = useTheme();
+  const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+
+  return (
+    <View
+      accessible
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={`Recording. ${seconds} ${seconds === 1 ? 'second' : 'seconds'} so far. It stops itself at ${Math.round(max / 60)} minutes.`}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: sp.md,
+        padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface,
+        borderWidth: 1, borderColor: t.warn,
+      }}
+    >
+      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.warn }} />
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink, flex: 1 }}>
+        {`Recording · ${mmss(seconds)}`}
+      </Text>
+      <Pressable onPress={onStop} accessibilityRole="button"
+        accessibilityLabel="Stop recording and keep what you have said"
+        hitSlop={hitSlopFor(MIN_TARGET)}
+        style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.md }}>
+        <Text style={{ ...ty.label, ...font('700'), color: t.ink }}>Stop</Text>
+      </Pressable>
     </View>
   );
 }

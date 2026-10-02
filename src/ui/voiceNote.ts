@@ -68,7 +68,7 @@ function audioModule(): {
  * a recording under a second is a mis-tap, and sending one is a notification
  * for silence.
  */
-export function useVoiceNote(): {
+export function useVoiceNote(onAutoStop?: (note: RecordedNote) => void): {
   /** False when this build has no audio module. The button is not drawn. */
   available: boolean;
   recording: boolean;
@@ -83,6 +83,11 @@ export function useVoiceNote(): {
   const [seconds, setSeconds] = useState(0);
   const startedAt = useRef(0);
   const stopRef = useRef<(() => Promise<RecordedNote | null>) | null>(null);
+  /** Through a ref so the timer below always calls the CURRENT handler: the
+   *  interval is armed once per recording and a screen that re-renders while
+   *  it runs would otherwise be handed its first render's closure. */
+  const onAutoStopRef = useRef(onAutoStop);
+  onAutoStopRef.current = onAutoStop;
 
   const stop = useCallback(async (): Promise<RecordedNote | null> => {
     if (!recorder || !recording) return null;
@@ -109,7 +114,15 @@ export function useVoiceNote(): {
     const id = setInterval(() => {
       const took = Math.round((Date.now() - startedAt.current) / 1000);
       setSeconds(took);
-      if (took >= MESSAGE_AUDIO_MAX_SECONDS) void stopRef.current?.();
+      if (took >= MESSAGE_AUDIO_MAX_SECONDS) {
+        // The take is HANDED BACK, not discarded. `stop()` resolves with the
+        // recording and this used to throw that away with `void`, so a coach
+        // who talked for the full three minutes watched the recorder stop and
+        // nothing arrive — the one outcome this module's header promises will
+        // not happen ("a take that is discarded for being too long is a take
+        // somebody has to do again").
+        void stopRef.current?.().then((note) => { if (note) onAutoStopRef.current?.(note); });
+      }
     }, 500);
     return () => clearInterval(id);
   }, [recording]);

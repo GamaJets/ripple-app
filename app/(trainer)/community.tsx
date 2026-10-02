@@ -30,9 +30,18 @@ export default function CoachCommunity() {
      and nothing. A coach with both is: an independent coach running a
      twelve-week block and a coach employed by a gym are the same person here,
      and the cohort is theirs either way. */
+  /* Computed per render rather than seeded into useState: on the first render
+     the tenant provider is still 'loading' and `tenant` is null, so a seeded
+     default is always the no-gym one. See the same note on the member's copy
+     of this screen. */
   const hasGym = !!tenant?.id;
-  const [board, setBoard] = useState<Board>(hasGym ? 'gym' : 'mine');
-  const onMine = !hasGym || board === 'mine';
+  const [picked, setPicked] = useState<Board | null>(null);
+  const board: Board = picked ?? (hasGym ? 'gym' : 'mine');
+  const setBoard = setPicked;
+  const onMine = board === 'mine';
+  /* What the tabs actually show. `tab` is the coach's last choice and may name
+     a tab this board does not have. */
+  const shownTab = onMine && tab === 'resource' ? 'post' : tab;
   const [key, setKey] = useState(0);
   const pull = usePullToRefresh(useCallback(() => setKey((k) => k + 1), []));
   return (
@@ -43,18 +52,40 @@ export default function CoachCommunity() {
           <Segmented style={{ marginTop: sp.lg }} value={board} onChange={setBoard}
             options={[{ key: 'gym', label: 'Your Gym' }, { key: 'mine', label: 'Your Clients' }] as const} />
         ) : null}
-        <Segmented style={{ marginTop: sp.lg }} value={tab} onChange={setTab}
-          options={[{ key: 'post', label: 'Discussion' }, { key: 'resource', label: 'Resources' }, { key: 'event', label: 'Events' }] as const} />
+        {/* No Resources tab on a coach's own board, and the tab is clamped
+            rather than merely hidden so switching boards while it is open does
+            not leave it selected.
+
+            It had nowhere to go. A resource there is forced onto the members
+            channel (there is only one), the member's own screen asks for
+            `kind: 'post'` and nothing else, and the coach is the only person
+            the board has who could read a coaches channel. So a resource
+            posted there was written, stored, and seen by one person — the one
+            who wrote it — under a note on this screen saying resources are for
+            the gym's coaches, which on this board is not true either.
+
+            The argument is the one the comment below already makes about the
+            channel switch: a staff-only room for an audience of one is a notes
+            app. A coach who wants their cohort to have a document sends it on
+            the thread, where it is a file somebody is told about. */}
+        {onMine ? null : (
+          <Segmented style={{ marginTop: sp.lg }} value={shownTab} onChange={setTab}
+            options={[{ key: 'post', label: 'Discussion' }, { key: 'resource', label: 'Resources' }, { key: 'event', label: 'Events' }] as const} />
+        )}
+        {onMine ? (
+          <Segmented style={{ marginTop: sp.lg }} value={shownTab} onChange={setTab}
+            options={[{ key: 'post', label: 'Discussion' }, { key: 'event', label: 'Events' }] as const} />
+        ) : null}
         {/* A coach's own board has one channel: there is one coach on it, and
             a staff-only room for an audience of one is a notes app (part
             3370 says the same thing as a check constraint). */}
-        {tab !== 'resource' && !onMine ? (
+        {shownTab !== 'resource' && !onMine ? (
           <Segmented style={{ marginTop: sp.sm }} value={channel} onChange={setChannel}
             options={[{ key: 'members', label: 'Members' }, { key: 'coaches', label: 'Coaches' }] as const} />
         ) : null}
         {/* Resources are for the gym's coaches only (part 3330). */}
-        <CommunityFeed key={`${board}-${tab}-${channel}-${key}`} kind={tab}
-          channel={onMine ? 'members' : tab === 'resource' ? 'coaches' : channel}
+        <CommunityFeed key={`${board}-${shownTab}-${channel}-${key}`} kind={shownTab}
+          channel={onMine ? 'members' : shownTab === 'resource' ? 'coaches' : channel}
           coachId={onMine ? myId : null} canPost moderator />
         <CommunityReports key={`r-${key}`} />
       </ScrollView>

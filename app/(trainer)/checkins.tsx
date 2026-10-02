@@ -216,7 +216,13 @@ export default function CoachCheckIns() {
         {isOpen ? (
           <View style={{ paddingBottom: sp.lg }}>
             <CheckInReview checkIn={e.checkIn} who={who} weightUnit={wu}
-              questions={myQuestions.questions} answers={answers === undefined ? {} : answers}
+              questions={myQuestions.questions}
+              // Null while the read is in flight, not {}. The component draws
+              // those differently on purpose — {} is "they answered none of
+              // them" and prints "Not answered" against every question, which
+              // for the length of a round trip is a false claim about what
+              // somebody wrote. Null says the answers are not here yet.
+              answers={answers === undefined ? null : answers}
               onReply={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: e.clientId } } as any)} />
           </View>
         ) : null}

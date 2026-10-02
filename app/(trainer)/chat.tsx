@@ -46,7 +46,7 @@ import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModul
 import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
-import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { attachmentNoun, MESSAGE_AUDIO_MAX_SECONDS } from '../../src/lib/messageAttachments';
 import { fmtRelativeDay } from '../../src/lib/format';
 import { atBottom } from '../../src/lib/readReceipt';
 import { useReadReceipt } from '../../src/ui/readReceipts';
@@ -56,7 +56,7 @@ import {
   UNFILLED_TOKEN_NOTE,
 } from '../../src/lib/messageTemplates';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { VoiceNoteBubble, FileBubble, RecordingBar } from '../../src/ui/AttachmentBubbles';
 import { useVoiceNote } from '../../src/ui/voiceNote';
 import {
   searchThread, threadSearchA11y, threadSearchActive, threadSearchLine,
@@ -300,7 +300,12 @@ export default function CoachChat() {
      recorder stops itself at three minutes — see src/ui/voiceNote.ts — and a
      take under a second is discarded rather than sent, because a notification
      for silence is worse than no message. */
-  const voice = useVoiceNote();
+  // The callback is what catches a recording the three-minute cap stopped:
+  // without it the take is made and thrown away, which is worse than
+  // refusing to start one.
+  const voice = useVoiceNote((took) => {
+    setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
+  });
   const onRecord = async () => {
     if (voice.recording) {
       const took = await voice.stop();
@@ -659,6 +664,14 @@ export default function CoachChat() {
         {/* ── composer ───────────────────────────────────────────────────── */}
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
+        {/* The microphone, while it is open. Nothing said so before this: the
+            take started from inside an action sheet and the sheet closed. */}
+        {voice.recording ? (
+          <View style={{ marginHorizontal: G, marginTop: sp.md }}>
+            <RecordingBar seconds={voice.seconds} max={MESSAGE_AUDIO_MAX_SECONDS}
+              onStop={() => { void onRecord(); }} />
+          </View>
+        ) : null}
         {pending ? (
           // Drawn as the board's attachment card (page 9's "Week 4 Plan.pdf"):
           // a bordered card with the file at its start and its name beside it.
@@ -670,7 +683,10 @@ export default function CoachChat() {
                   <Icon name="video" size={18} color={t.ink3} />
                 </View>}
             <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
-              {pending.kind === 'image' ? 'Photo ready to send' : 'Video ready to send'}
+              {/* `attachmentNoun` names all four. This line used to be a
+                  two-way ternary, so a voice note and a PDF both sat in the
+                  composer announcing themselves as a video. */}
+              {`${attachmentNoun(pending.kind).replace(/^./, (c) => c.toUpperCase())} ready to send`}
             </Text>
             <Pressable onPress={() => setPending(null)} accessibilityRole="button"
               accessibilityLabel={`Remove the ${attachmentNoun(pending.kind)}`} hitSlop={8}>

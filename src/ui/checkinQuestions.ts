@@ -58,7 +58,13 @@ export function useCheckinQuestions(coachId: string | null): {
 
   useEffect(() => {
     let live = true;
-    if (!USE_SUPABASE || !coachId) { setQuestions([]); setStatus(coachId ? 'ready' : 'ready'); return () => { live = false; }; }
+    // 'ready' in both cases, and the ternary that used to stand here said the
+    // same word twice. It is correct: a member with no coach is asked no extra
+    // questions, which is a whole answer rather than a missing one. What was
+    // wrong was downstream — the form drew the questions off the LIST and
+    // never looked at this status, so a failed read was indistinguishable from
+    // this line. See the error branch on app/(client)/checkin.tsx.
+    if (!USE_SUPABASE || !coachId) { setQuestions([]); setStatus('ready'); return () => { live = false; }; }
     (async () => {
       setStatus('loading');
       const { data, error } = await supabase.from('coach_checkin_questions').select(Q_COLS)

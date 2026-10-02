@@ -49,7 +49,7 @@ import { useCheckinQuestions, saveAnswers, fetchAnswers } from '../../src/ui/che
 import { liveQuestions, answerLine, type Answer } from '../../src/lib/checkinQuestions';
 import { useAuth } from '../../src/ui/auth';
 import type { Theme } from '../../src/theme/tokens';
-import { Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, MiniRing, fig, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, MiniRing, Notice, Ghost, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
@@ -381,7 +381,14 @@ export default function CheckIn() {
     if (out === 'unsent') {
       Alert.alert(
         'Saved on This Phone',
-        'No connection, so your coach has not seen this yet. Nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.'
+        'No connection, so your coach has not seen this yet. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.'
+        // The answers to a coach's own questions are the one part that cannot
+        // wait in the queue: they are written against the check-in's SERVER
+        // id, and an unsent check-in has none. Saying "nothing is lost" over
+        // them would be the alert making a promise the queue cannot keep, and
+        // somebody would close the app believing their waist measurement had
+        // been kept.
+        + (liveMine.length ? ' What you answered to your coach’s own questions is not saved with it, so fill those in again when you send it from somewhere with signal.' : '')
         + (weightStored ? '' : ' Your profile weight, which your targets are worked out from, is not in that queue. Record it on Body once you have signal.'),
         [{ text: 'Done', onPress: () => router.back() }],
       );
@@ -411,7 +418,7 @@ export default function CheckIn() {
     Alert.alert(
       'Check-in Sent',
       (!answersLanded
-        ? `Your coach can see this week's check-in${weightStored ? ' and your weight has been updated' : ''}. The answers to ${coachName ? `${coachName}'s` : 'their'} own questions did not save, so those are the one thing they cannot see. Send it again once you have signal to add them.`
+        ? `Your coach can see this week's check-in${weightStored ? ' and your weight has been updated' : ''}. The answers to ${coachName ? `${coachName}'s` : 'their'} own questions did not save, so those are the one thing they cannot see. Tell them in a message rather than sending the check-in again, which would file a second one for this week.`
         : weightStored
         ? 'Your coach can see this week\'s check-in and your weight has been updated.'
         : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight, the one your targets and your goal are worked out from, could not be updated just now, so record it again on Body when you have signal.'),
@@ -501,6 +508,25 @@ export default function CheckIn() {
               read them by name. A question left alone is a SKIP and writes no
               row — "they skipped it" and "they answered nought" are different
               facts, and the first is the common one. */}
+          {/* A failed read is SAID, not drawn as "they ask nothing". The list
+              comes back empty under 'error' as well as when a coach asks
+              nothing, and this block used to key on the list alone — so a
+              member whose connection dropped on this one query sent a check-in
+              with their coach's questions quietly absent, and the coach read
+              it as answered-nothing. There is nothing to retry towards here
+              except the screen itself, so it offers that. */}
+          {mine.status === 'error' ? (
+            <View style={{ marginBottom: sp.xl }}>
+              <Notice tone={t.warn} kicker="Check-in"
+                title="Your coach’s own questions could not be read"
+                note="The six above are safe to send. Anything else your coach asks is missing from this form, so if they ask their own questions, send this when you have signal instead." />
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={mine.reload}
+                  a11yLabel="Try reading your coach’s own questions again" />
+              </View>
+            </View>
+          ) : null}
+
           {liveMine.length ? (
             <View style={{ marginBottom: sp.xl }}>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
