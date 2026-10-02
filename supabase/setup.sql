@@ -73953,3 +73953,379 @@ on conflict (id) do update
 -- and neither of those depends on what the file IS. A voice note is on a
 -- thread exactly as a photo is, it stops being readable at the same moment,
 -- and it is deleted by the same sweep.
+
+-- ▶ a-coachs-own-group-is-not-a-gyms.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach's clients are a group. Until now only a GYM could have a board.
+--
+-- ── What part 3300 built, and who it leaves out ──────────────────────────
+--
+-- `community_posts.tenant_id` is `not null references tenants(id)`, the stamp
+-- trigger fills it from the author's own profile, and every policy on the
+-- table routes through `community_can_read(tenant_id, channel)`. That is the
+-- right shape for a gym: the board is the building, and everybody in it is a
+-- member of the same tenant.
+--
+-- An independent online coach is in no building. They have a roster, a dozen
+-- people doing the same twelve-week block, and the only group-shaped thing in
+-- this app is app/(trainer)/broadcast.tsx, which writes N separate private
+-- messages. Nobody can reply to each other. The thing that keeps an online
+-- cohort alive — somebody posting that they finally hit the lift, and four
+-- people answering — had nowhere to happen.
+--
+-- ── The shape ────────────────────────────────────────────────────────────
+--
+-- One more column, and exactly one of the two is set. A post belongs to a GYM
+-- or to a COACH and never to both, which is a check constraint rather than a
+-- convention — the alternative is a row that two different boards both think
+-- they own, and two sets of moderation rules disagreeing about who may hide
+-- it.
+--
+-- The policies are not rewritten so much as widened: every one of them already
+-- asked a function, so the functions are what change. `community_can_read` and
+-- `community_moderates` keep the gym's answer exactly as it was, and two new
+-- ones answer for a coach's board. A policy now asks whichever pair the row's
+-- own scope names.
+--
+-- ── Who is in a coach's board ────────────────────────────────────────────
+--
+-- The coach, and the people they currently coach. Both halves are read through
+-- the links that already exist — `clients.trainer_id` — so the board's
+-- membership is the roster and cannot drift from it. A client whose coaching
+-- ends stops being able to read it at the same moment they stop being a
+-- client, which is the same rule `is_my_client` gives every other table.
+--
+-- There is no 'coaches' channel on a coach's board. That channel exists on a
+-- gym's board so staff can talk where members cannot see; a coach's board has
+-- exactly one coach on it, and a private channel for an audience of one is a
+-- notes app. The check constraint says so rather than leaving it to the app.
+--
+-- ── Moderation is the coach's, and it has to be somebody's ───────────────
+--
+-- Apple requires a moderation path on any feed, and part 3300 answers that
+-- with reports, blocks, hides and a moderator who can take a post down. On a
+-- gym's board that is the owner and the coaches. On a coach's board it is the
+-- coach: they are the only person who is not a member of the audience, and a
+-- board whose moderator is one of twelve clients is not moderated.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.community_posts
+  add column if not exists coach_id uuid references public.profiles(id) on delete cascade;
+
+-- A gym's board or a coach's, never both and never neither. Written as one
+-- constraint because "which board is this post on" is one question.
+alter table public.community_posts alter column tenant_id drop not null;
+alter table public.community_posts drop constraint if exists community_posts_scope_chk;
+alter table public.community_posts add constraint community_posts_scope_chk
+  check (
+    (tenant_id is not null and coach_id is null)
+    or (tenant_id is null and coach_id is not null and channel = 'members')
+  );
+
+comment on column public.community_posts.coach_id is
+  'The coach whose own board this post is on, when it is not a gym''s. Exactly one of tenant_id and coach_id is set — see community_posts_scope_chk. A coach''s board has no coaches channel: a private channel for an audience of one is a notes app.';
+
+create index if not exists community_posts_coach_feed_idx
+  on public.community_posts (coach_id, created_at desc, id desc)
+  where coach_id is not null;
+
+-- ── who may read a coach's board ─────────────────────────────────────────
+create or replace function public.coach_board_can_read(c uuid)
+returns boolean language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select c is not null and (
+    -- The coach themselves.
+    c = auth.uid()
+    -- Or somebody they currently coach. Read off `clients.trainer_id`, which
+    -- is the same live link every other coach-to-client policy uses, so the
+    -- board's membership IS the roster.
+    or exists (
+      select 1 from public.clients cl
+       where cl.id = auth.uid() and cl.trainer_id = c
+    )
+  );
+$$;
+
+-- ── who may take a post down on one ──────────────────────────────────────
+create or replace function public.coach_board_moderates(c uuid)
+returns boolean language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select c is not null and c = auth.uid();
+$$;
+
+revoke execute on function public.coach_board_can_read(uuid) from public, anon;
+revoke execute on function public.coach_board_moderates(uuid) from public, anon;
+grant  execute on function public.coach_board_can_read(uuid) to authenticated;
+grant  execute on function public.coach_board_moderates(uuid) to authenticated;
+
+-- ── the policies, widened rather than rewritten ──────────────────────────
+--
+-- Each one keeps the gym's clause untouched and adds the coach's beside it.
+-- The blocks and hides tests are unchanged and apply to both boards: somebody
+-- who blocked another member does not start seeing them again because the
+-- board has a different owner.
+
+drop policy if exists community_posts_read on public.community_posts;
+create policy community_posts_read on public.community_posts
+  for select to authenticated
+  using (
+    (
+      (tenant_id is not null and public.community_can_read(tenant_id, channel))
+      or (coach_id is not null and public.coach_board_can_read(coach_id))
+    )
+    and (
+      hidden_at is null
+      or (tenant_id is not null and public.community_moderates(tenant_id))
+      or (coach_id is not null and public.coach_board_moderates(coach_id))
+    )
+    and not exists (select 1 from public.community_blocks b
+                     where b.blocker_id = (select auth.uid()) and b.blocked_id = author_id)
+    and not exists (select 1 from public.community_hides h
+                     where h.user_id = (select auth.uid()) and h.post_id = community_posts.id)
+  );
+
+drop policy if exists community_posts_insert on public.community_posts;
+create policy community_posts_insert on public.community_posts
+  for insert to authenticated
+  with check (
+    author_id = (select auth.uid())
+    and (
+      (tenant_id is not null and public.community_can_read(tenant_id, channel))
+      or (coach_id is not null and public.coach_board_can_read(coach_id))
+    )
+    -- The rules are accepted once, by version, and apply to every board a
+    -- person can post on. Somebody who has agreed to how to behave has agreed
+    -- to it in both rooms.
+    and exists (select 1 from public.community_rules_acceptance a
+                 where a.user_id = (select auth.uid()) and a.version >= 1)
+  );
+
+drop policy if exists community_posts_moderate on public.community_posts;
+create policy community_posts_moderate on public.community_posts
+  for update to authenticated
+  using (
+    (tenant_id is not null and public.community_moderates(tenant_id))
+    or (coach_id is not null and public.coach_board_moderates(coach_id))
+  )
+  with check (
+    (tenant_id is not null and public.community_moderates(tenant_id))
+    or (coach_id is not null and public.coach_board_moderates(coach_id))
+  );
+
+-- ── the stamp trigger stops forcing a tenant ─────────────────────────────
+--
+-- It filled `tenant_id` from the author's own profile on every insert, which
+-- would overwrite a coach-scoped post with the author's gym — or with null for
+-- somebody who has no gym, failing the new constraint. It now fills the tenant
+-- ONLY for a post that did not name a coach's board, and leaves everything
+-- else exactly as it was: the author id, the stamped name and role, and the
+-- refusal to let an update move any of them.
+create or replace function public.community_posts_stamp()
+returns trigger language plpgsql security definer
+set search_path = public, pg_temp
+as $$
+declare me public.profiles%rowtype;
+begin
+  if tg_op = 'INSERT' then
+    select * into me from public.profiles where id = auth.uid();
+    new.author_id := auth.uid();
+    -- The one change on this branch. It used to be `new.tenant_id := me.tenant_id`
+    -- unconditionally, which would stamp a coach-scoped post with the author's
+    -- gym — or with null for somebody who has none, failing the new constraint.
+    if new.coach_id is null then
+      new.tenant_id := me.tenant_id;
+    else
+      new.tenant_id := null;
+    end if;
+    new.author_role := coalesce(me.role, 'client');
+    new.author_name := left(coalesce(nullif(btrim(split_part(btrim(me.full_name), ' ', 1)), ''),
+                         case when me.role = 'client' then 'Member' else 'Coach' end), 60);
+    new.body := btrim(new.body);
+    new.created_at := now();
+    new.hidden_at := null;
+    new.hidden_by := null;
+  else
+    -- Only hidden_at moves, and only a moderator's UPDATE policy reaches here.
+    -- `coach_id` joins the frozen list for the same reason `tenant_id` is on
+    -- it: an update that could move a post between boards is an update that
+    -- could move it out from under the moderation that applies to it.
+    new.id := old.id; new.tenant_id := old.tenant_id; new.coach_id := old.coach_id;
+    new.author_id := old.author_id;
+    new.author_name := old.author_name; new.author_role := old.author_role;
+    new.channel := old.channel; new.body := old.body; new.created_at := old.created_at;
+    if new.hidden_at is null then
+      new.hidden_by := null;
+    elsif old.hidden_at is null then
+      new.hidden_at := now(); new.hidden_by := auth.uid();
+    else
+      new.hidden_at := old.hidden_at; new.hidden_by := old.hidden_by;
+    end if;
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.community_posts_stamp() from public;
+revoke all on function public.community_posts_stamp() from anon;
+revoke all on function public.community_posts_stamp() from authenticated;
+
+-- ▶ a-coach-asks-their-own-questions.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The questions a coach actually wants to ask every week.
+--
+-- ── What the check-in is today ───────────────────────────────────────────
+--
+-- Six fields, fixed since part 02: a weight, four 1-5 self-ratings (energy,
+-- sleep, mood, adherence) and a free-text note. They are good defaults and
+-- they are the same six for a powerlifter, a post-natal client and somebody
+-- training for a marathon.
+--
+-- A coach whose clients are online runs their whole week on this form. The
+-- things they need to ask are specific — "how did the knee feel on squats",
+-- "waist measurement", "how many days did you hit your steps" — and the answer
+-- today is to ask in the note field and read it back as prose, which cannot be
+-- compared week to week because it is not a value.
+--
+-- ── The shape, and what is deliberately NOT done ─────────────────────────
+--
+-- The six stay. They are not replaced, not made optional, and not migrated
+-- into this table. Every one of them already has history behind it, four
+-- screens read them by name, and src/lib/coachCheckins.ts is built on their
+-- being there. A coach's own questions are ADDED to the form, under the six.
+--
+-- That is the whole design decision and it is worth being explicit about why:
+-- a configurable form that replaces the fixed one is a form whose history
+-- stops being comparable the first time somebody edits it, and a coach who
+-- deletes "mood" in week three has thrown away a column that two other screens
+-- draw. Additive keeps every existing claim true.
+--
+-- ── A question is never deleted, only retired ────────────────────────────
+--
+-- `retired_at` rather than a DELETE, because an answer outlives the asking. A
+-- client answered "how did the knee feel" eleven times; the twelfth week the
+-- coach stops asking, and those eleven answers still have to say what they
+-- were answers TO. Deleting the question would either cascade the answers away
+-- or leave them pointing at nothing, and both of those lose a client's own
+-- words about their own body.
+--
+-- ── Three kinds, and no more ─────────────────────────────────────────────
+--
+--   rating  1-5, the same scale the four fixed ones use, so a coach's
+--           question reads beside them without a second scale to learn.
+--   number  a figure with a unit the coach names — a waist in centimetres, a
+--           step count. Stored as numeric and never interpreted here.
+--   text    a sentence. Capped, like the note.
+--
+-- No multiple choice, no yes/no, no scale of ten. Each of those is a real
+-- feature with its own rendering and its own comparison rules, and shipping
+-- three kinds that work is better than six that half do.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.coach_checkin_questions (
+  id          uuid        primary key default gen_random_uuid(),
+  coach_id    uuid        not null default auth.uid() references public.profiles(id) on delete cascade,
+  prompt      text        not null check (char_length(btrim(prompt)) between 1 and 120),
+  kind        text        not null check (kind in ('rating', 'number', 'text')),
+  -- What the figure is in, for a 'number'. The coach's own word, drawn beside
+  -- the box and stored with the answer's question rather than with the answer:
+  -- changing "cm" to "inches" next week would otherwise silently restate every
+  -- answer already given.
+  unit        text        check (unit is null or char_length(btrim(unit)) between 1 and 12),
+  position    int         not null default 0,
+  created_at  timestamptz not null default now(),
+  -- Stopped being asked, and still the question eleven answers belong to.
+  retired_at  timestamptz
+);
+
+comment on table public.coach_checkin_questions is
+  'Questions a coach adds to their clients'' weekly check-in, under the six fixed fields rather than instead of them. Retired, never deleted: an answer outlives the asking, and a deleted question either takes its answers with it or leaves them pointing at nothing. See part 3380 and src/lib/checkinQuestions.ts.';
+
+create index if not exists coach_checkin_questions_live_idx
+  on public.coach_checkin_questions (coach_id, position, created_at)
+  where retired_at is null;
+
+alter table public.coach_checkin_questions enable row level security;
+
+-- The coach owns theirs outright.
+drop policy if exists coach_checkin_questions_own on public.coach_checkin_questions;
+create policy coach_checkin_questions_own on public.coach_checkin_questions
+  for all to authenticated
+  using (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()));
+
+-- Their clients read them, because they have to answer them. Live ones and
+-- retired ones both: a client reading back their own history needs the
+-- question a two-month-old answer was given to.
+drop policy if exists coach_checkin_questions_client_read on public.coach_checkin_questions;
+create policy coach_checkin_questions_client_read on public.coach_checkin_questions
+  for select to authenticated
+  using (exists (
+    select 1 from public.clients cl
+     where cl.id = (select auth.uid()) and cl.trainer_id = coach_checkin_questions.coach_id
+  ));
+
+revoke all on public.coach_checkin_questions from anon, authenticated, public;
+grant select, insert, update, delete on public.coach_checkin_questions to authenticated;
+grant all on public.coach_checkin_questions to service_role;
+
+-- ── the answers ──────────────────────────────────────────────────────────
+--
+-- One row per question per check-in. The three value columns are nullable and
+-- exactly one is used, by kind — a check constraint rather than a convention,
+-- because a row carrying both a rating and a sentence is a row two screens
+-- would read differently.
+create table if not exists public.check_in_answers (
+  id          uuid        primary key default gen_random_uuid(),
+  check_in_id uuid        not null references public.check_ins(id) on delete cascade,
+  question_id uuid        not null references public.coach_checkin_questions(id) on delete restrict,
+  rating      int         check (rating is null or rating between 1 and 5),
+  number      numeric(10,2),
+  answer_text text        check (answer_text is null or char_length(answer_text) <= 1000),
+  created_at  timestamptz not null default now(),
+  -- One answer per question per check-in. A second submission replaces rather
+  -- than stacking, through the app's own upsert.
+  unique (check_in_id, question_id),
+  -- Exactly one value, and a row with none is a question somebody skipped and
+  -- is not written at all.
+  constraint check_in_answers_one_value_chk check (
+    (rating is not null)::int + (number is not null)::int + (answer_text is not null)::int = 1
+  )
+);
+
+comment on table public.check_in_answers is
+  'What a client answered to one of their coach''s own check-in questions. Exactly one value column is set, by the question''s kind. `on delete restrict` on the question is deliberate: a question with answers cannot be deleted, only retired.';
+
+create index if not exists check_in_answers_checkin_idx on public.check_in_answers (check_in_id);
+
+alter table public.check_in_answers enable row level security;
+
+-- The client owns the answers on their own check-in.
+drop policy if exists check_in_answers_own on public.check_in_answers;
+create policy check_in_answers_own on public.check_in_answers
+  for all to authenticated
+  using (exists (
+    select 1 from public.check_ins ci
+     where ci.id = check_in_answers.check_in_id and ci.user_id = (select auth.uid())
+  ))
+  with check (exists (
+    select 1 from public.check_ins ci
+     where ci.id = check_in_answers.check_in_id and ci.user_id = (select auth.uid())
+  ));
+
+-- Their coach reads them, on exactly the same predicate that admits them to
+-- the check-in itself. An answer is as visible as the form it is part of and
+-- stops being visible at the same moment.
+drop policy if exists check_in_answers_coach_read on public.check_in_answers;
+create policy check_in_answers_coach_read on public.check_in_answers
+  for select to authenticated
+  using (exists (
+    select 1 from public.check_ins ci
+     where ci.id = check_in_answers.check_in_id and public.is_my_client(ci.user_id)
+  ));
+
+revoke all on public.check_in_answers from anon, authenticated, public;
+grant select, insert, update, delete on public.check_in_answers to authenticated;
+grant all on public.check_in_answers to service_role;

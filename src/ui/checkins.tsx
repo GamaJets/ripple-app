@@ -97,6 +97,10 @@ interface CheckInsValue {
    *           offered, and the caller has to say it was not saved.
    */
   sendCheckIn: (c: Omit<CheckIn, 'id' | 'at'>) => Promise<WriteOutcome>;
+  /** The server id of the most recent STORED check-in, for a caller with rows
+   *  to hang off it. Null after anything but a 'stored', so it can never be
+   *  used to attach answers to a check-in the server does not have. */
+  lastStoredId: () => string | null;
   /** How many check-ins are on this phone and nowhere else. */
   unsent: number;
 }
@@ -133,6 +137,11 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
   // cache write: React double-invokes updaters in development and both would
   // fire twice.
   const listRef = useRef<CheckIn[]>([]);
+  /** The server id of the check-in this provider stored most recently, or null
+   *  when the last send did not reach the server. Read once, immediately after
+   *  a 'stored', by the screen that then writes the answers to a coach's own
+   *  questions against it. */
+  const storedId = useRef<string | null>(null);
   const uidRef = useRef<string | null>(null);
   // False once a read has come back truncated. Writing a short history over the
   // good cached one would turn a temporary gap into this device's idea of how
@@ -166,6 +175,11 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.from('check_ins').insert(ciToRow(owner, c)).select('id');
       const out = classifyWrite(error as any, data ? data.length : 0);
       if (out !== 'stored') return out;
+      // Kept for the one caller that has something to hang off it: the answers
+      // to a coach's own questions (part 3380) are written AFTER the check-in
+      // and reference its id, so that a failure there costs the extra
+      // questions and never the check-in itself.
+      storedId.current = String(data![0].id);
       setCheckins(adoptServerId(listRef.current, c.id, String(data![0].id)), owner);
       return 'stored';
     } catch { return 'unsent'; }
@@ -268,6 +282,7 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
 
   const sendCheckIn: CheckInsValue['sendCheckIn'] = async (c) => {
     const entry: CheckIn = { ...c, id: localId(), at: new Date().toISOString() };
+    storedId.current = null;
     // Optimistic, and cached immediately — a check-in typed in a changing room
     // has to survive the app being killed before signal comes back.
     setCheckins(mergeLog<CheckIn>(null, [entry, ...listRef.current]).entries, uidRef.current);
@@ -309,7 +324,9 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
   impl.current = { addCheckIn, sendCheckIn };
   const addCheckInStable = useCallback((...a: Parameters<typeof addCheckIn>) => impl.current.addCheckIn(...a), []);
   const sendCheckInStable = useCallback((...a: Parameters<typeof sendCheckIn>) => impl.current.sendCheckIn(...a), []);
-  const value = useMemo<CheckInsValue>(() => ({ checkins, latest: checkins[0] ?? null, latestSent, status, addCheckIn: addCheckInStable, sendCheckIn: sendCheckInStable, unsent, reload }), [checkins, checkins[0] ?? null, latestSent, status, addCheckInStable, sendCheckInStable, unsent, reload]);
+  // A ref read, so it is stable and cannot put a stale id in a memo.
+  const lastStoredId = useCallback(() => storedId.current, []);
+  const value = useMemo<CheckInsValue>(() => ({ checkins, latest: checkins[0] ?? null, latestSent, status, addCheckIn: addCheckInStable, sendCheckIn: sendCheckInStable, lastStoredId, unsent, reload }), [checkins, checkins[0] ?? null, latestSent, status, addCheckInStable, sendCheckInStable, lastStoredId, unsent, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

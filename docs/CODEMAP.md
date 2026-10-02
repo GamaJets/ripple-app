@@ -13,7 +13,7 @@ is paid again on every turn of the session that opened it.
 | 5,498 | 85k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
-| 5,138 | 82k | `app/(trainer)/dashboard.tsx` |
+| 5,141 | 82k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
 | 3,328 | 50k | `app/(trainer)/client.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,324 lines, ~1727k tokens if every one were read whole.
+Total: 47 files, 119,327 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -795,7 +795,7 @@ Total: 47 files, 119,324 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(trainer)/dashboard.tsx`
 
-5,138 lines · ~82k tokens · 88 anchors
+5,141 lines · ~82k tokens · 88 anchors
 
 ```
 163-168       fn       sheet
@@ -811,81 +811,81 @@ Total: 47 files, 119,324 lines, ~1727k tokens if every one were read whole.
 337-383       fn       Flag
 384-406       fn       Fold
 407-511       fn         toggle
-512-588       type     Shortcut
-589-647       fn       UnmarkedSessions
-648-684       fn       MoneyOwed
-685-748       default  TrainerClients
-749-782       §        who is drifting
-783-783       fn         driftFor
-784-820       fn         driftActionable
-821-848       fn         openInviteEmails
-849-860       §        finding one person
-861-870       §        who the bulk controls act on
-871-875       fn         togglePick
-876-890       fn         stopPicking
-891-909       fn         acceptJoin
-910-930       fn         cancelInvite
-931-951       §        bringing a whole book across
-952-956       fn         resetImport
-957-997       fn         chooseRosterFile
-998-1000      fn         runImport
-1001-1030     fn           invited
-1031-1081     fn         copyJoinLink
-1082-1107     fn         loadCodes
-1108-1166     fn         openInvite
-1167-1175     fn           c
-1176-1198     fn         saveSpend
-1199-1313     fn         namedCodes
-1314-1367     §        progress photos this client SENT
-1368-1452     §        the coach's own sessions, read once for the two figures that need them ─
-1453-1465     fn         nextBooked
-1466-1490     fn         nextBookedLine
-1491-1505     §        Nothing prompted the coach to clear this
-1506-1549     §        the other three things about a coach's own book
-1550-1563     fn         lowCredits
-1564-1570     fn         invoiceAgeing
-1571-1571     fn         owed
-1572-1612     fn         bookState
-1613-1629     §        and the test is over the rows that CAN carry a count
-1630-1644     fn         threaded
-1645-1659     fn         lowAdherence
-1660-1677     fn         driftNote
-1678-1681     fn         segN
-1682-1703     fn         noProgram
-1704-1757     §        who is waiting on a reply
-1758-1800     fn         matchSeg
-1801-1809     fn         pickedRoster
-1810-1811     fn           pairs
-1812-1830     fn           assessed
-1831-1837     fn         deliverMessage
-1838-1861     fn         sendNudge
-1862-1882     §        plan ending, money owed, no program
-1883-1937     fn         attnFor
-1938-1938     fn         attnReason
-1939-1954     fn         needsAttention
-1955-1959     fn         adherenceValues
-1960-1971     §        the client's name used to go to a model, and now does not
-1972-2025     fn         draftNudge
-2026-2101     fn         sendDraft
-2102-2103     fn         nameOf
-2104-2116     fn         openBulkMessage
-2117-2143     fn         deliverBulk
-2144-2153     fn         bulkAssign
-2154-2202     fn           go
-2203-2211     fn         bulkEnd
-2212-2255     fn           go
-2256-2291     fn         exportRoster
-2292-2306     §        and the same for the weekly summary
-2307-2395     fn         genSummary
-2396-2447     fn         reloadEverything
-2448-2468     fn         nextUp
-2469-2474     fn         openProfile
-2475-3388     fn         openAdd
-3389-3413     §        what used to be here, and why it is gone
-3414-4787     §        and each of the three now goes somewhere
-4788-5048     fn               problem
-5049-5089     fn               on
-5090-5138     fn       CoachSetupRow
+512-591       type     Shortcut
+592-650       fn       UnmarkedSessions
+651-687       fn       MoneyOwed
+688-751       default  TrainerClients
+752-785       §        who is drifting
+786-786       fn         driftFor
+787-823       fn         driftActionable
+824-851       fn         openInviteEmails
+852-863       §        finding one person
+864-873       §        who the bulk controls act on
+874-878       fn         togglePick
+879-893       fn         stopPicking
+894-912       fn         acceptJoin
+913-933       fn         cancelInvite
+934-954       §        bringing a whole book across
+955-959       fn         resetImport
+960-1000      fn         chooseRosterFile
+1001-1003     fn         runImport
+1004-1033     fn           invited
+1034-1084     fn         copyJoinLink
+1085-1110     fn         loadCodes
+1111-1169     fn         openInvite
+1170-1178     fn           c
+1179-1201     fn         saveSpend
+1202-1316     fn         namedCodes
+1317-1370     §        progress photos this client SENT
+1371-1455     §        the coach's own sessions, read once for the two figures that need them ─
+1456-1468     fn         nextBooked
+1469-1493     fn         nextBookedLine
+1494-1508     §        Nothing prompted the coach to clear this
+1509-1552     §        the other three things about a coach's own book
+1553-1566     fn         lowCredits
+1567-1573     fn         invoiceAgeing
+1574-1574     fn         owed
+1575-1615     fn         bookState
+1616-1632     §        and the test is over the rows that CAN carry a count
+1633-1647     fn         threaded
+1648-1662     fn         lowAdherence
+1663-1680     fn         driftNote
+1681-1684     fn         segN
+1685-1706     fn         noProgram
+1707-1760     §        who is waiting on a reply
+1761-1803     fn         matchSeg
+1804-1812     fn         pickedRoster
+1813-1814     fn           pairs
+1815-1833     fn           assessed
+1834-1840     fn         deliverMessage
+1841-1864     fn         sendNudge
+1865-1885     §        plan ending, money owed, no program
+1886-1940     fn         attnFor
+1941-1941     fn         attnReason
+1942-1957     fn         needsAttention
+1958-1962     fn         adherenceValues
+1963-1974     §        the client's name used to go to a model, and now does not
+1975-2028     fn         draftNudge
+2029-2104     fn         sendDraft
+2105-2106     fn         nameOf
+2107-2119     fn         openBulkMessage
+2120-2146     fn         deliverBulk
+2147-2156     fn         bulkAssign
+2157-2205     fn           go
+2206-2214     fn         bulkEnd
+2215-2258     fn           go
+2259-2294     fn         exportRoster
+2295-2309     §        and the same for the weekly summary
+2310-2398     fn         genSummary
+2399-2450     fn         reloadEverything
+2451-2471     fn         nextUp
+2472-2477     fn         openProfile
+2478-3391     fn         openAdd
+3392-3416     §        what used to be here, and why it is gone
+3417-4790     §        and each of the three now goes somewhere
+4791-5051     fn               problem
+5052-5092     fn               on
+5093-5141     fn       CoachSetupRow
 ```
 
 ## `studio-web/app/accounting/page.tsx`

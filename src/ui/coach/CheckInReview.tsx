@@ -21,6 +21,7 @@ import { useTheme } from '../components';
 import { Cta, Meter, type Tone } from '../kit';
 import { sp, radius, type as ty, value } from '../../theme/scale';
 import { RATING_MAX, ratingLabel, type CoachCheckIn } from '../../lib/coachCheckins';
+import { answerLine, type Answer, type Question } from '../../lib/checkinQuestions';
 import { weightLabel, type WeightUnit } from '../../lib/units';
 
 const STEPS = Array.from({ length: RATING_MAX }, (_, i) => i + 1);
@@ -80,7 +81,7 @@ function Track({ label, v, tone }: { label: string; v: number | null; tone: Tone
   );
 }
 
-export function CheckInReview({ checkIn, who, weightUnit, onReply }: {
+export function CheckInReview({ checkIn, who, weightUnit, onReply, questions = [], answers = null }: {
   checkIn: CoachCheckIn;
   /** A first name the caller has already established. */
   who: string;
@@ -88,9 +89,21 @@ export function CheckInReview({ checkIn, who, weightUnit, onReply }: {
   /** The coach's answer — opens the thread. Absent when there is no client id
    *  to open one for. */
   onReply?: () => void;
+  /** The coach's own questions (part 3380), live and retired: a two-month-old
+   *  answer still needs the question it was given to, so a retired one is
+   *  drawn here whenever there is an answer against it. */
+  questions?: readonly Question[];
+  /** Answers by question id, or null when that read failed. Null and {} are
+   *  kept apart on purpose: {} is "they answered none of them", null is "we do
+   *  not know", and only one of those may be drawn as silence. */
+  answers?: Record<string, Answer> | null;
 }) {
   const t = useTheme();
   const weight = weightLabel(checkIn.weightKg, weightUnit);
+  /* Live questions, plus any retired one this check-in actually answered —
+     the second half is why `questions` carries both. A question stopped two
+     months ago still has to label the answer it got. */
+  const asked = questions.filter((q) => !q.retiredAt || (answers && answers[q.id]));
   return (
     <View>
       <Faces label="Mood" v={checkIn.mood} />
@@ -116,6 +129,33 @@ export function CheckInReview({ checkIn, who, weightUnit, onReply }: {
           ? <Text style={{ ...ty.body, color: t.ink }}>{checkIn.note}</Text>
           : <Text style={{ ...ty.caption, color: t.ink3 }}>They sent the form without writing anything with it.</Text>}
       </View>
+
+      {/* ── what this coach asked, and what came back ─────────────────────
+          Drawn under the six and only when there is something to draw: a
+          coach who asks no questions of their own sees no heading, and a
+          question nobody answered says so rather than showing a blank, which
+          reads as a value of nothing. */}
+      {asked.length ? (
+        <View style={{ marginTop: sp.lg }}>
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your Own Questions</Text>
+          {answers === null ? (
+            <Text style={{ ...ty.caption, color: t.ink2 }}>
+              The answers to your own questions could not be read. That is this screen, not their check-in.
+            </Text>
+          ) : asked.map((q) => {
+            const line = answerLine(q, answers[q.id] ?? null);
+            return (
+              <View key={q.id} accessible accessibilityLabel={`${q.prompt}: ${line ?? 'not answered'}`}
+                style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginTop: sp.sm }}>
+                <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{q.prompt}</Text>
+                <Text style={{ ...ty.body, color: line ? t.ink : t.ink3, flexShrink: 0 }}>
+                  {line ?? 'Not answered'}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
 
       {onReply ? (
         <View style={{ marginTop: sp.lg }}>

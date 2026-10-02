@@ -44,22 +44,18 @@
 // pattern would have put them on. It is not a forecast of behaviour, it is
 // arithmetic on their last visit, and the field is named for the arithmetic.
 import { localDayKey, activeDayLog, type ActivityEvent } from './clientDrift';
-import { localDate } from './localDate';
+import { calendarDaysBetween } from './localDate';
 
 const DAY = 86_400_000;
 
-/** Whole days from one local calendar day to another, floored at zero.
- *
- *  Both ends are built as local midnights, so a daylight-saving change costs
- *  exactly the days it is and not the hour it moved. Null day keys resolve to
- *  zero rather than to a wrong number: an unreadable date is not a lateness. */
-function calendarDaysLate(fromDay: string, toDay: string): number | null {
-  const from = localDate(fromDay);
-  const to = localDate(toDay);
-  if (!from || !to) return null;
-  const days = Math.round((to.getTime() - from.getTime()) / DAY);
-  return days > 0 ? days : null;
+/** Whole calendar days late, or null when the figure would not be a lateness.
+ *  The counting itself is `calendarDaysBetween` in src/lib/localDate.ts, which
+ *  carries the argument for why milliseconds are the wrong unit here. */
+function daysLateFrom(expectedMs: number, nowMs: number): number | null {
+  const days = calendarDaysBetween(expectedMs, nowMs);
+  return days != null && days > 0 ? days : null;
 }
+
 
 /**
  * Fewer active days than this and there are not enough intervals to call
@@ -258,7 +254,7 @@ export function assessCadence(
     // every coach in that zone was told a client was a day less overdue than
     // they were. `localDate` builds both ends as local midnights, which is the
     // same reasoning `daysApart` in src/lib/photoTimeline.ts is written on.
-    overdueDays: late > 0 ? calendarDaysLate(expectedDay, todayKey) : null,
+    overdueDays: late > 0 ? daysLateFrom(expectedMs, todayMs) : null,
     activeDays: days.length,
     spanDays,
     noPattern: null,

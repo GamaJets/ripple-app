@@ -525,6 +525,12 @@ export function openSlotWindow(
   const open = future.length;
   const lastMs = open > 0 ? future[future.length - 1] : null;
   const lastAt = lastMs === null ? null : new Date(lastMs).toISOString();
+  // Milliseconds, deliberately, and this is the counter-example to the
+  // calendar-day sweep in src/lib/localDate.ts. This figure is a DURATION —
+  // how much longer the book stays open — and its own test states the rule:
+  // "a day and twenty hours is one whole day, not two". A reader flying to
+  // another timezone does not get more availability, which is the test for
+  // which kind of number this is.
   const daysLeft = lastMs === null ? null : Math.floor((lastMs - now) / 86_400_000);
   // `=== false` and not `!hasWeekly`. Null is "we have not read it", and the
   // two sentences below — one of which tells a coach their book is dead —

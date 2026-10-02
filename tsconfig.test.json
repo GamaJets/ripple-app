@@ -884,6 +884,8 @@
     "src/lib/musclePicker.ts",
     "src/lib/musclePicker.test.ts",
     "src/lib/clientFoodDays.test.ts",
+    "src/lib/bookFeed.test.ts",
+    "src/lib/checkinQuestions.test.ts",
     "src/lib/creditsLow.ts",
     "src/lib/creditsLow.test.ts",
     "src/lib/weeklyVolume.ts",

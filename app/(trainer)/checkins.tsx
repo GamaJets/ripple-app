@@ -46,6 +46,10 @@ import { Ghost, Notice, PageHead, PartialRead, Rule, Section, SectionHead } from
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { CheckInReview } from '../../src/ui/coach/CheckInReview';
 import { useRoster } from '../../src/ui/roster';
+import { useAuth } from '../../src/ui/auth';
+import { useCheckinQuestions, fetchAnswers } from '../../src/ui/checkinQuestions';
+import type { Answer } from '../../src/lib/checkinQuestions';
+import { CheckinQuestionEditor } from '../../src/ui/coach/CheckinQuestionEditor';
 import { useSettings } from '../../src/ui/settings';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -82,6 +86,8 @@ export default function CoachCheckIns() {
   const goBack = useBackFromHub('(trainer)');
   const { roster, status: rosterStatus } = useRoster();
   const wu = useSettings().weightUnit;
+  const { user } = useAuth();
+  const myQuestions = useCheckinQuestions(user?.id ?? null);
   /** The client a notification named, or none. The queue opens on them and
    *  says so, with the way back to everybody beside it — the same shape
    *  client-photos.tsx uses for the same parameter. */
@@ -93,6 +99,20 @@ export default function CoachCheckIns() {
   const [rows, setRows] = useState<CheckInRow[] | null>(null);
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [open, setOpen] = useState<string | null>(null);
+  /** Answers for the open check-in only. Read when a row is expanded rather
+   *  than for the whole queue: a coach opening one of forty should not pay for
+   *  forty reads, and the answers mean nothing until a row is open. Undefined
+   *  is "not asked yet", null is "the read failed", and `CheckInReview` draws
+   *  those two differently. */
+  const [answers, setAnswers] = useState<Record<string, Answer> | null | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    if (!open) { setAnswers(undefined); return () => { live = false; }; }
+    setAnswers(undefined);
+    void fetchAnswers(open).then((a) => { if (live) setAnswers(a); });
+    return () => { live = false; };
+  }, [open]);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
   const pull = usePullToRefresh(reload);
@@ -196,6 +216,7 @@ export default function CoachCheckIns() {
         {isOpen ? (
           <View style={{ paddingBottom: sp.lg }}>
             <CheckInReview checkIn={e.checkIn} who={who} weightUnit={wu}
+              questions={myQuestions.questions} answers={answers === undefined ? {} : answers}
               onReply={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: e.clientId } } as any)} />
           </View>
         ) : null}
@@ -241,6 +262,13 @@ export default function CoachCheckIns() {
                 </View>
               </Section>
             ) : null}
+
+            {/* The coach's own questions, written where they read the
+                answers to the last ones — which is the moment somebody
+                realises they are asking the wrong thing. Part 3380. */}
+            <Rule />
+            <CheckinQuestionEditor questions={myQuestions.questions} status={myQuestions.status}
+              onChanged={myQuestions.reload} />
 
             <Rule />
             <Section>

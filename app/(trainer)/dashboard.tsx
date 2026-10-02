@@ -533,6 +533,9 @@ const REACH_SHORTCUTS: Shortcut[] = [
  *  and it opens this same screen on the person who sent it. */
 const SENT_SHORTCUTS: Shortcut[] = [
   ['heart', 'Check-Ins', '/(trainer)/checkins'],
+  // What everybody did, between the one-client screen and the drift bands
+  // below — neither of which answers "what happened this week".
+  ['trending', 'This Week', '/(trainer)/book-week'],
 ];
 
 /** Reading the book as a whole. Leaderboard and Referrals are read for the same

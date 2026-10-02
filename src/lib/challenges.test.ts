@@ -148,8 +148,27 @@ eq(windowLine(row({ endsAt: NOW + DAY }), NOW), 'Last day', 'exactly one day lef
 eq(windowLine(row({ startsAt: NOW + 3 * DAY, endsAt: NOW + 30 * DAY }), NOW), 'Starts in 3 days', 'before it starts');
 eq(windowLine(row({ startsAt: NOW + DAY / 2, endsAt: NOW + 30 * DAY }), NOW), 'Starts tomorrow', 'starting within a day');
 eq(windowLine(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - 2 * DAY }), NOW), 'Finished 2 days ago', 'after it ends');
-eq(windowLine(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - DAY }), NOW), 'Finished yesterday', 'yesterday is named');
-eq(windowLine(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - DAY / 4 }), NOW), 'Finished today', 'today is named');
+// ── "today" and "yesterday" are CALENDAR words ─────────────────────────────
+//
+// These two are built as LOCAL instants rather than as offsets from NOW, and
+// that is the point of them. The old pair said "Finished today" for anything
+// inside 24 hours, which is wrong every time those hours cross midnight — and
+// a challenge that ends at 23:59 and is read the next morning is the ordinary
+// case, not an edge one. Counting local calendar days is what fixes it, and
+// `NOW` is noon UTC, so an offset-built assertion would land on a different
+// local day in each zone the suite runs in.
+{
+  const atLocal = (y: number, m: number, d: number, h: number) => new Date(y, m, d, h, 0).getTime();
+  const morning = atLocal(2026, 7, 31, 9);
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 7, 31, 6) }), morning),
+    'Finished today', 'ended earlier the same day');
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 7, 30, 18) }), morning),
+    'Finished yesterday', 'yesterday is named');
+  // The case the millisecond version got wrong every single time: nine hours
+  // earlier, and a different day.
+  eq(windowLine(row({ startsAt: morning - 30 * DAY, endsAt: atLocal(2026, 7, 30, 23) }), morning),
+    'Finished yesterday', 'a challenge that ended last night finished yesterday, not today');
+}
 ok(!/-/.test(windowLine(row({ endsAt: NOW - 5 * DAY, startsAt: NOW - 30 * DAY }), NOW)),
   'a finished challenge never prints a negative day count');
 // House rule: four figures carry a separator. A challenge can be a year long.

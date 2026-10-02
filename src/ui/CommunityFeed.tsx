@@ -297,11 +297,18 @@ const PLACEHOLDER: Record<PostKind, string> = {
   post: '', resource: 'What is it? e.g. Mobility Guide', event: 'Event title',
 };
 
-export function CommunityFeed({ channel, canPost, moderator, kind = 'post' }: { channel: Channel; canPost: boolean; moderator: boolean; kind?: PostKind }) {
+export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coachId = null }: {
+  channel: Channel; canPost: boolean; moderator: boolean; kind?: PostKind;
+  /** A coach's own board rather than a gym's — part 3370. The component is
+   *  otherwise identical: the same posting rules, the same reports, the same
+   *  blocks and hides, because a cohort needs moderating exactly as much as a
+   *  gym does and Apple requires it of both. */
+  coachId?: string | null;
+}) {
   const t = useTheme();
   const { user } = useAuth();
   const me = user?.id ?? null;
-  const feed = useCommunityFeed(channel, kind);
+  const feed = useCommunityFeed(channel, kind, coachId);
   const [target, setTarget] = useState<Target | null>(null);
   const [thread, setThread] = useState<Post | null>(null);
   const [likeErr, setLikeErr] = useState<string | null>(null);
