@@ -1,0 +1,153 @@
+# ── What EAS Build uploads ─────────────────────────────────────────────────
+#
+# Every build round uploads this tree six times — three variants, two platforms
+# — and on 2 Oct 2026 EAS reported the archive at 235 MB and said so in its own
+# output. Ten of that round's seventeen minutes were spent sending the same
+# files again.
+#
+# ── This file REPLACES .gitignore, which is the trap ──────────────────────
+#
+# When .easignore exists, EAS stops consulting .gitignore entirely. So the
+# first half of this file is a VERBATIM COPY of .gitignore, and it has to stay
+# one: every rule there was written for a reason and several record an incident.
+# The load-bearing one is `src/**/*.js`. A stray `tsc` run drops a .js beside
+# every .ts it reads, Metro resolves .js before .ts, and a stale one wins
+# silently — so dropping that single line from this file would ship code
+# nobody edited. `/ios/` and `/android/` matter nearly as much: they are
+# Continuous Native Generation output, EAS runs prebuild itself, and uploading
+# a local copy invites it to build a stale Xcode project instead.
+#
+# If you change .gitignore, change the copy below to match.
+#
+# ── Then the second half: what a NATIVE BUILD does not read ───────────────
+#
+# Each directory there was checked rather than assumed — nothing under app/,
+# src/, modules/ or app.config.ts imports from any of them. `data/` is the one
+# worth naming: its catalogues are build-time INPUT to scripts/build-*.mjs,
+# which generate modules into src/, and the app imports the generated code and
+# never the JSON. The files are mentioned in comments, which is what makes a
+# grep for them look alarming.
+#
+# `scripts/` is deliberately NOT excluded, though nothing on EAS runs it today.
+# It is 1.7 MB, and the day somebody adds an `eas-build-pre-install` hook the
+# failure would be a missing file on a remote builder rather than anything
+# visible here. Cheap insurance against a confusing afternoon.
+
+# ═══ VERBATIM COPY OF .gitignore — keep in step ═══════════════════════════
+node_modules/
+.expo/
+.tmp/
+.tmp-solo/
+dist/
+.env
+*.log
+# ── Anchored, and that matters ────────────────────────────────────────────
+#
+# These were `ios/` and `android/`, unanchored, which in gitignore matches a
+# directory of that name AT ANY DEPTH. The intent is only the two Continuous
+# Native Generation output directories at the repo root, which prebuild
+# regenerates and which must never be committed.
+#
+# What the unanchored form also swallowed: `modules/workout-activity/ios/` —
+# the entire native half of a local Expo module. Its config and its TypeScript
+# were tracked, so the module looked present; the Swift module, the podspec and
+# the Attributes symlink were invisible to git and were therefore never
+# uploaded to EAS. Build 47 shipped the Live Activity's widget extension with
+# nothing in the app able to start it: the app binary linked WidgetKit and not
+# ActivityKit, and carried no symbol from the module. Found by unpacking the
+# IPA, because every local build had the files on disk and worked.
+#
+# A leading slash anchors to the repository root. Anything called `ios` deeper
+# in the tree is a source directory somebody wrote, not a build product.
+/ios/
+/android/
+
+# transient edit scripts (device fs cannot rm)
+.scratch*
+.DS_Store
+_to_delete/
+
+dist-verify/
+.fuse_hidden*
+.claude/settings.local.json
+
+# Google Play service-account key. Grants Admin on the Play developer account,
+# so it never belongs in the repo — eas.json only points at it by path.
+/play-service-account.json
+.preflight-export/
+
+# Signing material. Nothing here today — EAS holds the certificates on its own
+# servers and none of this exists locally. These patterns are pre-emptive: the
+# moment somebody picks a "download" option in `eas credentials`, a .p8 or .p12
+# lands in this directory, and a private key committed once is a private key to
+# be rotated.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.keystore
+*.jks
+credentials.json
+# The Google Play submission key, if one is ever added for Android auto-submit.
+play-service-account*.json
+
+# Staged output of scripts/import-repdb.mjs. Generated, and deliberately not
+# committed: the manifest enumerates every file of a 1.8 GB licensed image
+# catalogue, and the RepDB licence forbids making that catalogue available in
+# bulk. A file listing is not the assets, but it is the shape of them, and it
+# has no reason to be in a repository either way.
+.repdb-staging/
+
+# Compiled output must never sit beside its source. A `tsc` run without
+# --outDir drops a .js next to every .ts it reads, and on 4 Sep 2026 one of
+# those was committed: src/lib/offlineQueue.js, a build artifact shadowing the
+# module it was built from. Metro resolves .js before .ts, so a stale one wins
+# silently and the app runs code nobody edited.
+src/**/*.js
+app/**/*.js
+src/**/*.js.map
+app/**/*.js.map
+
+$S/
+
+# ═══ Not read by a native build ══════════════════════════════════════════
+#
+# Sizes are the tracked, uncompressed figures on 2 Oct 2026.
+#
+# NO TRAILING COMMENTS BELOW. gitignore syntax has none: the first draft of
+# this file wrote `design/   # 15 MB of mockups` and the pattern became that
+# whole string, matching nothing. It dropped six files out of 2,568 and looked
+# exactly like a file that worked. Every comment is on its own line.
+
+# 15 MB of HTML canvases and mockups.
+design/
+
+# 12 MB — SQL parts, setup.sql and the edge functions. All of it is deployed by
+# its own tooling and none of it is bundled.
+supabase/
+
+# 3.9 MB of catalogue JSON: build-time input, see the header.
+data/
+
+# The Next.js operator console. Its own package, its own deploy.
+studio-web/
+
+# The static marketing site, deployed from Cloudflare Pages.
+web/
+
+# Planning documents and CODEMAP.md.
+docs/
+
+# Workflows run on GitHub, not on a builder.
+.github/
+
+# Repository prose. Tiny, but it is documentation for people and there is no
+# reason for it to make the trip.
+AUDIT-BRIEFING.md
+REDESIGN-HANDOFF.md
+CLAUDE.md
+AGENTS.md
+
+# Test-only TypeScript projects. The suite does not run on a builder.
+tsconfig.test.json
+tsconfig.solo.json
