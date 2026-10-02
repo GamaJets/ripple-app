@@ -37,7 +37,7 @@
 //    their goal progress and their coach's view are all computed from. The
 //    field now says which unit it wants, the bound is expressed in that unit,
 //    and the number is converted on the way to storage.
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -45,8 +45,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { useLoggingCoach } from '../../src/ui/coachLogQueries';
-import { useCheckinQuestions, saveAnswers } from '../../src/ui/checkinQuestions';
-import { liveQuestions } from '../../src/lib/checkinQuestions';
+import { useCheckinQuestions, saveAnswers, fetchAnswers } from '../../src/ui/checkinQuestions';
+import { liveQuestions, answerLine, type Answer } from '../../src/lib/checkinQuestions';
 import { useAuth } from '../../src/ui/auth';
 import type { Theme } from '../../src/theme/tokens';
 import { Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, MiniRing, fig, type Tone } from '../../src/ui/kit';
@@ -314,6 +314,18 @@ export default function CheckIn() {
   const mine = useCheckinQuestions(myCoach?.id ?? null);
   const liveMine = useMemo(() => liveQuestions(mine.questions), [mine.questions]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  /** What they answered last time, for reading back. Keyed by question id.
+   *  Null while unread or on a failed read: this block is drawn only when
+   *  there is something to draw, so a failure shows nothing rather than
+   *  claiming they answered nothing. */
+  const [lastAnswers, setLastAnswers] = useState<Record<string, Answer> | null>(null);
+  const latestStoredCheckInId = ci.latestSent?.id ?? null;
+  useEffect(() => {
+    let live = true;
+    if (!latestStoredCheckInId || !liveMine.length) { setLastAnswers(null); return () => { live = false; }; }
+    void fetchAnswers(latestStoredCheckInId).then((a) => { if (live) setLastAnswers(a); });
+    return () => { live = false; };
+  }, [latestStoredCheckInId, liveMine.length]);
 
   // What the line under the title says. See the note on the PageHead below.
   const waitingNote = unsentNote(ci.unsent, 'check-in', 'check-ins');
@@ -571,6 +583,31 @@ export default function CheckIn() {
                 })}
               </View>
               {ci.latest.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg, fontStyle: 'italic' }}>“{ci.latest.note}”</Text> : null}
+              {/* What they answered to their coach's own questions (part
+                  3380). Somebody who answers a question every week is entitled
+                  to read back what they said — and without this the answers
+                  went one way only, which is the shape of a form rather than
+                  of a record. Only drawn for answers that are actually there:
+                  an unanswered question is left out rather than shown as a
+                  blank, because a blank beside a question reads as an answer
+                  of nothing. */}
+              {lastAnswers && liveMine.length ? (() => {
+                const said = liveMine
+                  .map((q) => ({ q, line: answerLine(q, lastAnswers[q.id] ?? null) }))
+                  .filter((x) => x.line);
+                if (!said.length) return null;
+                return (
+                  <View style={{ marginTop: sp.lg }}>
+                    {said.map(({ q, line }) => (
+                      <View key={q.id} accessible accessibilityLabel={`${q.prompt}: ${line}`}
+                        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginTop: sp.sm }}>
+                        <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{q.prompt}</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, flexShrink: 0 }}>{line}</Text>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })() : null}
             </Section>
           </View>
         ) : null}
