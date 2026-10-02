@@ -32,7 +32,7 @@ const KIND_LABEL: Record<QuestionKind, string> = {
  *  centimetres" are the same choice described at two different distances. */
 const KIND_NOTE: Record<QuestionKind, string> = {
   rating: 'They answer 1 to 5, the same scale as the four questions everybody answers.',
-  number: 'They type a figure. Name what it is in — cm, kg, days — and it is shown beside every answer.',
+  number: 'They type a figure. Name what it is in (cm, kg, days) and it is shown beside every answer.',
   text: 'They write a sentence. Useful to ask, harder to compare week to week.',
 };
 
