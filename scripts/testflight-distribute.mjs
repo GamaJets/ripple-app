@@ -150,15 +150,32 @@ let added = 0;
 console.log(`testflight:distribute — runtime ${RUNTIME}${DRY ? '  (dry run, nothing will be written)' : ''}`);
 
 for (const bundle of bundles) {
-  const apps = await get(`/apps?filter[bundleId]=${encodeURIComponent(bundle)}&fields[apps]=name`);
+  // `fields[apps]=name,bundleId` — the id is requested BECAUSE it has to be
+  // compared. Asking only for the name is what made the bug below invisible.
+  const apps = await get(`/apps?filter[bundleId]=${encodeURIComponent(bundle)}&fields[apps]=name,bundleId`);
   if (!apps.ok) {
     console.error(`  ${bundle}: could not be looked up (HTTP ${apps.status}). ${apps.detail}`);
     failures += 1;
     continue;
   }
-  const app = apps.body.data?.[0];
+  /* EXACT, not data[0].
+     `filter[bundleId]` IS A PREFIX MATCH, so `com.washateria.repple` returns
+     all three of our apps and `data[0]` is whichever Apple returns first —
+     Repple Studio. On 2 Oct 2026 this ran for real and the output said it all:
+     "Repple Studio: no external group" printed TWICE and Repple Client never
+     appeared at all. The coach app got its build because its id is the only
+     exact prefix of itself; the MEMBER app, whose external group was sixteen
+     builds behind, was silently never touched.
+     The same mistake was found in scripts/check-testflight.mjs the same hour.
+     Two scripts, one API footgun, and in both the symptom was a name on screen
+     that nobody reads as an identity. */
+  const matches = apps.body.data ?? [];
+  const app = matches.find((a) => a.attributes?.bundleId === bundle);
   if (!app) {
-    console.error(`  ${bundle}: no app in this account has that bundle id.`);
+    console.error(`  ${bundle}: no app in this account has that bundle id exactly.`);
+    if (matches.length) {
+      console.error(`    The prefix match returned ${matches.length}: ${matches.map((a) => a.attributes?.bundleId).join(', ')}.`);
+    }
     failures += 1;
     continue;
   }
