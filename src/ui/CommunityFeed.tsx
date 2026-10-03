@@ -7,7 +7,7 @@
 // comment, Report on every post and comment, Block on every author, Hide From
 // My Feed on every post, and moderators' Hide For Everyone.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, Modal, ScrollView, Alert, Image, Linking } from 'react-native';
+import { View, Text, TextInput, Pressable, Modal, ScrollView, Alert, Image, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { useTheme } from './components';
 import { useAuth } from './auth';
 import { Card, Cta, Ghost, Flag, TonedChip, Rule, Section, SectionHead } from './kit';
@@ -37,10 +37,39 @@ function useField() {
 }
 
 /** A bottom sheet. */
+/**
+ * The bottom sheet every community control opens in.
+ *
+ * ── The keyboard, and why this is a KeyboardAvoidingView ──────────────────
+ *
+ * FOUND BY USING IT, 3 Oct 2026, on an iPhone 17 Pro simulator. This sheet is
+ * pinned to the bottom of a full-screen Modal, so when the keyboard opens it
+ * sits exactly where the keyboard is — and the sheet is not partly covered, it
+ * is ENTIRELY behind it. Typing a comment put the text somewhere invisible,
+ * "Reply" could not be reached, and the only escape was tapping the backdrop,
+ * which closes the sheet and throws the comment away.
+ *
+ * So a comment could not be posted at all, on either app, since the comment
+ * sheet is this component. The report sheet and the rules sheet are the same
+ * component and the same story the moment either grows a text field.
+ *
+ * `src/ui/keyboardLift.ts` and the eight sheets that use it already existed.
+ * This one was written as a bare `Modal` and never got any of it — the same
+ * shape as every other defect found this week: the mechanism was built, and
+ * one caller was wired to nothing.
+ *
+ * `behavior="padding"` on iOS pads the FLEX CONTAINER, which pushes the sheet
+ * up by the keyboard's height; the note in src/ui/EndReasonSheet.tsx about
+ * padding doing nothing applies to a ScrollView that already fills its parent,
+ * which is not the case here — the backdrop above is what absorbs the change.
+ * Android resizes the window itself, so it takes no behavior at all; passing
+ * one there moves the sheet twice.
+ */
 function Sheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
   const t = useTheme();
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '85%', ...elevation.e2 }}>
         <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
@@ -50,6 +79,7 @@ function Sheet({ open, onClose, children }: { open: boolean; onClose: () => void
           </Pressable>
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -326,7 +356,15 @@ export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coac
     <View>
       {canPost ? (
         <Composer max={POST_MAX} kind={kind} coachId={coachId} label={kind === 'event' ? 'Add Event' : kind === 'resource' ? 'Share' : 'Post'} onSend={feed.publish}
-          placeholder={PLACEHOLDER[kind] || (channel === 'coaches' ? 'Share with the other coaches' : 'Share something with your gym')} />
+          /* A coach's own board is not their gym, and said so on screen: this
+             read "Share something with your gym" above a feed only that coach's
+             clients can see, on a board an INDEPENDENT coach may have without
+             belonging to a gym at all. `coachId` is what already distinguishes
+             the two everywhere else on this component. */
+          placeholder={PLACEHOLDER[kind]
+            || (coachId ? 'Share something with your clients'
+              : channel === 'coaches' ? 'Share with the other coaches'
+              : 'Share something with your gym')} />
       ) : null}
 
       {stateLine ? (

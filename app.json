@@ -17,7 +17,7 @@
         "NSCalendarsFullAccessUsageDescription": "Repple reads your calendar so it can offer to block the times you are already busy, rather than asking you to type them in twice. It reads the times only, never who you are meeting or what about, nothing is sent to your clients, and nothing is written back to your calendar.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
         "NSMicrophoneUsageDescription": "Repple uses the microphone in two places, both of which you start yourself: recording a coaching clip with the camera, so the video has your voice on it, and recording a voice note to send in a message. Nothing is recorded at any other time, and Repple never listens in the background.",
-        "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
+        "NSPhotoLibraryUsageDescription": "Repple lets you choose photos from your library: an InBody scan to read, a progress photo to keep, and a picture to put on your gym's or your coach's community board. Repple never looks at anything you do not choose.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written.",
         "NSSupportsLiveActivities": true
