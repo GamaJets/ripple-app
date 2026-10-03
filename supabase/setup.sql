@@ -74938,3 +74938,86 @@ exception when others then
 end $function$;
 
 revoke execute on function public.community_reports_notify_moderators() from public, anon, authenticated;
+
+-- ▶ a-coachs-events-had-no-index-because-the-query-was-new.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- One index, and the four that were considered and are not here.
+--
+-- Part 3370 gave a coach's board `community_posts_coach_feed_idx` —
+-- `(coach_id, created_at desc, id desc) where coach_id is not null` — which
+-- serves the board feed exactly: one coach's rows, already in the order the
+-- feed reads them.
+--
+-- It does not serve the EVENTS query, and until 2 Oct 2026 that did not matter,
+-- because nothing asked it. `UpcomingEvents` read with no coach id and was
+-- drawn only on the gym branch, so a coach's own event reached no screen; the
+-- commit that fixed that is the reason this index is now worth having. A query
+-- written after the indexes is a query with none.
+--
+--   explain, before:
+--     Limit
+--       -> Sort                     Sort Key: event_at, id
+--            -> Index Scan using community_posts_coach_feed_idx
+--                 Index Cond: (coach_id = ...)
+--                 Filter: (channel = 'members' AND kind = 'event' AND event_at > now())
+--
+-- The sort is the cost: that index is ordered by `created_at`, the screen reads
+-- by `event_at`, so every one of a coach's posts is fetched, filtered down to
+-- the events, and then sorted — on a screen that wants the next five.
+--
+-- This mirrors `community_posts_events_idx`, which does the same job for a
+-- gym's board and cannot do it here: it leads with `tenant_id`, and a
+-- coach-scoped post has none.
+--
+-- `id` is in the key where the gym's equivalent stops at `event_at`, because
+-- the query orders by both and a trailing `id` makes the ordering complete
+-- rather than nearly so.
+--
+-- Written WITHOUT `concurrently` deliberately: all three community tables hold
+-- zero rows today, so this takes no lock worth having an opinion about, and
+-- `create index concurrently` cannot run inside the transaction a migration is
+-- applied in. The day one of these tables is large, that trade reverses.
+create index if not exists community_posts_coach_events_idx
+  on public.community_posts (coach_id, event_at, id)
+  where kind = 'event' and coach_id is not null;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- What was considered and deliberately not added
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Written down because the honest answer to "add the coach indexes" was "one
+-- of them", and the next person to look at this will otherwise see four
+-- obvious gaps and fill them.
+--
+-- · A coach mirror of `community_posts_kind_idx`
+--   `(tenant_id, channel, kind, created_at desc)`. The feed query does filter
+--   `kind`, so a `(coach_id, kind, created_at desc, id desc)` index would be a
+--   fractionally better match than the existing coach feed index. It would
+--   also duplicate it almost entirely. `coach_id` is already the selective
+--   column — one coach's cohort, not a gym's whole membership — and the sort
+--   order is already right, so what the extra index buys is skipping past the
+--   events while walking a list that is tens of rows long. That is not a cost
+--   anybody will measure.
+--
+-- · `channel` in either key. `community_posts_scope_chk` requires
+--   `channel = 'members'` for every coach-scoped post, so on this board the
+--   column is a constant and carries no selectivity at all. The gym's indexes
+--   lead with it because a gym has two channels.
+--
+-- · A coach mirror of `community_reports_open_idx`
+--   `(tenant_id, created_at desc) where resolved_at is null`. There is nothing
+--   to index on: `community_reports` has no `coach_id`, and the policy added
+--   in part 3410 reaches the coach through
+--   `coach_board_moderates(community_report_coach(post_id, comment_id))` — a
+--   function call, which no B-tree can serve. Denormalising a coach id onto
+--   the table to make it indexable would add a second source of truth for
+--   which board a report is on, and part 3390 is an entire part about what
+--   happens when a stamped copy and the real answer drift apart.
+--
+-- · A coach mirror of `community_comments_tenant_idx` `(tenant_id)`. Comments
+--   are read by their post — `community_comments_post_idx` is
+--   `(post_id, created_at, id)` and serves that exactly, on both kinds of
+--   board, because a post id is a post id. The tenant index is for a different
+--   question nobody is asking here.
