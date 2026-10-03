@@ -110,6 +110,28 @@ app/**/*.js.map
 
 $S/
 
+# ═══ The one rule .gitignore can never give us ═══════════════════════════
+#
+# `.git` is 428 MB on this machine and nothing above excludes it, because
+# .gitignore has no reason to: git does not ignore its own directory, it simply
+# never walks it. So the verbatim copy inherits a blind spot that only exists
+# once the file is used by something that is NOT git.
+#
+# Kept because it is correct, NOT because it was the problem — it was not, and
+# the measurement says so. Two builds on 3 Oct 2026, the second with this very
+# line added, both reported an archive of exactly 77.1 MB. Excluding 428 MB
+# would not leave a figure unchanged to one decimal place, so `.git` was never
+# in the archive to begin with.
+#
+# What IS established: .easignore took the archive from 235 MB to 77.1 MB, and
+# the payload these rules leave behind is 1,951 files, 32.3 MB raw and 10.7 MB
+# as a tar.gz. Something on the order of 45 MB of what EAS uploads is still not
+# this repository's source, and there is no candidate for it here. Written down
+# as an open question rather than a solved one, because the version of this
+# comment that named `.git` as "the most likely remainder" was wrong within the
+# hour.
+.git/
+
 # ═══ Not read by a native build ══════════════════════════════════════════
 #
 # Sizes are the tracked, uncompressed figures on 2 Oct 2026.

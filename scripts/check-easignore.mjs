@@ -59,6 +59,22 @@ for (const [i, l] of readFileSync('.easignore', 'utf8').split('\n').entries()) {
   }
 }
 
+/* `.git` is the one exclusion .gitignore can never supply: git does not ignore
+   its own directory, it never walks it. A file copied from .gitignore and then
+   handed to something that is not git inherits that blind spot, and the
+   directory is 428 MB. */
+{
+  let ignored = false;
+  try {
+    execFileSync('git', ['-c', 'core.excludesFile=.easignore', 'check-ignore', '--no-index', '--quiet', '.git/config'],
+      { stdio: 'ignore' });
+    ignored = true;
+  } catch { /* non-zero means not ignored */ }
+  if (!ignored) {
+    fail.push('.easignore does not exclude `.git/`. .gitignore never needs that rule, so a verbatim copy will not have it — and the directory is hundreds of megabytes that no builder reads.');
+  }
+}
+
 /**
  * What a native build cannot be built without.
  *
