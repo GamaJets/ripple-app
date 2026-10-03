@@ -425,4 +425,9 @@ if (!allOk) {
   console.error(`check:testflight — one or more of ${BUNDLES.length} apps cannot receive runtime ${rt.version}. See above.`);
   process.exit(1);
 }
-console.log(`check:testflight — all ${BUNDLES.length} apps have a group that can receive runtime ${rt.version}.`);
+// Only when there is something to summarise. scripts/publish.sh calls this
+// once per bundle with the id as an argument, so a summary line here printed
+// "all 1 apps" three times in a row down the middle of a publish.
+if (BUNDLES.length > 1) {
+  console.log(`check:testflight — all ${BUNDLES.length} apps have a group that can receive runtime ${rt.version}.`);
+}
