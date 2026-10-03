@@ -83,9 +83,11 @@ function RulesSheet({ open, onClose, onAccepted }: { open: boolean; onClose: () 
 
 /** A text box and a send button, behind the rules. `kind` adds a photo
  *  (a post), a link (a resource) or a day, time and place (an event). */
-function Composer({ max, placeholder, label, onSend, kind }: {
+function Composer({ max, placeholder, label, onSend, kind, coachId = null }: {
   max: number; placeholder: string; label: string; kind?: PostKind;
   onSend: (body: string, extra?: PostExtra) => Promise<string | null>;
+  /** Which board the photo belongs on. Null is a gym's; see uploadCommunityImage. */
+  coachId?: string | null;
 }) {
   const t = useTheme();
   const field = useField();
@@ -112,7 +114,7 @@ function Composer({ max, placeholder, label, onSend, kind }: {
     if (kind === 'resource') extra.url = url.trim();
     if (kind === 'event') { extra.event_at = new Date(eventInstant(day, time)!).toISOString(); extra.event_place = place.trim() || null; }
     if (photo) {
-      const up = await uploadCommunityImage(photo);
+      const up = await uploadCommunityImage(photo, coachId);
       if (up.error || !up.path) { setBusy(false); setErr(up.error ?? 'Your photo could not be uploaded.'); return; }
       extra.image_path = up.path;
     }
@@ -319,7 +321,7 @@ export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coac
   return (
     <View>
       {canPost ? (
-        <Composer max={POST_MAX} kind={kind} label={kind === 'event' ? 'Add Event' : kind === 'resource' ? 'Share' : 'Post'} onSend={feed.publish}
+        <Composer max={POST_MAX} kind={kind} coachId={coachId} label={kind === 'event' ? 'Add Event' : kind === 'resource' ? 'Share' : 'Post'} onSend={feed.publish}
           placeholder={PLACEHOLDER[kind] || (channel === 'coaches' ? 'Share with the other coaches' : 'Share something with your gym')} />
       ) : null}
 
@@ -399,9 +401,16 @@ export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coac
 /** The members channel's next events, small, for the member's Community
  *  screen. Nothing at all is drawn when there are none, or the read failed:
  *  the board below is the screen's subject and says its own state. */
-export function UpcomingEvents() {
+export function UpcomingEvents({ coachId = null }: { coachId?: string | null } = {}) {
   const t = useTheme();
-  const feed = useCommunityFeed('members', 'event');
+  /* `coachId` names a coach's own board, exactly as it does on CommunityFeed.
+     Without it this read was always the gym's, and it was only rendered on the
+     gym branch — so a coach who posted an event to their OWN cohort board,
+     which supabase/parts/3390 explicitly permits them to do, was posting
+     somewhere no client's app ever asked about: the board feed beside it
+     requests `kind: 'post'` and nothing else, and this section was not drawn
+     at all. "Saturday, 9am, the track" reached nobody. */
+  const feed = useCommunityFeed('members', 'event', coachId);
   const list = upcoming(feed.posts).slice(0, 5);
   if (!list.length) return null;
   return (

@@ -79,8 +79,21 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   ok(composeProblem('  ', POST_MAX, true) === null, 'a photo post may have no words');
   ok(/reword/.test(composeProblem('shit', POST_MAX, true) ?? ''), 'but the words it has are still screened');
   const path = communityImagePath(T, A, 1700000000000.4, 'Ab!9', 'jpg');
-  ok(path === `${T}/${A}/1700000000000-ab9.jpg`, 'the path is tenant/author/file');
+  ok(path === `${T}/${A}/1700000000000-ab9.jpg`, 'the path is board/author/file');
   ok(isCommunityImagePath(path), 'and reads back as one');
+  /* The first folder is the BOARD. On a coach's own board that is the coach,
+     and it has to read back as a valid path for the same reason a gym's does:
+     supabase/parts/3400's storage policy and the image_path check constraint
+     both key on <board>/<author>/, and until this was threaded through, a
+     coach's board had no folder anybody could legally write to — the upload
+     always built a tenant path, and an independent coach with no gym was told
+     "Your gym could not be read". */
+  const C = '33333333-3333-4333-8333-333333333333';
+  const onCoachBoard = communityImagePath(C, A, 1700000000000, 'tok', 'png');
+  ok(onCoachBoard === `${C}/${A}/1700000000000-tok.png`, 'a coach board puts the photo under the coach');
+  ok(isCommunityImagePath(onCoachBoard), 'and that reads back as a drawable path too');
+  ok(communityImagePath(C, C, 1700000000000, 'tok', 'jpg').startsWith(`${C}/${C}/`),
+    'and the coach posting on their own board is author and board at once');
   for (const bad of [`${T}/x.jpg`, `${T}/${A}/../x.jpg`, `${T}/${A}/a/b.jpg`, `${T}/${A}/a.gif`, null])
     ok(!isCommunityImagePath(bad), `a path shaped otherwise is not drawn: ${bad}`);
   ok(imageRefusal(MAX_IMAGE_BYTES) === null && /5 MB/.test(imageRefusal(MAX_IMAGE_BYTES + 1) ?? ''), 'the 5 MB cap');

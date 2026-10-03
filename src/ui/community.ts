@@ -283,21 +283,37 @@ export async function removeCommunityImage(path: string): Promise<void> {
   } catch (e) { reportError('community.photo.remove', e, { path }); }
 }
 
-/** Resize to 1280px, upload into <tenant>/<me>/, and return the key for the
- *  post to name. A PNG stays a PNG; anything else (HEIC included) becomes JPEG,
- *  which is all the bucket accepts. */
-export async function uploadCommunityImage(picked: PickedPhoto): Promise<{ path: string | null; error: string | null }> {
+/**
+ * Resize to 1280px, upload into `<board>/<me>/`, and return the key for the
+ * post to name. A PNG stays a PNG; anything else (HEIC included) becomes JPEG,
+ * which is all the bucket accepts.
+ *
+ * `coachId` names the board when the post is going on a coach's own one, and is
+ * null for a gym's. Both halves of that were broken before: the folder was
+ * always the tenant, which part 3400's storage policy does not accept for a
+ * coach-scoped post — and the read of `profiles.tenant_id` was unconditional,
+ * so an INDEPENDENT coach, who has no gym and never will, was told "Your gym
+ * could not be read" and could not put a photo on the cohort board that is the
+ * entire reason they have one.
+ */
+export async function uploadCommunityImage(picked: PickedPhoto, coachId: string | null = null): Promise<{ path: string | null; error: string | null }> {
   if (!USE_SUPABASE) return { path: null, error: 'This build has no server, so your photo has nowhere to go.' };
   try {
     const { data: s, error: sErr } = await supabase.auth.getSession();
     if (sErr) { reportError('community.photo.session', sErr); return { path: null, error: 'Your sign-in could not be checked, so the photo was not added. Try again.' }; }
     const me = s.session?.user.id;
     if (!me) return { path: null, error: 'Sign in again to add a photo.' };
-    const prof = await supabase.from('profiles').select('tenant_id').eq('id', me).maybeSingle();
-    const tenant = prof.data?.tenant_id as string | undefined;
-    if (prof.error || !tenant) {
-      if (prof.error) reportError('community.photo.tenant', prof.error);
-      return { path: null, error: 'Your gym could not be read, so the photo was not uploaded.' };
+    /* The board decides the folder, so a coach's board needs no tenant at all
+       and the read below is skipped rather than failed. */
+    let board = coachId;
+    if (!board) {
+      const prof = await supabase.from('profiles').select('tenant_id').eq('id', me).maybeSingle();
+      const tenant = prof.data?.tenant_id as string | undefined;
+      if (prof.error || !tenant) {
+        if (prof.error) reportError('community.photo.tenant', prof.error);
+        return { path: null, error: 'Your gym could not be read, so the photo was not uploaded.' };
+      }
+      board = tenant;
     }
     const png = String(picked.mimeType ?? '').toLowerCase() === 'image/png';
     const out = await ImageManipulator.manipulateAsync(picked.uri, [{ resize: { width: IMAGE_MAX_PX } }],
@@ -306,7 +322,7 @@ export async function uploadCommunityImage(picked: PickedPhoto): Promise<{ path:
     const refusal = imageRefusal(bytes.byteLength);
     if (refusal) return { path: null, error: refusal };
     const token = Math.random().toString(36).slice(2, 10);
-    const path = communityImagePath(tenant, me, Date.now(), token, png ? 'png' : 'jpg');
+    const path = communityImagePath(board, me, Date.now(), token, png ? 'png' : 'jpg');
     const up = await supabase.storage.from(COMMUNITY_MEDIA_BUCKET)
       .upload(path, bytes, { contentType: png ? 'image/png' : 'image/jpeg', upsert: false });
     if (up.error) { reportError('community.photo.upload', up.error, { path }); return { path: null, error: 'Your photo could not be uploaded.' }; }

@@ -108,9 +108,21 @@ export const PLACE_MAX = 120;
 
 /** `<tenant>/<author>/<time>-<token>.<ext>`: the shape part 3330's folder
  *  check and storage policies key on. */
-export function communityImagePath(tenantId: string, authorId: string, at: number, token: string, ext: 'png' | 'jpg'): string {
+/**
+ * `<board>/<author>/<when>-<token>.<ext>`.
+ *
+ * The first folder is the BOARD and not the tenant, which is the same decision
+ * supabase/parts/3400 made in the storage policy: a gym's board is its tenant,
+ * a coach's own board is the coach. That keeps the property the policy was
+ * built around — an object's key alone says who it belongs with and who put it
+ * there, so neither question needs a row read.
+ *
+ * It was `tenantId`, and a coach's board had no folder it could legally write
+ * to at all.
+ */
+export function communityImagePath(boardId: string, authorId: string, at: number, token: string, ext: 'png' | 'jpg'): string {
   const safe = String(token ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'photo';
-  return `${tenantId}/${authorId}/${Math.floor(at)}-${safe}.${ext}`;
+  return `${boardId}/${authorId}/${Math.floor(at)}-${safe}.${ext}`;
 }
 
 /** A path read back from a row is drawn only if it has that shape: two folders,

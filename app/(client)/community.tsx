@@ -64,6 +64,11 @@ export default function Community() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Everybody your coach works with can read this. Your gym cannot, and neither can anybody who is not one of their clients.
             </Text>
+            {/* The coach's own events, which nothing used to ask for. Drawn
+                above the board for the same reason the gym's are: something
+                happening on Saturday is read before this week's conversation,
+                not after it. */}
+            <UpcomingEvents key={`ce-${key}`} coachId={coach?.id ?? null} />
             <CommunityFeed key={`c-${key}`} channel="members" coachId={coach?.id ?? null} canPost moderator={false} />
           </>
         ) : (
