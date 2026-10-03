@@ -278,5 +278,77 @@ const reset = () => {
     assert.ok(/WHOOP/.test(wi.readNote(r, '14 days', 'your devices') ?? ''), 'the provider that refused is named');
   });
 
+  /* ── the zone breakdown an imported class carries ──────────────────────
+     `withHr` fetched the whole heart-rate series and kept two numbers from it.
+     Everything needed to keep the zones was already built and connected to
+     nothing, so a class at a heart-rate studio — recorded by the studio's
+     armband, arriving here as a finished Apple Health workout — was the one
+     kind of workout the zone model was designed for and the one kind that
+     could never show zones. The live path in app/(client)/workouts.tsx runs
+     off the session clock and covers only a session logged in this app. */
+  {
+    /** An Apple provider that hands back a real series over the window. */
+    const withSeries = (pts: Array<{ t: string; bpm: number }>): WearableProvider => ({
+      meta: { id: 'apple', name: 'Apple Health', icon: '', kind: 'healthkit', blurb: '', metrics: [] },
+      isAvailable: () => true,
+      connect: async () => true,
+      disconnect: async () => undefined,
+      fetchToday: async () => ({}),
+      fetchWorkouts: async () => [],
+      fetchHeartRateSeries: async () => pts,
+    } as unknown as WearableProvider);
+
+    /** Thirty minutes at 170 bpm. For a forty-year-old, max 180, that is 94% —
+     *  zone 5, and thirty splat points. Chosen so the arithmetic is checkable
+     *  by hand rather than by running the function. */
+    const hard = (() => {
+      const t0 = Date.parse('2026-09-10T07:00:00.000Z');
+      const out: Array<{ t: string; bpm: number }> = [];
+      for (let i = 0; i <= 30; i++) out.push({ t: new Date(t0 + i * 60000).toISOString(), bpm: 170 });
+      return out;
+    })();
+    const classSample = {
+      id: 'apple:otf', start: '2026-09-10T07:00:00.000Z', activity: 'HIIT',
+      mins: 30, source: 'apple',
+    } as unknown as WorkoutSample;
+
+    await test('an imported class keeps its zone breakdown, not just avg and peak', async () => {
+      reset();
+      catalogue.list = [withSeries(hard)];
+      const e = await wi.withHr(classSample, 40);
+      assert.ok(e.zones, 'the series was fetched and the zones must survive it');
+      const z = e.zones!;
+      assert.ok(z.z5 > 0, '170 bpm against a max of 180 is zone 5');
+      assert.strictEqual(z.z1 + z.z2 + z.z3 + z.z4, 0, 'and nothing is credited to a zone nobody was in');
+      assert.ok(e.cardio?.hrAvg === 170, 'the average is still there');
+    });
+
+    await test('no date of birth means NO zones, never a guessed scale', async () => {
+      reset();
+      catalogue.list = [withSeries(hard)];
+      const e = await wi.withHr(classSample, null);
+      assert.strictEqual(e.zones, undefined,
+        'every band is a percentage of 220-age, and a splat point is a minute at zone 4; a guessed age writes guessed splats into a health record');
+      assert.ok(e.cardio?.hrAvg === 170, 'the average does not depend on an age and is still kept');
+    });
+
+    await test('one reading is not a session, and earns no zones', async () => {
+      reset();
+      catalogue.list = [withSeries([{ t: '2026-09-10T07:05:00.000Z', bpm: 170 }])];
+      const e = await wi.withHr(classSample, 40);
+      assert.strictEqual(e.zones, undefined,
+        'a single sample says nothing about how long anybody spent anywhere');
+    });
+
+    await test('a workout from another provider is never asked HealthKit about', async () => {
+      reset();
+      catalogue.list = [withSeries(hard)];
+      const whoop = { ...classSample, id: 'whoop:1', source: 'whoop', avgHr: 150, maxHr: 171 } as unknown as WorkoutSample;
+      const e = await wi.withHr(whoop, 40);
+      assert.strictEqual(e.zones, undefined, 'HealthKit did not record it and must not be mined for it');
+      assert.strictEqual(e.cardio?.hrAvg, 150, "the vendor's own figure is the one that stands");
+    });
+  }
+
   console.log(`\n${ran} passed`);
 })();

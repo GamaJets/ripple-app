@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS } from '../lib/wearables/registry';
 import type { ProviderId, WearableProvider, WorkoutSample } from '../lib/wearables/types';
 import type { WorkoutEntry } from '../lib/mockData';
-import { hrStats } from '../lib/hr';
+import { hrStats, zonesFromSamples, zoneSecondsTotal } from '../lib/hr';
 import { reportError } from '../lib/reportError';
 import { linkFor } from '../lib/wearableLinkLedger';
 
@@ -83,8 +83,35 @@ export const toEntry = (sm: WorkoutSample): WorkoutEntry => ({
   kcal: sm.kcal ?? undefined,
 });
 
-/** Attach average and peak heart rate, from whichever source is entitled to say. */
-export async function withHr(sm: WorkoutSample): Promise<WorkoutEntry> {
+/**
+ * Attach average and peak heart rate — and the ZONE BREAKDOWN — from whichever
+ * source is entitled to say.
+ *
+ * ── Why the zones are here and were not ───────────────────────────────────
+ *
+ * This function already fetched the whole heart-rate series for the session and
+ * then reduced it to two numbers, an average and a peak, throwing the series
+ * away. Everything needed to keep more of it was already built and wired to
+ * nothing: `zonesFromSamples` in src/lib/hr.ts, `WorkoutEntry.zones`, the
+ * `workouts.zones` column, and src/ui/ZoneBoard.tsx.
+ *
+ * What that cost is specific. A class at a heart-rate studio — Orangetheory,
+ * where the five zones and the splat point come from, and whose model
+ * src/lib/hr.ts is explicitly built on — is recorded by the studio's own
+ * armband and arrives here as a finished workout in Apple Health. The only
+ * other path that produces zones, `rebuildZonesFromWatch` in
+ * app/(client)/workouts.tsx, runs from the live session clock and so covers
+ * only a session logged INSIDE this app. So the one kind of workout the zone
+ * model was designed for was the one kind that could never show zones.
+ *
+ * `age` is required rather than optional, and the zones are omitted without it
+ * instead of falling back to ASSUMED_AGE: every band is a percentage of
+ * 220 − age, and splat points are minutes at zone 4 or above, so a guessed age
+ * produces guessed splats sitting in a health record. `zones` stays ABSENT in
+ * that case, which the field's own comment requires — never zero-filled,
+ * because "no heart-rate source" and "no effort" are different facts.
+ */
+export async function withHr(sm: WorkoutSample, age: number | null = null): Promise<WorkoutEntry> {
   const e = toEntry(sm);
   // WHOOP reports avg/max on the workout itself. Prefer that over deriving it,
   // and never ask HealthKit about a session it did not record.
@@ -99,9 +126,19 @@ export async function withHr(sm: WorkoutSample): Promise<WorkoutEntry> {
   const fetchHr = apple?.fetchHeartRateSeries;
   if (fetchHr && apple && apple.isAvailable()) {
     try {
+      const startISO = new Date(Date.parse(sm.start)).toISOString();
       const endISO = new Date(Date.parse(sm.start) + Math.max(1, sm.mins) * 60000).toISOString();
-      const st = hrStats(await fetchHr(sm.start, endISO));
+      const pts = await fetchHr(startISO, endISO);
+      const st = hrStats(pts);
       if (st && e.cardio) { e.cardio.hrAvg = st.avg; e.cardio.hrHigh = st.high; }
+      // The same series, kept rather than discarded. `zonesFromSamples` is
+      // handed the window as well as the points, because it is what decides
+      // how long a reading stands for and so refuses to invent time the
+      // samples do not cover.
+      if (age != null && pts.length >= 2) {
+        const z = zonesFromSamples(pts, age, startISO, endISO);
+        if (z && zoneSecondsTotal(z) > 0) e.zones = z;
+      }
     } catch (err) { reportError('watchImport.withHr', err); }
   }
   return e;

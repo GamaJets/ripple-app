@@ -109,6 +109,18 @@ export interface WorkoutSample {
   avgHr?: number | null;
   maxHr?: number | null;
   source: ProviderId;
+  /**
+   * The APP that wrote this workout, when the provider can say — "Orangetheory",
+   * "Nike Run Club", a watch's own name.
+   *
+   * `source` is the provider this app read THROUGH and is 'apple' for
+   * everything in Apple Health, which is a different fact and was the only one
+   * kept. The sleep read in the same file has always kept the writer apart,
+   * under a comment saying the client asked to know where a figure came from;
+   * workouts pooled them. A studio class and a walk the phone noticed are not
+   * the same kind of record, and only this distinguishes them.
+   */
+  sourceName?: string | null;
 }
 
 /** A single heart-rate reading in a series (for the session/day HR chart). */

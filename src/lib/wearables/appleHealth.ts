@@ -605,6 +605,13 @@ export const appleHealth: WearableProvider = {
         kcal: isFinite(kcalN) && kcalN > 0 ? Math.round(kcalN) : null,
         distanceKm: isFinite(distN) && distN > 0 ? Math.round(distN / 10) / 100 : null,
         source: 'apple',
+        // Who actually recorded it. Read the same way the sleep path reads it,
+        // and for the same stated reason: a figure's writer is part of the
+        // figure. Null rather than 'Apple Health', which would name the shelf
+        // instead of the device.
+        sourceName: (typeof w?.sourceName === 'string' && w.sourceName.trim())
+          ? w.sourceName.trim()
+          : null,
       });
     }
     out.sort((x, y) => Date.parse(y.start) - Date.parse(x.start));

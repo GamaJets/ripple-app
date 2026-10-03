@@ -1095,7 +1095,7 @@ export default function Train() {
     if (!pending.length || importing) return;
     setImporting(true);
     try {
-      const out = await logWorkouts(await Promise.all(pending.map(withHr)));
+      const out = await logWorkouts(await Promise.all(pending.map((sm) => withHr(sm, ageFromDob(cd.dob)))));
       // Marked imported ONLY once the rows are on the server. This used to mark
       // them regardless, so a refused write both lost the session and struck it
       // off the list of things still worth offering — the watch would never

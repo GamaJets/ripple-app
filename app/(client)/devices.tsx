@@ -37,6 +37,11 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+// For the member's age, and ONLY for that: every heart-rate zone is a
+// percentage of 220 - age, so a zone breakdown without it would be a
+// breakdown of somebody else's scale. See withHr in src/ui/watchImport.ts.
+import { useClientData } from '../../src/ui/clientData';
+import { ageFromDob } from '../../src/lib/age';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
@@ -156,6 +161,13 @@ export default function Devices() {
  const t = useTheme();
  const router = useRouter();
  const w = useWearables();
+ /* The member's age, for the zone breakdown an imported workout now carries.
+    Null when the profile has no date of birth or has not been read, and that
+    null is passed through rather than replaced with ASSUMED_AGE: a splat point
+    is a minute at zone 4 or above, and zone 4 is a percentage of 220 - age, so
+    a guessed age writes guessed splats into a health record. `withHr` omits
+    the zones entirely in that case. */
+ const importAge = ageFromDob(useClientData().dob);
  // The unit every distance on this screen is read out in. Derived from the
  // length unit rather than asked for again — see src/lib/distance.ts.
  const du = distanceUnitFor(useSettings().lengthUnit);
@@ -270,7 +282,7 @@ export default function Devices() {
  // disappears on its own the moment they go up.
  const importOne = async (sm: WorkoutSample) => {
   if (alreadyLogged(sm)) return;
-  const out = await logWorkouts([await withHr(sm)]);
+  const out = await logWorkouts([await withHr(sm, importAge)]);
   if (out !== 'stored') { Alert.alert('Import Workouts', importNote(sm.activity, out, false)); return; }
   markImported([sm.id]);
   tapLight();
@@ -278,7 +290,7 @@ export default function Devices() {
  const importAll = async () => {
   const fresh = (wk || []).filter((sm) => !alreadyLogged(sm));
   if (!fresh.length) return;
-  const out = await logWorkouts(await Promise.all(fresh.map(withHr)));
+  const out = await logWorkouts(await Promise.all(fresh.map((sm) => withHr(sm, importAge))));
   if (out !== 'stored') { Alert.alert('Import Workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
   markImported(fresh.map((sm) => sm.id));
   tapLight();

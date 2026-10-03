@@ -47,7 +47,7 @@ is paid again on every turn of the session that opened it.
 | 1,690 | 26k | `app/(trainer)/invoices.tsx` |
 | 1,687 | 24k | `app/(client)/trainers.tsx` |
 | 1,667 | 23k | `studio-web/app/money/page.tsx` |
-| 1,654 | 24k | `app/(client)/devices.tsx` |
+| 1,666 | 24k | `app/(client)/devices.tsx` |
 | 1,583 | 22k | `src/lib/connect.ts` |
 | 1,580 | 19k | `scripts/check-schema.mjs` |
 | 1,573 | 19k | `studio-web/app/passes/page.tsx` |
@@ -57,11 +57,11 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,327 lines, ~1727k tokens if every one were read whole.
+Total: 47 files, 119,339 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
-7,721 lines · ~123k tokens · 167 anchors
+7,721 lines · ~123k tokens · 168 anchors
 
 ```
 54-103        §        the block, the week of it this client is on, and the three fields a set
@@ -89,7 +89,8 @@ Total: 47 files, 119,327 lines, ~1727k tokens if every one were read whole.
 890-987       §        the state in this component, not only the bytes on the disk
 988-1024      fn         built
 1025-1093     fn           m
-1094-1183     fn         importPending
+1094-1097     fn         importPending
+1098-1183     fn             out
 1184-1184     fn         dateFor
 1185-1185     fn         pad2
 1186-1256     fn         dstr
@@ -2982,47 +2983,48 @@ Total: 47 files, 119,327 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(client)/devices.tsx`
 
-1,654 lines · ~24k tokens · 38 anchors
+1,666 lines · ~24k tokens · 39 anchors
 
 ```
-100-119       type     MetricKey
-120-124       fn       importNote
-125-148       fn       ago
-149-154       fn       sessionWhen
-155-189       default  Devices
-190-199       fn        apple
-200-216       fn        lookbackLabel
-217-228       fn        wkNoteFor
-229-233       fn        pull
-234-235       fn        alreadyLogged
-236-270       fn        findWorkouts
-271-277       fn        importOne
-278-278       fn        importAll
-279-286       fn         fresh
-287-310       §        Writing sessions BACK to Apple Health
-311-324       fn        reviewHk
-325-352       fn        writeHk
-353-375       fn        saveSessionMins
-376-403       fn        onConnect
-404-429       fn        restoreNights
-430-463       §        a helper that was deleted, and the claim in it that was wrong
-464-464       fn        onDisconnect
-465-479       §        the nights are copied BEFORE anything is unlinked
-480-578       §        the false sign-out that walked straight past the copy
-579-592       fn        confirmDisconnect
-593-599       fn        connected
-600-626       fn        readable
-627-684       fn        connectedKey
-685-713       fn        lastRecorded
-714-733       fn        connectedMeta
-734-794       fn        named
-795-823       §        pull-to-refresh here was reported dead, and the keyboard props are NOT why
-824-850       §        What it actually was: the difference is not on this screen
-851-955       fn        toggleWellnessShare
-956-978       §        connected, and not readable on this phone
-979-1422      §        and the chip must not say Connected over it
-1423-1423     fn              provider
-1424-1654     fn              lastNight
+105-124       type     MetricKey
+125-129       fn       importNote
+130-153       fn       ago
+154-159       fn       sessionWhen
+160-201       default  Devices
+202-211       fn        apple
+212-228       fn        lookbackLabel
+229-240       fn        wkNoteFor
+241-245       fn        pull
+246-247       fn        alreadyLogged
+248-282       fn        findWorkouts
+283-289       fn        importOne
+290-290       fn        importAll
+291-292       fn         fresh
+293-298       fn         out
+299-322       §        Writing sessions BACK to Apple Health
+323-336       fn        reviewHk
+337-364       fn        writeHk
+365-387       fn        saveSessionMins
+388-415       fn        onConnect
+416-441       fn        restoreNights
+442-475       §        a helper that was deleted, and the claim in it that was wrong
+476-476       fn        onDisconnect
+477-491       §        the nights are copied BEFORE anything is unlinked
+492-590       §        the false sign-out that walked straight past the copy
+591-604       fn        confirmDisconnect
+605-611       fn        connected
+612-638       fn        readable
+639-696       fn        connectedKey
+697-725       fn        lastRecorded
+726-745       fn        connectedMeta
+746-806       fn        named
+807-835       §        pull-to-refresh here was reported dead, and the keyboard props are NOT why
+836-862       §        What it actually was: the difference is not on this screen
+863-967       fn        toggleWellnessShare
+968-990       §        connected, and not readable on this phone
+991-1434      §        and the chip must not say Connected over it
+1435-1435     fn              provider
+1436-1666     fn              lastNight
 ```
 
 ## `src/lib/connect.ts`
