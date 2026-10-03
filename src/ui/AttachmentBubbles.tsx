@@ -183,8 +183,16 @@ export function FileBubble({ url, name }: { url: string; name: string | null }) 
  * at three minutes either way; this is what makes the first three minutes
  * visible.
  */
-export function RecordingBar({ seconds, onStop, max }: {
+export function RecordingBar({ seconds, onStop, max, starting = false }: {
   seconds: number; onStop: () => void; max: number;
+  /**
+   * The gap between the tap and the first sample, which is not instant and on
+   * one simulator was minutes. Drawn because the alternative is what was
+   * measured on 3 Oct 2026: a tap that does nothing, then another, then
+   * another — and three recorders queued behind each other, each resetting the
+   * counter as it arrived.
+   */
+  starting?: boolean;
 }) {
   const t = useTheme();
   const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
@@ -193,23 +201,29 @@ export function RecordingBar({ seconds, onStop, max }: {
     <View
       accessible
       accessibilityLiveRegion="polite"
-      accessibilityLabel={`Recording. ${seconds} ${seconds === 1 ? 'second' : 'seconds'} so far. It stops itself at ${Math.round(max / 60)} minutes.`}
+      accessibilityLabel={starting
+        ? 'Starting the recorder. It is not recording yet.'
+        : `Recording. ${seconds} ${seconds === 1 ? 'second' : 'seconds'} so far. It stops itself at ${Math.round(max / 60)} minutes.`}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: sp.md,
         padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface,
         borderWidth: 1, borderColor: t.warn,
       }}
     >
-      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.warn }} />
+      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: starting ? t.ink3 : t.warn }} />
       <Text style={{ ...ty.body, ...font('600'), color: t.ink, flex: 1 }}>
-        {`Recording · ${mmss(seconds)}`}
+        {starting ? 'Starting the recorder…' : `Recording · ${mmss(seconds)}`}
       </Text>
-      <Pressable onPress={onStop} accessibilityRole="button"
-        accessibilityLabel="Stop recording and keep what you have said"
-        hitSlop={hitSlopFor(MIN_TARGET)}
-        style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.md }}>
-        <Text style={{ ...ty.label, ...font('700'), color: t.ink }}>Stop</Text>
-      </Pressable>
+      {/* No Stop while it is still starting: there is nothing to stop yet, and
+          a button that does nothing is what the silent tap already was. */}
+      {starting ? null : (
+        <Pressable onPress={onStop} accessibilityRole="button"
+          accessibilityLabel="Stop recording and keep what you have said"
+          hitSlop={hitSlopFor(MIN_TARGET)}
+          style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.md }}>
+          <Text style={{ ...ty.label, ...font('700'), color: t.ink }}>Stop</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

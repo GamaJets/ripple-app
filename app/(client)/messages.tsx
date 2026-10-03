@@ -407,15 +407,34 @@ export default function Messages() {
   const voice = useVoiceNote((took) => {
     setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
   });
+  /**
+   * Said in the composer, not in an Alert.
+   *
+   * FOUND ON A SIMULATOR, 3 Oct 2026: tapping "Record a Voice Note" did
+   * nothing. No recorder, no counter, and NO ERROR — the one outcome that
+   * leaves somebody tapping the same menu item again.
+   *
+   * Both of these alerts were raised from inside the action sheet's own
+   * `onPress`, and iOS drops an alert presented while another is still being
+   * dismissed. So every refusal this function can produce — no microphone
+   * permission, a build that cannot record, a recorder that will not start —
+   * was being announced into the gap between two alerts and never seen.
+   *
+   * The composer is where the recording bar already appears, so a refusal
+   * belongs in the same place: it is on screen, it survives the sheet closing,
+   * and it does not depend on presentation timing at all.
+   */
+  const [voiceSaid, setVoiceSaid] = useState<string | null>(null);
   const onRecord = async () => {
+    setVoiceSaid(null);
     if (voice.recording) {
       const took = await voice.stop();
-      if (!took) { Alert.alert('Nothing to Send', 'That recording was too short. Hold the thought and try again.'); return; }
+      if (!took) { setVoiceSaid('That recording was too short to send. Hold the thought and try again.'); return; }
       setPending({ uri: took.uri, kind: 'audio', mimeType: 'audio/m4a', fileName: null });
       return;
     }
     const refused = await voice.start();
-    if (refused) Alert.alert('Cannot Record', refused);
+    if (refused) setVoiceSaid(refused);
   };
 
   const onAttach = () => {
@@ -912,10 +931,18 @@ export default function Messages() {
             before it does. Nothing is uploaded until Send. */}
         {/* The microphone, while it is open. Nothing said so before this: the
             take started from inside an action sheet and the sheet closed. */}
-        {voice.recording ? (
+        {voice.recording || voice.starting ? (
           <View style={{ marginHorizontal: G, marginTop: sp.md }}>
             <RecordingBar seconds={voice.seconds} max={MESSAGE_AUDIO_MAX_SECONDS}
+              starting={voice.starting && !voice.recording}
               onStop={() => { void onRecord(); }} />
+          </View>
+        ) : null}
+        {/* Why a recording did not start, where the recording itself would be.
+            See the note on `onRecord`: as an Alert this was never seen. */}
+        {voiceSaid ? (
+          <View style={{ marginHorizontal: G, marginTop: sp.md }}>
+            <Flag tone={t.warn}>{voiceSaid}</Flag>
           </View>
         ) : null}
         {pending ? (
@@ -923,7 +950,14 @@ export default function Messages() {
             {pending.kind === 'image'
               ? <Image source={{ uri: pending.uri }} style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" accessibilityIgnoresInvertColors />
               : <View style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="video" size={18} color={t.ink3} />
+                  {/* The glyph has to agree with the sentence beside it. That
+                      sentence was a two-way ternary and called a voice note a
+                      video; it was fixed and this was not, so the row then read
+                      "Voice note ready to send" under a film camera — seen on a
+                      simulator, 3 Oct 2026. `play` for audio, a page for a file,
+                      and the camera only for an actual video. */}
+                  <Icon name={pending.kind === 'audio' ? 'play' : pending.kind === 'file' ? 'grid' : 'video'}
+                    size={18} color={t.ink3} />
                 </View>}
             <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
               {/* `attachmentNoun` names all four. This line used to be a

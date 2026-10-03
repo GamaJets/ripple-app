@@ -72,6 +72,15 @@ export function useVoiceNote(onAutoStop?: (note: RecordedNote) => void): {
   /** False when this build has no audio module. The button is not drawn. */
   available: boolean;
   recording: boolean;
+  /**
+   * Between the tap and the first sample.
+   *
+   * `prepareToRecordAsync` is not instant — on a simulator it took MINUTES —
+   * and until it resolves there is no recorder, no counter and nothing on
+   * screen. Measured 3 Oct 2026 by tapping "Record a Voice Note" and watching
+   * nothing happen, then tapping twice more, which is what anybody would do.
+   */
+  starting: boolean;
   /** Whole seconds so far, for the counter beside the button. */
   seconds: number;
   start: () => Promise<string | null>;
@@ -80,8 +89,18 @@ export function useVoiceNote(onAutoStop?: (note: RecordedNote) => void): {
   const mod = useRef(audioModule()).current;
   const recorder = mod ? mod.useAudioRecorder(mod.RecordingPresets.HIGH_QUALITY) : null;
   const [recording, setRecording] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const startedAt = useRef(0);
+  /** Guards against a SECOND start while the first is still preparing.
+   *
+   *  Without it, every extra tap queued another `prepareToRecordAsync`, and
+   *  each one that resolved reset `startedAt` and set `recording` again — so
+   *  the counter kept dropping back to 0:00 and `stop()` lost a race against
+   *  the next queued start, which is why the Stop button appeared dead. A ref
+   *  rather than the state above because two taps in the same tick must both
+   *  see it. */
+  const inFlight = useRef(false);
   const stopRef = useRef<(() => Promise<RecordedNote | null>) | null>(null);
   /** Through a ref so the timer below always calls the CURRENT handler: the
    *  interval is armed once per recording and a screen that re-renders while
@@ -129,6 +148,12 @@ export function useVoiceNote(onAutoStop?: (note: RecordedNote) => void): {
 
   const start = useCallback(async (): Promise<string | null> => {
     if (!mod || !recorder) return 'This build cannot record audio.';
+    // Already recording, or already on the way there. Not an error: the person
+    // tapped twice because the first tap said nothing, which is now fixed at
+    // the other end by `starting`.
+    if (inFlight.current) return null;
+    inFlight.current = true;
+    setStarting(true);
     try {
       const perm = await mod.requestRecordingPermissionsAsync();
       if (!perm?.granted) {
@@ -146,8 +171,13 @@ export function useVoiceNote(onAutoStop?: (note: RecordedNote) => void): {
     } catch (e) {
       reportError('voiceNote.start', e);
       return 'The recorder could not be started. Try again.';
+    } finally {
+      // Cleared in both directions, or a failed start would lock the button
+      // for the rest of the session.
+      inFlight.current = false;
+      setStarting(false);
     }
   }, [mod, recorder]);
 
-  return { available: !!recorder, recording, seconds, start, stop };
+  return { available: !!recorder, recording, starting, seconds, start, stop };
 }
