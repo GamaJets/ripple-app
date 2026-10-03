@@ -86,7 +86,7 @@ export default function CoachCommunity() {
         {/* Resources are for the gym's coaches only (part 3330). */}
         <CommunityFeed key={`${board}-${shownTab}-${channel}-${key}`} kind={shownTab}
           channel={onMine ? 'members' : shownTab === 'resource' ? 'coaches' : channel}
-          coachId={onMine ? myId : null} canPost moderator />
+          coachId={onMine ? myId : null} tenantId={onMine ? null : tenant?.id ?? null} canPost moderator />
         <CommunityReports key={`r-${key}`} />
       </ScrollView>
     </SafeAreaView>

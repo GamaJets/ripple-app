@@ -73,8 +73,8 @@ export default function Community() {
           </>
         ) : (
           <>
-            <UpcomingEvents key={`e-${key}`} />
-            <CommunityFeed key={key} channel="members" canPost moderator={false} />
+            <UpcomingEvents key={`e-${key}`} tenantId={tenant?.id ?? null} />
+            <CommunityFeed key={key} channel="members" canPost moderator={false} tenantId={tenant?.id ?? null} />
           </>
         )}
       </ScrollView>

@@ -55,7 +55,40 @@ async function wrote(where: string, what: string, run: () => PromiseLike<{ error
  * filter a gym's feed would quietly include their coach's cohort and nobody
  * would be able to tell which room they were posting in.
  */
-export function useCommunityFeed(channel: Channel, kind: PostKind = 'post', coachId?: string | null) {
+export function useCommunityFeed(
+  channel: Channel, kind: PostKind = 'post', coachId?: string | null,
+  /**
+   * The gym whose board this is, when it is a gym's.
+   *
+   * REDUNDANT against RLS and deliberately so. `community_posts_read` already
+   * admits only the reader's own tenant, so this changes no row — it is a
+   * predicate the PLANNER can use, and without it the three gym indexes
+   * (`community_posts_feed_idx`, `_kind_idx`, `_events_idx`) are all unusable,
+   * because every one of them leads with `tenant_id` and RLS supplies the
+   * tenant through `community_can_read(tenant_id, channel)`, a function call
+   * no B-tree can serve.
+   *
+   * Measured, not assumed. `explain` on the gym's own events query:
+   *
+   *   Limit -> Sort  Sort Key: event_at, id
+   *     -> Index Scan using community_posts_events_idx
+   *          Index Cond: ((channel = 'members') AND (event_at > now()))
+   *          Filter: (coach_id IS NULL)
+   *
+   * `tenant_id` is skipped in the index condition, so the scan crosses every
+   * gym's events and the ordering the index holds WITHIN a tenant is no longer
+   * an ordering at all — hence the sort. With one gym in the database that is
+   * nothing; it grows with the number of tenants, which is the one number a
+   * white-label product is trying to grow.
+   *
+   * Omitted when unknown, which is the case on the first render while the
+   * tenant provider is still loading. Filtering on a null tenant would return
+   * nothing and read as an empty board, which is the collapse this codebase
+   * spends most of its comments avoiding — so an unknown tenant falls back to
+   * exactly today's behaviour: correct, and slower.
+   */
+  tenantId?: string | null,
+) {
   const rev = useAuthRevision();
   const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
@@ -69,7 +102,10 @@ export function useCommunityFeed(channel: Channel, kind: PostKind = 'post', coac
     setStatus('loading');
     try {
       const base = supabase.from('community_posts').select(POST_COLS).eq('channel', channel).eq('kind', kind);
-      const q = coachId ? base.eq('coach_id', coachId) : base.is('coach_id', null);
+      // A coach's board is keyed on the coach and has no tenant at all; a gym's
+      // is keyed on the tenant when it is known. See the note on `tenantId`.
+      const scoped = coachId ? base.eq('coach_id', coachId) : base.is('coach_id', null);
+      const q = !coachId && tenantId ? scoped.eq('tenant_id', tenantId) : scoped;
       const { data, error } = await (kind === 'event'
         ? q.gt('event_at', new Date().toISOString()).order('event_at').order('id')
         : q.order('created_at', { ascending: false }).order('id', { ascending: false })
@@ -94,7 +130,7 @@ export function useCommunityFeed(channel: Channel, kind: PostKind = 'post', coac
       reportError('community.feed', e);
       setStatus('error');
     }
-  }, [channel, kind, coachId]);
+  }, [channel, kind, coachId, tenantId]);
 
   useEffect(() => { setPosts([]); setLikes([]); void reload(); }, [reload, rev]);
 

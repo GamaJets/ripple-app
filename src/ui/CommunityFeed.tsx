@@ -299,18 +299,22 @@ const PLACEHOLDER: Record<PostKind, string> = {
   post: '', resource: 'What is it? e.g. Mobility Guide', event: 'Event title',
 };
 
-export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coachId = null }: {
+export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coachId = null, tenantId = null }: {
   channel: Channel; canPost: boolean; moderator: boolean; kind?: PostKind;
   /** A coach's own board rather than a gym's — part 3370. The component is
    *  otherwise identical: the same posting rules, the same reports, the same
    *  blocks and hides, because a cohort needs moderating exactly as much as a
    *  gym does and Apple requires it of both. */
   coachId?: string | null;
+  /** The gym whose board this is. A planner hint and not a permission — RLS
+   *  already admits only the reader's own tenant. See the note on
+   *  `useCommunityFeed`'s own `tenantId` for what it is worth. */
+  tenantId?: string | null;
 }) {
   const t = useTheme();
   const { user } = useAuth();
   const me = user?.id ?? null;
-  const feed = useCommunityFeed(channel, kind, coachId);
+  const feed = useCommunityFeed(channel, kind, coachId, tenantId);
   const [target, setTarget] = useState<Target | null>(null);
   const [thread, setThread] = useState<Post | null>(null);
   const [likeErr, setLikeErr] = useState<string | null>(null);
@@ -401,7 +405,11 @@ export function CommunityFeed({ channel, canPost, moderator, kind = 'post', coac
 /** The members channel's next events, small, for the member's Community
  *  screen. Nothing at all is drawn when there are none, or the read failed:
  *  the board below is the screen's subject and says its own state. */
-export function UpcomingEvents({ coachId = null }: { coachId?: string | null } = {}) {
+export function UpcomingEvents({ coachId = null, tenantId = null }: {
+  coachId?: string | null;
+  /** As above: the gym's own id, so the gym's event index is usable. */
+  tenantId?: string | null;
+} = {}) {
   const t = useTheme();
   /* `coachId` names a coach's own board, exactly as it does on CommunityFeed.
      Without it this read was always the gym's, and it was only rendered on the
@@ -410,7 +418,7 @@ export function UpcomingEvents({ coachId = null }: { coachId?: string | null } =
      somewhere no client's app ever asked about: the board feed beside it
      requests `kind: 'post'` and nothing else, and this section was not drawn
      at all. "Saturday, 9am, the track" reached nobody. */
-  const feed = useCommunityFeed('members', 'event', coachId);
+  const feed = useCommunityFeed('members', 'event', coachId, tenantId);
   const list = upcoming(feed.posts).slice(0, 5);
   if (!list.length) return null;
   return (

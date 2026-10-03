@@ -10,10 +10,16 @@ import { PageHead, Section, SectionHead, Segmented } from '../../src/ui/kit';
 import type { Channel } from '../../src/lib/community';
 import { layout } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+// For the gym's own id, which the board reads are now scoped by so the three
+// tenant-leading indexes on community_posts are usable. The provider wraps the
+// whole app in app/_layout.tsx, so this is the same read the member's and
+// coach's community screens already make.
+import { useTenant } from '../../src/ui/tenant';
 import { CommunityFeed, CommunityReports } from '../../src/ui/CommunityFeed';
 
 export default function OwnerCommunity() {
   const t = useTheme();
+  const { tenant } = useTenant();
   const [key, setKey] = useState(0);
   const [eventChannel, setEventChannel] = useState<Channel>('members');
   const pull = usePullToRefresh(useCallback(() => setKey((k) => k + 1), []));
@@ -26,11 +32,11 @@ export default function OwnerCommunity() {
           <SectionHead title="Events" />
           <Segmented value={eventChannel} onChange={setEventChannel}
             options={[{ key: 'members', label: 'For Members' }, { key: 'coaches', label: 'For Coaches' }] as const} />
-          <CommunityFeed key={`e-${eventChannel}-${key}`} kind="event" channel={eventChannel} canPost moderator />
+          <CommunityFeed key={`e-${eventChannel}-${key}`} kind="event" channel={eventChannel} tenantId={tenant?.id ?? null} canPost moderator />
         </Section>
         <Section>
           <SectionHead title="Members Board" />
-          <CommunityFeed key={key} channel="members" canPost={false} moderator />
+          <CommunityFeed key={key} channel="members" canPost={false} tenantId={tenant?.id ?? null} moderator />
         </Section>
       </ScrollView>
     </SafeAreaView>
