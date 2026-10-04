@@ -64,38 +64,51 @@ eq(nextAlternative(['Goblet Squat', 'Box Jump'], [], 'Back', [inj('knee')], 'rea
 eq(nextAlternative(['Goblet Squat', 'Lat Pulldown'], [], 'Back', [inj('knee')], 'error'), 'Goblet Squat',
   'under an unread disclosure there is no safer-looking pick to prefer, and none is invented');
 
-/* ── a replacement comes from the same muscle group ──────────────────────
+/* ── a replacement trains the same muscle ────────────────────────────────
    Seen on a device, 3 Oct 2026: a Full Body session offered "Or instead:
-   Barbell Overhead Extension" on EVERY row — under a seated hip abduction, a
-   standing hip abduction and a calf raise alike. On Full Body the pool is the
-   whole catalogue, so "the next unused movement" is the same movement for
-   every row, and the Replace button really would have put a triceps extension
-   where a calf raise was. The line was honest; the behaviour was wrong. */
+   Barbell Overhead Extension" on EVERY row — under a clamshell, a hip
+   abduction and a calf raise alike. Replace really would have put a triceps
+   extension where the calf raise was.
+
+   The first attempt at this matched on `muscle_group` and changed NOTHING,
+   because that column reads "Full body" on 196 of the catalogue's 615 rows and
+   those 196 include both the calf raise and the triceps extension. The screen
+   proved it by offering the same swap again. `primary_muscles` is the column
+   that says what is trained. */
 {
-  const groupOf = (n: string) => ({
-    'Barbell Overhead Extension': 'Arms',
-    'Standing Calf Raise': 'Legs',
-    'Seated Calf Raise': 'Legs',
-  } as Record<string, string>)[n] ?? '';
+  const musclesOf = (n: string) => ({
+    'Barbell Overhead Extension': ['triceps brachii'],
+    'Barbell Calf Raise': ['gastrocnemius'],
+    'Standing Calf Raise': ['gastrocnemius'],
+  } as Record<string, string[]>)[n] ?? [];
 
   eq(nextAlternative(
-    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Legs', [], 'ready', undefined, groupOf,
+    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Full body', [], 'ready',
+    'Barbell Calf Raise', musclesOf,
   ), 'Standing Calf Raise',
-    'a calf raise is replaced by another leg movement, not by the first free thing in the catalogue');
+    'a calf raise is replaced by the other calf movement, not by the first free thing in the catalogue');
 
-  // Without the resolver the old behaviour stands, so no caller is broken by
-  // the parameter being optional.
+  // The group is "Full body" for all three, so a group match would have picked
+  // the triceps extension — this is the case the first fix got wrong.
   eq(nextAlternative(
-    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Legs', [], 'ready',
+    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Full body', [], 'ready',
+    'Barbell Calf Raise',
   ), 'Barbell Overhead Extension',
-    'with no way to look a group up, the pool is taken in order as before');
+    'with no muscles to compare, the pool is taken in order exactly as before');
 
-  // The fallback: one movement of its kind still deserves a swap rather than a
-  // button that does nothing.
+  // One of its kind still deserves a swap rather than a button that does
+  // nothing.
   eq(nextAlternative(
-    ['Barbell Overhead Extension'], [], 'Legs', [], 'ready', undefined, groupOf,
+    ['Barbell Overhead Extension'], [], 'Full body', [], 'ready', 'Barbell Calf Raise', musclesOf,
   ), 'Barbell Overhead Extension',
-    'when the group has nothing else, the wider pool is offered rather than nothing');
+    'when nothing shares the muscle, the wider pool is offered rather than nothing');
+
+  // A row the catalogue names no muscles for must not match everything.
+  eq(nextAlternative(
+    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Full body', [], 'ready',
+    'Unknown Movement', musclesOf,
+  ), 'Barbell Overhead Extension',
+    'a movement with no muscles recorded falls back to the pool rather than matching anything');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

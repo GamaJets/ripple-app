@@ -98,20 +98,20 @@ export function nextAlternative(
   status: LoadStatus,
   current?: string,
   /**
-   * The catalogue's group for a movement, when the caller can say.
+   * The muscles a movement names, for holding a swap to the same area.
    *
-   * Without it a replacement is simply the next unused movement in the pool,
-   * and on a Full Body session the pool is the WHOLE catalogue — so on 3 Oct
-   * 2026, on a device, every row of a full-body workout offered the same
-   * swap: "Or instead: Barbell Overhead Extension", under a seated hip
-   * abduction, a standing hip abduction and a calf raise alike.
+   * NOT the group. `exercises.muscle_group` reads "Full body" on 196 of the
+   * catalogue's 615 rows — a third of it — and that set contains a triceps
+   * extension and a calf raise alike, so matching on it matches everything.
+   * The first version of this fix did exactly that and changed nothing, which
+   * the screen then proved by offering the same swap on every row a second
+   * time. `primary_muscles` is populated on 193 of those 196 and on every
+   * other row, and it is the column that actually says what is being trained.
    *
-   * The line was not lying — Replace really would have put that movement in.
-   * That is the defect. Swapping a calf raise for an overhead triceps
-   * extension changes what the session trains, and the question this button
-   * answers is "give me a different exercise FOR THIS MUSCLE GROUP".
+   * Without it the behaviour is what it always was: the next unused movement
+   * in the pool.
    */
-  groupOf?: (name: string) => string,
+  musclesOf?: (name: string) => readonly string[],
 ): string | null {
   const key = (x: string) => x.trim().toLowerCase();
   const taken = new Set((used || []).map(key));
@@ -123,11 +123,11 @@ export function nextAlternative(
   // returning null is deliberate: a movement the catalogue has only one of
   // still deserves a swap, and a wrong-group swap the member can see is better
   // than a Replace button that does nothing.
-  const want = key(group || '');
-  const sameGroup = groupOf && want
-    ? free.filter((a) => key(groupOf(a) || '') === want)
+  const mine = new Set((musclesOf && current ? musclesOf(current) : []).map(key).filter(Boolean));
+  const sameArea = mine.size
+    ? free.filter((a) => (musclesOf!(a) || []).some((m) => mine.has(key(m))))
     : [];
-  const pool = sameGroup.length ? sameGroup : free;
+  const pool = sameArea.length ? sameArea : free;
   const clear = pool.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
   return clear ?? pool[0];
 }

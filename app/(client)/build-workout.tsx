@@ -392,10 +392,11 @@ export default function BuildWorkout() {
                 // Everything the day currently holds, so a replacement cannot
                 // put the same movement on the day twice.
                 const used = d.exercises.map((x) => swaps[x.key] || x.name);
-                // `byName` is the catalogue, so the swap can be held to the
-                // group of the movement it replaces. See nextAlternative.
+                // Held to the MUSCLE the movement names, not its group: a
+                // third of the catalogue is filed as "Full body". See
+                // nextAlternative.
                 const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus, name,
-                  (x) => (byName.get(x)?.group || '').trim());
+                  (x) => byName.get(x)?.primaryMuscles ?? []);
                 const chk = checkInjury(name, group, cd.injuries, cd.profileStatus);
                 // The line names exactly the movement Replace will put in, and
                 // nothing else. It used to name the first two free movements at
