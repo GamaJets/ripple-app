@@ -97,6 +97,21 @@ export function nextAlternative(
   injuries: Injury[] | null | undefined,
   status: LoadStatus,
   current?: string,
+  /**
+   * The catalogue's group for a movement, when the caller can say.
+   *
+   * Without it a replacement is simply the next unused movement in the pool,
+   * and on a Full Body session the pool is the WHOLE catalogue — so on 3 Oct
+   * 2026, on a device, every row of a full-body workout offered the same
+   * swap: "Or instead: Barbell Overhead Extension", under a seated hip
+   * abduction, a standing hip abduction and a calf raise alike.
+   *
+   * The line was not lying — Replace really would have put that movement in.
+   * That is the defect. Swapping a calf raise for an overhead triceps
+   * extension changes what the session trains, and the question this button
+   * answers is "give me a different exercise FOR THIS MUSCLE GROUP".
+   */
+  groupOf?: (name: string) => string,
 ): string | null {
   const key = (x: string) => x.trim().toLowerCase();
   const taken = new Set((used || []).map(key));
@@ -104,6 +119,15 @@ export function nextAlternative(
   const at = current ? all.findIndex((a) => a && key(a) === key(current)) + 1 : 0;
   const free = [...all.slice(at), ...all.slice(0, at)].filter((a) => a && !taken.has(key(a)));
   if (!free.length) return null;
-  const clear = free.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
-  return clear ?? free[0];
+  // Same muscle group first. Falling back to the whole pool rather than
+  // returning null is deliberate: a movement the catalogue has only one of
+  // still deserves a swap, and a wrong-group swap the member can see is better
+  // than a Replace button that does nothing.
+  const want = key(group || '');
+  const sameGroup = groupOf && want
+    ? free.filter((a) => key(groupOf(a) || '') === want)
+    : [];
+  const pool = sameGroup.length ? sameGroup : free;
+  const clear = pool.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
+  return clear ?? pool[0];
 }

@@ -64,4 +64,38 @@ eq(nextAlternative(['Goblet Squat', 'Box Jump'], [], 'Back', [inj('knee')], 'rea
 eq(nextAlternative(['Goblet Squat', 'Lat Pulldown'], [], 'Back', [inj('knee')], 'error'), 'Goblet Squat',
   'under an unread disclosure there is no safer-looking pick to prefer, and none is invented');
 
+/* ── a replacement comes from the same muscle group ──────────────────────
+   Seen on a device, 3 Oct 2026: a Full Body session offered "Or instead:
+   Barbell Overhead Extension" on EVERY row — under a seated hip abduction, a
+   standing hip abduction and a calf raise alike. On Full Body the pool is the
+   whole catalogue, so "the next unused movement" is the same movement for
+   every row, and the Replace button really would have put a triceps extension
+   where a calf raise was. The line was honest; the behaviour was wrong. */
+{
+  const groupOf = (n: string) => ({
+    'Barbell Overhead Extension': 'Arms',
+    'Standing Calf Raise': 'Legs',
+    'Seated Calf Raise': 'Legs',
+  } as Record<string, string>)[n] ?? '';
+
+  eq(nextAlternative(
+    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Legs', [], 'ready', undefined, groupOf,
+  ), 'Standing Calf Raise',
+    'a calf raise is replaced by another leg movement, not by the first free thing in the catalogue');
+
+  // Without the resolver the old behaviour stands, so no caller is broken by
+  // the parameter being optional.
+  eq(nextAlternative(
+    ['Barbell Overhead Extension', 'Standing Calf Raise'], [], 'Legs', [], 'ready',
+  ), 'Barbell Overhead Extension',
+    'with no way to look a group up, the pool is taken in order as before');
+
+  // The fallback: one movement of its kind still deserves a swap rather than a
+  // button that does nothing.
+  eq(nextAlternative(
+    ['Barbell Overhead Extension'], [], 'Legs', [], 'ready', undefined, groupOf,
+  ), 'Barbell Overhead Extension',
+    'when the group has nothing else, the wider pool is offered rather than nothing');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

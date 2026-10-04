@@ -97,6 +97,21 @@ export default function BuildWorkout() {
    *  than as today's index so a screen left open over midnight still means
    *  today; `useToday` below is what makes that re-render. */
   const [startDay, setStartDay] = useState<number | null>(null);
+  /**
+   * Whether the day was chosen through the "Today" chip rather than its own
+   * weekday.
+   *
+   * Both chips mean the same day, and the first version let both carry the
+   * tick on the grounds that they are one day. Seen on a device, on a Saturday,
+   * that reads as two days picked — and these are `accessibilityRole="radio"`,
+   * so it is not only ambiguous, it is a radio group announcing two selected
+   * options, which no screen reader has a sensible way to say.
+   *
+   * So the tick follows the chip that was actually tapped. Null until the
+   * member chooses, and "Today" is where the tick starts, because that is what
+   * most of these sessions are for.
+   */
+  const [viaToday, setViaToday] = useState(true);
   const [built, setBuilt] = useState<
     { targets: string[]; noKit: boolean; together: boolean; startDay: number } | null>(null);
   /** One movement swapped for another, by the generated row's own key. Cleared
@@ -215,21 +230,24 @@ export default function BuildWorkout() {
           {/* Today first, then the week itself. Today is the day most of these
               sessions are for and the member should not have to work out which
               weekday that is; the week still reads Sunday to Saturday behind
-              it, and today's own weekday carries the tick too — the two chips
-              are one day. */}
-          {[{ label: 'Today', at: today }, ...WEEK_DAY_NAMES.map((n, i) => ({ label: n, at: i }))].map(({ label, at }, k) => {
+              it. Exactly ONE chip is ever ticked — see `viaToday`. */}
+          {[{ label: 'Today', at: today, isToday: true }, ...WEEK_DAY_NAMES.map((n, i) => ({ label: n, at: i, isToday: false }))].map(({ label, at, isToday }, k) => {
             const name = WEEK_DAY_NAMES[at];
             const i = at;
+            // One tick, on the chip that was tapped. The "Today" chip and
+            // today's own weekday are the same day and would otherwise both
+            // light up.
+            const on = day === i && (isToday ? viaToday : !(i === today && viaToday));
             return (
             <Pressable
               key={`${label}-${k}`}
-              onPress={() => setStartDay(i)}
+              onPress={() => { setStartDay(i); setViaToday(isToday); }}
               accessibilityRole="radio"
-              accessibilityState={{ selected: day === i }}
+              accessibilityState={{ selected: on }}
               accessibilityLabel={`${splitting ? 'Start on' : 'Train on'} ${name}${i === today ? ', today' : ''}`}
               hitSlop={hitSlopFor(MIN_TARGET)}
             >
-              {day === i ? (
+              {on ? (
                 <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                   <TonedChip label={label} icon="check" />
                 </View>
@@ -374,7 +392,10 @@ export default function BuildWorkout() {
                 // Everything the day currently holds, so a replacement cannot
                 // put the same movement on the day twice.
                 const used = d.exercises.map((x) => swaps[x.key] || x.name);
-                const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus, name);
+                // `byName` is the catalogue, so the swap can be held to the
+                // group of the movement it replaces. See nextAlternative.
+                const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus, name,
+                  (x) => (byName.get(x)?.group || '').trim());
                 const chk = checkInjury(name, group, cd.injuries, cd.profileStatus);
                 // The line names exactly the movement Replace will put in, and
                 // nothing else. It used to name the first two free movements at
