@@ -485,7 +485,7 @@ export default function BuildWorkout() {
                 // third of the catalogue is filed as "Full body". See
                 // nextAlternative.
                 const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus, name,
-                  (x) => byName.get(x)?.primaryMuscles ?? []);
+                  (x) => byName.get(x)?.primaryMuscles ?? [], ei);
                 const chk = checkInjury(name, group, cd.injuries, cd.profileStatus);
                 // The line names exactly the movement Replace will put in, and
                 // nothing else. It used to name the first two free movements at

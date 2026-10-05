@@ -172,6 +172,32 @@ const catalogue: TargetRow[] = [
     }
     eq(seen.size, 45, 'the first 45 swaps are 45 different movements, none of them the original five');
   }
+  /* ── five rows must not name one movement ──────────────────────────────
+     What the screen showed: a chest day whose every row read "Or instead:
+     Kettlebell Svend Press", once under Dumbbell Svend Press. Each answer was
+     true — none was on the day — so every assertion above passed over it, and
+     the repetition only reads as broken to somebody looking at the screen.
+
+     It is structural rather than unlucky: `exOf` rotates row i's pool by i+1,
+     which moves row i's own movement to the end and leaves the untaken
+     remainder in one order at the front of every row's list, so stripping out
+     what the day holds leaves all five rows the identical list. Hence `slot`,
+     and hence this: the suggestions a day shows at rest are all different. */
+  {
+    const day = targetedProgram(tri, [{ kind: 'muscle', name: 'Triceps' }]).program.days[0];
+    const used = day.exercises.map((x) => x.name);
+    const shown = day.exercises.map((e, i) =>
+      nextAlternative(e.alternatives, used, 'Arms', [], 'ready', e.name, undefined, i));
+    eq(shown.filter((a) => a != null).length, day.exercises.length, 'every row has a swap to offer');
+    eq(new Set(shown).size, day.exercises.length,
+      `each row names a different movement — got ${shown.join(', ')}`);
+    for (const a of shown) ok(!used.includes(a!), `${a} is not already on the day`);
+    // And without the slot it is the bug, so this test cannot pass by accident
+    // if the rotation is ever dropped.
+    const flat = day.exercises.map((e) => nextAlternative(e.alternatives, used, 'Arms', [], 'ready', e.name));
+    eq(new Set(flat).size, 1, 'and with no slot every row names the same one, which is what was shipped');
+  }
+
   // One row, Replace pressed again and again, walks the pool rather than
   // flipping between the two movements a swap keeps freeing.
   {

@@ -112,6 +112,26 @@ export function nextAlternative(
    * in the pool.
    */
   musclesOf?: (name: string) => readonly string[],
+  /**
+   * Where this row sits in its day, so that two rows do not name the same swap.
+   *
+   * Without it every row on a single-target day offers the SAME movement, and
+   * not by accident — it falls out of how the pools are built. `exOf` in
+   * targetedWorkout.ts hands row i the pool rotated by i+1, which puts row i's
+   * own movement last and leaves everything the day did not take in its
+   * original order at the front of all of them. Strip out the movements the day
+   * holds and every row is left with the identical list, so every row names its
+   * first entry. A chest day drew "Or instead: Kettlebell Svend Press" five
+   * times, once under Dumbbell Svend Press.
+   *
+   * Each answer was true — none of them was on the day — which is why nothing
+   * caught it: there is no wrong movement here to assert against, only a
+   * repetition that reads as a broken screen. So the row's own position picks
+   * which free movement it offers, and five rows name five movements.
+   *
+   * Omitted, the behaviour is what it was: the first free movement in the pool.
+   */
+  slot = 0,
 ): string | null {
   const key = (x: string) => x.trim().toLowerCase();
   const taken = new Set((used || []).map(key));
@@ -128,6 +148,13 @@ export function nextAlternative(
     ? free.filter((a) => (musclesOf!(a) || []).some((m) => mine.has(key(m))))
     : [];
   const pool = sameArea.length ? sameArea : free;
-  const clear = pool.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
-  return clear ?? pool[0];
+  // Rotated by the row's own position, so the five rows of a day walk five
+  // different entries of one pool rather than all stopping at its first. A pool
+  // shorter than the day wraps and two rows do collide — unavoidable, and still
+  // better than every row naming the same movement. Applied AFTER the same-area
+  // filter, so varying the answer never costs the member a matching one.
+  const start = ((Math.trunc(slot) % pool.length) + pool.length) % pool.length;
+  const ordered = [...pool.slice(start), ...pool.slice(0, start)];
+  const clear = ordered.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
+  return clear ?? ordered[0];
 }
