@@ -1050,7 +1050,11 @@ export default function Home() {
             // is no less reachable than the row it replaces.
             <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button"
               accessibilityLabel="Nothing logged yet today. Open Daily Habits"
-              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+              // Top-aligned, not centred: the sentence runs to four lines at the
+              // default text size and centring drops the plate to the third of
+              // them, where it reads as belonging to the body rather than to the
+              // heading it is the mark for.
+              style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
               <IconPlate icon="plus" tone="brand" size={44} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ ...ty.head, color: t.ink }}>Nothing logged yet today</Text>
