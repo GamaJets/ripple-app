@@ -14,6 +14,7 @@ const { readFileSync } = require('node:fs') as {
 };
 import {
   mapMuscle, unmapped, approximations, isUndrawn, drawnIntensity,
+  exerciseIntensity, sessionIntensity, PRIMARY, SECONDARY,
 } from './muscleMap';
 
 const errors: string[] = [];
@@ -105,6 +106,40 @@ eq(approximations(['rhomboids', 'rhomboids']).length, 1,
   // and was not declared is the failure this catches.
   const silent = TRAINED.filter((t) => (mapMuscle(t)?.drawn.length ?? 0) === 0 && !isUndrawn(t));
   eq(silent.join(','), '', 'every trained muscle either draws or is a declared gap');
+}
+
+/* ── a session's muscles are the LARGEST of its movements', never the sum ──
+   The failure this catches: a day holding four curls drawing the biceps four
+   times as hard as a day holding one, which is what summing does — and with a
+   ramp that clamps at 1, every arm day would then look identical. */
+{
+  const curl = { primary: ['biceps brachii'], secondary: ['forearm flexors'] };
+  const one = sessionIntensity([curl]);
+  const four = sessionIntensity([curl, curl, curl, curl]);
+  eq(JSON.stringify(four), JSON.stringify(one), 'four of the same movement light exactly what one does');
+
+  // An assisting muscle in one movement that another movement LEADS is lit as
+  // led. The curl assists the forearms; a wrist curl leads them.
+  const wrist = { primary: ['forearm flexors'], secondary: [] as string[] };
+  const both = sessionIntensity([curl, wrist]);
+  const assisted = exerciseIntensity(curl.primary, curl.secondary);
+  const led = exerciseIntensity(wrist.primary, wrist.secondary);
+  for (const layer of Object.keys(led)) {
+    ok(both[layer] === led[layer],
+      `"${layer}" is led by one movement, so the session lights it as led — got ${both[layer]}, want ${led[layer]}`);
+    ok(led[layer] > (assisted[layer] ?? 0),
+      `leading "${layer}" is drawn harder than assisting it`);
+  }
+  ok(PRIMARY > SECONDARY, 'a primary mover outranks an assisting muscle');
+
+  // An empty session is an empty map, not a lit body: a built workout with no
+  // movements in it must draw nothing rather than a grey figure claiming to be
+  // a picture of it.
+  eq(Object.keys(sessionIntensity([])).length, 0, 'no movements light no layers');
+  // A movement the catalogue names no muscles for contributes nothing and
+  // throws nothing — 41 catalogue rows are in exactly that state.
+  eq(Object.keys(sessionIntensity([{ primary: [], secondary: [] }])).length, 0,
+    'a movement with no muscles named lights no layers');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

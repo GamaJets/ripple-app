@@ -46,8 +46,15 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useBackFromHub } from '../../src/ui/backTo';
 import {
-  Cta, Flag, Ghost, Notice, PageHead, PartialRead, Rule, Section, SectionHead, Segmented, TonedChip,
+  Cta, Flag, Ghost, HeroCard, Notice, PageHead, PartialRead, Rule, Section, SectionHead, Segmented,
+  TonedChip,
 } from '../../src/ui/kit';
+import { GuardedImage } from '../../src/ui/GuardedImage';
+import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { MuscleBody } from '../../src/ui/MuscleBody';
+import { sessionIntensity } from '../../src/lib/muscleMap';
+import { busierSide, rampFor } from '../../src/lib/bodyHeat';
+import { layerNames } from '../../src/ui/muscleArt';
 import { useClientData } from '../../src/ui/clientData';
 // The injury check and the swap, both of them out of src/lib/builtWorkout.ts
 // rather than written again here. `checkInjury` will not answer "nothing is
@@ -59,7 +66,7 @@ import { MusclePicker } from '../../src/ui/MusclePicker';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
-import { grown, hairline, layout, sp, type as ty, font } from '../../src/theme/scale';
+import { grown, hairline, layout, radius, sp, type as ty, font } from '../../src/theme/scale';
 import { WEEK_DAYS, WEEK_DAY_NAMES, weekIndexOf } from '../../src/lib/weekStart';
 import { useToday } from '../../src/ui/today';
 import { localDate } from '../../src/lib/localDate';
@@ -142,6 +149,37 @@ export default function BuildWorkout() {
     for (const r of cat.rows) m.set(r.name, r);
     return m;
   }, [cat.rows]);
+
+  /**
+   * The catalogue rows the built session currently holds — swaps applied, in
+   * the order they are drawn.
+   *
+   * One list with two readers: the thumbnail on each row, and the figure on
+   * the card over them. Built once so the two cannot disagree about what is in
+   * the session, which is exactly what a replacement would otherwise cause —
+   * a picture of the movement that was swapped OUT, beside the name of the one
+   * that replaced it.
+   */
+  const planRows = useMemo(() => {
+    if (!plan) return [] as CatalogueRow[];
+    const out: CatalogueRow[] = [];
+    for (const d of plan.program.days) {
+      for (const e of d.exercises) {
+        const r = byName.get(swaps[e.key] || e.name);
+        if (r) out.push(r);
+      }
+    }
+    return out;
+  }, [plan, swaps, byName]);
+  /** Every thumbnail the session needs, signed in one request. The stills are
+   *  in a private bucket, so a path is not a URL — see src/ui/signedMedia.ts. */
+  const thumbFor = useCatalogueThumbs(planRows);
+  /** What the whole session trains, for the figure on the card. The LARGEST of
+   *  its movements and never the sum: see sessionIntensity. */
+  const trains = useMemo(
+    () => sessionIntensity(planRows.map((r) => ({ primary: r.primaryMuscles, secondary: r.secondaryMuscles }))),
+    [planRows],
+  );
 
   /** A day each is only a choice with something to split; one target is one
    *  session whichever way the control is set. */
@@ -319,19 +357,56 @@ export default function BuildWorkout() {
        order, and 'partial' counts as unread there and here. */
     const injLoading = cd.profileStatus === 'loading';
     const injRead = isWhole(cd.profileStatus);
+    /* ── the shape of the session, counted ──────────────────────────────
+       Movements and sets, never a duration: there is no duration model in
+       this codebase and "about 38 minutes" over a session nobody has timed is
+       a figure with nothing behind it. These two are the plan itself. */
+    const moves = program.days.reduce((n, d) => n + d.exercises.length, 0);
+    const sets = program.days.reduce((n, d) => n + d.exercises.reduce((m, e) => m + e.sets, 0), 0);
+    const shape = [
+      program.days.length > 1 ? `${program.days.length} days` : null,
+      moves === 1 ? '1 movement' : `${moves} movements`,
+      sets === 1 ? '1 set' : `${sets} sets`,
+    ].filter(Boolean).join(' \u00b7 ');
+    /* The one loud block on the screen, and the only one: the picker above it
+       is four white cards on grey because they are four questions of equal
+       weight, and this is the answer they were asked for. `HeroCard` is the
+       kit's dark card — the same one the member's home opens with — so this is
+       the contrast that already exists, used where the screen's point is.
+
+       The figure is only drawn where the catalogue named muscles the artwork
+       can draw: an unlit body on a session that trains something would read as
+       "this works nothing", which is a claim the catalogue did not make. It is
+       decorative and hidden from the screen reader — the focus chips beside it
+       name the same thing in words, and `legend`/`captions` are off because the
+       chips and this screen's own four status sentences say it. Its ramp and
+       surface are the NIGHT card's, not the page's: rampFor picks a ramp by the
+       luminance of what it is drawn on, and left on `t.bg` it would grade a
+       dark figure against a light page. */
+    const lit = Object.keys(trains).length > 0;
+    const side = busierSide(trains, layerNames('front'), layerNames('back'));
     return (
       <>
-        <Rule />
-        <Section>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Built From The Catalogue</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{program.title}</Text>
-          {program.focus.length ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-              {program.focus.map((f) => <TonedChip key={f} label={f} tone={groupTone(f)} />)}
+        <HeroCard eyebrow="Built From The Catalogue" title={program.title} meta={shape}>
+          {lit || program.focus.length ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+              {lit ? (
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <MuscleBody side={side} intensity={trains} status={cat.status} height={104}
+                    ramp={rampFor(t.night)} surface={t.night} legend={false} captions={false} />
+                </View>
+              ) : null}
+              {program.focus.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, flex: 1, minWidth: 0 }}>
+                  {program.focus.map((f) => <TonedChip key={f} label={f} tone={groupTone(f)} />)}
+                </View>
+              ) : null}
             </View>
           ) : null}
+        </HeroCard>
+        <Section>
           {built?.noKit ? (
-            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
+            <Text style={{ ...ty.body, color: t.ink2 }}>
               Every movement here needs no equipment at all: no bar, no bands, no bench.
             </Text>
           ) : null}
@@ -405,6 +480,9 @@ export default function BuildWorkout() {
                 // button delivered another. A hint that disagrees with its own
                 // button is worse than no hint.
                 const alts = alt ? (byName.get(alt)?.display.text ?? alt) : '';
+                // Signed in one batch for the whole session — see `planRows`.
+                // Null where the row has no still, which 7 of 615 do not.
+                const thumb = row ? thumbFor(row) : null;
                 return (
                   <View key={e.key} style={{ borderTopWidth: ei === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <Pressable
@@ -430,6 +508,28 @@ export default function BuildWorkout() {
                       paddingVertical: sp.md, minHeight: MIN_TARGET,
                     }}
                   >
+                    {/* The picture of the movement, not a generic glyph. A
+                        built session reads as five lines of "3 × 10-15 · Arms"
+                        otherwise, and a member who cannot picture a
+                        concentration curl has no way to tell it from the four
+                        rows around it. The catalogue carries a still for 608
+                        of its 615 rows and this screen already loads them —
+                        `thumbPath` is on every CatalogueRow it reads. Keyed on
+                        `row`, which is the movement AFTER any replacement, so
+                        a swap changes the picture with the name. */}
+                    <View style={{
+                      width: 52, height: 52, borderRadius: radius.md, backgroundColor: t.surface2,
+                      overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {thumb ? (
+                        <GuardedImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
+                          style={{ width: '100%', height: '100%' }} />
+                      ) : (
+                        // No picture is said with the glyph rather than an empty
+                        // square, which reads as an image that failed to load.
+                        <Icon name="dumbbell" size={17} color={t.ink3} />
+                      )}
+                    </View>
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
                         <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{label}</Text>

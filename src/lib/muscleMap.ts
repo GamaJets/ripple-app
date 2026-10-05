@@ -180,3 +180,51 @@ export function drawnIntensity(byTrained: Readonly<Record<string, number>>): Rec
   }
   return out;
 }
+
+/* ── a movement's muscles, and a session's ──────────────────────────────── */
+
+/** Intensity a primary mover is drawn at: the top of the ramp. */
+export const PRIMARY = 1;
+/** Intensity an assisting muscle is drawn at: band 2 of the ramp. */
+export const SECONDARY = 0.5;
+
+/**
+ * Intensity per DRAWN layer for one movement, from the catalogue's two lists.
+ *
+ * A muscle named in both lists takes the primary value — `drawnIntensity`
+ * keeps the LARGEST when two names land on one layer, and building the
+ * trained map with primaries written last does the same one level up.
+ */
+export function exerciseIntensity(
+  primary: readonly string[],
+  secondary: readonly string[],
+): Record<string, number> {
+  const byTrained: Record<string, number> = {};
+  for (const m of secondary) byTrained[m] = SECONDARY;
+  for (const m of primary) byTrained[m] = PRIMARY;
+  return drawnIntensity(byTrained);
+}
+
+/**
+ * Intensity per DRAWN layer for a whole session — every movement in it at once.
+ *
+ * The LARGEST wins, never the sum, for the reason `drawnIntensity` gives one
+ * level down: a day with four curls in it has not trained the biceps four
+ * times as hard as a day with one, and summing would draw it that way. So a
+ * muscle any movement leads is lit as led, whatever else assists it.
+ *
+ * Lives here rather than in the component that draws it because two screens
+ * now need it, and two copies of a weighting is how one of them ends up
+ * saying a session trains something the other says it does not.
+ */
+export function sessionIntensity(
+  movements: readonly { primary: readonly string[]; secondary: readonly string[] }[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const mv of movements) {
+    for (const [layer, v] of Object.entries(exerciseIntensity(mv.primary ?? [], mv.secondary ?? []))) {
+      out[layer] = Math.max(out[layer] ?? 0, v);
+    }
+  }
+  return out;
+}

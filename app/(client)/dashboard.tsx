@@ -32,7 +32,7 @@ import { View, Text, ScrollView, Pressable, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, Notice, Card, Flag, HeroCard, HeroRing, Ring, MiniRing, DayBars, TonedChip, ChartShell, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, Notice, Card, Flag, HeroCard, HeroRing, IconPlate, Ring, MiniRing, DayBars, TonedChip, ChartShell, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, font, grown } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
@@ -766,6 +766,28 @@ export default function Home() {
     stepsWhy ? `Steps · ${stepsWhy}` : null,
   ].filter((line): line is string => line !== null);
 
+  /**
+   * Whether today holds nothing at all yet, as a FACT rather than as a gap.
+   *
+   * At nine in the morning the four rings are 0%, 0%, 0/20 and a dash. Every
+   * figure is true and the picture is a day already failed — four empty arcs
+   * are the first thing on the screen, over a day nobody has had the chance to
+   * do anything with. So when there is genuinely nothing to draw, the card
+   * says what fills it instead of drawing four noughts.
+   *
+   * Gated on WHOLE reads, every one of them, because that is the whole
+   * difference between "you have not eaten yet" and "we could not read what
+   * you ate". A short read leaves this false and the rings and their reasons
+   * stand — `snapshotNotes` already names which read fell short, and replacing
+   * them with "nothing logged yet today" would be the app inventing a clean
+   * sheet out of its own failure. Steps are the one that may be unreadable
+   * without lying: a member with no watch has no step count to have logged,
+   * and the note under the card says so in its own words.
+   */
+  const nothingToday = foodWhole && consumed.kcal === 0 && consumed.p === 0
+    && hyd.showCount && water === 0
+    && (!stepsCounted || (wToday.steps ?? 0) === 0);
+
   // ── This Week: seven bars off the training log ───────────────────────────
   //
   // How many movements the log holds for each day of THIS week — the same
@@ -1007,15 +1029,38 @@ export default function Home() {
             figure of another screen and is a BUTTON to it, so the macro meters,
             the water controls and the step goal stay where they have room.
 
-            All four are always drawn. A brand-new account used to get no fuel
-            tile at all (`showFuel`), because a row of dashes looked broken; a
-            ring with a dash in it and one line under the row saying what would
-            fill it is the opposite of broken — it is the prompt. The lines are
-            `snapshotNotes`, above, with the gate each ring answers to. */}
+            All four are drawn together or not at all. A brand-new account
+            used to get no fuel tile at all (`showFuel`), because a row of
+            dashes looked broken; a ring with a dash in it and one line under
+            the row saying what would fill it is the opposite of broken — it is
+            the prompt. The lines are `snapshotNotes`, above, with the gate each
+            ring answers to, and they are printed either way.
+
+            What is NOT drawn is four noughts over a day nothing has happened
+            in yet — see `nothingToday`, which is a statement about today and
+            not about a read that fell short. Tiles are still never dropped one
+            at a time: it is the four rings or the sentence that replaces them,
+            because a row that loses a tile is the thing that looked broken. */}
         <Section>
           <SectionHead title="Daily Snapshot" note="Details" onPress={() => router.push('/(client)/habits')} />
           {/* Wraps two and two at the largest text, where four grown rings no
               longer share a card's width; `grown(70)` is the ring's own size. */}
+          {nothingToday ? (
+            // One control, going where three of the four rings go, so the card
+            // is no less reachable than the row it replaces.
+            <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button"
+              accessibilityLabel="Nothing logged yet today. Open Daily Habits"
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+              <IconPlate icon="plus" tone="brand" size={44} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>Nothing logged yet today</Text>
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
+                  Your calories, protein, water and steps fill in as the day goes. Log a meal, add a
+                  glass of water, or let your watch count your steps.
+                </Text>
+              </View>
+            </Pressable>
+          ) : (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
             {snapshot.map((r) => (
               // The ring is a picture; the control is a button that says the
@@ -1030,6 +1075,7 @@ export default function Home() {
               </Pressable>
             ))}
           </View>
+          )}
           {snapshotNotes.map((line, i) => (
             <Text key={line} style={{ ...ty.micro, ...font('500'), color: t.ink3, marginTop: i === 0 ? sp.md : sp.xs }}>{line}</Text>
           ))}

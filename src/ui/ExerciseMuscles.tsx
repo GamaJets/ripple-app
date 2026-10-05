@@ -54,7 +54,7 @@ import { MuscleBody } from './MuscleBody';
 import { layerNames, type BodySide } from './muscleArt';
 import { sp, radius, grown, font, type as ty } from '../theme/scale';
 import { rampFor } from '../lib/bodyHeat';
-import { approximations, drawnIntensity, unmapped } from '../lib/muscleMap';
+import { approximations, exerciseIntensity, unmapped } from '../lib/muscleMap';
 import { catalogueValue as cap } from '../lib/format';
 
 /**
@@ -78,11 +78,6 @@ import { catalogueValue as cap } from '../lib/format';
 // here because the exercise and library screens already import it from this file.
 export { groupTone } from './groupTone';
 
-/** Intensity a primary mover is drawn at: the top of the ramp. */
-const PRIMARY = 1;
-/** Intensity an assisting muscle is drawn at: band 2 of the ramp. */
-const SECONDARY = 0.5;
-
 /** Height of each figure on the exercise screens. Two of them sit side by
  *  side and come to about 150 points across, which fits the narrowest phone
  *  with the section's own padding to spare. */
@@ -96,20 +91,6 @@ const COMPACT_HEIGHT = 40;
 // manifest and this is asked for every row of a fifty-row page.
 const FRONT_LAYERS = new Set(layerNames('front'));
 const BACK_LAYERS = new Set(layerNames('back'));
-
-/**
- * Intensity per DRAWN layer for a movement, from the catalogue's two lists.
- *
- * A muscle named in both lists takes the primary value — `drawnIntensity`
- * keeps the LARGEST when two names land on one layer, and building the
- * trained map with primaries written last does the same one level up.
- */
-function exerciseIntensity(primary: readonly string[], secondary: readonly string[]): Record<string, number> {
-  const byTrained: Record<string, number> = {};
-  for (const m of secondary) byTrained[m] = SECONDARY;
-  for (const m of primary) byTrained[m] = PRIMARY;
-  return drawnIntensity(byTrained);
-}
 
 /** How many of the lit layers this side can actually draw. */
 function litOn(intensity: Readonly<Record<string, number>>, side: BodySide): number {
