@@ -193,6 +193,7 @@ import { useAuth } from '../../src/ui/auth';
 import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useRevealSelected } from '../../src/ui/useRevealSelected';
+import { useCloseOnBlur } from '../../src/ui/closeOnBlur';
 
 // ── the weekday, the month and the clock, in the reader's own language ─────
 //
@@ -2499,6 +2500,20 @@ export default function TrainerSchedule() {
   const [moveDayKey, setMoveDayKey] = useState<string | null>(null);
   const openMove = (s: TrainingSession) => { setMoveDayKey(dayKey(s.startsAt)); setMoveFrom(s); };
   const closeMove = () => { setMoveFrom(null); setMoveDayKey(null); };
+
+  /* Every sheet on this screen, shut when the reader leaves it.
+   *
+   * A <Modal> is drawn by the native layer for as long as its component is
+   * mounted, and a tab's screens stay mounted when you leave them — so a sheet
+   * opened here was still over the app after a deep link moved it to Build
+   * Program, with its write buttons live. Seen on 5 Oct 2026. The reason it is
+   * every sheet and not the one that was caught is that they are all the same
+   * shape, and a list of exceptions is how the next one gets added without
+   * anybody deciding it should be. See src/ui/closeOnBlur.ts. */
+  useCloseOnBlur(() => {
+    setAvailOpen(false); setBlockOpen(false); setBusyOpen(false); setSyncOpen(false);
+    setAddOpen(false); setSeriesOpen(false); setEndFor(null); closeMove();
+  });
   /** The fourteen days the sheet offers, from today. Built from local parts, so
    *  "tomorrow" is tomorrow on the coach's own clock across a clock change. */
   const moveDays = Array.from({ length: 14 }, (_, i) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + i));

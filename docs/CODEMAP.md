@@ -12,7 +12,7 @@ is paid again on every turn of the session that opened it.
 | 7,721 | 123k | `app/(client)/workouts.tsx` |
 | 5,498 | 85k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
-| 5,224 | 79k | `app/(trainer)/calendar.tsx` |
+| 5,239 | 79k | `app/(trainer)/calendar.tsx` |
 | 5,189 | 83k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,414 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -681,117 +681,117 @@ Total: 47 files, 119,414 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/calendar.tsx`
 
-5,224 lines · ~79k tokens · 108 anchors
+5,239 lines · ~79k tokens · 108 anchors
 
 ```
-197-212       §        the weekday, the month and the clock, in the reader's own language
-213-219       fn       DOW
-220-224       fn       dayKey
-225-226       fn       timeLabel
-227-231       fn       dateLabel
-232-254       fn       dateOfLabel
-255-263       type     DayTypeKey
-264-264       fn       markOf
-265-271       fn       typeOfSession
-272-280       fn       MonthStep
-281-302       fn       Chip
-303-318       fn       HOURS
-319-323       fn       hourLabel
-324-337       fn       avTime
-338-382       fn       TimeGrid
-383-406       default  TrainerSchedule
-407-426       §        The empty diary that was not empty
-427-493       §        the focus refresh that would not stop
-494-520       fn         bookedIds
-521-598       fn         reloadWaitWho
-599-599       fn         nameOf
-600-608       fn         slotOf
-609-614       fn         tapOf
-615-622       fn         openClient
-623-661       §        The one person in the transaction this app never reminded
-662-667       fn         sendFloorNow
-668-679       fn         remindable
-680-773       §        the window is the READ, not the rows that came back
-774-788       §        Blocking more than one day
-789-891       §        Blocking what the phone already knows
-892-912       fn         pull
-913-937       fn         standing
-938-949       §        the slots that stopped coming
-950-968       fn         applyPhoneZone
-969-1053      fn         generateSlots
-1054-1080     fn               blocking
-1081-1115     §        the stretch, and what it would do
-1116-1137     fn         availByDay
-1138-1140     fn         removeRange
-1141-1170     fn           dayNames
-1171-1182     fn         clearDay
-1183-1202     fn               mine
-1203-1222     fn         addRange
-1223-1254     fn         addWeekly
-1255-1268     fn         seriesWho
-1269-1285     fn         nextOccurrenceOf
-1286-1359     fn         createSeriesNow
-1360-1412     fn         endSeriesNow
-1413-1413     fn         booked
-1414-1430     fn         open
-1431-1476     fn         selDaySessions
-1477-1511     fn         monthTypes
-1512-1547     fn         openSlots
-1548-1590     fn         doBlock
-1591-1640     fn         blockOneDay
-1641-1658     fn         reportBlock
-1659-1659     fn         confirmCancelAndBlock
-1660-1660     fn           who
-1661-1745     fn           go
-1746-1780     fn         loadBusy
-1781-1797     fn         openBusySheet
-1798-1807     fn         refreshLink
-1808-1818     fn         doConnectCalendar
-1819-1853     fn         doDisconnectCalendar
-1854-1878     fn         doSetWrite
-1879-1893     fn         currentPushWindow
-1894-1894     fn         teachingForSync
-1895-1929     fn         plannedEvents
-1930-1968     fn         pushCoverage
-1969-1994     fn         doPush
-1995-2075     §        a silent push that FAILED has not been done
-2076-2078     fn         toggleBusyPick
-2079-2079     fn         doBlockFromCalendar
-2080-2129     fn           picked
-2130-2171     fn         shiftMonth
-2172-2282     fn         handleAdd
-2283-2377     fn         cancelOne
-2378-2429     fn         doCancel
-2430-2499     fn         confirmWaive
-2500-2500     fn         openMove
-2501-2503     fn         closeMove
-2504-2504     fn         moveDays
-2505-2555     fn         moveDay
-2556-2572     fn         confirmMove
-2573-2607     fn         doMove
-2608-2636     fn         confirmMoveAt
-2637-2678     fn         doMoveAt
-2679-2724     fn         confirmCancel
-2725-2764     fn         removeOpen
-2765-2809     fn         doReoffer
-2810-2823     fn         reoffer
-2824-2835     §        and "all N of your clients" is a claim about who can TAKE it
-2836-2896     fn           ids
-2897-2950     fn         occurrenceLine
-2951-2966     fn         checkIn
-2967-2967     fn           realName
-2968-3008     fn           openRecord
-3009-3009     fn         exportSchedule
-3010-3045     fn           evts
-3046-3047     fn               todays
-3048-3180     fn               next
-3181-3673     fn               n
-3674-3870     fn               waiting
-3871-3873     fn               days
-3874-3876     fn               n
-3877-4123     fn               total
-4124-4899     §        WITHDRAWN, not hidden-because-broken
-4900-5224     fn               slot
+198-213       §        the weekday, the month and the clock, in the reader's own language
+214-220       fn       DOW
+221-225       fn       dayKey
+226-227       fn       timeLabel
+228-232       fn       dateLabel
+233-255       fn       dateOfLabel
+256-264       type     DayTypeKey
+265-265       fn       markOf
+266-272       fn       typeOfSession
+273-281       fn       MonthStep
+282-303       fn       Chip
+304-319       fn       HOURS
+320-324       fn       hourLabel
+325-338       fn       avTime
+339-383       fn       TimeGrid
+384-407       default  TrainerSchedule
+408-427       §        The empty diary that was not empty
+428-494       §        the focus refresh that would not stop
+495-521       fn         bookedIds
+522-599       fn         reloadWaitWho
+600-600       fn         nameOf
+601-609       fn         slotOf
+610-615       fn         tapOf
+616-623       fn         openClient
+624-662       §        The one person in the transaction this app never reminded
+663-668       fn         sendFloorNow
+669-680       fn         remindable
+681-774       §        the window is the READ, not the rows that came back
+775-789       §        Blocking more than one day
+790-892       §        Blocking what the phone already knows
+893-913       fn         pull
+914-938       fn         standing
+939-950       §        the slots that stopped coming
+951-969       fn         applyPhoneZone
+970-1054      fn         generateSlots
+1055-1081     fn               blocking
+1082-1116     §        the stretch, and what it would do
+1117-1138     fn         availByDay
+1139-1141     fn         removeRange
+1142-1171     fn           dayNames
+1172-1183     fn         clearDay
+1184-1203     fn               mine
+1204-1223     fn         addRange
+1224-1255     fn         addWeekly
+1256-1269     fn         seriesWho
+1270-1286     fn         nextOccurrenceOf
+1287-1360     fn         createSeriesNow
+1361-1413     fn         endSeriesNow
+1414-1414     fn         booked
+1415-1431     fn         open
+1432-1477     fn         selDaySessions
+1478-1512     fn         monthTypes
+1513-1548     fn         openSlots
+1549-1591     fn         doBlock
+1592-1641     fn         blockOneDay
+1642-1659     fn         reportBlock
+1660-1660     fn         confirmCancelAndBlock
+1661-1661     fn           who
+1662-1746     fn           go
+1747-1781     fn         loadBusy
+1782-1798     fn         openBusySheet
+1799-1808     fn         refreshLink
+1809-1819     fn         doConnectCalendar
+1820-1854     fn         doDisconnectCalendar
+1855-1879     fn         doSetWrite
+1880-1894     fn         currentPushWindow
+1895-1895     fn         teachingForSync
+1896-1930     fn         plannedEvents
+1931-1969     fn         pushCoverage
+1970-1995     fn         doPush
+1996-2076     §        a silent push that FAILED has not been done
+2077-2079     fn         toggleBusyPick
+2080-2080     fn         doBlockFromCalendar
+2081-2130     fn           picked
+2131-2172     fn         shiftMonth
+2173-2283     fn         handleAdd
+2284-2378     fn         cancelOne
+2379-2430     fn         doCancel
+2431-2500     fn         confirmWaive
+2501-2501     fn         openMove
+2502-2518     fn         closeMove
+2519-2519     fn         moveDays
+2520-2570     fn         moveDay
+2571-2587     fn         confirmMove
+2588-2622     fn         doMove
+2623-2651     fn         confirmMoveAt
+2652-2693     fn         doMoveAt
+2694-2739     fn         confirmCancel
+2740-2779     fn         removeOpen
+2780-2824     fn         doReoffer
+2825-2838     fn         reoffer
+2839-2850     §        and "all N of your clients" is a claim about who can TAKE it
+2851-2911     fn           ids
+2912-2965     fn         occurrenceLine
+2966-2981     fn         checkIn
+2982-2982     fn           realName
+2983-3023     fn           openRecord
+3024-3024     fn         exportSchedule
+3025-3060     fn           evts
+3061-3062     fn               todays
+3063-3195     fn               next
+3196-3688     fn               n
+3689-3885     fn               waiting
+3886-3888     fn               days
+3889-3891     fn               n
+3892-4138     fn               total
+4139-4914     §        WITHDRAWN, not hidden-because-broken
+4915-5239     fn               slot
 ```
 
 ## `app/(trainer)/dashboard.tsx`
