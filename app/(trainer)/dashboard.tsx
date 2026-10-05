@@ -2449,6 +2449,27 @@ export default function TrainerClients() {
    *  answer and when nothing is left today; the hero then draws no column
    *  rather than a name it has no basis for. */
   const nextUp = todaySessions?.find((x) => Date.parse(x.startsAt) + x.durationMin * 60_000 > now.getTime()) ?? null;
+  /**
+   * The next booked session AFTER today, for the day today has none.
+   *
+   * A coach with nothing booked today met a 44pt "0" and an empty column
+   * beside it — the largest thing on their home screen was a nought, and the
+   * card said nothing else and offered nothing to do. The count is true and it
+   * stays; what was missing is that this screen already knew the answer to the
+   * question the nought provokes. `mySessions` is the whole diary, not today's
+   * slice of it, and `bookedAhead` has been reading future rows out of it for
+   * the roster since the day that column was added.
+   *
+   * Same rule as `nextUp` — a session is still ahead until it has ENDED — minus
+   * the local-day filter, and only read where `nextUp` is null, so a day with
+   * work in it is untouched. Null, not an empty answer, while the diary has not
+   * answered: the dash and its one line already say which, and a card that said
+   * "nothing booked ahead" off a failed read would be inventing an empty diary.
+   */
+  const nextAhead = (mySessions === null || nextUp) ? null
+    : mySessions
+      .filter((x) => x.status === 'booked' && Date.parse(x.startsAt) + x.durationMin * 60_000 > now.getTime())
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0] ?? null;
   const hi = now.getHours() < 12 ? 'Good Morning' : now.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
   const G = layout.gutter;
   /** The green + over the screen. 56pt is the size the board draws it and
@@ -2543,6 +2564,10 @@ export default function TrainerClients() {
               ? (sessionsUnread ? 'Your diary could not be read, so today’s count is not none' : 'Reading today’s schedule')
               : `${num(todaySessions.length)} ${todaySessions.length === 1 ? 'session' : 'sessions'} today`,
             nextUp ? `Next up ${fmtTime(nextUp.startsAt)}, ${nextUp.clientName || 'client name unavailable'}, PT session` : '',
+            !nextUp && nextAhead
+              ? `Next ${fmtRelativeDay(nextAhead.startsAt, now)} at ${fmtTime(nextAhead.startsAt)}, ${nextAhead.clientName || 'client name unavailable'}, PT session`
+              : '',
+            !nextUp && !nextAhead && todaySessions !== null ? 'Nothing booked ahead either' : '',
             'Open Schedule',
           ].filter(Boolean).join('. ')}
           style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
@@ -2575,11 +2600,34 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.brandDeep }}>PT Session</Text>
                 </View>
               </View>
+            ) : nextAhead ? (
+              /* Today is free and the diary said so. The column that would
+                 have held "Next Up" holds the next session there actually IS,
+                 with its day as well as its time — `fmtRelativeDay` says
+                 "Tomorrow" and "Thu 9 Oct" in the reader's own locale, and
+                 without the day a bare time beside a nought reads as today. */
+              <View style={{ flexShrink: 1, minWidth: 0, alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end', gap: 4 }}>
+                <Text style={{ ...ty.micro, color: t.nightInk3 }}>Next</Text>
+                <Text numberOfLines={2} style={{ ...ty.head, ...numeric, color: t.nightInk, textTransform: nextAhead.clientName ? 'capitalize' : 'none' }}>
+                  {fmtRelativeDay(nextAhead.startsAt, now)} · {fmtTime(nextAhead.startsAt)}
+                </Text>
+                <Text numberOfLines={1} style={{ ...ty.caption, color: t.nightInk2, textTransform: nextAhead.clientName ? 'capitalize' : 'none' }}>
+                  {nextAhead.clientName || 'Client name unavailable'}
+                </Text>
+              </View>
             ) : null}
           </View>
           {todaySessions === null ? (
             <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
               {sessionsUnread ? 'Your diary could not be read, so today’s count is not none.' : 'Reading today’s schedule…'}
+            </Text>
+          ) : !nextUp && !nextAhead ? (
+            /* Read, empty today, and empty ahead. The one case where the nought
+               really is the whole answer, so it says so rather than leaving the
+               card to imply it — and the card already opens Schedule, which is
+               where a session is put in. */
+            <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
+              Nothing booked ahead either. Tap to open your schedule and put something in.
             </Text>
           ) : null}
         </Pressable>

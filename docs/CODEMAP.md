@@ -13,7 +13,7 @@ is paid again on every turn of the session that opened it.
 | 5,498 | 85k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
 | 5,197 | 79k | `app/(trainer)/calendar.tsx` |
-| 5,141 | 82k | `app/(trainer)/dashboard.tsx` |
+| 5,189 | 83k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
 | 3,328 | 50k | `app/(trainer)/client.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,339 lines, ~1727k tokens if every one were read whole.
+Total: 47 files, 119,387 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -796,7 +796,7 @@ Total: 47 files, 119,339 lines, ~1727k tokens if every one were read whole.
 
 ## `app/(trainer)/dashboard.tsx`
 
-5,141 lines · ~82k tokens · 88 anchors
+5,189 lines · ~83k tokens · 88 anchors
 
 ```
 163-168       fn       sheet
@@ -879,14 +879,14 @@ Total: 47 files, 119,339 lines, ~1727k tokens if every one were read whole.
 2295-2309     §        and the same for the weekly summary
 2310-2398     fn         genSummary
 2399-2450     fn         reloadEverything
-2451-2471     fn         nextUp
-2472-2477     fn         openProfile
-2478-3391     fn         openAdd
-3392-3416     §        what used to be here, and why it is gone
-3417-4790     §        and each of the three now goes somewhere
-4791-5051     fn               problem
-5052-5092     fn               on
-5093-5141     fn       CoachSetupRow
+2451-2492     fn         nextUp
+2493-2498     fn         openProfile
+2499-3439     fn         openAdd
+3440-3464     §        what used to be here, and why it is gone
+3465-4838     §        and each of the three now goes somewhere
+4839-5099     fn               problem
+5100-5140     fn               on
+5141-5189     fn       CoachSetupRow
 ```
 
 ## `studio-web/app/accounting/page.tsx`
