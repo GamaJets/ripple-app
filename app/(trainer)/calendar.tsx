@@ -11,7 +11,7 @@
 // sections, and the day grid now reads through weight and the accent rather
 // than through boxes and 800-weight text.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Modal, type LayoutChangeEvent } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -192,6 +192,7 @@ import { fmtDay, fmtTime, monthNames, monthNamesShort, weekdayNameShort, num } f
 import { useAuth } from '../../src/ui/auth';
 import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { useRevealSelected } from '../../src/ui/useRevealSelected';
 
 // ── the weekday, the month and the clock, in the reader's own language ─────
 //
@@ -277,9 +278,14 @@ function MonthStep({ t, icon, label, onPress }: { t: Theme; icon: typeof BACK_IC
   );
 }
 
-function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean; onPress: () => void }) {
+function Chip({ t, label, on, onPress, onLayout }: {
+  t: Theme; label: string; on: boolean; onPress: () => void;
+  /** From `useRevealSelected().chip(key)`, so the strip can scroll to this one
+   *  when it is the selected one. Absent on the strips short enough to fit. */
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
+    <Pressable onPress={onPress} onLayout={onLayout} accessibilityRole="button" accessibilityState={{ selected: on }}
       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
@@ -332,11 +338,22 @@ const DURS = [30, 45, 60, 90];
 function TimeGrid({ t, hour, minute, onHour, onMinute }: {
   t: Theme; hour: number; minute: number; onHour: (h: number) => void; onMinute: (m: number) => void;
 }) {
+  /* The hour strip holds all 24 and shows about six. Opened at the default of
+     9am it used to start at 12am with the selected chip off the right edge, so
+     the sheet showed a row of grey pills and no selection at all — the heading
+     above it said "Time · 9:00am" and the control under it disagreed. Seen on
+     an iPhone 17 Pro, 5 Oct 2026, on the Add Session sheet. The strip scrolls
+     to its own selection now; src/lib/revealOffset.ts is the arithmetic and
+     says there why it declines to move a chip that is already on screen. */
+  const strip = useRevealSelected(hour);
   return (
     <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} ref={strip.ref}
+        onLayout={strip.onLayout} onScroll={strip.onScroll} scrollEventThrottle={64}
+        contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
         {HOURS.map((h) => (
-          <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={hour === h} onPress={() => onHour(h)} />
+          <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={hour === h}
+            {...strip.chip(h)} onPress={() => onHour(h)} />
         ))}
       </ScrollView>
       <View style={{ flexDirection: 'row', gap: sp.sm }}>
@@ -825,6 +842,11 @@ export default function TrainerSchedule() {
   const [avToMin, setAvToMin] = useState(0);
   const [avDur, setAvDur] = useState(60);
   const [avBusy, setAvBusy] = useState(false);
+  /* The two 24-chip hour strips on the weekly-availability sheet. Its own note
+     below records what they looked like before: at the defaults of 7am and 7pm
+     both selected chips sat off the right edge and the rows read as unset. */
+  const avFromStrip = useRevealSelected(avFrom);
+  const avToStrip = useRevealSelected(avTo);
   /* ── Standing appointments ────────────────────────────────────────────────
    *
    * "Ana trains with me at seven every Tuesday" — the single most common fact
@@ -4258,9 +4280,12 @@ export default function TrainerSchedule() {
                   and had to scroll sideways twice to find out what they were
                   about to save. */}
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From · {avTime(avFrom, avFromMin)}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} ref={avFromStrip.ref}
+                onLayout={avFromStrip.onLayout} onScroll={avFromStrip.onScroll} scrollEventThrottle={64}
+                contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.map((h) => (
                   <Chip key={'af' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avFrom === h}
+                    {...avFromStrip.chip(h)}
                     onPress={() => { setAvFrom(h); if (avTo <= h) setAvTo(Math.min(24, h + 1)); }} />
                 ))}
               </ScrollView>
@@ -4271,9 +4296,11 @@ export default function TrainerSchedule() {
               </ScrollView>
 
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until · {avTo === 24 ? hourLabel(24) : avTime(avTo, avToMin)}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} ref={avToStrip.ref}
+                onLayout={avToStrip.onLayout} onScroll={avToStrip.onScroll} scrollEventThrottle={64}
+                contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.filter((h) => h >= avFrom).concat([24]).map((h) => (
-                  <Chip key={'at' + h} t={t} label={hourLabel(h)} on={avTo === h} onPress={() => setAvTo(h)} />
+                  <Chip key={'at' + h} t={t} label={hourLabel(h)} on={avTo === h} {...avToStrip.chip(h)} onPress={() => setAvTo(h)} />
                 ))}
               </ScrollView>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>

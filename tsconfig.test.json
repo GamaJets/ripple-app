@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/revealOffset.ts",
+    "src/lib/revealOffset.test.ts",
     "src/lib/mealSwaps.ts",
     "src/lib/mealSwaps.test.ts",
     "src/lib/cancelPolicy.ts",
