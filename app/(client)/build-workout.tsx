@@ -53,7 +53,7 @@ import { GuardedImage } from '../../src/ui/GuardedImage';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { MuscleBody } from '../../src/ui/MuscleBody';
 import { sessionIntensity } from '../../src/lib/muscleMap';
-import { busierSide, rampFor } from '../../src/lib/bodyHeat';
+import { busierSide } from '../../src/lib/bodyHeat';
 import { layerNames } from '../../src/ui/muscleArt';
 import { useClientData } from '../../src/ui/clientData';
 // The injury check and the swap, both of them out of src/lib/builtWorkout.ts
@@ -372,39 +372,53 @@ export default function BuildWorkout() {
        is four white cards on grey because they are four questions of equal
        weight, and this is the answer they were asked for. `HeroCard` is the
        kit's dark card — the same one the member's home opens with — so this is
-       the contrast that already exists, used where the screen's point is.
-
-       The figure is only drawn where the catalogue named muscles the artwork
-       can draw: an unlit body on a session that trains something would read as
-       "this works nothing", which is a claim the catalogue did not make. It is
-       decorative and hidden from the screen reader — the focus chips beside it
-       name the same thing in words, and `legend`/`captions` are off because the
-       chips and this screen's own four status sentences say it. Its ramp and
-       surface are the NIGHT card's, not the page's: rampFor picks a ramp by the
-       luminance of what it is drawn on, and left on `t.bg` it would grade a
-       dark figure against a light page. */
+       a contrast that already exists, used where the screen's point is. */
     const lit = Object.keys(trains).length > 0;
     const side = busierSide(trains, layerNames('front'), layerNames('back'));
     return (
       <>
         <HeroCard eyebrow="Built From The Catalogue" title={program.title} meta={shape}>
-          {lit || program.focus.length ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
-              {lit ? (
-                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                  <MuscleBody side={side} intensity={trains} status={cat.status} height={104}
-                    ramp={rampFor(t.night)} surface={t.night} legend={false} captions={false} />
-                </View>
-              ) : null}
-              {program.focus.length ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, flex: 1, minWidth: 0 }}>
-                  {program.focus.map((f) => <TonedChip key={f} label={f} tone={groupTone(f)} />)}
-                </View>
-              ) : null}
+          {program.focus.length ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
+              {program.focus.map((f) => <TonedChip key={f} label={f} tone={groupTone(f)} />)}
             </View>
           ) : null}
         </HeroCard>
         <Section>
+          {/* ── what the session trains, as a picture ─────────────────────
+              Here and not on the hero card above it, and the reason is
+              measured rather than aesthetic. The unlit body is `ink3` mixed
+              30% over whatever it is drawn on (GROUND_MIX, and its header does
+              the arithmetic for exactly that figure), and the two promises it
+              has to keep pull opposite ways: the ramp's bands need 3:1 against
+              the body, which wants a DARK body, and the silhouette needs 1.4:1
+              against its card, which wants a LIGHT one. On the page's four
+              surfaces both fit, and src/lib/bodyHeat.test.ts walks all twelve
+              palettes to say so. On `night` the window shuts — `night` is
+              near-black in every palette, light ones included, and of the
+              twenty-eight inks a palette carries exactly one clears both bars
+              there, by luck, and it is a data hue. So the figure goes where the
+              body is already measured.
+
+              Decorative, and hidden from the screen reader: the chips on the
+              card above name the same thing in words, and `legend`/`captions`
+              are off because the chips say it and this screen's own four
+              catalogue sentences cover the reads. Drawn only where the
+              catalogue named muscles the artwork can draw — an unlit body over
+              a session that trains something reads as "this works nothing",
+              which is a claim the catalogue did not make. */}
+          {lit ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <MuscleBody side={side} intensity={trains} status={cat.status} height={96}
+                  legend={false} captions={false} />
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink2, flex: 1, minWidth: 0 }}>
+                Where this session lands. The muscles each movement leads are drawn strongest; the
+                ones that assist are lighter.
+              </Text>
+            </View>
+          ) : null}
           {built?.noKit ? (
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Every movement here needs no equipment at all: no bar, no bands, no bench.
