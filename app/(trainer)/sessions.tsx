@@ -129,6 +129,7 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { InPersonNote } from '../../src/ui/InPersonNote';
 
 /**
  * The four outcomes, in the order a person would consider them.
@@ -929,6 +930,7 @@ export default function TrainerSessions() {
         {/* No subtitle: "clear outstanding outcomes first, then review…" was
             the page describing its own order, which the order already says. */}
         <PageHead title="Mark Sessions" />
+        <InPersonNote what="Marking what happened" />
         {(() => {
           const tz = deviceTimeZone();
           return (

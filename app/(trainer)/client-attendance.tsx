@@ -82,6 +82,7 @@ import { RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { useClientAttendance } from '../../src/ui/clientAttendance';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { InPersonNote } from '../../src/ui/InPersonNote';
 import {
   dwellMinutes, staffScopeNote, STAFF_RECORD_NOTE,
   type AttendanceEvent, type ClassOutcome,
@@ -413,6 +414,7 @@ export default function ClientAttendanceScreen() {
             record; the picker that names them is below the fold once
             somebody is chosen, as on client-body.tsx. */}
         <PageHead title="Attendance" subtitle={client?.name || undefined} />
+        <InPersonNote what="Attendance" />
 
         {/* ── who ──────────────────────────────────────────────────────────── */}
         {r.status === 'error' ? (

@@ -105,6 +105,7 @@ import { assertChanged } from '../../src/lib/changedRows';
 // notification and not two differently-worded copies of the same cancellation.
 import { classOffConfirmation } from '../../src/lib/notifyCopy';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { InPersonNote } from '../../src/ui/InPersonNote';
 import { tellTheCancelledRoom } from '../../src/lib/classOff';
 import { supabase } from '../../src/lib/supabase';
 
@@ -776,6 +777,7 @@ export default function TrainerClasses() {
           title="Classes"
           trailing={<Ghost icon="plus" a11yLabel={createOpen ? 'Close the new class form' : 'Schedule a class'} onPress={() => setCreateOpen((open) => !open)} />}
         />
+        <InPersonNote what="Classes" />
 
         {/* ── how full the timetable is, as a picture ──────────────────────
             The page opened on a form heading and a list of "8/12"s. The one

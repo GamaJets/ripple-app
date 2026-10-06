@@ -54,10 +54,10 @@ is paid again on every turn of the session that opened it.
 | 1,560 | 20k | `studio-web/app/equipment/page.tsx` |
 | 1,555 | 23k | `app/(owner)/members.tsx` |
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
-| 1,529 | 22k | `app/(trainer)/sessions.tsx` |
+| 1,531 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,440 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,442 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -3330,51 +3330,51 @@ Total: 47 files, 119,440 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/sessions.tsx`
 
-1,529 lines · ~22k tokens · 42 anchors
+1,531 lines · ~22k tokens · 42 anchors
 
 ```
 19-71         §        It is the coach's queue, not the gym's
 72-82         §        and WHO wrote the record
 83-108        §        Finishing a session, as opposed to merely marking it
-109-152       §        Answering a request for an hour the coach never opened
-153-161       fn       OUTCOMES
-162-163       fn       WHOLE_DAY_OUTCOMES
-164-179       fn       when
-180-195       fn       requestWhen
-196-199       fn       chipWord
-200-221       fn       dayOnly
-222-242       fn       byDay
-243-248       fn       dayHeading
-249-254       default  TrainerSessions
-255-255       fn         refreshTenant
-256-387       §        who these sessions belong to
-388-454       fn         load
-455-472       fn         loadRequests
-473-487       fn         pull
-488-549       fn         answer
-550-570       fn         queue
-571-571       fn         clearFilter
-572-574       fn         shownRows
-575-575       fn         allDays
-576-587       fn         days
-588-602       fn         history
-603-644       fn         historyIds
-645-645       fn         stateOf
-646-647       fn         shownHistory
-648-652       fn         historyDays
-653-653       fn         who
-654-657       fn         counts
-658-665       fn         pickedName
-666-687       fn         windowFrom
-688-704       fn         finish
-705-733       fn         mark
-734-795       §        the outcome, and the room it is recorded in
-796-804       fn         sendWaiting
-805-809       fn         undo
-810-812       fn           stands
-813-886       §        through the queue, like the mark it takes back
-887-887       fn         markDay
-888-1529      fn           label
+109-153       §        Answering a request for an hour the coach never opened
+154-162       fn       OUTCOMES
+163-164       fn       WHOLE_DAY_OUTCOMES
+165-180       fn       when
+181-196       fn       requestWhen
+197-200       fn       chipWord
+201-222       fn       dayOnly
+223-243       fn       byDay
+244-249       fn       dayHeading
+250-255       default  TrainerSessions
+256-256       fn         refreshTenant
+257-388       §        who these sessions belong to
+389-455       fn         load
+456-473       fn         loadRequests
+474-488       fn         pull
+489-550       fn         answer
+551-571       fn         queue
+572-572       fn         clearFilter
+573-575       fn         shownRows
+576-576       fn         allDays
+577-588       fn         days
+589-603       fn         history
+604-645       fn         historyIds
+646-646       fn         stateOf
+647-648       fn         shownHistory
+649-653       fn         historyDays
+654-654       fn         who
+655-658       fn         counts
+659-666       fn         pickedName
+667-688       fn         windowFrom
+689-705       fn         finish
+706-734       fn         mark
+735-796       §        the outcome, and the room it is recorded in
+797-805       fn         sendWaiting
+806-810       fn         undo
+811-813       fn           stands
+814-887       §        through the queue, like the mark it takes back
+888-888       fn         markDay
+889-1531      fn           label
 ```
 
 ## `app/(trainer)/client-body.tsx`

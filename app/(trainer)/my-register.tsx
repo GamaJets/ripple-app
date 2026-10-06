@@ -77,6 +77,7 @@ import { missingRegisters, peopleWaiting, gapsHeading, gapsNote, gapLine } from 
 // urgency.
 import { useMyCloseQueue } from '../../src/ui/coachClose';
 import { CoachCloseQueue } from '../../src/ui/CoachCloseQueue';
+import { InPersonNote } from '../../src/ui/InPersonNote';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
  *  the heading and the query cannot disagree about which one is on screen. */
@@ -212,6 +213,7 @@ export default function MyRegister() {
 
         {/* ── the board's head: back, and the title on the centre line ──── */}
         <PageHead title="Your Register" subtitle="Your classes" />
+        <InPersonNote what="Your register" />
 
         {/* Two bare percentages sit below this, on the screen a coach opens to
             check they have been paid right. */}
