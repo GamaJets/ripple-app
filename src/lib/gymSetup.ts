@@ -156,6 +156,20 @@ export interface TenantSettings {
 
 export interface SetupFacts {
   /**
+   * The tenant read LANDED and this account has no gym on it.
+   *
+   * A fourth state, and it exists because `tenant: null` was standing for it.
+   * Null means "nobody managed to ask", and every item built from it says so —
+   * "The gym record could not be read, so this could not be checked". On an
+   * account with no gym that is false twice over: nothing failed, and there is
+   * no record to read. It blamed a connection for an answer the database gave
+   * perfectly well, on the checklist an owner works through to get started.
+   *
+   * Optional, so every existing caller keeps the unread wording until it passes
+   * one, which is the right default for a caller that does not know.
+   */
+  noGym?: boolean;
+  /**
    * The tenants row, or NULL when that read did not come back. Null is not a
    * gym with nothing set: it is four settings nobody managed to ask about, and
    * four items go 'unknown' on it rather than 'todo'.
@@ -225,6 +239,11 @@ function stated(v: string | null): string | null {
 const UNREAD_GYM =
   'The gym record could not be read, so this could not be checked. It is not known to be either way.';
 
+/** The settled version of the same absence: there is no gym to check, and that
+ *  is an answer rather than a failure. */
+const NO_GYM =
+  'No gym is linked to this account yet, so there is nothing to check here. Create or join a gym and this fills in.';
+
 /**
  * The six, in order, each with its state and its consequence.
  *
@@ -243,7 +262,7 @@ export function assessGymSetup(f: SetupFacts): SetupItem[] {
     found: (s: TenantSettings) => string | null = () => null,
   ): SetupItem => (
     t === null
-      ? { key, state: 'unknown', title, breaks, onlyIf, unknownWhy: UNREAD_GYM, found: null }
+      ? { key, state: 'unknown', title, breaks, onlyIf, unknownWhy: f.noGym ? NO_GYM : UNREAD_GYM, found: null }
       : { key, state: isDone(t) ? 'done' : 'todo', title, breaks, onlyIf, unknownWhy: null, found: found(t) }
   );
 
@@ -256,7 +275,7 @@ export function assessGymSetup(f: SetupFacts): SetupItem[] {
     unknownWhy: string,
   ): SetupItem => (
     n === null
-      ? { key, state: 'unknown', title, breaks, onlyIf, unknownWhy, found: null }
+      ? { key, state: 'unknown', title, breaks, onlyIf, unknownWhy: f.noGym ? NO_GYM : unknownWhy, found: null }
       : { key, state: n > 0 ? 'done' : 'todo', title, breaks, onlyIf, unknownWhy: null, found: null }
   );
 

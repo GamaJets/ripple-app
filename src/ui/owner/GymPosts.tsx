@@ -10,6 +10,7 @@
 // from src/lib/postCard.ts and carry the gym's name, brand colour and logo
 // (set on the Brand screen, part 3270).
 import { useEffect, useState } from 'react';
+import { isWhole } from '../loadStatus';
 import { View, Text, TextInput } from 'react-native';
 import { useTheme } from '../components';
 import { Section, SectionHead, ListRow, Cta } from '../kit';
@@ -35,14 +36,19 @@ export function GymPosts() {
   const { classes, status: classStatus } = useClasses();
   const logo = useGymLogo(tenant?.id);
   const { promos, status: promoStatus } = usePromos();
-  const [visits, setVisits] = useState<{ visits: number; classes: number } | null | 'error'>(null);
+  /** null = still counting · 'error' = the read failed · 'no-gym' = the tenant
+   *  read LANDED and this account has no gym, so there is nothing to count and
+   *  never will be until one is linked. The fourth state exists because without
+   *  it the first stood in for it: "Counting class visits…" sat here for ever,
+   *  and tapping the row answered "Still counting class visits." */
+  const [visits, setVisits] = useState<{ visits: number; classes: number } | null | 'error' | 'no-gym'>(null);
   const [open, setOpen] = useState<'promo' | 'event' | null>(null);
   const [ev, setEv] = useState({ title: '', when: '', note: '' });
   const [build, setBuild] = useState<PostBuild | null>(null);
 
   const tenantId = tenant?.id ?? null;
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId) { if (isWhole(tenantStatus)) setVisits('no-gym'); return; }
     let alive = true;
     const now = Date.now();
     fetchClasses(supabase, tenantId, new Date(now - 30 * DAY_MS).toISOString(), new Date(now).toISOString())
@@ -85,9 +91,14 @@ export function GymPosts() {
       ) : null}
 
       <ListRow icon="people" title="Member Milestones"
-        note={visits === 'error' ? 'Class visits could not be read' : visits ? `${visits.visits.toLocaleString()} class visits in the last 30 days` : 'Counting class visits…'}
-        onPress={() => setBuild(!brand ? noBrand() : visits === 'error' || visits === null
-          ? { ok: false, why: visits === 'error' ? 'Class visits could not be read. Try again when you have a connection.' : 'Still counting class visits.' }
+        note={visits === 'no-gym' ? 'No gym is linked to this account, so there are no class visits to count'
+          : visits === 'error' ? 'Class visits could not be read'
+          : visits ? `${visits.visits.toLocaleString()} class visits in the last 30 days`
+          : 'Counting class visits…'}
+        onPress={() => setBuild(!brand ? noBrand() : visits === 'error' || visits === null || visits === 'no-gym'
+          ? { ok: false, why: visits === 'error' ? 'Class visits could not be read. Try again when you have a connection.'
+              : visits === 'no-gym' ? 'No gym is linked to this account, so there are no class visits to post about.'
+              : 'Still counting class visits.' }
           : milestonePost({ visits: visits.visits, classes: visits.classes, period: 'Last 30 Days', brand }))} />
 
       <ListRow icon="bell" title="An Event or Opening" note="In your own words"

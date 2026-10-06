@@ -194,4 +194,35 @@ if (errors.length) {
   for (const e of errors) console.error(`  · ${e}`);
   process.exit(1);
 }
+/* ── an account with no gym is not a gym whose record would not load ─────
+   `loadSetup` returns before reading anything when there is no gym, so every
+   fact arrives null — the same shape a failed read produces. The checklist then
+   told an owner "The gym record could not be read, so this could not be
+   checked", which blames a connection for an answer the database gave
+   perfectly well, on the screen they work through to get started. */
+{
+  const unread = assessGymSetup({ tenant: null, plans: null, members: null });
+  const none = assessGymSetup({ tenant: null, plans: null, members: null, noGym: true });
+
+  eq(unread.length, none.length, 'the same items either way — nothing is hidden');
+  ok(unread.every((i) => i.state === 'unknown'), 'an unread gym leaves every item unknown');
+  ok(none.every((i) => i.state === 'unknown'), 'and so does an account with no gym: neither is "todo"');
+
+  for (const i of unread) {
+    ok(/could not be read/.test(i.unknownWhy ?? ''), `${i.key} blames the read when the read is what failed`);
+  }
+  for (const i of none) {
+    const why = i.unknownWhy ?? '';
+    ok(!/could not be read/.test(why), `${i.key} does not blame a read that never ran — got "${why}"`);
+    ok(/no gym/i.test(why), `${i.key} says what is actually true — got "${why}"`);
+  }
+
+  // Not a fourth STATE. 'unknown' is still right for both: nothing here is done
+  // and nothing is outstanding, because there is nothing to do it to. Only the
+  // sentence differs, and promoting either to 'todo' would put work on an
+  // owner's list that they cannot possibly complete.
+  ok(none.every((i) => i.state !== 'todo' && i.state !== 'done'),
+    'no gym is never rendered as work outstanding or work finished');
+}
+
 console.log('gymSetup: ok');

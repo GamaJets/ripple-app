@@ -351,6 +351,12 @@ export default function OwnerOverview() {
     tenant: setupTenant,
     plans: setupPlans,
     members: setupMembers,
+    // `loadSetup` returns before reading anything when there is no gym, so all
+    // three arrive null — the same shape a failed read produces. Without this
+    // the checklist told an owner with no gym that "the gym record could not be
+    // read", blaming a connection for an answer the database gave perfectly
+    // well, on the screen they work through to get started.
+    noGym: isWhole(tenantStatus) && !tenantId,
   } satisfies SetupFacts);
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // This hook PERSISTS what it is handed, so a figure we are unsure of is not
