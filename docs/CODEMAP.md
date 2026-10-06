@@ -51,13 +51,13 @@ is paid again on every turn of the session that opened it.
 | 1,583 | 22k | `src/lib/connect.ts` |
 | 1,580 | 19k | `scripts/check-schema.mjs` |
 | 1,573 | 19k | `studio-web/app/passes/page.tsx` |
+| 1,564 | 23k | `app/(owner)/members.tsx` |
 | 1,560 | 20k | `studio-web/app/equipment/page.tsx` |
-| 1,555 | 23k | `app/(owner)/members.tsx` |
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,531 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,454 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,463 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -3197,6 +3197,36 @@ Total: 47 files, 119,454 lines, ~1728k tokens if every one were read whole.
 1561-1573     fn       Section
 ```
 
+## `app/(owner)/members.tsx`
+
+1,564 lines · ~23k tokens · 23 anchors
+
+```
+129-130       type     Candidate
+131-305       default  OwnerMembers
+306-400       fn         load
+401-419       fn         sum
+420-426       fn         mrrCcy
+427-430       fn         inLens
+431-448       fn         shown
+449-458       fn         lensCounts
+459-465       fn         frozen
+466-472       fn         churn
+473-477       fn           done
+478-506       fn         runSearch
+507-521       fn             held
+522-535       fn         commitMembership
+536-545       fn         savePause
+546-581       §        from the TERM, not from the row
+582-606       fn         liftPause
+607-631       fn         saveDates
+632-666       fn         changeStatus
+667-674       fn         commitPayment
+675-798       §        the hundred that is not a hundred everywhere
+799-799       fn               slices
+800-1564      fn               n
+```
+
 ## `studio-web/app/equipment/page.tsx`
 
 1,560 lines · ~20k tokens · 35 anchors
@@ -3237,36 +3267,6 @@ Total: 47 files, 119,454 lines, ~1728k tokens if every one were read whole.
 1450-1532     fn         add
 1533-1539     fn       daysSince
 1540-1560     fn       Section
-```
-
-## `app/(owner)/members.tsx`
-
-1,555 lines · ~23k tokens · 23 anchors
-
-```
-128-129       type     Candidate
-130-304       default  OwnerMembers
-305-391       fn         load
-392-410       fn         sum
-411-417       fn         mrrCcy
-418-421       fn         inLens
-422-439       fn         shown
-440-449       fn         lensCounts
-450-456       fn         frozen
-457-463       fn         churn
-464-468       fn           done
-469-497       fn         runSearch
-498-512       fn             held
-513-526       fn         commitMembership
-527-536       fn         savePause
-537-572       §        from the TERM, not from the row
-573-597       fn         liftPause
-598-622       fn         saveDates
-623-657       fn         changeStatus
-658-665       fn         commitPayment
-666-789       §        the hundred that is not a hundred everywhere
-790-790       fn               slices
-791-1555      fn               n
 ```
 
 ## `studio-web/app/revenue/page.tsx`

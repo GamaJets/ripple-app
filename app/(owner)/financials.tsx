@@ -413,6 +413,17 @@ export default function Financials() {
         // looked at, which is the same class of mistake as the one above it.
         setMrrCcy(null); setRevCcy(null);
         setDerivedFailed(tenantStatus !== 'ready');
+        // A tenant read that LANDED and said "no gym" is a finished read, and
+        // the freshness line has to agree with the page under it. Without this
+        // the stamp stayed null for ever, `fetchedNote` printed "Reading…", and
+        // an owner with no gym linked sat looking at a screen that said it was
+        // still reading above three cards stating a settled conclusion — "Your
+        // account is not linked to a gym, so there are no months to close".
+        //
+        // Only on a whole read. Loading and error leave the stamp alone,
+        // because in those two the screen genuinely has not finished and
+        // claiming a read time would be the opposite mistake.
+        if (isWhole(tenantStatus)) setFetchedAt(Date.now());
         return;
       }
       setBusy(true);

@@ -156,7 +156,16 @@ export default function OwnerEquipment() {
   const [zoneUnread, setZoneUnread] = useState(false);
 
   const load = useCallback(async () => {
-    if (!tenant?.id) return;
+    if (!tenant?.id) {
+      // `noGym` is the one of the three facts above that is SETTLED: the tenant
+      // read landed and this account has no gym. That is a finished read, and
+      // the freshness line has to agree with the screen under it — without this
+      // the stamp stayed null and `fetchedNote` printed "Reading…" for ever,
+      // over copy that had already answered. The other two leave it alone,
+      // because in those the screen genuinely has not finished.
+      if (noGym) setFetchedAt(Date.now());
+      return;
+    }
     // The zone is read first and its failure is separate: a register full of
     // kit is still worth showing to somebody whose timezone read was refused,
     // and `gymTodayWindow` answers a null zone with the reader's day and the
@@ -190,7 +199,7 @@ export default function OwnerEquipment() {
       // when. Only a first read that has never landed leaves this null.
       setFailed(true);
     }
-  }, [tenant?.id]);
+  }, [tenant?.id, noGym]);
 
   useEffect(() => { void load(); }, [load]);
 

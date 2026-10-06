@@ -18,6 +18,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { ScreenSheet } from '../../src/ui/ScreenSheet';
+import { isWhole } from '../../src/ui/loadStatus';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
@@ -129,7 +130,7 @@ interface Candidate { id: string; name: string }
 
 export default function OwnerMembers() {
   const t = useTheme();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   // The gym's own currency, and NOTHING when it has not set one.
   //
   // This was `tenant?.currency || GYM_CURRENCY`, and the fallback was the last
@@ -303,7 +304,15 @@ export default function OwnerMembers() {
     : dayWindow.note;
 
   const load = useCallback(async () => {
-    if (!tenant?.id) return;
+    if (!tenant?.id) {
+      // A tenant read that LANDED and said "no gym" is a finished read, so the
+      // freshness line says so rather than "Reading…" for ever over a screen
+      // that has already answered. Loading and error leave the stamp alone:
+      // there the screen genuinely has not finished, and claiming a read time
+      // would be the opposite mistake.
+      if (isWhole(tenantStatus)) setFetchedAt(Date.now());
+      return;
+    }
     setReloading(true);
     // The gym's clock, on its own try/catch. A register full of members is
     // still worth showing to somebody whose timezone read was refused, and the
@@ -375,7 +384,7 @@ export default function OwnerMembers() {
     } finally {
       setReloading(false);
     }
-  }, [tenant?.id]);
+  }, [tenant?.id, tenantStatus]);
 
   useEffect(() => { void load(); }, [load]);
 
