@@ -103,7 +103,15 @@ trap drop_pubtree EXIT
 
 echo "── tree must be a commit before anything else ──"
 clean_or_die
-echo "at $(git rev-parse --short HEAD)"
+# Captured ONCE, here, and never re-read. The closing line used to run
+# `git rev-parse HEAD` again after the publish, which names whatever HEAD is by
+# then — and on 6 Oct 2026 that was a commit made while this script was still
+# bundling, so it reported shipping something it had never bundled, in the one
+# sentence whose whole job is to say what shipped. The worktree below is cut
+# from THIS sha, the gates ran against THIS sha, and this is the sha the
+# closing line prints.
+PUBSHA="$(git rev-parse --short HEAD)"
+echo "at $PUBSHA"
 
 echo
 echo "── gates ──"
@@ -288,4 +296,4 @@ if [ ${#PUBFAILED[@]} -gt 0 ]; then
 fi
 
 echo
-echo "published from $(git rev-parse --short HEAD) — and that commit is what the gates ran against."
+echo "published from $PUBSHA — and that commit is what the gates ran against."
