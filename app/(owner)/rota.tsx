@@ -554,7 +554,16 @@ export default function OwnerRota() {
             read in a basement an hour ago and still on screen is exactly the
             figure somebody staffs a shift against. Under the figure rather
             than over the week, so the first viewport is the rota. */}
-        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />
+        {/* No gym, no freshness line. `shifts` and `demand` stay null — the
+            header above forbids answering with empty arrays, because
+            `coverage()` turns an empty week into "No shifts on the rota for
+            this week", prints "Uncovered Hours 0" and invites the owner to fix
+            a problem they do not have, and a landed "no gym" would arrive at
+            that same place a failed read does. So nothing is faked here and
+            nothing is stamped: a line reporting when a read landed, over reads
+            that never ran, would be its own small lie. The card above says what
+            is true instead. */}
+        {noGym ? null : <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />}
 
         {/* Whose clock every time and every column on this screen is drawn on.
             Stated always, in both states, because the failure it closes is
@@ -589,7 +598,9 @@ export default function OwnerRota() {
               above now. */}
           {failed || !loaded || cov?.blocker ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {failed
+              {noGym
+                ? 'No gym is linked to this account, so there are no shifts, classes or one-to-ones to read.'
+                : failed
                 ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
                 : !loaded
                 ? 'Reading this week’s shifts, classes and one-to-ones.'
