@@ -43,6 +43,7 @@
 // instance — it scored a trainer on bookings nobody had marked. Three places,
 // one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
+import type { CoachedMode } from './types';
 import { capLimit, capped, ROW_CAP, TruncatedRead } from './rowCap';
 import { readCappedByIds } from './cappedByIds';
 
@@ -70,6 +71,21 @@ export interface DriftInput {
   events: ActivityEvent[];
   /** When the client joined the book, if known. Null when it is not. */
   since?: string | null;
+  /**
+   * How this client is coached, when it is known.
+   *
+   * It names the channels the silence sentence is allowed to list. A client
+   * coached online cannot walk into a gym, so "no visits" about them is not
+   * evidence of anything — it pads the case against somebody with a channel
+   * that was never open to them, on a screen a coach uses to decide who to
+   * chase. Absent, the sentence names all three, which is true of everybody
+   * the app does not know this about.
+   *
+   * It does NOT touch the arithmetic. Drift is days since the last signal of
+   * any kind, and an event that could never have happened cannot change a
+   * maximum — so only the words needed fixing, and only the words were.
+   */
+  mode?: CoachedMode | null;
 }
 
 export interface DriftWindows {
@@ -332,7 +348,7 @@ export function assessDrift(
       ...base,
       status: statusFromRisk('idle'),
       unknown: true,
-      reason: unknownReason(base, windows, evs.length),
+      reason: unknownReason(base, windows, evs.length, input.mode),
     };
   }
 
@@ -349,11 +365,29 @@ export function assessDrift(
   };
 }
 
+/**
+ * The channels a silence sentence may name for this client.
+ *
+ * Oxford-free and joined by `src/lib/format.ts`'s own rules nowhere, because
+ * this is two or three fixed phrases rather than a list of data — spelling it
+ * out keeps the comma before "and" out of the one case that has two.
+ */
+function silentChannels(mode: CoachedMode | null | undefined): string {
+  // 'online' is the only mode that rules a channel out. 'hybrid' trains in the
+  // room some of the time, and a coach chasing a hybrid client wants to know
+  // the gym has not seen them either.
+  return mode === 'online'
+    ? 'no check-ins and no logged workouts'
+    : 'no check-ins, no logged workouts, no visits';
+}
+
 function unknownReason(
   d: Omit<Drift, 'status' | 'unknown' | 'reason'>,
   windows: DriftWindows,
   eventCount: number,
+  mode: CoachedMode | null | undefined,
 ): string {
+  const channels = silentChannels(mode);
   if (eventCount === 0) {
     // ── how far back the silence may be claimed to run ─────────────────
     //
@@ -379,11 +413,11 @@ function unknownReason(
       // for silence they have not had time to break. Their first day is not a
       // gap in their record; it is the whole of it.
       if (d.observedDays === 0) {
-        return 'On your book since today, with nothing recorded yet: no check-ins, no logged workouts, no visits.';
+        return `On your book since today, with nothing recorded yet: ${channels}.`;
       }
-      return `Nothing recorded in ${d.observedDays} day${d.observedDays === 1 ? '' : 's'} on your book: no check-ins, no logged workouts, no visits.`;
+      return `Nothing recorded in ${d.observedDays} day${d.observedDays === 1 ? '' : 's'} on your book: ${channels}.`;
     }
-    return `Nothing recorded in the last ${windows.historyDays} days: no check-ins, no logged workouts, no visits.`;
+    return `Nothing recorded in the last ${windows.historyDays} days: ${channels}.`;
   }
   if (d.baselineSpanDays == null || d.baselineSpanDays < MIN_BASELINE_SPAN_DAYS) {
     const days = d.observedDays ?? Math.round(d.baselineSpanDays ?? 0);

@@ -554,7 +554,12 @@ export default function ClientScreen() {
         // `since` is when they joined the book. Without it a client added
         // yesterday and a client silent for eight weeks are the same shape of
         // nothing — see the note in clientDrift.ts.
-        setDrift(assessDrift({ clientId: id, events: driftEvents, since: joinedAt }));
+        // `mode` names which channels the silence sentence may list. A client
+        // coached online cannot walk into a gym, so "no visits" about them is
+        // not evidence — see DriftInput in src/lib/clientDrift.ts. Undefined
+        // while the roster row has not arrived, which names all three, which is
+        // true of a client this screen does not yet know the mode of.
+        setDrift(assessDrift({ clientId: id, events: driftEvents, since: joinedAt, mode: client?.mode }));
         setActivity({ events: read.byClient[id] ?? [], readFromMs, truncated: unusable });
       } catch (e) {
         reportError('client.drift', e);

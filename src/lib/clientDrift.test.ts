@@ -147,6 +147,41 @@ if (errors.length) {
   console.error(`clientDrift: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
   process.exit(1);
 }
+/* ── the silence sentence names only the channels this client HAS ────────
+   A client coached online cannot walk into a gym, so "no visits" about them is
+   not evidence of anything — it pads the case against somebody, on the screen a
+   coach uses to decide who to chase, with a channel that was never open to
+   them. The arithmetic is untouched: drift is days since the last signal of any
+   kind, and an event that could never have happened cannot change a maximum. */
+{
+  const NOW = Date.parse('2026-09-01T12:00:00Z');
+  const base = { clientId: 'c', events: [], since: '2026-08-20T00:00:00Z' };
+  const online = assessDrift({ ...base, mode: 'online' as const }, NOW).reason;
+  const room = assessDrift({ ...base, mode: 'inperson' as const }, NOW).reason;
+  const both = assessDrift({ ...base, mode: 'hybrid' as const }, NOW).reason;
+  const unknownMode = assessDrift(base, NOW).reason;
+
+  ok(!online.includes('visits'), `an online client is not charged with missing visits — got "${online}"`);
+  ok(online.includes('check-ins') && online.includes('logged workouts'),
+    'but the channels they do have are still named');
+
+  for (const [label, text] of [['in person', room], ['hybrid', both], ['mode unknown', unknownMode]]) {
+    ok(text.includes('visits'), `a ${label} client is still asked about visits — got "${text}"`);
+  }
+  // Hybrid trains in the room some of the time, so a coach chasing one wants to
+  // know the gym has not seen them either. Only 'online' rules a channel out.
+  eq(both, room, 'hybrid reads exactly as in-person does');
+  // An unclassified client gets the widest wording, which is true of everybody.
+  eq(unknownMode, room, 'and so does a client nobody has classified');
+
+  // The arithmetic is untouched by any of it.
+  const d1 = assessDrift({ ...base, mode: 'online' as const }, NOW);
+  const d2 = assessDrift(base, NOW);
+  eq(d1.quietDays, d2.quietDays, 'mode does not move quietDays');
+  eq(d1.status, d2.status, 'nor the status');
+  eq(d1.unknown, d2.unknown, 'nor whether it is unknown');
+}
+
 console.log('clientDrift ok');
 
 })();

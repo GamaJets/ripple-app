@@ -46,6 +46,7 @@
 // strength of, because the rows that would have disproved their silence are
 // exactly the ones that did not come back. `actionable` is that gate.
 import { useEffect, useMemo, useState } from 'react';
+import type { CoachedMode } from '../lib/types';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import {
@@ -64,6 +65,11 @@ export interface DriftSubject {
    *  clamps the baseline to the period they were actually on the book, so a
    *  real fall is not diluted by weeks they did not exist for. */
   joinedAt?: string | null;
+  /** How this client is coached, where the caller knows. It names which
+   *  channels the silence sentence may list — a client coached online cannot
+   *  walk into a gym, so "no visits" about them is not evidence. Optional, and
+   *  absent names all three, which is true of a client nobody has classified. */
+  mode?: CoachedMode | null;
 }
 
 export interface ClientDriftRead {
@@ -112,7 +118,8 @@ export function useClientDrift(
   // which is not in the dependency list on purpose: a roster whose rows changed
   // identity but not membership must not restart the read.
   const joinedOf: Record<string, string | null> = {};
-  for (const c of subjects) joinedOf[c.id] = c.joinedAt ?? null;
+  const modeOf: Record<string, CoachedMode | null> = {};
+  for (const c of subjects) { joinedOf[c.id] = c.joinedAt ?? null; modeOf[c.id] = c.mode ?? null; }
 
   useEffect(() => {
     const ids = key ? key.split(',') : [];
@@ -135,7 +142,7 @@ export function useClientDrift(
         setCoverage({ notAsked: new Set(act.notAsked), truncated: act.truncated });
         const map: Record<string, Drift> = {};
         for (const id of ids) {
-          map[id] = assessDrift({ clientId: id, events: act.byClient[id] ?? [], since: joinedOf[id] ?? null });
+          map[id] = assessDrift({ clientId: id, events: act.byClient[id] ?? [], since: joinedOf[id] ?? null, mode: modeOf[id] ?? null });
         }
         setDrift(map);
       } catch (e: any) {

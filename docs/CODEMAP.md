@@ -16,7 +16,7 @@ is paid again on every turn of the session that opened it.
 | 5,190 | 83k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
 | 3,349 | 54k | `app/(trainer)/payments.tsx` |
-| 3,334 | 50k | `app/(trainer)/client.tsx` |
+| 3,339 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
 | 3,208 | 54k | `app/(client)/nutrition.tsx` |
 | 3,143 | 51k | `app/(client)/scans.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,531 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,442 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,447 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1072,7 +1072,7 @@ Total: 47 files, 119,442 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/client.tsx`
 
-3,334 lines · ~50k tokens · 40 anchors
+3,339 lines · ~50k tokens · 40 anchors
 
 ```
 3-14          §        Why this screen exists
@@ -1087,34 +1087,34 @@ Total: 47 files, 119,442 lines, ~1728k tokens if every one were read whole.
 307-325       fn         xy
 326-390       default  ClientScreen
 391-409       fn         client
-410-596       §        getting a hand-added client onto the app, from the screen about them
-597-666       fn         board
-667-670       fn         focusOn
-671-718       fn         week
-719-727       fn         trainingBoardValue
-728-729       fn         weeklyTrained
-730-921       fn           dayNo
-922-923       fn         creditLines
-924-946       fn         creditsRemaining
-947-999       fn         creditShortfall
-1000-1007     fn         valueReads
-1008-1012     fn         valueRead
-1013-1020     fn         sub
-1021-1040     fn         owed
-1041-1052     fn         seen
-1053-1169     fn         activeLines
-1170-1268     fn         pickMode
-1269-1406     fn         saveContact
-1407-1436     fn         diary
-1437-1440     fn         followUps
-1441-1453     fn           recent
-1454-1454     fn         loopTally
-1455-1457     fn         loopLine
-1458-1556     fn         loopBlocked
-1557-1611     fn         reloadEverything
-1612-1624     fn         go
-1625-1649     fn         sendAsk
-1650-3334     fn         askIntake
+410-601       §        getting a hand-added client onto the app, from the screen about them
+602-671       fn         board
+672-675       fn         focusOn
+676-723       fn         week
+724-732       fn         trainingBoardValue
+733-734       fn         weeklyTrained
+735-926       fn           dayNo
+927-928       fn         creditLines
+929-951       fn         creditsRemaining
+952-1004      fn         creditShortfall
+1005-1012     fn         valueReads
+1013-1017     fn         valueRead
+1018-1025     fn         sub
+1026-1045     fn         owed
+1046-1057     fn         seen
+1058-1174     fn         activeLines
+1175-1273     fn         pickMode
+1274-1411     fn         saveContact
+1412-1441     fn         diary
+1442-1445     fn         followUps
+1446-1458     fn           recent
+1459-1459     fn         loopTally
+1460-1462     fn         loopLine
+1463-1561     fn         loopBlocked
+1562-1616     fn         reloadEverything
+1617-1629     fn         go
+1630-1654     fn         sendAsk
+1655-3339     fn         askIntake
 ```
 
 ## `studio-web/app/close/page.tsx`
