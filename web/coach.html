@@ -234,6 +234,14 @@ addEventListener('DOMContentLoaded', function () {
       <h1 class="display" id="p-name" tabindex="-1"></h1>
       <p class="lede" id="p-tagline" hidden></p>
 
+      <!-- How this coach works, directly under their name, because for a coach
+           who works online it is the fact that decides whether a stranger reads
+           any further: they are not limited to the people who can reach one
+           gym. Absent entirely when the coach has not said — see deliveryLine
+           in src/lib/publicProfile.ts, which refuses to default. -->
+      <p class="chips" id="p-deliverybox" hidden style="margin:14px 0 0"><span class="chip" id="p-delivery"></span></p>
+      <p class="tiny" id="p-deliverynote" hidden></p>
+
       <p class="btn-row"><a class="btn primary" id="p-join" href="#" hidden>Train with Them</a></p>
       <p class="tiny" id="p-joinnote" hidden></p>
 
@@ -640,6 +648,28 @@ function render(result) {
 
   const tagline = String(r.tagline || '').trim();
   if (tagline) { $('p-tagline').textContent = tagline; show($('p-tagline'), true); }
+
+  /* How this coach works. The strings are a SECOND COPY of deliveryLine and
+     deliveryNote in src/lib/publicProfile.ts — this page is static HTML with no
+     build step, so it cannot import them — and publicProfile.test.ts reads this
+     file and fails if the two ever stop matching, which is the only thing that
+     makes a second copy safe.
+
+     Anything other than the three known answers prints nothing at all. Null is
+     the ordinary case: most coaches have never been asked, and a default here
+     would invent a fact about somebody's business on a URL search engines keep. */
+  const DELIVERY = {
+    online: ['Coaches online', 'Your programme and your check-ins come through the app, so where you train is up to you.'],
+    inperson: ['Coaches in person', 'You train together in person.'],
+    hybrid: ['Coaches online and in person', 'You train together in person, and your programme and check-ins come through the app between times.'],
+  };
+  const said = DELIVERY[String(r.delivery_mode || '')];
+  if (said) {
+    $('p-delivery').textContent = said[0];
+    show($('p-deliverybox'), true);
+    $('p-deliverynote').textContent = said[1];
+    show($('p-deliverynote'), true);
+  }
 
   /* THE POINT OF THE PAGE. The join link carries the coach's own code, so
      somebody arriving from their bio is attributed to them exactly as an ad

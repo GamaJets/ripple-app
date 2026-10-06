@@ -425,3 +425,57 @@ export function pageStateNote(s: PageState): string | null {
       return 'A coach’s link carries their own address on the end of it. This one does not, so there is nothing to show.';
   }
 }
+
+/* ── how this coach works, for somebody who has never met them ────────────── */
+
+/**
+ * The delivery line on a coach's public page, or null to say nothing.
+ *
+ * ── why it is here at all ─────────────────────────────────────────────────
+ *
+ * A coach who works online is not limited to the people who can reach their
+ * gym, and that is the entire proposition — it is what they put at the top of
+ * every post they write. Their public page could not say it. `public_coach_page`
+ * returned a name, a tagline, specialties, offers and a SESSION FEE, and a
+ * stranger reading a per-session price with no mention of distance reasonably
+ * concludes they have to turn up somewhere. The one fact an online coach most
+ * needs a stranger to know was the one fact the page could not carry.
+ *
+ * ── and why null is an answer ─────────────────────────────────────────────
+ *
+ * `trainers.delivery_mode` is nullable and most rows are null: a coach who has
+ * never been asked, who skipped the question, or whose answer did not save.
+ * None of those is "in person", and a page that printed a default would be
+ * inventing a fact about somebody's business on a crawlable URL. Nothing is
+ * shown, exactly as src/lib/coachDelivery.ts refuses to read silence as an
+ * answer — the same rule, on the one surface where being wrong is permanent.
+ *
+ * It is the coach's OWN declaration and never the roster-derived shape. The
+ * derived half widens on an unread roster, which is right for deciding what to
+ * put away inside the coach's app and wrong for a claim published under their
+ * name: a page must only ever say what the coach themselves said.
+ */
+export function deliveryLine(mode: string | null | undefined): string | null {
+  switch (mode) {
+    case 'online': return 'Coaches online';
+    case 'inperson': return 'Coaches in person';
+    case 'hybrid': return 'Coaches online and in person';
+    default: return null;
+  }
+}
+
+/**
+ * The sentence under that line, which is where the useful part is.
+ *
+ * "Coaches online" alone leaves a reader working out what it means for them.
+ * These say what it changes about getting coached by this person, in the second
+ * person, because the reader is deciding whether to get in touch.
+ */
+export function deliveryNote(mode: string | null | undefined): string | null {
+  switch (mode) {
+    case 'online': return 'Your programme and your check-ins come through the app, so where you train is up to you.';
+    case 'inperson': return 'You train together in person.';
+    case 'hybrid': return 'You train together in person, and your programme and check-ins come through the app between times.';
+    default: return null;
+  }
+}

@@ -25,6 +25,12 @@
 //   3. THE DIRECTORY OPT-IN IS NOT CONSENT TO THIS. There is no input to
 //      publicPageState that produces 'live' without `listed`, and the SQL's
 //      where clause is checked for both conditions.
+// `require`, not `import`: this file lives under src/**, which check:types
+// compiles with the PHONE app's tsconfig and no node types, so a top-level
+// `import … from 'node:fs'` fails that gate while passing the test build. Same
+// shape and same reason as src/lib/muscleMap.test.ts.
+const { readFileSync } = require('node:fs') as { readFileSync: (p: string, enc: string) => string };
+import { deliveryLine, deliveryNote } from './publicProfile';
 import {
   HANDLE_MIN, HANDLE_MAX, RESERVED_HANDLES,
   normaliseHandle, handleProblem, handleProblemText,
@@ -600,6 +606,54 @@ ok(/href="styles\.css(\?v=[a-f0-9]+)?"/.test(page),
     'listed_trainer_currencies() must not be reachable by anon: it is the directory, which is behind a sign-in');
   ok(!/grant execute on function public\.listed_trainer_currencies\(uuid\[\]\) to [^;]*anon/.test(code),
     'part 2470 grants listed_trainer_currencies() to anon, which would widen the anon surface past its two entry points');
+}
+
+/* ── what a stranger is told about how this coach works ──────────────────
+   The marketable half: an online coach is not limited to the people who can
+   reach their gym, and the page could not say so. The refusal matters as much
+   as the line — `trainers.delivery_mode` is null for every coach who has never
+   been asked, and a page that printed a default would invent a fact about
+   somebody's business on a crawlable URL. */
+{
+  eq(deliveryLine('online'), 'Coaches online', 'an online coach says so');
+  eq(deliveryLine('inperson'), 'Coaches in person', 'and so does an in-person one');
+  eq(deliveryLine('hybrid'), 'Coaches online and in person', 'and both');
+
+  for (const quiet of [null, undefined, '', 'ONLINE', 'remote', 'Online', 'in-person', 'anything']) {
+    eq(deliveryLine(quiet as string | null), null,
+      `nothing is claimed for ${JSON.stringify(quiet)} — silence is not an answer`);
+    eq(deliveryNote(quiet as string | null), null,
+      `and no note either for ${JSON.stringify(quiet)}`);
+  }
+
+  // The line and its note travel together: one without the other is either a
+  // claim with no meaning or a meaning with nothing claiming it.
+  for (const m of ['online', 'inperson', 'hybrid']) {
+    ok(deliveryLine(m) !== null && deliveryNote(m) !== null, `${m} has both a line and a note`);
+  }
+  // The note is addressed to the READER, who is deciding whether to get in
+  // touch — not to the coach, whose own app words it the other way round.
+  ok((deliveryNote('online') ?? '').includes('you'), 'the online note speaks to the reader');
+}
+
+/* ── the page's copy is a second copy, and it has to agree ───────────────
+   web/coach.html is static HTML with no build step, so it cannot import
+   deliveryLine/deliveryNote and carries its own literals. That is only safe
+   while something fails when they drift, and this is that something. */
+{
+  const page = readFileSync('web/coach.html', 'utf8');
+  for (const m of ['online', 'inperson', 'hybrid']) {
+    const line = deliveryLine(m)!;
+    const note = deliveryNote(m)!;
+    ok(page.includes(line), `web/coach.html still prints the ${m} line: "${line}"`);
+    ok(page.includes(note), `web/coach.html still prints the ${m} note`);
+  }
+  // And the page must not have grown a fourth answer this module does not know
+  // about, which would be the page claiming something nothing here can check.
+  const keys = [...page.matchAll(/^\s{4}(online|inperson|hybrid|[a-z]+):\s\[/gm)].map((x) => x[1]);
+  for (const k of keys) {
+    ok(deliveryLine(k) !== null, `web/coach.html offers "${k}", which this module does not recognise`);
+  }
 }
 
 if (errors.length) {
