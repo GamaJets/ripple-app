@@ -256,6 +256,11 @@ export default function OwnerRevenue() {
    *  for again. */
   const [rosterAt, setRosterAt] = useState<number | null>(null);
   useEffect(() => { if (trainersStatus === 'ready') setRosterAt(Date.now()); }, [trainersStatus]);
+  /** The tenant read LANDED and this account has no gym on it. Settled, and
+   *  not to be confused with the read still being in flight or having failed —
+   *  the three were one `!tenantId` test and this screen showed the loading
+   *  sentence for all of them. */
+  const noGym = tenantStatus === 'ready' && !tenantId;
   /** One line over both, and it is the age of the older. */
   const fetchedAt = oldestFetch(tillAt, rosterAt);
   useEffect(() => {
@@ -267,7 +272,15 @@ export default function OwnerRevenue() {
     // failure is reported as what it is, in the sentence the `null` branch of
     // the hero already carries.
     if (tenantStatus === 'error') { setTakings(null); setOrders(null); return; }
-    if (!tenantId) { setTakings(undefined); setOrders(undefined); return; }
+    if (!tenantId) {
+      setTakings(undefined); setOrders(undefined);
+      // A tenant read that LANDED and said "no gym" is a finished read, so the
+      // line over this screen says so instead of "Reading…" for ever. Only on
+      // a whole read: 'loading' and 'error' have their own branches above and
+      // below, and both of those genuinely have not finished.
+      if (noGym) setTillAt(Date.now());
+      return;
+    }
     setBusy(true);
     const now = Date.now();
     const since = new Date(now - 30 * 86400000).toISOString();
@@ -423,7 +436,13 @@ export default function OwnerRevenue() {
             screen the board does not draw. */}
         {(() => {
           const figure = fig(till && !till.empty ? money(till.cents, till.currency) : till?.empty ? money(0, cur) : null);
-          const note = takings === undefined
+          const note = noGym
+            // Ahead of the loading sentence, because it is the settled answer
+            // and the loading one is what this screen said instead of it: with
+            // no gym there is no till to read, the read is never started, and
+            // "Reading what your gym was paid…" stayed on screen for ever.
+            ? 'Your account is not linked to a gym, so there is no till to read. That is an account with no gym on it, not a gym that took nothing.'
+            : takings === undefined
             ? 'Reading what your gym was paid…'
             : takings === null
             ? 'Your payments could not be read. This is not a month in which the gym took nothing.'

@@ -545,9 +545,26 @@ export function KpiRow({ items, onPress, tiles }: {
       </View>
     );
   }
+  /* Three across, and no more, however many it is handed.
+     The strip was built for three — the delta note below each figure is sized
+     against "roughly 14 characters at caption size" on a 390pt phone, which is
+     what a third of that width buys. Eight call sites across the three apps
+     pass four, five and six, and the owner's Revenue screen is what that looks
+     like: "Sessions" rendered as "Sessio" over "ns", "Clients" as "Client"
+     over an orphan "s", and the notes under them cut to "nee ds…" and "no
+     trai…", which are not facts and not sentences.
+     So a longer list wraps into rows of three rather than dividing one row
+     further. Three or fewer is byte for byte what it was: one row, no margin,
+     the first column with no leading rule. */
+  const ACROSS = 3;
+  const rows: KpiItem[][] = [];
+  for (let n = 0; n < items.length; n += ACROSS) rows.push(items.slice(n, n + ACROSS));
+
   return (
-    <View style={{ flexDirection: 'row' }}>
-      {items.map((k, i) => {
+    <View>
+      {rows.map((row, r) => (
+      <View key={`kpirow-${r}`} style={{ flexDirection: 'row', marginTop: r === 0 ? 0 : sp.lg }}>
+      {row.map((k, i) => {
         const live = !!onPress && !!k.route;
         // The delta's direction is drawn as a dot in the accent colour when it
         // is movement the client wants and in ink3 when it is not. That is the
@@ -601,6 +618,8 @@ export function KpiRow({ items, onPress, tiles }: {
         </Pressable>
         );
       })}
+      </View>
+      ))}
     </View>
   );
 }
