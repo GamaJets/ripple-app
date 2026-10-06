@@ -946,7 +946,14 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
           <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={q.icon} size={17} color={t.brand} />
           </View>
-          <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7, textAlign: 'center', paddingHorizontal: 4 }}>{q.label}</Text>
+          {/* One line, shrunk to fit rather than wrapped. A tile label is a
+              single word, and a single word has no boundary to wrap AT — so
+              when it did not fit, React Native broke it mid-word: the owner
+              board's five tiles rendered "Members" as "Member" over an orphan
+              "s". `HERO_FIT` clears the line height, which `check:fit` requires
+              beside `adjustsFontSizeToFit` and which is why that gate exists. */}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
+            style={{ ...ty.micro, ...HERO_FIT, letterSpacing: 0.3, color: t.ink2, marginTop: 7, textAlign: 'center', paddingHorizontal: 4 }}>{q.label}</Text>
         </Pressable>
       ))}
     </View>

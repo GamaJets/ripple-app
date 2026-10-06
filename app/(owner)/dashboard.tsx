@@ -619,6 +619,13 @@ export default function OwnerOverview() {
             ? 'Your recorded months could not be read'
             : delta !== 0
             ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month`
+            // Nobody to deliver a session is the reason there are none, and it
+            // comes BEFORE the pricing advice: telling an owner with an empty
+            // gym to set a session fee so the app can "value these" answers a
+            // question they have not reached yet, under a nought whose actual
+            // cause is sitting in the card directly above this one.
+            : roll.trainers === 0
+            ? 'No trainers have joined your gym yet, so there are no sessions to count.'
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
               // Null here also covers "the gym has not set a currency", and an
