@@ -131,6 +131,10 @@ interface Candidate { id: string; name: string }
 export default function OwnerMembers() {
   const t = useTheme();
   const { tenant, status: tenantStatus } = useTenant();
+  /** The tenant read LANDED and this account has no gym on it. Settled, and not
+   *  the same as still reading or having failed — `load` returns before reading
+   *  anything, so every downstream state answers 'loading' without it. */
+  const noGym = isWhole(tenantStatus) && !tenant?.id;
   // The gym's own currency, and NOTHING when it has not set one.
   //
   // This was `tenant?.currency || GYM_CURRENCY`, and the fallback was the last
@@ -758,7 +762,13 @@ export default function OwnerMembers() {
           // under a failed read — by arithmetic rather than on purpose, which is
           // one refactor of `summarise` away from printing a confident 0.
           const figure = hasRows(state) ? (money(sum.mrrCents, mrrCcy.currency) ?? '—') : '—';
-          const note = state === 'failed'
+          const note = noGym
+            // The settled answer, ahead of both. `load` returns before reading
+            // anything when there is no gym, so `rows` stays null and `state`
+            // answers 'loading' — this screen stamped its freshness line
+            // correctly and then went on saying it was reading above it.
+            ? 'Your account is not linked to a gym, so there is no register to read. That is an account with no gym on it, not a gym with no members.'
+            : state === 'failed'
             ? failedNote('register', reason)
             : state === 'loading'
             ? 'Reading your register…'
