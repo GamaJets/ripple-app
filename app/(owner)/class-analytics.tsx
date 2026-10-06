@@ -38,6 +38,7 @@
 // the 12.5/11.5px font sizes are gone.
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useStickyChoice } from '../../src/ui/useStickyChoice';
+import { isWhole } from '../../src/ui/loadStatus';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -246,7 +247,7 @@ export default function OwnerClassAnalytics() {
   // The gym's own currency (part 99), not the module default — this screen
   // prints a pay rate a trainer is owed, which is the last figure that should
   // be denominated in a guess.
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   // `?? null`, not `|| GYM_CURRENCY`: the per-check-in rate below is typed by
   // the owner in their own money, and printing the payroll it produces in
   // dirhams at a gym that never chose them is a wrong figure on a screen whose
@@ -389,7 +390,19 @@ export default function OwnerClassAnalytics() {
   const [payTick, setPayTick] = useState(0);
   useEffect(() => {
     let on = true;
-    if (!tenantId) { setPay(null); setPaid(null); return; }
+    if (!tenantId) {
+      setPay(null); setPaid(null);
+      // The pay read is SKIPPED here, not pending, and the stamp has to say so.
+      // `fetchedAt` is `oldestFetch(attendanceAt, payAt)` — the older of the two
+      // — so a payAt that never moves holds the whole line at "Reading…" however
+      // long ago attendance landed. That is what this screen did: "No classes in
+      // this range." under a line still claiming to be reading.
+      //
+      // Only on a whole tenant read. In flight or failed, the pay read really is
+      // still to come and the waiting line is the true one.
+      if (isWhole(tenantStatus)) setPayAt(Date.now());
+      return;
+    }
     // Both halves have to land for the stamp to move: the payroll column needs
     // the rates AND the lines already raised, and a stamp set by whichever
     // resolved first would claim an age for the other one. Each keeps its own
@@ -428,7 +441,7 @@ export default function OwnerClassAnalytics() {
       .then(() => { if (on) setPayAt(Date.now()); })
       .catch(() => { /* both halves have already reported and cleared themselves */ });
     return () => { on = false; };
-  }, [tenantId, payTick]);
+  }, [tenantId, tenantStatus, payTick]);
   const reload = () => setPayTick((n) => n + 1);
   /** One line over the two reads, and it is the age of the older. */
   const fetchedAt = oldestFetch(attendanceAt, payAt);
