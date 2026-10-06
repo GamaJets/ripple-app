@@ -287,7 +287,19 @@ export default function OwnerTrainers() {
 
         {onboarding ? invitesBlock : null}
 
-        {/* ── roster health: the state of the staff, before anything else ──── */}
+        {/* ── roster health: the state of the staff, before anything else ────
+            Not drawn on a gym with nobody in it. `onboarding` is a WHOLE read
+            that found no trainers, so there is no mix to show a mix of — the
+            card drew a donut of nothing over "On Track 0 / Watch 0 / At Risk 0
+            / Idle 0", between a hero that had just said "No Trainers Yet" and a
+            list card that says it again underneath. Three statements of one
+            fact, and the middle one dressed as a chart.
+
+            `trainersUnknown` is inside `onboarding`, so an unread or failed
+            roster still draws the card with its dashes. An empty gym and an
+            unread one are not the same screen, and withholding this on the
+            second would be hiding a failure rather than a nothing. */}
+        {onboarding ? null : (
         <Section>
           {/* Every figure on this screen is over the same thirty days — the
               window `fetchGymTrainers` reads — and the head says so once
@@ -332,6 +344,7 @@ export default function OwnerTrainers() {
             </Flag>
           ) : null}
         </Section>
+        )}
 
         {/* The age of all three reads, under the roster's figures rather than
             in the header so the first viewport is the gym and not the plumbing. */}

@@ -47,6 +47,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
+import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Flag, fig, PageHead, Donut, Legend, TonedChip, type Slice } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
@@ -121,8 +122,19 @@ function unspellableReasons(u: UnspellablePaid): string {
 
 export default function OwnerOrders() {
   const t = useTheme();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   const tenantId = tenant?.id ?? null;
+  /**
+   * The tenant read LANDED and this account has no gym on it.
+   *
+   * `load` opens `if (!tenantId) return;`, so with no gym the order book is
+   * never read, `rows` stays null, `readState` answers 'loading', and all four
+   * sentences on this screen said they were reading — the hero, the freshness
+   * line, Taken Online and Orders — for ever. Settled is not loading, and the
+   * note above forbids the other way out: `rows` may never become `[]` here,
+   * because an empty array renders as the claim that this gym has sold nothing.
+   */
+  const noGym = isWhole(tenantStatus) && !tenantId;
 
   /**
    * Null is "nothing has ever landed here".
@@ -244,6 +256,10 @@ export default function OwnerOrders() {
             // of members who paid and got nothing, and a dash over it must
             // never be read as a zero.
             ? `${failedNote('order book', reason)} This is NOT an all-clear.`
+            : noGym
+            // Ahead of 'loading', because it is the settled answer and the
+            // loading sentence is what stood in for it.
+            ? 'Your account is not linked to a gym, so there is no order book to read. That is an account with no gym on it, not a gym that sold nothing.'
             : state === 'loading'
             ? 'Reading your online orders…'
             : list.length === 0
@@ -288,7 +304,10 @@ export default function OwnerOrders() {
           );
         })()}
 
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={busy} />
+        {/* Nothing is read when there is no gym, so there is nothing to report
+            the age of. Stamping one would be a read time over a read that never
+            ran; the cards above say what is true instead. */}
+        {noGym ? null : <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={busy} />}
 
         {/* Said above the money, because it is more urgent than the money. */}
         {loaded && needsAPerson > 0 ? (
@@ -350,7 +369,9 @@ export default function OwnerOrders() {
           <SectionHead title="Taken Online" note={`Last ${WINDOW_DAYS} Days`} />
           {!loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {state === 'failed'
+              {noGym
+                ? 'No gym is linked to this account, so there is nothing to total.'
+                : state === 'failed'
                 ? 'Not known. The order book could not be read. This is not a quarter in which nothing sold.'
                 : 'Reading…'}
             </Text>
@@ -461,6 +482,10 @@ export default function OwnerOrders() {
                 <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
+          ) : noGym ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No gym is linked to this account, so there is no order book to list.
+            </Text>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading…</Text>
           ) : list.length === 0 ? (
