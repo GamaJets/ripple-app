@@ -9,20 +9,20 @@ is paid again on every turn of the session that opened it.
 
 | lines | ~tok | file |
 | ----: | ---: | ---- |
-| 7,721 | 123k | `app/(client)/workouts.tsx` |
-| 5,498 | 85k | `app/(trainer)/builder.tsx` |
+| 7,722 | 123k | `app/(client)/workouts.tsx` |
+| 5,499 | 85k | `app/(trainer)/builder.tsx` |
 | 5,285 | 88k | `src/lib/coverage.test.ts` |
-| 5,239 | 79k | `app/(trainer)/calendar.tsx` |
-| 5,189 | 83k | `app/(trainer)/dashboard.tsx` |
+| 5,226 | 79k | `app/(trainer)/calendar.tsx` |
+| 5,190 | 83k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
-| 3,348 | 54k | `app/(trainer)/payments.tsx` |
-| 3,328 | 50k | `app/(trainer)/client.tsx` |
+| 3,349 | 54k | `app/(trainer)/payments.tsx` |
+| 3,329 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
-| 3,207 | 54k | `app/(client)/nutrition.tsx` |
-| 3,142 | 51k | `app/(client)/scans.tsx` |
+| 3,208 | 54k | `app/(client)/nutrition.tsx` |
+| 3,143 | 51k | `app/(client)/scans.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
-| 2,574 | 38k | `app/(trainer)/log-session.tsx` |
+| 2,575 | 38k | `app/(trainer)/log-session.tsx` |
 | 2,554 | 32k | `src/lib/gymExport.ts` |
 | 2,505 | 32k | `studio-web/app/staff/page.tsx` |
 | 2,474 | 30k | `studio-web/app/members/page.tsx` |
@@ -31,10 +31,10 @@ is paid again on every turn of the session that opened it.
 | 2,189 | 34k | `supabase/functions/stripe-webhook/index.ts` |
 | 2,148 | 32k | `app/(trainer)/client-training.tsx` |
 | 2,110 | 29k | `src/ui/sessions.tsx` |
-| 2,104 | 34k | `app/(client)/calendar.tsx` |
+| 2,105 | 34k | `app/(client)/calendar.tsx` |
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
-| 2,005 | 33k | `app/(trainer)/analytics.tsx` |
+| 2,006 | 33k | `app/(trainer)/analytics.tsx` |
 | 1,858 | 24k | `src/ui/messaging.ts` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
 | 1,792 | 23k | `studio-web/app/analytics/page.tsx` |
@@ -42,340 +42,340 @@ is paid again on every turn of the session that opened it.
 | 1,758 | 23k | `studio-web/app/coach/earnings/page.tsx` |
 | 1,752 | 27k | `app/(trainer)/money.tsx` |
 | 1,744 | 26k | `app/(owner)/ops.tsx` |
-| 1,714 | 26k | `app/(client)/foodlog.tsx` |
+| 1,715 | 26k | `app/(client)/foodlog.tsx` |
 | 1,697 | 23k | `scripts/check-site-claims.mjs` |
-| 1,690 | 26k | `app/(trainer)/invoices.tsx` |
-| 1,687 | 24k | `app/(client)/trainers.tsx` |
+| 1,691 | 26k | `app/(trainer)/invoices.tsx` |
+| 1,688 | 24k | `app/(client)/trainers.tsx` |
+| 1,667 | 24k | `app/(client)/devices.tsx` |
 | 1,667 | 23k | `studio-web/app/money/page.tsx` |
-| 1,666 | 24k | `app/(client)/devices.tsx` |
 | 1,583 | 22k | `src/lib/connect.ts` |
 | 1,580 | 19k | `scripts/check-schema.mjs` |
 | 1,573 | 19k | `studio-web/app/passes/page.tsx` |
 | 1,560 | 20k | `studio-web/app/equipment/page.tsx` |
-| 1,554 | 23k | `app/(owner)/members.tsx` |
+| 1,555 | 23k | `app/(owner)/members.tsx` |
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,431 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
-7,721 lines · ~123k tokens · 168 anchors
+7,722 lines · ~123k tokens · 168 anchors
 
 ```
-54-103        §        the block, the week of it this client is on, and the three fields a set
-104-115       §        ticking a planned set off, rather than typing it out
-116-257       §        one row per set in the sheet that adds or corrects a movement
-258-288       type     Activity
-289-289       fn       byName
-290-328       fn       names
-329-353       fn       isCardioMovement
-354-358       type     TrainMode
-359-364       type     SessionKind
-365-382       fn       isSessionKind
-383-401       fn       cardioKcal
-402-407       fn       onNight
-408-423       fn       MetricCols
-424-441       default  Train
-442-447       fn         entryKey
-448-453       fn         workoutLog
-454-524       fn             live
-525-680       §        The clock this screen judges "today" by
-681-696       fn         logWorkoutNL
-697-720       fn           out
-721-872       fn         pull
-873-889       fn         rememberSession
-890-987       §        the state in this component, not only the bytes on the disk
-988-1024      fn         built
-1025-1093     fn           m
-1094-1097     fn         importPending
-1098-1183     fn             out
-1184-1184     fn         dateFor
-1185-1185     fn         pad2
-1186-1256     fn         dstr
-1257-1257     fn         workedDates
-1258-1274     §        and NOT a second list kept on this phone
-1275-1327     §        typed, and not saved
-1328-1329     fn         stripEntries
-1330-1330     fn         dayEntries
-1331-1348     §        the day's volume, priced the way every other total in this app is
-1349-1354     fn         daySets
-1355-1355     fn         dayKcalEntries
-1356-1357     fn         dayKcal
-1358-1372     fn         prettyDay
-1373-1387     fn         repeatable
-1388-1412     fn           add
-1413-1448     fn         startRepeat
-1449-1499     fn         uid
-1500-1504     fn             _alt
-1505-1505     fn         isInjHidden
-1506-1506     fn         nameOf
-1507-1521     §        the name to READ, which is not the name to WRITE
-1522-1531     fn         shownName
-1532-1536     fn         orderedExercises
-1537-1546     fn             run
-1547-1550     fn         isRemovedEx
-1551-1581     fn         withEdits
-1582-1601     fn         planEx
-1602-1615     fn         runnableEx
-1616-1635     fn         isCustomEx
-1636-1638     fn         deleteEntry
-1639-1664     fn           putBack
-1665-1667     fn         knownExercises
-1668-1680     fn           add
-1681-1707     fn         removeExercise
-1708-1717     fn         planNameFor
-1718-1733     fn         retypeCxSets
-1734-1743     fn         switchCxUnit
-1744-1760     fn         openEditFor
-1761-1766     fn         replaceExercise
-1767-1824     fn         commitCx
-1825-1826     fn         firstOpenId
-1827-1827     fn         doneCount
-1828-1838     fn         plannedSets
-1839-1887     fn         weekFocus
-1888-1907     fn         logSet
-1908-1924     fn         tickPlannedSet
-1925-1942     fn         untickLastSet
-1943-1956     §        and why it is not offered for every prescription
-1957-1961     fn         quickReps
-1962-1963     fn         canQuickLog
-1964-1980     fn         quickLog
-1981-2044     fn         commitSession
-2045-2061     fn         logCardio
-2062-2079     fn         saveManual
-2080-2082     fn             setPairs
-2083-2086     fn             bwFlags
-2087-2094     fn             timedFlags
-2095-2171     fn             bestE1
-2172-2674     §        why the log is re-read, and only here
-2675-2690     fn               varied
-2691-2695     fn               intGroups
-2696-3826     fn               hit
-3827-4004     fn               names
-4005-4068     fn       useLiveVitals
-4069-4070     fn         awayMs
-4071-4071     fn           tick
-4072-4089     fn           q
-4090-4127     fn           z
-4128-4134     fn         rebuildZonesFromWatch
-4135-4156     fn             source
-4157-4186     fn           sub
-4187-4289     fn       ZonePanel
-4290-4327     fn       TimedSessionRunner
-4328-4351     fn         clock
-4352-4359     fn         hrInput
-4360-4378     fn         hrEstimate
-4379-4383     fn         hrUnknownNote
-4384-4408     fn         finish
-4409-4700     fn         discard
-4701-4713     fn       clipCaption
-4714-4724     fn       SessionDemo
-4725-4843     fn         clip
-4844-4859     fn       DayPicture
-4860-4861     type     RunnerView
-4862-4868     fn       SessionRunner
-4869-4950     fn         shownName
-4951-4951     fn         cardioAt
-4952-4953     fn         setCardioAt
-4954-5038     fn         showLoad
-5039-5047     fn         cancelRestAlert
-5048-5056     fn         startRest
-5057-5079     §        Making a noise from a pocket
-5080-5177     fn           sub
-5178-5216     fn           id
-5217-5234     §        Surviving the phone
-5235-5248     §        and one key PER ACCOUNT
-5249-5261     fn         forgetGuidedDraft
-5262-5296     fn         planNames
-5297-5310     fn               n
-5311-5366     fn           any
-5367-5380     fn         methodAt
-5381-5385     fn         prescribedTempoAt
-5386-5436     fn         logSet
-5437-5544     fn         record
-5545-5545     fn         feelStep
-5546-5554     fn         chooseFeel
-5555-5660     fn         buildEntries
-5661-5670     fn         save
-5671-5695     fn         finish
-5696-5707     fn         retry
-5708-5726     fn         next
-5727-5737     fn         back
-5738-5738     fn         pause
-5739-5753     fn         resume
-5754-5758     fn         startSet
-5759-5760     fn         openDemo
-5761-5761     fn         skipRest
-5762-5788     fn         loggedSets
-5789-5791     fn         notDoneNames
-5792-5811     fn         endSession
-5812-5812     fn           totalSets
-5813-5826     §        what counts as training volume, and what only counts as work
-5827-5837     fn           counts
-5838-5869     §        and why a bodyweight set is not a zero
-5870-5874     fn           workingSets
-5875-6118     fn           exDone
-6119-6152     §        the two things this movement is, beyond its name
-6153-6181     fn         variedPlan
-6182-6199     fn         tickPlanned
-6200-6347     fn         untickLast
-6348-6385     fn         nav
-6386-7370     fn         repsWord
-7371-7389     §        What was already here, and what the report actually asked for
-7390-7409     §        What happens to the sets, and to a PR
-7410-7428     §        The unit
-7429-7472     fn       EditEntrySheet
-7473-7474     fn         setAt
-7475-7492     fn         flagAt
-7493-7499     fn         dayLabel
-7500-7539     fn         save
-7540-7721     fn         setCount
+55-104        §        the block, the week of it this client is on, and the three fields a set
+105-116       §        ticking a planned set off, rather than typing it out
+117-258       §        one row per set in the sheet that adds or corrects a movement
+259-289       type     Activity
+290-290       fn       byName
+291-329       fn       names
+330-354       fn       isCardioMovement
+355-359       type     TrainMode
+360-365       type     SessionKind
+366-383       fn       isSessionKind
+384-402       fn       cardioKcal
+403-408       fn       onNight
+409-424       fn       MetricCols
+425-442       default  Train
+443-448       fn         entryKey
+449-454       fn         workoutLog
+455-525       fn             live
+526-681       §        The clock this screen judges "today" by
+682-697       fn         logWorkoutNL
+698-721       fn           out
+722-873       fn         pull
+874-890       fn         rememberSession
+891-988       §        the state in this component, not only the bytes on the disk
+989-1025      fn         built
+1026-1094     fn           m
+1095-1098     fn         importPending
+1099-1184     fn             out
+1185-1185     fn         dateFor
+1186-1186     fn         pad2
+1187-1257     fn         dstr
+1258-1258     fn         workedDates
+1259-1275     §        and NOT a second list kept on this phone
+1276-1328     §        typed, and not saved
+1329-1330     fn         stripEntries
+1331-1331     fn         dayEntries
+1332-1349     §        the day's volume, priced the way every other total in this app is
+1350-1355     fn         daySets
+1356-1356     fn         dayKcalEntries
+1357-1358     fn         dayKcal
+1359-1373     fn         prettyDay
+1374-1388     fn         repeatable
+1389-1413     fn           add
+1414-1449     fn         startRepeat
+1450-1500     fn         uid
+1501-1505     fn             _alt
+1506-1506     fn         isInjHidden
+1507-1507     fn         nameOf
+1508-1522     §        the name to READ, which is not the name to WRITE
+1523-1532     fn         shownName
+1533-1537     fn         orderedExercises
+1538-1547     fn             run
+1548-1551     fn         isRemovedEx
+1552-1582     fn         withEdits
+1583-1602     fn         planEx
+1603-1616     fn         runnableEx
+1617-1636     fn         isCustomEx
+1637-1639     fn         deleteEntry
+1640-1665     fn           putBack
+1666-1668     fn         knownExercises
+1669-1681     fn           add
+1682-1708     fn         removeExercise
+1709-1718     fn         planNameFor
+1719-1734     fn         retypeCxSets
+1735-1744     fn         switchCxUnit
+1745-1761     fn         openEditFor
+1762-1767     fn         replaceExercise
+1768-1825     fn         commitCx
+1826-1827     fn         firstOpenId
+1828-1828     fn         doneCount
+1829-1839     fn         plannedSets
+1840-1888     fn         weekFocus
+1889-1908     fn         logSet
+1909-1925     fn         tickPlannedSet
+1926-1943     fn         untickLastSet
+1944-1957     §        and why it is not offered for every prescription
+1958-1962     fn         quickReps
+1963-1964     fn         canQuickLog
+1965-1981     fn         quickLog
+1982-2045     fn         commitSession
+2046-2062     fn         logCardio
+2063-2080     fn         saveManual
+2081-2083     fn             setPairs
+2084-2087     fn             bwFlags
+2088-2095     fn             timedFlags
+2096-2172     fn             bestE1
+2173-2675     §        why the log is re-read, and only here
+2676-2691     fn               varied
+2692-2696     fn               intGroups
+2697-3827     fn               hit
+3828-4005     fn               names
+4006-4069     fn       useLiveVitals
+4070-4071     fn         awayMs
+4072-4072     fn           tick
+4073-4090     fn           q
+4091-4128     fn           z
+4129-4135     fn         rebuildZonesFromWatch
+4136-4157     fn             source
+4158-4187     fn           sub
+4188-4290     fn       ZonePanel
+4291-4328     fn       TimedSessionRunner
+4329-4352     fn         clock
+4353-4360     fn         hrInput
+4361-4379     fn         hrEstimate
+4380-4384     fn         hrUnknownNote
+4385-4409     fn         finish
+4410-4701     fn         discard
+4702-4714     fn       clipCaption
+4715-4725     fn       SessionDemo
+4726-4844     fn         clip
+4845-4860     fn       DayPicture
+4861-4862     type     RunnerView
+4863-4869     fn       SessionRunner
+4870-4951     fn         shownName
+4952-4952     fn         cardioAt
+4953-4954     fn         setCardioAt
+4955-5039     fn         showLoad
+5040-5048     fn         cancelRestAlert
+5049-5057     fn         startRest
+5058-5080     §        Making a noise from a pocket
+5081-5178     fn           sub
+5179-5217     fn           id
+5218-5235     §        Surviving the phone
+5236-5249     §        and one key PER ACCOUNT
+5250-5262     fn         forgetGuidedDraft
+5263-5297     fn         planNames
+5298-5311     fn               n
+5312-5367     fn           any
+5368-5381     fn         methodAt
+5382-5386     fn         prescribedTempoAt
+5387-5437     fn         logSet
+5438-5545     fn         record
+5546-5546     fn         feelStep
+5547-5555     fn         chooseFeel
+5556-5661     fn         buildEntries
+5662-5671     fn         save
+5672-5696     fn         finish
+5697-5708     fn         retry
+5709-5727     fn         next
+5728-5738     fn         back
+5739-5739     fn         pause
+5740-5754     fn         resume
+5755-5759     fn         startSet
+5760-5761     fn         openDemo
+5762-5762     fn         skipRest
+5763-5789     fn         loggedSets
+5790-5792     fn         notDoneNames
+5793-5812     fn         endSession
+5813-5813     fn           totalSets
+5814-5827     §        what counts as training volume, and what only counts as work
+5828-5838     fn           counts
+5839-5870     §        and why a bodyweight set is not a zero
+5871-5875     fn           workingSets
+5876-6119     fn           exDone
+6120-6153     §        the two things this movement is, beyond its name
+6154-6182     fn         variedPlan
+6183-6200     fn         tickPlanned
+6201-6348     fn         untickLast
+6349-6386     fn         nav
+6387-7371     fn         repsWord
+7372-7390     §        What was already here, and what the report actually asked for
+7391-7410     §        What happens to the sets, and to a PR
+7411-7429     §        The unit
+7430-7473     fn       EditEntrySheet
+7474-7475     fn         setAt
+7476-7493     fn         flagAt
+7494-7500     fn         dayLabel
+7501-7540     fn         save
+7541-7722     fn         setCount
 ```
 
 ## `app/(trainer)/builder.tsx`
 
-5,498 lines · ~85k tokens · 137 anchors
+5,499 lines · ~85k tokens · 137 anchors
 
 ```
-23-166        §        The Assign button is now withheld, not warned about
-167-172       type     BWeek
-173-205       fn       s
-206-225       fn       nextKey
-226-249       fn       cloneWeek
-250-262       fn       toBuilderDays
-263-357       type     BEx
-358-359       type     BDay
-360-386       §        The goal that generates a program is now allowed to be unknown
-387-422       default  Builder
-423-437       fn         savedCount
-438-438       fn         usage
-439-439       fn         shortcuts
-440-441       fn           own
-442-449       fn           used
-450-670       §        Why the Back arrow is conditional here and not on every other screen
-671-689       fn         rosterIds
-690-696       fn             on
-697-836       fn         client
-837-849       §        the eighth read, which the refresh did not count
-850-882       §        This builder edits ONE person's copy
-883-913       fn         pull
-914-922       fn         retryReads
-923-960       fn         confirmInjuries
-961-984       fn         markSaved
-985-1011      fn         loadFrom
-1012-1024     fn         clearBuilder
-1025-1037     §        and it has to be the WHOLE block, for the same reason
-1038-1044     fn         hasDraft
-1045-1061     fn         builderDirty
-1062-1062     fn         startFromTemplate
-1063-1086     fn           land
-1087-1094     fn         noKit
-1095-1096     fn         buildNoKitWeek
-1097-1110     fn           land
-1111-1112     fn         byMuscle
-1113-1120     fn           parsed
-1121-1122     fn         buildFromMuscles
-1123-1149     fn           land
-1150-1185     fn         loadTheirProgram
-1186-1226     fn           tpl
-1227-1245     fn         loadCues
-1246-1266     fn         cueFo
-1267-1278     fn         commitCue
-1279-1284     fn             rest
-1285-1297     fn         dropCue
-1298-1312     fn         setDayFocus
-1313-1327     fn         setDayCardio
-1328-1355     fn         addExercise
-1356-1366     fn         fillFromCues
-1367-1385     fn         removeExercise
-1386-1388     fn         moveExercise
-1389-1458     fn             at
-1459-1461     fn         heightsFor
-1462-1470     fn         beginDrag
-1471-1479     fn         moveDrag
-1480-1518     fn         endDrag
-1519-1529     fn         patchRows
-1530-1532     fn         groupWithNext
-1533-1541     fn             ids
-1542-1594     fn         ungroup
-1595-1602     fn         openEditor
-1603-1631     fn         toggleDay
-1632-1781     fn         openDay
-1782-1799     fn           anyContent
-1800-1807     fn         clearDraft
-1808-1824     fn         saveDraftNow
-1825-1826     fn         patchEx
-1827-1832     fn         addDay
-1833-1833     fn             used
-1834-1844     fn             free
-1845-1850     fn         addDayOn
-1851-1864     fn         cycleDay
-1865-1886     fn         removeDay
-1887-1888     fn         applyWeekEdit
-1889-1904     fn           land
-1905-1923     fn         totalExercises
-1924-1940     fn         pickedIds
-1941-1941     fn         factFor
-1942-1947     fn           c
-1948-1948     fn         injuriesOf
-1949-1964     fn         asMember
-1965-2008     fn         neverAskedNames
-2009-2011     fn         injuryLoads
-2012-2033     fn           movements
-2034-2044     §        what the picker searches
-2045-2048     fn         ownList
-2049-2056     fn         ownShown
-2057-2074     fn         ownSlugs
-2075-2079     fn         catByName
-2080-2101     fn         rowFor
-2102-2109     fn         customAdd
-2110-2118     fn         weekVolume
-2119-2123     fn           groups
-2124-2124     fn         typeFill
-2125-2125     fn         typeOn
-2126-2126     fn         typesPresent
-2127-2127     fn         thumbRows
-2128-2132     fn           inDays
-2133-2143     fn           inOwn
-2144-2172     fn         previewExercise
-2173-2219     fn         composeDays
-2220-2254     fn         composeProgram
-2255-2288     fn         review
-2289-2313     fn         volumeLine
-2314-2342     fn         doSaveTemplate
-2343-2411     fn         recordInjuryChoice
-2412-2434     fn         assign
-2435-2449     fn           go
-2450-2451     fn           sending
-2452-2458     fn             lines
-2459-2459     fn             more
-2460-2481     fn             okd
-2482-2507     fn             mine
-2508-2541     fn           outstanding
-2542-2553     fn         unassign
-2554-2580     fn           go
-2581-2619     fn         revert
-2620-2646     fn         deleteTemplate
-2647-2647     fn         footWho
-2648-2651     fn           names
-2652-2653     fn         footWhere
-2654-2654     fn           day
-2655-2671     fn           ex
-2672-2735     fn         workflowFooter
-2736-2830     fn               onCount
-2831-2832     fn               di
-2833-2833     fn               sessions
-2834-2933     fn               exercises
-2934-3690     fn               ec
-3691-3794     fn               daySets
-3795-3795     fn               allSame
-3796-3796     fn               repsList
-3797-4737     fn               loadList
-4738-5358     fn               held
-5359-5412     fn               ec
-5413-5498     fn               cur
+23-167        §        The Assign button is now withheld, not warned about
+168-173       type     BWeek
+174-206       fn       s
+207-226       fn       nextKey
+227-250       fn       cloneWeek
+251-263       fn       toBuilderDays
+264-358       type     BEx
+359-360       type     BDay
+361-387       §        The goal that generates a program is now allowed to be unknown
+388-423       default  Builder
+424-438       fn         savedCount
+439-439       fn         usage
+440-440       fn         shortcuts
+441-442       fn           own
+443-450       fn           used
+451-671       §        Why the Back arrow is conditional here and not on every other screen
+672-690       fn         rosterIds
+691-697       fn             on
+698-837       fn         client
+838-850       §        the eighth read, which the refresh did not count
+851-883       §        This builder edits ONE person's copy
+884-914       fn         pull
+915-923       fn         retryReads
+924-961       fn         confirmInjuries
+962-985       fn         markSaved
+986-1012      fn         loadFrom
+1013-1025     fn         clearBuilder
+1026-1038     §        and it has to be the WHOLE block, for the same reason
+1039-1045     fn         hasDraft
+1046-1062     fn         builderDirty
+1063-1063     fn         startFromTemplate
+1064-1087     fn           land
+1088-1095     fn         noKit
+1096-1097     fn         buildNoKitWeek
+1098-1111     fn           land
+1112-1113     fn         byMuscle
+1114-1121     fn           parsed
+1122-1123     fn         buildFromMuscles
+1124-1150     fn           land
+1151-1186     fn         loadTheirProgram
+1187-1227     fn           tpl
+1228-1246     fn         loadCues
+1247-1267     fn         cueFo
+1268-1279     fn         commitCue
+1280-1285     fn             rest
+1286-1298     fn         dropCue
+1299-1313     fn         setDayFocus
+1314-1328     fn         setDayCardio
+1329-1356     fn         addExercise
+1357-1367     fn         fillFromCues
+1368-1386     fn         removeExercise
+1387-1389     fn         moveExercise
+1390-1459     fn             at
+1460-1462     fn         heightsFor
+1463-1471     fn         beginDrag
+1472-1480     fn         moveDrag
+1481-1519     fn         endDrag
+1520-1530     fn         patchRows
+1531-1533     fn         groupWithNext
+1534-1542     fn             ids
+1543-1595     fn         ungroup
+1596-1603     fn         openEditor
+1604-1632     fn         toggleDay
+1633-1782     fn         openDay
+1783-1800     fn           anyContent
+1801-1808     fn         clearDraft
+1809-1825     fn         saveDraftNow
+1826-1827     fn         patchEx
+1828-1833     fn         addDay
+1834-1834     fn             used
+1835-1845     fn             free
+1846-1851     fn         addDayOn
+1852-1865     fn         cycleDay
+1866-1887     fn         removeDay
+1888-1889     fn         applyWeekEdit
+1890-1905     fn           land
+1906-1924     fn         totalExercises
+1925-1941     fn         pickedIds
+1942-1942     fn         factFor
+1943-1948     fn           c
+1949-1949     fn         injuriesOf
+1950-1965     fn         asMember
+1966-2009     fn         neverAskedNames
+2010-2012     fn         injuryLoads
+2013-2034     fn           movements
+2035-2045     §        what the picker searches
+2046-2049     fn         ownList
+2050-2057     fn         ownShown
+2058-2075     fn         ownSlugs
+2076-2080     fn         catByName
+2081-2102     fn         rowFor
+2103-2110     fn         customAdd
+2111-2119     fn         weekVolume
+2120-2124     fn           groups
+2125-2125     fn         typeFill
+2126-2126     fn         typeOn
+2127-2127     fn         typesPresent
+2128-2128     fn         thumbRows
+2129-2133     fn           inDays
+2134-2144     fn           inOwn
+2145-2173     fn         previewExercise
+2174-2220     fn         composeDays
+2221-2255     fn         composeProgram
+2256-2289     fn         review
+2290-2314     fn         volumeLine
+2315-2343     fn         doSaveTemplate
+2344-2412     fn         recordInjuryChoice
+2413-2435     fn         assign
+2436-2450     fn           go
+2451-2452     fn           sending
+2453-2459     fn             lines
+2460-2460     fn             more
+2461-2482     fn             okd
+2483-2508     fn             mine
+2509-2542     fn           outstanding
+2543-2554     fn         unassign
+2555-2581     fn           go
+2582-2620     fn         revert
+2621-2647     fn         deleteTemplate
+2648-2648     fn         footWho
+2649-2652     fn           names
+2653-2654     fn         footWhere
+2655-2655     fn           day
+2656-2672     fn           ex
+2673-2736     fn         workflowFooter
+2737-2831     fn               onCount
+2832-2833     fn               di
+2834-2834     fn               sessions
+2835-2934     fn               exercises
+2935-3691     fn               ec
+3692-3795     fn               daySets
+3796-3796     fn               allSame
+3797-3797     fn               repsList
+3798-4738     fn               loadList
+4739-5359     fn               held
+5360-5413     fn               ec
+5414-5499     fn               cur
 ```
 
 ## `src/lib/coverage.test.ts`
@@ -681,7 +681,7 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/calendar.tsx`
 
-5,239 lines · ~79k tokens · 108 anchors
+5,226 lines · ~79k tokens · 108 anchors
 
 ```
 198-213       §        the weekday, the month and the clock, in the reader's own language
@@ -764,129 +764,129 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 2379-2430     fn         doCancel
 2431-2500     fn         confirmWaive
 2501-2501     fn         openMove
-2502-2518     fn         closeMove
-2519-2519     fn         moveDays
-2520-2570     fn         moveDay
-2571-2587     fn         confirmMove
-2588-2622     fn         doMove
-2623-2651     fn         confirmMoveAt
-2652-2693     fn         doMoveAt
-2694-2739     fn         confirmCancel
-2740-2779     fn         removeOpen
-2780-2824     fn         doReoffer
-2825-2838     fn         reoffer
-2839-2850     §        and "all N of your clients" is a claim about who can TAKE it
-2851-2911     fn           ids
-2912-2965     fn         occurrenceLine
-2966-2981     fn         checkIn
-2982-2982     fn           realName
-2983-3023     fn           openRecord
-3024-3024     fn         exportSchedule
-3025-3060     fn           evts
-3061-3062     fn               todays
-3063-3195     fn               next
-3196-3688     fn               n
-3689-3885     fn               waiting
-3886-3888     fn               days
-3889-3891     fn               n
-3892-4138     fn               total
-4139-4914     §        WITHDRAWN, not hidden-because-broken
-4915-5239     fn               slot
+2502-2505     fn         closeMove
+2506-2506     fn         moveDays
+2507-2557     fn         moveDay
+2558-2574     fn         confirmMove
+2575-2609     fn         doMove
+2610-2638     fn         confirmMoveAt
+2639-2680     fn         doMoveAt
+2681-2726     fn         confirmCancel
+2727-2766     fn         removeOpen
+2767-2811     fn         doReoffer
+2812-2825     fn         reoffer
+2826-2837     §        and "all N of your clients" is a claim about who can TAKE it
+2838-2898     fn           ids
+2899-2952     fn         occurrenceLine
+2953-2968     fn         checkIn
+2969-2969     fn           realName
+2970-3010     fn           openRecord
+3011-3011     fn         exportSchedule
+3012-3047     fn           evts
+3048-3049     fn               todays
+3050-3182     fn               next
+3183-3675     fn               n
+3676-3872     fn               waiting
+3873-3875     fn               days
+3876-3878     fn               n
+3879-4125     fn               total
+4126-4901     §        WITHDRAWN, not hidden-because-broken
+4902-5226     fn               slot
 ```
 
 ## `app/(trainer)/dashboard.tsx`
 
-5,189 lines · ~83k tokens · 88 anchors
+5,190 lines · ~83k tokens · 88 anchors
 
 ```
-163-168       fn       sheet
-169-175       fn       field
-176-187       fn       SheetHead
-188-205       fn       CodeFig
-206-220       fn       JoinLinkFallback
-221-241       fn       Chip
-242-279       fn       driftTone
-280-314       fn       rowStatus
-315-325       fn       toneOf
-326-336       fn       Initials
-337-383       fn       Flag
-384-406       fn       Fold
-407-511       fn         toggle
-512-591       type     Shortcut
-592-650       fn       UnmarkedSessions
-651-687       fn       MoneyOwed
-688-751       default  TrainerClients
-752-785       §        who is drifting
-786-786       fn         driftFor
-787-823       fn         driftActionable
-824-851       fn         openInviteEmails
-852-863       §        finding one person
-864-873       §        who the bulk controls act on
-874-878       fn         togglePick
-879-893       fn         stopPicking
-894-912       fn         acceptJoin
-913-933       fn         cancelInvite
-934-954       §        bringing a whole book across
-955-959       fn         resetImport
-960-1000      fn         chooseRosterFile
-1001-1003     fn         runImport
-1004-1033     fn           invited
-1034-1084     fn         copyJoinLink
-1085-1110     fn         loadCodes
-1111-1169     fn         openInvite
-1170-1178     fn           c
-1179-1201     fn         saveSpend
-1202-1316     fn         namedCodes
-1317-1370     §        progress photos this client SENT
-1371-1455     §        the coach's own sessions, read once for the two figures that need them ─
-1456-1468     fn         nextBooked
-1469-1493     fn         nextBookedLine
-1494-1508     §        Nothing prompted the coach to clear this
-1509-1552     §        the other three things about a coach's own book
-1553-1566     fn         lowCredits
-1567-1573     fn         invoiceAgeing
-1574-1574     fn         owed
-1575-1615     fn         bookState
-1616-1632     §        and the test is over the rows that CAN carry a count
-1633-1647     fn         threaded
-1648-1662     fn         lowAdherence
-1663-1680     fn         driftNote
-1681-1684     fn         segN
-1685-1706     fn         noProgram
-1707-1760     §        who is waiting on a reply
-1761-1803     fn         matchSeg
-1804-1812     fn         pickedRoster
-1813-1814     fn           pairs
-1815-1833     fn           assessed
-1834-1840     fn         deliverMessage
-1841-1864     fn         sendNudge
-1865-1885     §        plan ending, money owed, no program
-1886-1940     fn         attnFor
-1941-1941     fn         attnReason
-1942-1957     fn         needsAttention
-1958-1962     fn         adherenceValues
-1963-1974     §        the client's name used to go to a model, and now does not
-1975-2028     fn         draftNudge
-2029-2104     fn         sendDraft
-2105-2106     fn         nameOf
-2107-2119     fn         openBulkMessage
-2120-2146     fn         deliverBulk
-2147-2156     fn         bulkAssign
-2157-2205     fn           go
-2206-2214     fn         bulkEnd
-2215-2258     fn           go
-2259-2294     fn         exportRoster
-2295-2309     §        and the same for the weekly summary
-2310-2398     fn         genSummary
-2399-2450     fn         reloadEverything
-2451-2492     fn         nextUp
-2493-2498     fn         openProfile
-2499-3439     fn         openAdd
-3440-3464     §        what used to be here, and why it is gone
-3465-4838     §        and each of the three now goes somewhere
-4839-5099     fn               problem
-5100-5140     fn               on
-5141-5189     fn       CoachSetupRow
+164-169       fn       sheet
+170-176       fn       field
+177-188       fn       SheetHead
+189-206       fn       CodeFig
+207-221       fn       JoinLinkFallback
+222-242       fn       Chip
+243-280       fn       driftTone
+281-315       fn       rowStatus
+316-326       fn       toneOf
+327-337       fn       Initials
+338-384       fn       Flag
+385-407       fn       Fold
+408-512       fn         toggle
+513-592       type     Shortcut
+593-651       fn       UnmarkedSessions
+652-688       fn       MoneyOwed
+689-752       default  TrainerClients
+753-786       §        who is drifting
+787-787       fn         driftFor
+788-824       fn         driftActionable
+825-852       fn         openInviteEmails
+853-864       §        finding one person
+865-874       §        who the bulk controls act on
+875-879       fn         togglePick
+880-894       fn         stopPicking
+895-913       fn         acceptJoin
+914-934       fn         cancelInvite
+935-955       §        bringing a whole book across
+956-960       fn         resetImport
+961-1001      fn         chooseRosterFile
+1002-1004     fn         runImport
+1005-1034     fn           invited
+1035-1085     fn         copyJoinLink
+1086-1111     fn         loadCodes
+1112-1170     fn         openInvite
+1171-1179     fn           c
+1180-1202     fn         saveSpend
+1203-1317     fn         namedCodes
+1318-1371     §        progress photos this client SENT
+1372-1456     §        the coach's own sessions, read once for the two figures that need them ─
+1457-1469     fn         nextBooked
+1470-1494     fn         nextBookedLine
+1495-1509     §        Nothing prompted the coach to clear this
+1510-1553     §        the other three things about a coach's own book
+1554-1567     fn         lowCredits
+1568-1574     fn         invoiceAgeing
+1575-1575     fn         owed
+1576-1616     fn         bookState
+1617-1633     §        and the test is over the rows that CAN carry a count
+1634-1648     fn         threaded
+1649-1663     fn         lowAdherence
+1664-1681     fn         driftNote
+1682-1685     fn         segN
+1686-1707     fn         noProgram
+1708-1761     §        who is waiting on a reply
+1762-1804     fn         matchSeg
+1805-1813     fn         pickedRoster
+1814-1815     fn           pairs
+1816-1834     fn           assessed
+1835-1841     fn         deliverMessage
+1842-1865     fn         sendNudge
+1866-1886     §        plan ending, money owed, no program
+1887-1941     fn         attnFor
+1942-1942     fn         attnReason
+1943-1958     fn         needsAttention
+1959-1963     fn         adherenceValues
+1964-1975     §        the client's name used to go to a model, and now does not
+1976-2029     fn         draftNudge
+2030-2105     fn         sendDraft
+2106-2107     fn         nameOf
+2108-2120     fn         openBulkMessage
+2121-2147     fn         deliverBulk
+2148-2157     fn         bulkAssign
+2158-2206     fn           go
+2207-2215     fn         bulkEnd
+2216-2259     fn           go
+2260-2295     fn         exportRoster
+2296-2310     §        and the same for the weekly summary
+2311-2399     fn         genSummary
+2400-2451     fn         reloadEverything
+2452-2493     fn         nextUp
+2494-2499     fn         openProfile
+2500-3440     fn         openAdd
+3441-3465     §        what used to be here, and why it is gone
+3466-4839     §        and each of the three now goes somewhere
+4840-5100     fn               problem
+5101-5141     fn               on
+5142-5190     fn       CoachSetupRow
 ```
 
 ## `studio-web/app/accounting/page.tsx`
@@ -1004,7 +1004,7 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/payments.tsx`
 
-3,348 lines · ~54k tokens · 61 anchors
+3,349 lines · ~54k tokens · 61 anchors
 
 ```
 12-35         §        What this screen may say about money, and what it may not
@@ -1014,107 +1014,107 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 111-127       §        A chargeback, which this screen used to mention and never show
 128-142       §        A pack that runs out of time
 143-197       §        Stopping a subscription, which a coach can now actually do
-198-337       §        A status nobody wrote a sentence for
-338-358       type     RefundTarget
-359-380       fn       purchaseTarget
-381-396       fn       renewalTarget
-397-415       fn       billingWords
-416-421       fn       dayOf
-422-544       default  TrainerPayments
-545-571       fn         load
-572-583       fn         activePkgs
-584-586       fn         promoPkgLine
-587-591       fn           found
-592-593       fn         onboard
-594-647       fn         addPkg
-648-681       fn           go
-682-685       fn         switchCancel
-686-822       fn           go
-823-825       fn         promoTarget
-826-840       fn         addPromo
-841-880       fn         withdrawPromo
-881-891       fn         refundedLine
-892-912       fn         openRefund
-913-969       fn         sendRefund
-970-980       fn         confirmRefund
-981-1013      §        The third state, which this used to spend
-1014-1036     §        the credit a refund does not give back
-1037-1062     fn         moveCredit
-1063-1076     fn         confirmCredit
-1077-1118     §        changing a package that is already on sale
-1119-1159     fn         openEdit
-1160-1180     fn         editPatch
-1181-1194     fn         saveEdit
-1195-1305     fn         remove
-1306-1306     fn         liveSubs
-1307-1308     fn         unsettledSubs
-1309-1314     §        the money figures
-1315-1323     fn         paid
-1324-1340     fn         undated
-1341-1380     §        what went back out, said beside the gross and never taken off it
-1381-1423     §        the one figure in here that came from a PREDICTION
-1424-1449     fn         packs
-1450-1450     fn         liveDisputes
-1451-1453     fn         expiredPacks
-1454-1454     fn         stranded
-1455-1461     fn         runOut
-1462-1462     fn         packsShown
-1463-1491     §        the sales that were in every figure and on no list
-1492-1493     fn         memberships
-1494-1542     §        which clients the figure at the top is made of
-1543-1564     fn         potsRow
-1565-1576     fn         potLine
-1577-1588     fn         made
-1589-1593     fn         madeMeters
-1594-1619     fn             part
-1620-3348     §        the refund sheet's own arithmetic
+198-338       §        A status nobody wrote a sentence for
+339-359       type     RefundTarget
+360-381       fn       purchaseTarget
+382-397       fn       renewalTarget
+398-416       fn       billingWords
+417-422       fn       dayOf
+423-545       default  TrainerPayments
+546-572       fn         load
+573-584       fn         activePkgs
+585-587       fn         promoPkgLine
+588-592       fn           found
+593-594       fn         onboard
+595-648       fn         addPkg
+649-682       fn           go
+683-686       fn         switchCancel
+687-823       fn           go
+824-826       fn         promoTarget
+827-841       fn         addPromo
+842-881       fn         withdrawPromo
+882-892       fn         refundedLine
+893-913       fn         openRefund
+914-970       fn         sendRefund
+971-981       fn         confirmRefund
+982-1014      §        The third state, which this used to spend
+1015-1037     §        the credit a refund does not give back
+1038-1063     fn         moveCredit
+1064-1077     fn         confirmCredit
+1078-1119     §        changing a package that is already on sale
+1120-1160     fn         openEdit
+1161-1181     fn         editPatch
+1182-1195     fn         saveEdit
+1196-1306     fn         remove
+1307-1307     fn         liveSubs
+1308-1309     fn         unsettledSubs
+1310-1315     §        the money figures
+1316-1324     fn         paid
+1325-1341     fn         undated
+1342-1381     §        what went back out, said beside the gross and never taken off it
+1382-1424     §        the one figure in here that came from a PREDICTION
+1425-1450     fn         packs
+1451-1451     fn         liveDisputes
+1452-1454     fn         expiredPacks
+1455-1455     fn         stranded
+1456-1462     fn         runOut
+1463-1463     fn         packsShown
+1464-1492     §        the sales that were in every figure and on no list
+1493-1494     fn         memberships
+1495-1543     §        which clients the figure at the top is made of
+1544-1565     fn         potsRow
+1566-1577     fn         potLine
+1578-1589     fn         made
+1590-1594     fn         madeMeters
+1595-1620     fn             part
+1621-3349     §        the refund sheet's own arithmetic
 ```
 
 ## `app/(trainer)/client.tsx`
 
-3,328 lines · ~50k tokens · 40 anchors
+3,329 lines · ~50k tokens · 40 anchors
 
 ```
 3-14          §        Why this screen exists
 15-29         §        Why it is not a menu
 30-39         §        Nothing here recomputes anything
 40-72         §        Where the dashes come from
-73-182        §        Nor by a read that was never entitled to an answer
-183-272       §        the money on the client detail screen
-273-293       fn       Chip
-294-298       fn       TrendFigure
-299-300       fn         pts
-301-319       fn         xy
-320-384       default  ClientScreen
-385-403       fn         client
-404-590       §        getting a hand-added client onto the app, from the screen about them
-591-660       fn         board
-661-664       fn         focusOn
-665-712       fn         week
-713-721       fn         trainingBoardValue
-722-723       fn         weeklyTrained
-724-915       fn           dayNo
-916-917       fn         creditLines
-918-940       fn         creditsRemaining
-941-993       fn         creditShortfall
-994-1001      fn         valueReads
-1002-1006     fn         valueRead
-1007-1014     fn         sub
-1015-1034     fn         owed
-1035-1046     fn         seen
-1047-1163     fn         activeLines
-1164-1262     fn         pickMode
-1263-1400     fn         saveContact
-1401-1430     fn         diary
-1431-1434     fn         followUps
-1435-1447     fn           recent
-1448-1448     fn         loopTally
-1449-1451     fn         loopLine
-1452-1550     fn         loopBlocked
-1551-1605     fn         reloadEverything
-1606-1618     fn         go
-1619-1643     fn         sendAsk
-1644-3328     fn         askIntake
+73-183        §        Nor by a read that was never entitled to an answer
+184-273       §        the money on the client detail screen
+274-294       fn       Chip
+295-299       fn       TrendFigure
+300-301       fn         pts
+302-320       fn         xy
+321-385       default  ClientScreen
+386-404       fn         client
+405-591       §        getting a hand-added client onto the app, from the screen about them
+592-661       fn         board
+662-665       fn         focusOn
+666-713       fn         week
+714-722       fn         trainingBoardValue
+723-724       fn         weeklyTrained
+725-916       fn           dayNo
+917-918       fn         creditLines
+919-941       fn         creditsRemaining
+942-994       fn         creditShortfall
+995-1002      fn         valueReads
+1003-1007     fn         valueRead
+1008-1015     fn         sub
+1016-1035     fn         owed
+1036-1047     fn         seen
+1048-1164     fn         activeLines
+1165-1263     fn         pickMode
+1264-1401     fn         saveContact
+1402-1431     fn         diary
+1432-1435     fn         followUps
+1436-1448     fn           recent
+1449-1449     fn         loopTally
+1450-1452     fn         loopLine
+1453-1551     fn         loopBlocked
+1552-1606     fn         reloadEverything
+1607-1619     fn         go
+1620-1644     fn         sendAsk
+1645-3329     fn         askIntake
 ```
 
 ## `studio-web/app/close/page.tsx`
@@ -1178,189 +1178,189 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/nutrition.tsx`
 
-3,207 lines · ~54k tokens · 101 anchors
+3,208 lines · ~54k tokens · 101 anchors
 
 ```
-21-155        fn       cuisineLabel
-156-190       §        where the calorie target came from (TF-29)
-191-195       fn       rateIn
-196-205       fn       onDate
-206-209       fn       targetBasis
-210-253       fn         w
-254-259       §        real recipes in the list
-260-262       fn       sameDish
-263-267       fn       dishKey
-268-285       fn       openLink
-286-300       type     PlannedRead
-301-309       fn       PlannedRecipeRead
-310-406       default  Nutrition
-407-435       §        real recipes
-436-459       fn         onRecipeRead
-460-480       fn         logPlanned
-481-495       §        whose shop, and which week
-496-508       fn         grocWeekKey
-509-556       §        whose swaps
-557-618       §        and whose planned recipes
-619-619       fn         toggleCuisine
-620-636       fn           next
-637-637       fn         saveDislikes
-638-666       fn         addDislike
-667-680       fn         pull
-681-733       fn         removeMeal
-734-758       fn         photoLog
-759-810       fn         runPhotoLog
-811-811       fn         barcodeLog
-812-830       fn         describeLog
-831-852       fn           whole
-853-854       fn             outs
-855-855       fn             refused
-856-885       fn             unsent
-886-887       fn         adjustFor
-888-896       fn         cyclingAdjust
-897-897       fn         openWeightGoal
-898-913       §        and why every one of these is memoised
-914-931       fn         energyPlan
-932-952       §        which day of the coach's week the member is standing in
-953-955       fn         coachOverride
-956-961       fn         input
-962-962       fn         snacks
-963-963       fn         planHasSnacks
-964-965       fn         planSlots
-966-989       §        the plan, with the planned recipes in it
-990-1001      fn         recipeDish
-1002-1010     §        the days on screen
-1011-1023     fn         days
-1024-1028     fn         coachRefs
-1029-1032     fn         plannedSrc
-1033-1034     fn         refAt
-1035-1045     fn         withRecipes
-1046-1048     fn         waitingIn
-1049-1050     fn         todayPlan
-1051-1051     fn         todayWaiting
-1052-1056     fn         slotMeals
-1057-1064     fn         genSlotMeals
-1065-1072     fn         choose
-1073-1089     fn         openMeal
-1090-1100     fn         planRecipe
-1101-1108     fn         unplanRecipe
-1109-1125     fn         slotOptions
-1126-1142     fn           flavour
-1143-1144     fn         coachPick
-1145-1159     fn         swap
-1160-1193     §        the recipe search, and only when asked
-1194-1214     §        Today's meals are real recipes
-1215-1225     fn           open
-1226-1248     fn               pick
-1249-1261     fn         recipeInPlan
-1262-1263     fn         coachWeekDay
-1264-1273     fn         week
-1274-1280     fn         weekPlan
-1281-1281     fn         weekWaiting
-1282-1284     fn         weekUnread
-1285-1285     fn         recipeWeek
-1286-1303     fn         groc
-1304-1306     fn         repeatsOn
-1307-1313     §        the exclusions that could not be honoured, computed once
-1314-1319     fn         gapNote
-1320-1330     fn         dislikeNote
-1331-1337     fn         weekAllergens
-1338-1338     fn         grocCount
-1339-1340     fn         grocKeys
-1341-1343     fn         grocNeed
-1344-1344     fn         grocLine
-1345-1345     fn         grocChecked
-1346-1353     fn         toggleGroc
-1354-1404     fn         shareGrocery
-1405-1407     fn         sharePlan
-1408-1408     fn           rows
-1409-1454     fn           labels
-1455-1498     §        and whether that burn is a CURRENT reading
-1499-1576     §        water
-1577-1584     §        today's list: the rows, and how one is drawn
-1585-1602     fn         matchesQuery
-1603-1609     fn         macroLines
-1610-1619     fn         mealRow
-1620-1729     fn           planned
-1730-3207     §        what a horizon costs, and the bound on it
+21-156        fn       cuisineLabel
+157-191       §        where the calorie target came from (TF-29)
+192-196       fn       rateIn
+197-206       fn       onDate
+207-210       fn       targetBasis
+211-254       fn         w
+255-260       §        real recipes in the list
+261-263       fn       sameDish
+264-268       fn       dishKey
+269-286       fn       openLink
+287-301       type     PlannedRead
+302-310       fn       PlannedRecipeRead
+311-407       default  Nutrition
+408-436       §        real recipes
+437-460       fn         onRecipeRead
+461-481       fn         logPlanned
+482-496       §        whose shop, and which week
+497-509       fn         grocWeekKey
+510-557       §        whose swaps
+558-619       §        and whose planned recipes
+620-620       fn         toggleCuisine
+621-637       fn           next
+638-638       fn         saveDislikes
+639-667       fn         addDislike
+668-681       fn         pull
+682-734       fn         removeMeal
+735-759       fn         photoLog
+760-811       fn         runPhotoLog
+812-812       fn         barcodeLog
+813-831       fn         describeLog
+832-853       fn           whole
+854-855       fn             outs
+856-856       fn             refused
+857-886       fn             unsent
+887-888       fn         adjustFor
+889-897       fn         cyclingAdjust
+898-898       fn         openWeightGoal
+899-914       §        and why every one of these is memoised
+915-932       fn         energyPlan
+933-953       §        which day of the coach's week the member is standing in
+954-956       fn         coachOverride
+957-962       fn         input
+963-963       fn         snacks
+964-964       fn         planHasSnacks
+965-966       fn         planSlots
+967-990       §        the plan, with the planned recipes in it
+991-1002      fn         recipeDish
+1003-1011     §        the days on screen
+1012-1024     fn         days
+1025-1029     fn         coachRefs
+1030-1033     fn         plannedSrc
+1034-1035     fn         refAt
+1036-1046     fn         withRecipes
+1047-1049     fn         waitingIn
+1050-1051     fn         todayPlan
+1052-1052     fn         todayWaiting
+1053-1057     fn         slotMeals
+1058-1065     fn         genSlotMeals
+1066-1073     fn         choose
+1074-1090     fn         openMeal
+1091-1101     fn         planRecipe
+1102-1109     fn         unplanRecipe
+1110-1126     fn         slotOptions
+1127-1143     fn           flavour
+1144-1145     fn         coachPick
+1146-1160     fn         swap
+1161-1194     §        the recipe search, and only when asked
+1195-1215     §        Today's meals are real recipes
+1216-1226     fn           open
+1227-1249     fn               pick
+1250-1262     fn         recipeInPlan
+1263-1264     fn         coachWeekDay
+1265-1274     fn         week
+1275-1281     fn         weekPlan
+1282-1282     fn         weekWaiting
+1283-1285     fn         weekUnread
+1286-1286     fn         recipeWeek
+1287-1304     fn         groc
+1305-1307     fn         repeatsOn
+1308-1314     §        the exclusions that could not be honoured, computed once
+1315-1320     fn         gapNote
+1321-1331     fn         dislikeNote
+1332-1338     fn         weekAllergens
+1339-1339     fn         grocCount
+1340-1341     fn         grocKeys
+1342-1344     fn         grocNeed
+1345-1345     fn         grocLine
+1346-1346     fn         grocChecked
+1347-1354     fn         toggleGroc
+1355-1405     fn         shareGrocery
+1406-1408     fn         sharePlan
+1409-1409     fn           rows
+1410-1455     fn           labels
+1456-1499     §        and whether that burn is a CURRENT reading
+1500-1577     §        water
+1578-1585     §        today's list: the rows, and how one is drawn
+1586-1603     fn         matchesQuery
+1604-1610     fn         macroLines
+1611-1620     fn         mealRow
+1621-1730     fn           planned
+1731-3208     §        what a horizon costs, and the bound on it
 ```
 
 ## `app/(client)/scans.tsx`
 
-3,142 lines · ~51k tokens · 72 anchors
+3,143 lines · ~51k tokens · 72 anchors
 
 ```
-141-226       §        the handover document
-227-246       fn       consentWhen
-247-289       §        The two invokes that used to live here
-290-290       fn       Wheel
-291-344       fn         step
-345-349       fn       coachSubject
-350-364       default  Scans
-365-377       §        sharing and exporting this record
-378-396       fn         exportRows
-397-397       fn         sendPdf
-398-398       fn         sendCsv
-399-400       fn         sendSummary
-401-435       §        the handover document
-436-447       fn         muscleBoard7
-448-455       fn         muscleShading7
-456-476       fn         muscleWeek
-477-538       fn         buildReport
-539-553       fn         shareForProfessional
-554-582       fn         shareProgress
-583-629       fn           options
-630-643       fn         fieldFromKg
-644-715       §        who can see these
-716-733       fn         _connectedKey
-734-764       fn         devWeight
-765-767       fn         pull
-768-798       §        Correcting a scan
-799-820       §        the correction sheet's own date wheel
-821-821       fn         scanDateISO
-822-837       fn         scanDateLabel
-838-846       fn         pick
-847-939       fn         runSheetRead
-940-957       fn         saveScan
-958-1001      §        the muscle figure, against the weight beside it
-1002-1098     §        what the OTHER scans say, and whether we heard them
-1099-1112     fn           sign
-1113-1116     §        progress photos
-1117-1133     fn         loadPhotos
-1134-1152     fn         loadShares
-1153-1171     fn         loadPubs
-1172-1198     fn         allowPublishing
-1199-1219     fn         stopPublishing
-1220-1233     fn         savePhoto
-1234-1284     §        The three arguments this call has always accepted and never been
-1285-1285     fn         physiqueCheck
-1286-1345     fn           keep
-1346-1357     fn         exifTakenAt
-1358-1391     fn         addPhoto
-1392-1431     fn         removePhoto
-1432-1458     fn         sendToCoach
-1459-1484     fn         takeBackFromCoach
-1485-1488     fn         photoActions
-1489-1507     fn           buttons
-1508-1509     fn         toggleCmp
-1510-1511     fn         chrono
-1512-1530     fn         wsv
-1531-1532     fn         editing
-1533-1563     fn         openEdit
-1564-1569     fn         eWheelISO
-1570-1583     fn         saveEdit
-1584-1606     §        the date, and the consequence said before it happens
-1607-1647     fn               proceed
-1648-1686     fn         removeScan
-1687-1705     §        where each figure came from, and when
-1706-1729     fn         priorOf
-1730-1764     fn         progressTrendReads
-1765-1790     fn         dlt
-1791-1797     §        the latest scan as one picture
-1798-2257     fn         comp
-2258-2309     fn               p
-2310-2528     fn               p
-2529-2555     §        this row, in the member's own unit
-2556-3142     fn               series
+142-227       §        the handover document
+228-247       fn       consentWhen
+248-290       §        The two invokes that used to live here
+291-291       fn       Wheel
+292-345       fn         step
+346-350       fn       coachSubject
+351-365       default  Scans
+366-378       §        sharing and exporting this record
+379-397       fn         exportRows
+398-398       fn         sendPdf
+399-399       fn         sendCsv
+400-401       fn         sendSummary
+402-436       §        the handover document
+437-448       fn         muscleBoard7
+449-456       fn         muscleShading7
+457-477       fn         muscleWeek
+478-539       fn         buildReport
+540-554       fn         shareForProfessional
+555-583       fn         shareProgress
+584-630       fn           options
+631-644       fn         fieldFromKg
+645-716       §        who can see these
+717-734       fn         _connectedKey
+735-765       fn         devWeight
+766-768       fn         pull
+769-799       §        Correcting a scan
+800-821       §        the correction sheet's own date wheel
+822-822       fn         scanDateISO
+823-838       fn         scanDateLabel
+839-847       fn         pick
+848-940       fn         runSheetRead
+941-958       fn         saveScan
+959-1002      §        the muscle figure, against the weight beside it
+1003-1099     §        what the OTHER scans say, and whether we heard them
+1100-1113     fn           sign
+1114-1117     §        progress photos
+1118-1134     fn         loadPhotos
+1135-1153     fn         loadShares
+1154-1172     fn         loadPubs
+1173-1199     fn         allowPublishing
+1200-1220     fn         stopPublishing
+1221-1234     fn         savePhoto
+1235-1285     §        The three arguments this call has always accepted and never been
+1286-1286     fn         physiqueCheck
+1287-1346     fn           keep
+1347-1358     fn         exifTakenAt
+1359-1392     fn         addPhoto
+1393-1432     fn         removePhoto
+1433-1459     fn         sendToCoach
+1460-1485     fn         takeBackFromCoach
+1486-1489     fn         photoActions
+1490-1508     fn           buttons
+1509-1510     fn         toggleCmp
+1511-1512     fn         chrono
+1513-1531     fn         wsv
+1532-1533     fn         editing
+1534-1564     fn         openEdit
+1565-1570     fn         eWheelISO
+1571-1584     fn         saveEdit
+1585-1607     §        the date, and the consequence said before it happens
+1608-1648     fn               proceed
+1649-1687     fn         removeScan
+1688-1706     §        where each figure came from, and when
+1707-1730     fn         priorOf
+1731-1765     fn         progressTrendReads
+1766-1791     fn         dlt
+1792-1798     §        the latest scan as one picture
+1799-2258     fn         comp
+2259-2310     fn               p
+2311-2529     fn               p
+2530-2556     §        this row, in the member's own unit
+2557-3143     fn               series
 ```
 
 ## `studio-web/app/door/page.tsx`
@@ -1477,60 +1477,60 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/log-session.tsx`
 
-2,574 lines · ~38k tokens · 51 anchors
+2,575 lines · ~38k tokens · 51 anchors
 
 ```
 29-37         §        One send per press of Save
 38-46         §        And it asks when the session happened
 47-73         §        The session the coach already wrote
 74-98         §        Who it is for, and why that is a picker rather than a param
-99-290        §        And it can now FINISH a session, not just log one
-291-291       type     SheetSet
-292-298       type     Row
-299-303       fn       counts
-304-306       type     RestRun
-307-308       fn       mkKey
-309-334       default  LogSession
-335-410       fn         sendWaiting
-411-454       fn         pull
-455-615       fn         seededStart
-616-616       fn         startClock
-617-617       fn         stopClocks
-618-632       fn         startRest
-633-646       fn         dropRestFor
-647-652       fn         catByName
-653-657       fn         stillFor
-658-718       fn         thumbRows
-719-774       fn         pickedRow
-775-793       fn         loadBox
-794-857       fn         loadPlanDay
-858-1010      fn         autoLoadRef
-1011-1033     fn         lastByName
-1034-1068     fn         shownClients
-1069-1074     fn         addExercise
-1075-1080     fn         addSet
-1081-1085     fn         patchSet
-1086-1087     fn         holdSet
-1088-1102     fn         removeRow
-1103-1119     fn         removeSet
-1120-1143     fn         askRemoveSet
-1144-1167     fn         clearSheet
-1168-1196     fn         entriesToWrite
-1197-1218     fn         loadProblem
-1219-1257     fn         hasSets
-1258-1269     fn         save
-1270-1606     fn         runSave
-1607-1992     fn               all
-1993-2204     fn               nowSets
-2205-2310     fn               press
-2311-2311     fn               total
-2312-2312     fn               saved
-2313-2474     fn               heldN
-2475-2477     fn       SessionClock
-2478-2508     fn           id
-2509-2512     fn       RestBar
-2513-2529     fn         leftAt
-2530-2574     fn           id
+99-291        §        And it can now FINISH a session, not just log one
+292-292       type     SheetSet
+293-299       type     Row
+300-304       fn       counts
+305-307       type     RestRun
+308-309       fn       mkKey
+310-335       default  LogSession
+336-411       fn         sendWaiting
+412-455       fn         pull
+456-616       fn         seededStart
+617-617       fn         startClock
+618-618       fn         stopClocks
+619-633       fn         startRest
+634-647       fn         dropRestFor
+648-653       fn         catByName
+654-658       fn         stillFor
+659-719       fn         thumbRows
+720-775       fn         pickedRow
+776-794       fn         loadBox
+795-858       fn         loadPlanDay
+859-1011      fn         autoLoadRef
+1012-1034     fn         lastByName
+1035-1069     fn         shownClients
+1070-1075     fn         addExercise
+1076-1081     fn         addSet
+1082-1086     fn         patchSet
+1087-1088     fn         holdSet
+1089-1103     fn         removeRow
+1104-1120     fn         removeSet
+1121-1144     fn         askRemoveSet
+1145-1168     fn         clearSheet
+1169-1197     fn         entriesToWrite
+1198-1219     fn         loadProblem
+1220-1258     fn         hasSets
+1259-1270     fn         save
+1271-1607     fn         runSave
+1608-1993     fn               all
+1994-2205     fn               nowSets
+2206-2311     fn               press
+2312-2312     fn               total
+2313-2313     fn               saved
+2314-2475     fn               heldN
+2476-2478     fn       SessionClock
+2479-2509     fn           id
+2510-2513     fn       RestBar
+2514-2530     fn         leftAt
+2531-2575     fn           id
 ```
 
 ## `src/lib/gymExport.ts`
@@ -2078,50 +2078,50 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/calendar.tsx`
 
-2,104 lines · ~34k tokens · 41 anchors
+2,105 lines · ~34k tokens · 41 anchors
 
 ```
 11-21         §        Round five: the approved look
 22-33         §        Against the board (client page 11, "Calendar")
 34-60         §        TF-20: the calendar can be written to as well as read
-61-178        §        TF-32: every "your coach" on this screen named the reader
-179-197       fn       initialsOf
-198-207       fn       dayKey
-208-220       fn       timeLabel
-221-238       fn       zoneLine
-239-254       fn       cancelTermsLine
-255-302       fn       planDayLabel
-303-349       fn       AgendaRow
-350-384       fn       logDetail
-385-426       default  Calendar
-427-472       fn         standingCount
-473-510       §        the "Session in 1 hour" banner, armed AND disarmed
-511-545       §        TF-20: the days this client has marked
-546-569       §        bounded in time, because every figure below answers "what have I got
-570-572       fn         upcoming
-573-573       fn         mine
-574-591       fn         open
-592-630       fn         visible
-631-667       fn           seen
-668-675       fn         selDaySessions
-676-709       fn         selDayLog
-710-739       fn         pull
-740-789       fn         shiftMonth
-790-790       fn         openPlanner
-791-814       fn           existing
-815-820       fn         queuePlan
-821-851       fn         savePlan
-852-879       fn         removePlan
-880-896       §        review, then confirm
-897-915       fn         book
-916-984       fn         commitBooking
-985-1000      fn         cancel
-1001-1061     fn           doCancel
-1062-1099     fn         joinWaitlist
-1100-1192     fn         leaveWaitlist
-1193-1193     fn               hasMine
-1194-1748     fn               hasOpen
-1749-2104     fn               evts
+61-179        §        TF-32: every "your coach" on this screen named the reader
+180-198       fn       initialsOf
+199-208       fn       dayKey
+209-221       fn       timeLabel
+222-239       fn       zoneLine
+240-255       fn       cancelTermsLine
+256-303       fn       planDayLabel
+304-350       fn       AgendaRow
+351-385       fn       logDetail
+386-427       default  Calendar
+428-473       fn         standingCount
+474-511       §        the "Session in 1 hour" banner, armed AND disarmed
+512-546       §        TF-20: the days this client has marked
+547-570       §        bounded in time, because every figure below answers "what have I got
+571-573       fn         upcoming
+574-574       fn         mine
+575-592       fn         open
+593-631       fn         visible
+632-668       fn           seen
+669-676       fn         selDaySessions
+677-710       fn         selDayLog
+711-740       fn         pull
+741-790       fn         shiftMonth
+791-791       fn         openPlanner
+792-815       fn           existing
+816-821       fn         queuePlan
+822-852       fn         savePlan
+853-880       fn         removePlan
+881-897       §        review, then confirm
+898-916       fn         book
+917-985       fn         commitBooking
+986-1001      fn         cancel
+1002-1062     fn           doCancel
+1063-1100     fn         joinWaitlist
+1101-1193     fn         leaveWaitlist
+1194-1194     fn               hasMine
+1195-1749     fn               hasOpen
+1750-2105     fn               evts
 ```
 
 ## `studio-web/app/costs/page.tsx`
@@ -2285,53 +2285,53 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/analytics.tsx`
 
-2,005 lines · ~33k tokens · 44 anchors
+2,006 lines · ~33k tokens · 44 anchors
 
 ```
-11-108        §        Every figure here waits for a whole read
-109-146       fn       WindowFigure
-147-220       default  TrainerAnalytics
-221-292       fn         driftSubjects
-293-373       fn         month
-374-397       fn         payingClients
-398-402       fn         _adhKnown
-403-429       fn         avgAdh
-430-430       fn         onTrack
-431-431       fn         watch
-432-453       fn         riskCount
-454-466       fn         noRecord
-467-467       fn         _atRiskIds
-468-511       fn         atRiskMonth
-512-529       fn         loadCurrency
-530-532       fn         noCur
-533-557       fn         priced
-558-573       fn         loadTakings
-574-587       fn         takenRows
-588-595       fn         takingsReads
-596-600       fn         takenStrands
-601-647       fn         takenMonth
-648-649       fn         sourceDonuts
-650-683       fn             part
-684-699       fn         saveGoals
-700-831       fn         genDigest
-832-853       §        AND THE KEY CHANGED, WHICH IS NOT A DETAIL
-854-909       fn         chartMonths
-910-912       fn         rangeDef
-913-913       fn         win
-914-914       fn         prevWin
-915-915       fn         buckets
-916-919       fn         prevBuckets
-920-923       fn         rangeIds
-924-942       fn         rangeGap
-943-946       fn         curFigures
-947-950       fn         prevFigures
-951-955       fn         rangeLabels
-956-976       fn         rangeDeltaLine
-977-983       fn         rangeChip
-984-989       fn         upward
-990-1003      fn         countOf
-1004-1023     fn         pull
-1024-2005     fn         exportAnalytics
+11-109        §        Every figure here waits for a whole read
+110-147       fn       WindowFigure
+148-221       default  TrainerAnalytics
+222-293       fn         driftSubjects
+294-374       fn         month
+375-398       fn         payingClients
+399-403       fn         _adhKnown
+404-430       fn         avgAdh
+431-431       fn         onTrack
+432-432       fn         watch
+433-454       fn         riskCount
+455-467       fn         noRecord
+468-468       fn         _atRiskIds
+469-512       fn         atRiskMonth
+513-530       fn         loadCurrency
+531-533       fn         noCur
+534-558       fn         priced
+559-574       fn         loadTakings
+575-588       fn         takenRows
+589-596       fn         takingsReads
+597-601       fn         takenStrands
+602-648       fn         takenMonth
+649-650       fn         sourceDonuts
+651-684       fn             part
+685-700       fn         saveGoals
+701-832       fn         genDigest
+833-854       §        AND THE KEY CHANGED, WHICH IS NOT A DETAIL
+855-910       fn         chartMonths
+911-913       fn         rangeDef
+914-914       fn         win
+915-915       fn         prevWin
+916-916       fn         buckets
+917-920       fn         prevBuckets
+921-924       fn         rangeIds
+925-943       fn         rangeGap
+944-947       fn         curFigures
+948-951       fn         prevFigures
+952-956       fn         rangeLabels
+957-977       fn         rangeDeltaLine
+978-984       fn         rangeChip
+985-990       fn         upward
+991-1004      fn         countOf
+1005-1024     fn         pull
+1025-2006     fn         exportAnalytics
 ```
 
 ## `src/ui/messaging.ts`
@@ -2746,52 +2746,52 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(client)/foodlog.tsx`
 
-1,714 lines · ~26k tokens · 43 anchors
+1,715 lines · ~26k tokens · 43 anchors
 
 ```
-133-153       type     WayIn
-154-237       default  FoodLog
-238-242       fn          live
-243-270       §        which day a meal is being logged to
-271-278       fn        stampFor
-279-302       §        Search foods
-303-307       fn        localCommon
-308-317       fn        localDishes
-318-335       fn          timer
-336-368       fn        results
-369-419       §        the one review sheet
-420-446       fn        warnUnsaved
-447-454       fn        sayBackdated
-455-468       fn        sayLogged
-469-472       fn        logNL
-473-515       §        four answers, four sentences
-516-518       fn          whole
-519-596       fn          short
-597-606       §        correcting a meal already logged (TF-02)
-607-610       fn        openEdit
-611-643       fn        saveEdit
-644-645       fn        removeMeal
-646-667       fn         putBack
-668-668       fn        staged
-669-669       fn        entries
-670-705       fn        off
-706-713       fn        pull
-714-737       §        and why the oldest day goes with it under 'partial'
-738-739       fn        pastDays
-740-779       §        the yogurt somebody eats every morning
-780-817       §        the branch that threw away the only copy
-818-824       fn        remembered
-825-840       fn        pinFood
-841-841       fn        favRows
-842-842       fn         pinnedKeys
-843-843       fn         recent
-844-852       fn         recentKeys
-853-871       fn        openRemembered
-872-879       fn        relogEntry
-880-928       §        and whether that burn is a CURRENT reading
-929-956       fn        takeMealPhoto
-957-1018      fn        runMealPhoto
-1019-1714     fn        macroRow
+134-154       type     WayIn
+155-238       default  FoodLog
+239-243       fn          live
+244-271       §        which day a meal is being logged to
+272-279       fn        stampFor
+280-303       §        Search foods
+304-308       fn        localCommon
+309-318       fn        localDishes
+319-336       fn          timer
+337-369       fn        results
+370-420       §        the one review sheet
+421-447       fn        warnUnsaved
+448-455       fn        sayBackdated
+456-469       fn        sayLogged
+470-473       fn        logNL
+474-516       §        four answers, four sentences
+517-519       fn          whole
+520-597       fn          short
+598-607       §        correcting a meal already logged (TF-02)
+608-611       fn        openEdit
+612-644       fn        saveEdit
+645-646       fn        removeMeal
+647-668       fn         putBack
+669-669       fn        staged
+670-670       fn        entries
+671-706       fn        off
+707-714       fn        pull
+715-738       §        and why the oldest day goes with it under 'partial'
+739-740       fn        pastDays
+741-780       §        the yogurt somebody eats every morning
+781-818       §        the branch that threw away the only copy
+819-825       fn        remembered
+826-841       fn        pinFood
+842-842       fn        favRows
+843-843       fn         pinnedKeys
+844-844       fn         recent
+845-853       fn         recentKeys
+854-872       fn        openRemembered
+873-880       fn        relogEntry
+881-929       §        and whether that burn is a CURRENT reading
+930-957       fn        takeMealPhoto
+958-1019      fn        runMealPhoto
+1020-1715     fn        macroRow
 ```
 
 ## `scripts/check-site-claims.mjs`
@@ -2873,79 +2873,125 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(trainer)/invoices.tsx`
 
-1,690 lines · ~26k tokens · 27 anchors
+1,691 lines · ~26k tokens · 27 anchors
 
 ```
 4-12          §        Why this screen exists
 13-21         §        Nothing on this screen decides what an invoice says
 22-31         §        THE CURRENCY IS THE GATE
-32-87         §        An empty list means two different things
-88-163        default  Invoices
-164-180       fn         load
-181-185       fn         pull
-186-215       fn         book
-216-229       fn         ageing
-230-238       fn         chase
-239-261       fn         inBand
-262-266       fn         lastTax
-267-279       fn         draft
-280-328       fn         reset
-329-356       fn         billAgain
-357-393       fn         onIssue
-394-435       fn         send
-436-459       fn         sendChase
-460-488       fn         doVoid
-489-522       fn         onChase
-523-530       fn         openSettle
-531-582       fn         doSettle
-583-589       fn         openChaseFrom
-590-625       fn         doChaseFrom
-626-706       fn         agedRow
-707-1081      fn         undatedRow
-1082-1690     fn               inBand
+32-88         §        An empty list means two different things
+89-164        default  Invoices
+165-181       fn         load
+182-186       fn         pull
+187-216       fn         book
+217-230       fn         ageing
+231-239       fn         chase
+240-262       fn         inBand
+263-267       fn         lastTax
+268-280       fn         draft
+281-329       fn         reset
+330-357       fn         billAgain
+358-394       fn         onIssue
+395-436       fn         send
+437-460       fn         sendChase
+461-489       fn         doVoid
+490-523       fn         onChase
+524-531       fn         openSettle
+532-583       fn         doSettle
+584-590       fn         openChaseFrom
+591-626       fn         doChaseFrom
+627-707       fn         agedRow
+708-1082      fn         undatedRow
+1083-1691     fn               inBand
 ```
 
 ## `app/(client)/trainers.tsx`
 
-1,687 lines · ~24k tokens · 36 anchors
+1,688 lines · ~24k tokens · 36 anchors
 
 ```
-11-92         §        The two things this directory could not tell anybody
-93-153        §        What became of the coaches this member asked
-154-184       fn       initials
-185-209       fn       CoachFace
-210-233       type     Coach
-234-235       type     CcyStatus
-236-265       default  FindTrainer
-266-273       fn         pull
-274-356       §        every request this member has made, and what became of it
-357-366       §        The way out
-367-373       §        null` must mean "nobody coaches you", never "we could not find out".
-374-446       fn         submitCode
-447-499       §        and then the name
-500-508       fn         confirmLeave
-509-532       fn         leaveCoach
-533-564       fn         acceptCoach
-565-578       fn         gymCards
-579-579       fn         acceptGym
-580-647       fn           inv
-648-663       fn               ids
-664-715       fn               nameById
-716-722       §        the trust surface, in two calls for the whole page
-723-733       fn               listed
-734-770       §        and what those figures are actually denominated in
-771-779       fn         request
-780-827       §        two answers that were told as one
-828-866       §        a duplicate and a write that stored nothing are not the same
-867-947       §        the push that was never sent
-948-978       fn         askToRequest
-979-988       fn         rateLine
-989-1005      fn         feeMoney
-1006-1015     fn         feeText
-1016-1025     fn         feeGap
-1026-1038     fn         credsFor
-1039-1048     fn         stamp
-1049-1687     fn         listedRequests
+11-93         §        The two things this directory could not tell anybody
+94-154        §        What became of the coaches this member asked
+155-185       fn       initials
+186-210       fn       CoachFace
+211-234       type     Coach
+235-236       type     CcyStatus
+237-266       default  FindTrainer
+267-274       fn         pull
+275-357       §        every request this member has made, and what became of it
+358-367       §        The way out
+368-374       §        null` must mean "nobody coaches you", never "we could not find out".
+375-447       fn         submitCode
+448-500       §        and then the name
+501-509       fn         confirmLeave
+510-533       fn         leaveCoach
+534-565       fn         acceptCoach
+566-579       fn         gymCards
+580-580       fn         acceptGym
+581-648       fn           inv
+649-664       fn               ids
+665-716       fn               nameById
+717-723       §        the trust surface, in two calls for the whole page
+724-734       fn               listed
+735-771       §        and what those figures are actually denominated in
+772-780       fn         request
+781-828       §        two answers that were told as one
+829-867       §        a duplicate and a write that stored nothing are not the same
+868-948       §        the push that was never sent
+949-979       fn         askToRequest
+980-989       fn         rateLine
+990-1006      fn         feeMoney
+1007-1016     fn         feeText
+1017-1026     fn         feeGap
+1027-1039     fn         credsFor
+1040-1049     fn         stamp
+1050-1688     fn         listedRequests
+```
+
+## `app/(client)/devices.tsx`
+
+1,667 lines · ~24k tokens · 39 anchors
+
+```
+106-125       type     MetricKey
+126-130       fn       importNote
+131-154       fn       ago
+155-160       fn       sessionWhen
+161-202       default  Devices
+203-212       fn        apple
+213-229       fn        lookbackLabel
+230-241       fn        wkNoteFor
+242-246       fn        pull
+247-248       fn        alreadyLogged
+249-283       fn        findWorkouts
+284-290       fn        importOne
+291-291       fn        importAll
+292-293       fn         fresh
+294-299       fn         out
+300-323       §        Writing sessions BACK to Apple Health
+324-337       fn        reviewHk
+338-365       fn        writeHk
+366-388       fn        saveSessionMins
+389-416       fn        onConnect
+417-442       fn        restoreNights
+443-476       §        a helper that was deleted, and the claim in it that was wrong
+477-477       fn        onDisconnect
+478-492       §        the nights are copied BEFORE anything is unlinked
+493-591       §        the false sign-out that walked straight past the copy
+592-605       fn        confirmDisconnect
+606-612       fn        connected
+613-639       fn        readable
+640-697       fn        connectedKey
+698-726       fn        lastRecorded
+727-746       fn        connectedMeta
+747-807       fn        named
+808-836       §        pull-to-refresh here was reported dead, and the keyboard props are NOT why
+837-863       §        What it actually was: the difference is not on this screen
+864-968       fn        toggleWellnessShare
+969-991       §        connected, and not readable on this phone
+992-1435      §        and the chip must not say Connected over it
+1436-1436     fn              provider
+1437-1667     fn              lastNight
 ```
 
 ## `studio-web/app/money/page.tsx`
@@ -2979,52 +3025,6 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 1614-1645     fn       why
 1646-1662     fn       Section
 1663-1667     fn       Banner
-```
-
-## `app/(client)/devices.tsx`
-
-1,666 lines · ~24k tokens · 39 anchors
-
-```
-105-124       type     MetricKey
-125-129       fn       importNote
-130-153       fn       ago
-154-159       fn       sessionWhen
-160-201       default  Devices
-202-211       fn        apple
-212-228       fn        lookbackLabel
-229-240       fn        wkNoteFor
-241-245       fn        pull
-246-247       fn        alreadyLogged
-248-282       fn        findWorkouts
-283-289       fn        importOne
-290-290       fn        importAll
-291-292       fn         fresh
-293-298       fn         out
-299-322       §        Writing sessions BACK to Apple Health
-323-336       fn        reviewHk
-337-364       fn        writeHk
-365-387       fn        saveSessionMins
-388-415       fn        onConnect
-416-441       fn        restoreNights
-442-475       §        a helper that was deleted, and the claim in it that was wrong
-476-476       fn        onDisconnect
-477-491       §        the nights are copied BEFORE anything is unlinked
-492-590       §        the false sign-out that walked straight past the copy
-591-604       fn        confirmDisconnect
-605-611       fn        connected
-612-638       fn        readable
-639-696       fn        connectedKey
-697-725       fn        lastRecorded
-726-745       fn        connectedMeta
-746-806       fn        named
-807-835       §        pull-to-refresh here was reported dead, and the keyboard props are NOT why
-836-862       §        What it actually was: the difference is not on this screen
-863-967       fn        toggleWellnessShare
-968-990       §        connected, and not readable on this phone
-991-1434      §        and the chip must not say Connected over it
-1435-1435     fn              provider
-1436-1666     fn              lastNight
 ```
 
 ## `src/lib/connect.ts`
@@ -3241,32 +3241,32 @@ Total: 47 files, 119,429 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(owner)/members.tsx`
 
-1,554 lines · ~23k tokens · 23 anchors
+1,555 lines · ~23k tokens · 23 anchors
 
 ```
-127-128       type     Candidate
-129-303       default  OwnerMembers
-304-390       fn         load
-391-409       fn         sum
-410-416       fn         mrrCcy
-417-420       fn         inLens
-421-438       fn         shown
-439-448       fn         lensCounts
-449-455       fn         frozen
-456-462       fn         churn
-463-467       fn           done
-468-496       fn         runSearch
-497-511       fn             held
-512-525       fn         commitMembership
-526-535       fn         savePause
-536-571       §        from the TERM, not from the row
-572-596       fn         liftPause
-597-621       fn         saveDates
-622-656       fn         changeStatus
-657-664       fn         commitPayment
-665-788       §        the hundred that is not a hundred everywhere
-789-789       fn               slices
-790-1554      fn               n
+128-129       type     Candidate
+130-304       default  OwnerMembers
+305-391       fn         load
+392-410       fn         sum
+411-417       fn         mrrCcy
+418-421       fn         inLens
+422-439       fn         shown
+440-449       fn         lensCounts
+450-456       fn         frozen
+457-463       fn         churn
+464-468       fn           done
+469-497       fn         runSearch
+498-512       fn             held
+513-526       fn         commitMembership
+527-536       fn         savePause
+537-572       §        from the TERM, not from the row
+573-597       fn         liftPause
+598-622       fn         saveDates
+623-657       fn         changeStatus
+658-665       fn         commitPayment
+666-789       §        the hundred that is not a hundred everywhere
+790-790       fn               slices
+791-1555      fn               n
 ```
 
 ## `studio-web/app/revenue/page.tsx`

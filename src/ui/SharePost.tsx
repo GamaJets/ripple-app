@@ -7,6 +7,7 @@
 // same SVG → toDataURL → sharePngAsset path app/(trainer)/share-kit.tsx proved.
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, Alert, Platform, useWindowDimensions } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import Svg, { Rect, Text as SvgText, TSpan, Path, G, Image as SvgImage } from 'react-native-svg';
 import { useTheme } from './components';
 import { Cta, Ghost, Segmented } from './kit';
@@ -182,7 +183,7 @@ export function SharePostSheet({ build, onClose, invite, logo }: { build: PostBu
   };
 
   return (
-    <Modal visible={!!build} transparent animationType="slide" onRequestClose={onClose} onDismiss={() => { void handOver(); }}>
+    <ScreenSheet visible={!!build} transparent animationType="slide" onRequestClose={onClose} onDismiss={() => { void handOver(); }}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
         accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '92%', ...elevation.e2 }}>
@@ -221,7 +222,7 @@ export function SharePostSheet({ build, onClose, invite, logo }: { build: PostBu
           </>) : null}
         </ScrollView>
       </View>
-    </Modal>
+    </ScreenSheet>
   );
 }
 

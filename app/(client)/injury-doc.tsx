@@ -53,6 +53,7 @@ import { useCallback, useEffect, useState } from 'react';
 // this is a still photograph, there is nothing to animate, and RN's is in every
 // binary ever built so no guard is needed and no install can be without it.
 import { View, Text, Image, Modal, Pressable, ScrollView, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -733,7 +734,7 @@ export default function InjuryDoc() {
           platform chooses; this is the one question on this screen where the
           member has to be able to read all of it and where "Send" must not be
           the button their thumb is already resting on. */}
-      <Modal visible={pending != null} transparent animationType="slide"
+      <ScreenSheet visible={pending != null} transparent animationType="slide"
         onRequestClose={() => setPending(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
           accessibilityRole="button" accessibilityLabel={CONSENT_CANCEL_A11Y}
@@ -761,7 +762,7 @@ export default function InjuryDoc() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── the document, full-screen, still inside this app ───────────────
           The whole point of item 46. A photographed report is drawn here by
@@ -777,7 +778,7 @@ export default function InjuryDoc() {
           `onRequestClose` is not optional: on Android the hardware back button
           is how most people will close this, and without it the gesture goes to
           the router and leaves the modal up over a different screen. */}
-      <Modal visible={viewing != null} animationType="fade" onRequestClose={() => setViewing(null)}
+      <ScreenSheet visible={viewing != null} animationType="fade" onRequestClose={() => setViewing(null)}
         supportedOrientations={['portrait', 'landscape']}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top', 'bottom']}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingVertical: sp.md }}>
@@ -852,7 +853,7 @@ export default function InjuryDoc() {
             </View>
           ) : null}
         </SafeAreaView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

@@ -93,6 +93,7 @@
 // is that rule where the second figure can never be filled in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -765,7 +766,7 @@ export default function Broadcast() {
           A picker and nothing more, as in the chat composer: editing them is
           on its own screen, because an editor inside a composer is where
           somebody edits the template while meaning to edit the message. */}
-      <Modal visible={savedOpen} transparent animationType="slide" onRequestClose={() => setSavedOpen(false)}>
+      <ScreenSheet visible={savedOpen} transparent animationType="slide" onRequestClose={() => setSavedOpen(false)}>
         <Scrim onPress={() => setSavedOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
           <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
@@ -791,7 +792,7 @@ export default function Broadcast() {
           <View style={{ height: sp.sm }} />
           <Cta label="Close" wide onPress={() => setSavedOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

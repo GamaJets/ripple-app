@@ -20,6 +20,7 @@ import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState, StatusBar } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SessionSteps } from '../../src/ui/SessionSteps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -3535,7 +3536,7 @@ export default function Train() {
           entry. */}
       {!showCal ? overlays : null}
 
-      <Modal visible={!!swapFor} transparent animationType="slide" onRequestClose={() => setSwapFor(null)}>
+      <ScreenSheet visible={!!swapFor} transparent animationType="slide" onRequestClose={() => setSwapFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, ...elevation.e2 }}>
@@ -3554,10 +3555,10 @@ export default function Train() {
               </View>); })}
           </View>)}
         </View>
-      </Modal>
+      </ScreenSheet>
 
 
-      <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
+      <ScreenSheet visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
@@ -3786,7 +3787,7 @@ export default function Train() {
           </ScrollView>
         </View>
         {showCal ? overlays : null}
-      </Modal>
+      </ScreenSheet>
 
       {/* ── which session to repeat ────────────────────────────────────────
           A list and nothing else. Every row says the day it was done, how much
@@ -3798,7 +3799,7 @@ export default function Train() {
           member tapping here must not come away believing they have done
           today's program. It says what happens to the plan, because what
           happens to the plan is nothing. */}
-      <Modal visible={repeatPick} transparent animationType="slide" onRequestClose={() => setRepeatPick(false)}>
+      <ScreenSheet visible={repeatPick} transparent animationType="slide" onRequestClose={() => setRepeatPick(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRepeatPick(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), maxHeight: '76%', ...elevation.e2 }}>
@@ -3840,9 +3841,9 @@ export default function Train() {
           </ScrollView>
           <Ghost label="Close" onPress={() => setRepeatPick(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setRepeatRun(null); setSession(false); }}>
+      <ScreenSheet visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setRepeatRun(null); setSession(false); }}>
         {/* `clientId` is null rather than 'unknown': that placeholder is what
             this screen carries before the profile has resolved, and a
             notification routed to `?clientId=unknown` opens a coach's screen at
@@ -3871,11 +3872,11 @@ export default function Train() {
             in `runnableEx` — a movement somebody chose for themselves is shown
             to them with the caution on it rather than taken away. */}
         <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={repeatRun ? repeatRun.exercises : runnableEx} focus={repeatRun ? 'Repeat' : workout.focus} nameOf={repeatRun ? (e: ProgramExercise) => e.name : nameOf} onSwap={repeatRun ? undefined : (e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setRepeatRun(null); setSession(false); }} />
-      </Modal>
+      </ScreenSheet>
 
       {/* Mounted only while a session is running, so its clock starts at zero
           every time rather than carrying the last one's elapsed time. */}
-      <Modal visible={timed != null} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setTimed(null); }}>
+      <ScreenSheet visible={timed != null} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setTimed(null); }}>
         {timed ? (
           <TimedSessionRunner
             t={t}
@@ -3894,7 +3895,7 @@ export default function Train() {
             onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setTimed(null); }}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
 
       {/* Same contract as the timed runner above: it never writes the log
           itself, `commitSession` does, and the sheet stays up until the row is
@@ -3902,7 +3903,7 @@ export default function Train() {
           session named "Stretching" — the entry the Mobility chip has always
           made — so it is counted once, in one place, and a session logged
           before this feature existed still reads exactly as it did. */}
-      <Modal visible={stretchOn != null} animationType="slide" onRequestClose={() => setStretchOn(null)}>
+      <ScreenSheet visible={stretchOn != null} animationType="slide" onRequestClose={() => setStretchOn(null)}>
         {stretchOn ? (
           <StretchRunner
             t={t}
@@ -3911,12 +3912,12 @@ export default function Train() {
             onClose={() => setStretchOn(null)}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
 
       {/* KeyboardAvoidingView, or the keyboard sits on top of the very fields
           this sheet exists to fill in — and every tap aimed at a covered field
           lands on the backdrop and closes the sheet instead. */}
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -3973,7 +3974,7 @@ export default function Train() {
           <Pressable onPress={() => { setAddOpen(false); setEditingKey(null); }} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
         </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
@@ -7321,7 +7322,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         <PairMonitorSheet t={t} visible={pairing} onClose={() => setPairing(false)} reach={reach}
           hasSample={freshSample != null} onPaired={() => { void rebuildZonesFromWatch(); }} />
 
-        <Modal visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
+        <ScreenSheet visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
@@ -7359,7 +7360,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               </View>
             ) : null}
           </View>
-        </Modal>
+        </ScreenSheet>
       </ScrollView>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
@@ -7540,7 +7541,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
   const setCount = rows.filter((r) => (parseInt(r.reps, 10) || 0) > 0).length;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -7715,6 +7716,6 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
         </ScrollView>
       </View>
           </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }

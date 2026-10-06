@@ -49,6 +49,7 @@ import { useTenant } from '../../src/ui/tenant';
 import { useClientDrift } from '../../src/ui/clientDrift';
 import { reportError } from '../../src/lib/reportError';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -3638,7 +3639,7 @@ export default function TrainerClients() {
       </Pressable>
 
       {/* ── client detail ────────────────────────────────────────────────── */}
-      <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+      <ScreenSheet visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={SCRIM} onPress={() => setSel(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -4264,7 +4265,7 @@ export default function TrainerClients() {
           have a state between them (ended, unexplained) that every dropped
           connection reaches, and the ending is the only moment the question
           makes sense. Skipping records nothing and still removes them. */}
-      <Modal visible={!!ending} animationType="slide" onRequestClose={() => setEnding(null)}>
+      <ScreenSheet visible={!!ending} animationType="slide" onRequestClose={() => setEnding(null)}>
         {ending ? (
           <EndReasonSheet
             name={ending.name}
@@ -4289,7 +4290,7 @@ export default function TrainerClients() {
             }}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
 
       {/* ── the coach meal picker used to sit here ────────────────────────
           It searched the catalogue with `sel.avoid ?? []` and `sel.diet ||
@@ -4304,10 +4305,10 @@ export default function TrainerClients() {
           `clients.diet, avoid` itself with its own LoadStatus and withholds
           the send behind `guardPlan` until that read has landed. The row above
           opens it on this client, so the job is still one tap from here. */}
-      </Modal>
+      </ScreenSheet>
 
       {/* ── add a client ─────────────────────────────────────────────────── */}
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setAddOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -4412,7 +4413,7 @@ export default function TrainerClients() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── import a roster ───────────────────────────────────────────────
           Preview, then confirm. The reading is src/lib/csvImport.ts's — the
@@ -4421,7 +4422,7 @@ export default function TrainerClients() {
           listed twice before the batch fails halfway through with nobody
           knowing where it stopped.
           Nothing reaches the database until Import is pressed. */}
-      <Modal visible={impOpen} transparent animationType="slide" onRequestClose={() => setImpOpen(false)}>
+      <ScreenSheet visible={impOpen} transparent animationType="slide" onRequestClose={() => setImpOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setImpOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -4510,10 +4511,10 @@ export default function TrainerClients() {
             <Ghost label={impResult ? 'Close' : 'Cancel'} onPress={() => { setImpOpen(false); resetImport(); }} />
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── broadcast ────────────────────────────────────────────────────── */}
-      <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
+      <ScreenSheet visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -4629,10 +4630,10 @@ export default function TrainerClients() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── invite by email ──────────────────────────────────────────────── */}
-      <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
+      <ScreenSheet visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setInvOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -4986,10 +4987,10 @@ export default function TrainerClients() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── AI check-in draft review ─────────────────────────────────────── */}
-      <Modal visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
+      <ScreenSheet visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={SCRIM} onPress={() => setDraftClient(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -5019,7 +5020,7 @@ export default function TrainerClients() {
           )}
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── bulk program assign ──────────────────────────────────────────── */}
       {/* ── the segment composer ───────────────────────────────────────────
@@ -5030,7 +5031,7 @@ export default function TrainerClients() {
           else's name — the one thing src/lib/nudge.ts and supabase/parts/140
           refuse outright, and the reason Quiet Clients drafts and will not
           send. */}
-      <Modal visible={msgOpen} transparent animationType="slide" onRequestClose={() => setMsgOpen(false)}>
+      <ScreenSheet visible={msgOpen} transparent animationType="slide" onRequestClose={() => setMsgOpen(false)}>
         <Pressable style={SCRIM} onPress={() => setMsgOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -5083,9 +5084,9 @@ export default function TrainerClients() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
+      <ScreenSheet visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
         <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { maxHeight: '78%' })}>
@@ -5115,7 +5116,7 @@ export default function TrainerClients() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Cancel</Text>
           </Pressable>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

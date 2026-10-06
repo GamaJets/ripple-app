@@ -60,6 +60,7 @@
 // confirms names them.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -595,7 +596,7 @@ export default function Templates() {
           the wrapper currently lifts nothing. It stays because it is the sheet's
           correct shape and the next field added in here would otherwise be
           covered by the keyboard exactly as the last one was. */}
-      <Modal visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
+      <ScreenSheet visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -877,7 +878,7 @@ export default function Templates() {
             )}
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       <DateSheet
         visible={startPick}

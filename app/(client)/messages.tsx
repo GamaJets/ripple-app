@@ -72,6 +72,7 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -1051,7 +1052,7 @@ export default function Messages() {
           the member to characterise what happened in legal terms, and the note
           is optional: requiring an explanation puts a writing task in front of
           the person least able to do one at that moment. */}
-      <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
+      <ScreenSheet visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
@@ -1112,7 +1113,7 @@ export default function Messages() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

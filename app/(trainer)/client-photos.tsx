@@ -97,6 +97,7 @@
 // button would quietly make it something else.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Image, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -647,7 +648,7 @@ export default function ClientPhotos() {
           list: a body is not a preview to be half-seen behind a grid. The two
           dates travel with the picture, because this is the view somebody is
           most likely to read as "now". */}
-      <Modal visible={!!opened} animationType="fade" onRequestClose={() => setOpen(null)}>
+      <ScreenSheet visible={!!opened} animationType="fade" onRequestClose={() => setOpen(null)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
           {opened ? (
             <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}>
@@ -681,7 +682,7 @@ export default function ClientPhotos() {
             </View>
           ) : null}
         </SafeAreaView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

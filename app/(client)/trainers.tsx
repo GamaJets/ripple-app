@@ -47,6 +47,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput, Image } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -1466,7 +1467,7 @@ export default function FindTrainer() {
         </Section>
       </ScrollView>
 
-      <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+      <ScreenSheet visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
@@ -1680,7 +1681,7 @@ export default function FindTrainer() {
             </ScrollView>
           )}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

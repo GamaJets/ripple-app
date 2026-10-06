@@ -34,6 +34,7 @@
 import { useCallback, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, PageHead, Notice, Cta, Ghost, fig, Ring, Spark, ChartShell, KpiRow, TonedChip, Segmented } from '../../src/ui/kit';
@@ -489,7 +490,7 @@ export default function Glucose() {
         </Section>
       </ScrollView>
 
-      <Modal visible={typing} animationType="slide" transparent onRequestClose={() => setTyping(false)}>
+      <ScreenSheet visible={typing} animationType="slide" transparent onRequestClose={() => setTyping(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: 40 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Add a Reading</Text>
@@ -506,7 +507,7 @@ export default function Glucose() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

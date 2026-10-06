@@ -36,6 +36,7 @@
 // node. This file is the pixels and the failure states.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { Icon } from './Icon';
 import { Flag, Scrim } from './kit';
 import { sp, radius, layout, elevation, type as ty } from '../theme/scale';
@@ -152,7 +153,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
         ) : null}
       </View>
 
-      <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
+      <ScreenSheet visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Scrim onPress={() => setComposing(false)} label="Close without querying" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
@@ -202,7 +203,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </View>
   );
 }

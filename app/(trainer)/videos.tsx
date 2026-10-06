@@ -62,6 +62,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -1133,7 +1134,7 @@ export default function TrainerVideos() {
       </ScrollView>
 
       {/* ── add by link ──────────────────────────────────────────────────── */}
-      <Modal visible={linkOpen} transparent animationType="slide" onRequestClose={() => { if (!lBusy) setLinkOpen(false); }}>
+      <ScreenSheet visible={linkOpen} transparent animationType="slide" onRequestClose={() => { if (!lBusy) setLinkOpen(false); }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!lBusy) setLinkOpen(false); }}
           accessibilityRole="button" accessibilityLabel="Close, without adding a video" />
@@ -1148,10 +1149,10 @@ export default function TrainerVideos() {
           <Ghost label="Cancel" onPress={() => { if (!lBusy) setLinkOpen(false); }} />
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── name a recorded / picked clip ────────────────────────────────── */}
-      <Modal visible={!!pendUri} transparent animationType="slide" onRequestClose={() => { if (!upBusy) setPendUri(null); }}>
+      <ScreenSheet visible={!!pendUri} transparent animationType="slide" onRequestClose={() => { if (!upBusy) setPendUri(null); }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }}
           accessibilityRole="button" accessibilityLabel="Close, without saving this clip" />
@@ -1191,7 +1192,7 @@ export default function TrainerVideos() {
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

@@ -127,6 +127,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -2410,7 +2411,7 @@ export default function LogSession() {
         ) : null}
       </KeyboardAvoidingView>
 
-      <Modal visible={picker} transparent animationType="slide" onRequestClose={() => setPicker(false)}>
+      <ScreenSheet visible={picker} transparent animationType="slide" onRequestClose={() => setPicker(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPicker(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -2459,7 +2460,7 @@ export default function LogSession() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

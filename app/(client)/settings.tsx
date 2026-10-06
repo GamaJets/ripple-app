@@ -46,6 +46,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { View, Text, Pressable, ScrollView, Alert, Platform, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -740,7 +741,7 @@ export default function Settings() {
           key, and the injury documents say plainly that nobody else can see
           them, because that is the promise the rest of the product makes about
           them and this is the one screen where the member gets them back. */}
-      <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
+      <ScreenSheet visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
@@ -770,7 +771,7 @@ export default function Settings() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

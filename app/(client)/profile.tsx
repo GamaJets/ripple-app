@@ -23,6 +23,7 @@
 // account's (src/ui/settings.tsx), the same one the Settings screen sets.
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -210,7 +211,7 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
   };
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
           accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: sp.lg, borderTopWidth: hairline, borderColor: t.ring, ...elevation.e2 }}>
@@ -228,7 +229,7 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
           </View>
         </View>
       </View>
-    </Modal>
+    </ScreenSheet>
   );
 }
 
@@ -915,7 +916,7 @@ export default function Profile() {
       </ScrollView>
 
       {/* edit profile sheet */}
-      <Modal visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
+      <ScreenSheet visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowEdit(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -1022,7 +1023,7 @@ export default function Profile() {
         {showDob ? (
           <DobPicker iso={cd.dob} onClose={() => setShowDob(false)} onSave={(v) => { cd.setDob(v); setShowDob(false); }} t={t} />
         ) : null}
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

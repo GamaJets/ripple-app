@@ -272,6 +272,11 @@ export function WaiverGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
+      {/* A GATE, not a sheet. It blocks the whole app until the release of
+          liability is signed, its onRequestClose is a deliberate no-op, and
+          <WaiverGate> wraps <Tabs> rather than sitting inside one — so there is
+          no screen for it to lose focus with.
+          modal-ok: a gate that closed itself when navigation moved is not a gate. */}
       <Modal visible={blocked || waiting} animationType="fade" onRequestClose={() => {}}>
         {waiting ? (
           // A bare spinner with no words and no timeout was the whole of this,

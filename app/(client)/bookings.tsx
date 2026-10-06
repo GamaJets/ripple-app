@@ -31,6 +31,7 @@
 // not more honest than one that simply says what it is.
 import { useMemo, useCallback, useState, useEffect } from 'react';
 import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -1013,7 +1014,7 @@ export default function Bookings() {
           The empty state is gated on the read that produced it. "Your coach has
           no other open times" is a claim about their calendar, and a failed
           read may not make it. */}
-      <Modal visible={!!moveFor} transparent animationType="slide" onRequestClose={() => setMoveFor(null)}>
+      <ScreenSheet visible={!!moveFor} transparent animationType="slide" onRequestClose={() => setMoveFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
@@ -1055,7 +1056,7 @@ export default function Bookings() {
             </ScrollView>
           </>) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

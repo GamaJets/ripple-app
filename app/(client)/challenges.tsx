@@ -53,6 +53,7 @@
 // progress made. The score is the sheet's business.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { num } from '../../src/lib/format';
@@ -352,7 +353,7 @@ export default function Challenges() {
         </Section>
       </ScrollView>
 
-      <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
+      <ScreenSheet visible={!!sheet} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '80%', ...elevation.e2 }}>
@@ -523,7 +524,7 @@ export default function Challenges() {
             </ScrollView>
           )}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

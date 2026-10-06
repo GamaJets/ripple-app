@@ -34,6 +34,7 @@
 // checking.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Pressable } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 // Who is signed in, and which of the two reasons nobody is. A `getSession()`
@@ -585,7 +586,7 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
         ) : null}
       </Section>
 
-      <Modal visible={!!asking} animationType="slide" onRequestClose={() => setAsking(null)}>
+      <ScreenSheet visible={!!asking} animationType="slide" onRequestClose={() => setAsking(null)}>
         {asking ? (
           <EndReasonSheet
             name={asking.name ?? 'A former client'}
@@ -594,7 +595,7 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
             onDone={(reason, note) => { void record(asking, reason, note); }}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
     </>
   );
 }

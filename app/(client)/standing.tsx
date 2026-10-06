@@ -47,6 +47,7 @@
 // and it is their coach's policy and their money it describes.
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -859,7 +860,7 @@ export default function StandingAppointments() {
           next occurrence standing. So each option carries what confirming it
           actually does, in words, above its own button — and the only
           emphasised control on the sheet is the one that changes nothing. */}
-      <Modal visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
+      <ScreenSheet visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -957,7 +958,7 @@ export default function StandingAppointments() {
             <Cta label="Change Nothing" wide onPress={() => setEndFor(null)} />
           </>) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── pause for a while ───────────────────────────────────────────────
           Three presets rather than a date picker. The case this exists for is
@@ -969,7 +970,7 @@ export default function StandingAppointments() {
           taken (`pausePreviewLine`), and what it actually did afterwards
           (`pauseOutcomeLines`). Both sentences live in src/lib/reschedule so
           they cannot drift from one another or from the tests. */}
-      <Modal visible={!!pauseFor} animationType="slide" transparent onRequestClose={() => setPauseFor(null)}>
+      <ScreenSheet visible={!!pauseFor} animationType="slide" transparent onRequestClose={() => setPauseFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPauseFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -1045,7 +1046,7 @@ export default function StandingAppointments() {
             </ScrollView>
           </>) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── ask for a weekly time ───────────────────────────────────────────
           A sibling of the two sheets above, never nested inside one: a Modal
@@ -1057,7 +1058,7 @@ export default function StandingAppointments() {
           screen and only 07:00 on the other has been handed two products. What
           differs is the first control: a WEEKDAY rather than a date, because
           the thing being asked for is every week. */}
-      <Modal visible={asking} animationType="slide" transparent onRequestClose={() => setAsking(false)}>
+      <ScreenSheet visible={asking} animationType="slide" transparent onRequestClose={() => setAsking(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAsking(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -1203,7 +1204,7 @@ export default function StandingAppointments() {
             <Ghost label="Change Nothing" onPress={() => setAsking(false)} />
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* Outside the pause Modal on purpose. A Modal inside a Modal is the one
           arrangement iOS will not reliably present — the second arrives behind

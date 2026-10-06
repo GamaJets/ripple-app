@@ -41,6 +41,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -875,7 +876,7 @@ export default function Library() {
    </ScrollView>
 
    {/* ── the clip, playing here rather than in the browser ───────────────── */}
-   <Modal visible={!!open} transparent animationType="slide" onRequestClose={close}>
+   <ScreenSheet visible={!!open} transparent animationType="slide" onRequestClose={close}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close}
      accessibilityRole="button" accessibilityLabel="Close the clip" />
@@ -975,7 +976,7 @@ export default function Library() {
      </ScrollView>
     </View>
     </KeyboardAvoidingView>
-   </Modal>
+   </ScreenSheet>
   </SafeAreaView>
  );
 }

@@ -17,6 +17,7 @@
 // yet" is a third state again, and reads as "Reading the rota…".
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone, HERO_FIT } from '../../src/ui/kit';
@@ -780,7 +781,7 @@ export default function OwnerRota() {
         </View>
       </ScrollView>
 
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -866,7 +867,7 @@ export default function OwnerRota() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

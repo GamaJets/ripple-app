@@ -18,6 +18,7 @@
 // success live in src/lib/sessionPairing.ts, under plain node.
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, Modal, ScrollView } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { Icon } from './Icon';
 import { Flag, Scrim } from './kit';
 import { useWearables } from './wearables';
@@ -118,7 +119,7 @@ export function PairMonitorSheet({ t, visible, onClose, reach, hasSample, onPair
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Scrim onPress={onClose} label="Close and carry on with your session" />
       <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -189,6 +190,6 @@ export function PairMonitorSheet({ t, visible, onClose, reach, hasSample, onPair
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{MID_SESSION_GAP_NOTE}</Text>
         )}
       </View>
-    </Modal>
+    </ScreenSheet>
   );
 }

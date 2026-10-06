@@ -12,6 +12,7 @@
 // than through boxes and 800-weight text.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal, type LayoutChangeEvent } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { Icon } from '../../src/ui/Icon';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -193,7 +194,6 @@ import { useAuth } from '../../src/ui/auth';
 import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useRevealSelected } from '../../src/ui/useRevealSelected';
-import { useCloseOnBlur } from '../../src/ui/closeOnBlur';
 
 // ── the weekday, the month and the clock, in the reader's own language ─────
 //
@@ -2501,19 +2501,6 @@ export default function TrainerSchedule() {
   const openMove = (s: TrainingSession) => { setMoveDayKey(dayKey(s.startsAt)); setMoveFrom(s); };
   const closeMove = () => { setMoveFrom(null); setMoveDayKey(null); };
 
-  /* Every sheet on this screen, shut when the reader leaves it.
-   *
-   * A <Modal> is drawn by the native layer for as long as its component is
-   * mounted, and a tab's screens stay mounted when you leave them — so a sheet
-   * opened here was still over the app after a deep link moved it to Build
-   * Program, with its write buttons live. Seen on 5 Oct 2026. The reason it is
-   * every sheet and not the one that was caught is that they are all the same
-   * shape, and a list of exceptions is how the next one gets added without
-   * anybody deciding it should be. See src/ui/closeOnBlur.ts. */
-  useCloseOnBlur(() => {
-    setAvailOpen(false); setBlockOpen(false); setBusyOpen(false); setSyncOpen(false);
-    setAddOpen(false); setSeriesOpen(false); setEndFor(null); closeMove();
-  });
   /** The fourteen days the sheet offers, from today. Built from local parts, so
    *  "tomorrow" is tomorrow on the coach's own clock across a clock change. */
   const moveDays = Array.from({ length: 14 }, (_, i) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + i));
@@ -4167,7 +4154,7 @@ export default function TrainerSchedule() {
       </ScrollView>
 
       {/* ── weekly availability sheet ─────────────────────────────────────── */}
-      <Modal visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
+      <ScreenSheet visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
@@ -4435,10 +4422,10 @@ export default function TrainerSchedule() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setAvailOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── block-out sheet ───────────────────────────────────────────────── */}
-      <Modal visible={blockOpen} animationType="slide" transparent onRequestClose={() => setBlockOpen(false)}>
+      <ScreenSheet visible={blockOpen} animationType="slide" transparent onRequestClose={() => setBlockOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBlockOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
@@ -4522,7 +4509,7 @@ export default function TrainerSchedule() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── both calendars, one list ──────────────────────────────────────
           Eight states now, and the two that both hold an empty list are still
@@ -4539,7 +4526,7 @@ export default function TrainerSchedule() {
           nothing — and it is shown whether the list is empty or not, because a
           coach looking at three real periods will otherwise take them for the
           whole week. */}
-      <Modal visible={busyOpen} animationType="slide" transparent onRequestClose={() => setBusyOpen(false)}>
+      <ScreenSheet visible={busyOpen} animationType="slide" transparent onRequestClose={() => setBusyOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
@@ -4664,7 +4651,7 @@ export default function TrainerSchedule() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setBusyOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── Google Calendar ────────────────────────────────────────────────
           Two decisions, asked separately, because they are not the same
@@ -4684,7 +4671,7 @@ export default function TrainerSchedule() {
           an invisible sheet that iOS never presented went on swallowing
           every touch on the screen behind it. Not left lying in the tree. */}
       {CALENDAR_SYNC_CONFIGURED ? (
-            <Modal visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
+            <ScreenSheet visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSyncOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -4837,7 +4824,7 @@ export default function TrainerSchedule() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setSyncOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
       ) : null}
 
       {/* ── add-session sheet ─────────────────────────────────────────────── */}
@@ -4851,7 +4838,7 @@ export default function TrainerSchedule() {
           Every time listed makes exactly one claim — nothing of this coach's is
           in it — checked against the same three obstacles the server checks.
           See src/lib/moveTimes.ts. */}
-      <Modal visible={!!moveFrom} animationType="slide" transparent onRequestClose={closeMove}>
+      <ScreenSheet visible={!!moveFrom} animationType="slide" transparent onRequestClose={closeMove}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeMove}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, maxHeight: '85%', ...elevation.e2 }}>
@@ -4956,9 +4943,9 @@ export default function TrainerSchedule() {
             </>
           ) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: t.surface3, alignSelf: 'center', marginBottom: sp.lg }} />
@@ -5059,10 +5046,10 @@ export default function TrainerSchedule() {
             </View>
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── standing-appointment sheet ────────────────────────────────────── */}
-      <Modal visible={seriesOpen} animationType="slide" transparent onRequestClose={() => setSeriesOpen(false)}>
+      <ScreenSheet visible={seriesOpen} animationType="slide" transparent onRequestClose={() => setSeriesOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSeriesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -5157,7 +5144,7 @@ export default function TrainerSchedule() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setSeriesOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── cancel one, or end the arrangement ────────────────────────────────
           THE TWO OPTIONS ARE NEVER COLLAPSED INTO ONE BUTTON, and neither of
@@ -5168,7 +5155,7 @@ export default function TrainerSchedule() {
           who ends one and unexpectedly bills a client, is the failure this
           sheet exists to prevent — so each option carries what confirming it
           actually does, in words, above its own button. */}
-      <Modal visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
+      <ScreenSheet visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
@@ -5232,7 +5219,7 @@ export default function TrainerSchedule() {
             <Cta label="Change Nothing" wide onPress={() => setEndFor(null)} />
           </>) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

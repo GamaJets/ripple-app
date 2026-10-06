@@ -63,6 +63,7 @@
 // this screen can print.
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -490,7 +491,7 @@ export default function Nudges() {
         <OvernightChecks />
       </ScrollView>
 
-      <Modal visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
+      <ScreenSheet visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
         {drafting ? (
           <DraftSheet
             nudge={drafting}
@@ -548,9 +549,9 @@ export default function Nudges() {
             }}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={!!explaining} animationType="slide" onRequestClose={() => setExplaining(null)}>
+      <ScreenSheet visible={!!explaining} animationType="slide" onRequestClose={() => setExplaining(null)}>
         {explaining ? (
           <WhySheet
             name={explaining.name}
@@ -559,7 +560,7 @@ export default function Nudges() {
             onClose={() => setExplaining(null)}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

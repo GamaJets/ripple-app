@@ -24,6 +24,7 @@ import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exercise
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, Image } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
@@ -2638,7 +2639,7 @@ export default function Nutrition() {
           Switching the CONTENT of one modal is the shape that works on both
           platforms. It also fixes the Android back button, which used to
           dismiss the recipe sheet out from under cook mode. */}
-      <Modal
+      <ScreenSheet
         visible={!!recipe}
         transparent
         animationType="slide"
@@ -2881,7 +2882,7 @@ export default function Nutrition() {
         </View>
           </>
         )}
-      </Modal>
+      </ScreenSheet>
 
       {/* ── grocery sheet ────────────────────────────────────────────────── */}
       {/* ── Build My Plan ─────────────────────────────────────────────────
@@ -2889,7 +2890,7 @@ export default function Nutrition() {
           takes effect as it is tapped, through the setters the rest of this
           screen uses; the button at the foot only closes the sheet onto the
           plan it has just shaped. */}
-      <Modal visible={buildOpen} transparent animationType="slide" onRequestClose={() => setBuildOpen(false)}>
+      <ScreenSheet visible={buildOpen} transparent animationType="slide" onRequestClose={() => setBuildOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBuildOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '86%', ...elevation.e2 }}>
@@ -2946,9 +2947,9 @@ export default function Nutrition() {
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Then swap any meal you don’t fancy, or search real recipes, from the plan.</Text>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
+      <ScreenSheet visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
@@ -3044,7 +3045,7 @@ export default function Nutrition() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── what the three day types mean ────────────────────────────────── */}
       {/* ── the question, asked before the camera opens ─────────────────
@@ -3063,7 +3064,7 @@ export default function Nutrition() {
           here, so what somebody agrees to cannot drift from what is sent — and
           so this tab and the Food Log tab cannot come to say different things
           about the same photograph going to the same place. */}
-      <Modal visible={askPhoto} transparent animationType="slide" onRequestClose={() => setAskPhoto(false)}>
+      <ScreenSheet visible={askPhoto} transparent animationType="slide" onRequestClose={() => setAskPhoto(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
           accessibilityRole="button" accessibilityLabel="Do not take a meal photo at all"
           onPress={() => setAskPhoto(false)} />
@@ -3096,14 +3097,14 @@ export default function Nutrition() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── what the numbers mean: the head's info control ───────────────
           The help row's own lines, and under them the sentences round five
           took off the page — the ones that explain a card rather than qualify
           a figure. Nothing here is a withheld reason, an allergen or a sync
           state; those stayed beside the thing they are about. */}
-      <Modal visible={helpOpen} transparent animationType="slide" onRequestClose={() => setHelpOpen(false)}>
+      <ScreenSheet visible={helpOpen} transparent animationType="slide" onRequestClose={() => setHelpOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setHelpOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '82%', ...elevation.e2 }}>
@@ -3126,9 +3127,9 @@ export default function Nutrition() {
             <Ghost label="Close" onPress={() => setHelpOpen(false)} />
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
+      <ScreenSheet visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
@@ -3161,7 +3162,7 @@ export default function Nutrition() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* The sheet itself lives in src/ui/BarcodeSheet — the Food Log needs the
           same one, and a second copy is how the two calorie sums on these very

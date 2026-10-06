@@ -33,6 +33,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { num, num1 } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Switch } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -1637,7 +1638,7 @@ export default function Devices() {
 
  </ScrollView>
 
- <Modal visible={detail != null} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
+ <ScreenSheet visible={detail != null} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
   <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
   <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
@@ -1659,7 +1660,7 @@ export default function Devices() {
     </>
    ) : null}
   </View>
- </Modal>
+ </ScreenSheet>
  </SafeAreaView>
  );
 }

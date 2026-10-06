@@ -10,6 +10,7 @@
 // writes a `trainer_invites` row the invitee accepts in their own app.
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Pressable } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -448,7 +449,7 @@ export default function OwnerTrainers() {
       </ScrollView>
 
       {/* ── invite ─────────────────────────────────────────────────────── */}
-      <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
+      <ScreenSheet visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Scrim opacity={0.4} label="Cancel" onPress={() => { setInvErr(null); setInvOpen(false); }} />
           <View style={sheet}>
@@ -468,10 +469,10 @@ export default function OwnerTrainers() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── one trainer ────────────────────────────────────────────────── */}
-      <Modal visible={!!current} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+      <ScreenSheet visible={!!current} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <View style={{ flex: 1 }}>
           <Scrim opacity={0.4} onPress={() => setSel(null)} />
           <View style={sheet}>
@@ -510,7 +511,7 @@ export default function OwnerTrainers() {
             ); })() : null}
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

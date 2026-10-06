@@ -48,6 +48,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -1252,7 +1253,7 @@ export default function MyCoach() {
           and the same reason IDS — so a churn list can hold a client's own
           account beside a coach's guess, which is the distinction
           `reasonAttribution` exists to keep. */}
-      <Modal visible={leaving} animationType="slide" onRequestClose={() => setLeaving(false)}>
+      <ScreenSheet visible={leaving} animationType="slide" onRequestClose={() => setLeaving(false)}>
         <EndReasonSheet
           name={coach?.name || 'your coach'}
           heading="Why You Are Leaving"
@@ -1265,7 +1266,7 @@ export default function MyCoach() {
           onCancel={() => setLeaving(false)}
           onDone={(reason, note) => { void doLeave(reason, note); }}
         />
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

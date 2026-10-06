@@ -66,6 +66,7 @@ import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exercise
 // local midnight, on foreground and on focus. See the memo below.
 import { useNow } from '../../src/ui/today';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, Linking, Image } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -1246,7 +1247,7 @@ export default function ClientNutrition() {
       {/* One modal on this screen, deliberately. Two siblings whose `visible`
           expressions share an identifier is a dead button on iOS — see
           scripts/check-runtime-traps.mjs. */}
-      <Modal visible={!!pick} animationType="slide" transparent
+      <ScreenSheet visible={!!pick} animationType="slide" transparent
         onRequestClose={() => setPick(null)}>
         <View style={{ flex: 1, backgroundColor: '#0009', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '85%', paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.xxl }}>
@@ -1456,7 +1457,7 @@ export default function ClientNutrition() {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

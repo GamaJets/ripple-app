@@ -4,6 +4,7 @@
 // duration (so the feature is visible on Android / without a watch).
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { useTheme } from './components';
 import { HrZoneChart } from './HrZoneChart';
 import { sp, radius, hairline, elevation, type as ty } from '../theme/scale';
@@ -62,7 +63,7 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
   })();
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={onClose} accessibilityLabel="Close heart-rate detail" />
       <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: sp.lg, paddingBottom: 34, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
@@ -80,6 +81,6 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
           </>
         )}
       </View>
-    </Modal>
+    </ScreenSheet>
   );
 }

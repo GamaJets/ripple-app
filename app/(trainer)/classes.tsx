@@ -24,6 +24,7 @@
 //     coach's phone alone is on nobody's timetable and cannot be booked.
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -1104,7 +1105,7 @@ export default function TrainerClasses() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={!!manage} animationType="slide" transparent onRequestClose={() => setManage(null)}>
+      <ScreenSheet visible={!!manage} animationType="slide" transparent onRequestClose={() => setManage(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setManage(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -1281,7 +1282,7 @@ export default function TrainerClasses() {
             ) : null}
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

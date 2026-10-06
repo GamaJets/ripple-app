@@ -36,6 +36,7 @@
 // injury and nothing else.
 import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -388,7 +389,7 @@ export default function Injuries() {
         ) : null}
       </ScrollView>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={closeSheet}>
+      <ScreenSheet visible={open} transparent animationType="slide" onRequestClose={closeSheet}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeSheet}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -448,7 +449,7 @@ export default function Injuries() {
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

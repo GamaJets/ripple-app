@@ -8,6 +8,7 @@
 // hairline-separated sections, and the Georgia serif header is gone.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -928,7 +929,7 @@ export default function OwnerOverview() {
       </ScrollView>
 
       {/* Trainer drill-down */}
-      <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+      <ScreenSheet visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
@@ -956,7 +957,7 @@ export default function OwnerOverview() {
             </>
           )}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

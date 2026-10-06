@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, Animated } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -5076,7 +5077,7 @@ export default function Builder() {
       />
 
       {/* ── exercise picker ──────────────────────────────────────────────── */}
-      <Modal visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
+      <ScreenSheet visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setPickerDay(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -5325,10 +5326,10 @@ export default function Builder() {
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── start-from-template picker ───────────────────────────────────── */}
-      <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
+      <ScreenSheet visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
         <Pressable style={scrim} onPress={() => setTplPick(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[sheet, { maxHeight: '80%' }]}>
@@ -5398,14 +5399,14 @@ export default function Builder() {
             <Ghost label="Manage All Templates" onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} />
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── save-as-template ─────────────────────────────────────────────── */}
       {/* ── How this exercise is performed ────────────────────────────────
           A sheet rather than a cycling button: there are twelve methods and
           each needs its sentence to be choosable at all. A coach who does not
           already know what "rest-pause" means cannot pick it from a label. */}
-      <Modal visible={methodOpen !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
+      <ScreenSheet visible={methodOpen !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
         <Pressable style={scrim} onPress={() => setMethodOpenFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet}>
@@ -5472,9 +5473,9 @@ export default function Builder() {
             );
           })()}
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
+      <ScreenSheet visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setSaveOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -5491,7 +5492,7 @@ export default function Builder() {
           <Ghost label="Cancel" onPress={() => setSaveOpen(false)} />
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

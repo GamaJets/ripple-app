@@ -86,6 +86,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -3208,7 +3209,7 @@ export default function ClientScreen() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={askOpen} animationType="slide" transparent onRequestClose={() => setAskOpen(false)}>
+      <ScreenSheet visible={askOpen} animationType="slide" transparent onRequestClose={() => setAskOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -3246,7 +3247,7 @@ export default function ClientScreen() {
             <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── record what was tried ──────────────────────────────────────────
           Two closed sets and an optional note, which is the whole of the row.
@@ -3269,7 +3270,7 @@ export default function ClientScreen() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={!!logging} animationType="slide" transparent onRequestClose={() => setLogging(null)}>
+      <ScreenSheet visible={!!logging} animationType="slide" transparent onRequestClose={() => setLogging(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -3321,7 +3322,7 @@ export default function ClientScreen() {
             <Ghost label="Cancel" onPress={() => setLogging(null)} />
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

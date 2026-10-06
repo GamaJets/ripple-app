@@ -36,6 +36,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -490,7 +491,7 @@ export default function TrainerCredentials() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
+      <ScreenSheet visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -610,7 +611,7 @@ export default function TrainerCredentials() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── the reply sheet ─────────────────────────────────────────────── */}
       {/* ── the keyboard covered this sheet ────────────────────────────────
@@ -625,7 +626,7 @@ export default function TrainerCredentials() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={!!replyTo} transparent animationType="slide" onRequestClose={() => setReplyTo(null)}>
+      <ScreenSheet visible={!!replyTo} transparent animationType="slide" onRequestClose={() => setReplyTo(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -662,7 +663,7 @@ export default function TrainerCredentials() {
             ) : null}
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }
@@ -760,7 +761,7 @@ function ReviewAsks() {
         </View>
       ) : null}
 
-      <Modal visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
+      <ScreenSheet visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
         {drafting ? (
           <AskSheet
             row={drafting}
@@ -775,7 +776,7 @@ function ReviewAsks() {
             }}
           />
         ) : null}
-      </Modal>
+      </ScreenSheet>
     </Section>
   );
 }

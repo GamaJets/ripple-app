@@ -16,6 +16,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num, fmtTime } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -1568,7 +1569,7 @@ export default function FoodLog() {
 
      Every sentence is rendered from src/lib/photoAI.ts rather than typed
      here, so what somebody agrees to cannot drift from what is sent. */}
- <Modal visible={askPhoto != null} transparent animationType="slide"
+ <ScreenSheet visible={askPhoto != null} transparent animationType="slide"
    onRequestClose={() => setAskPhoto(null)}>
   <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
     accessibilityRole="button" accessibilityLabel="Do not take a meal photo at all"
@@ -1605,13 +1606,13 @@ export default function FoodLog() {
     </View>
    </ScrollView>
   </View>
- </Modal>
+ </ScreenSheet>
 
  {/* ── the meal is being read ──────────────────────────────────────── */}
  {/* Its own small modal rather than a state inside the sheet: the sheet does
      not open until there is something to put in it, and two seconds of
      nothing happening after the shutter reads as a button that did not work. */}
- <Modal visible={reading} transparent animationType="fade" onRequestClose={() => setReading(false)}>
+ <ScreenSheet visible={reading} transparent animationType="fade" onRequestClose={() => setReading(false)}>
   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: G }}>
    <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
     {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: 180, height: 120, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" /> : null}
@@ -1619,10 +1620,10 @@ export default function FoodLog() {
     <Text style={{ ...ty.label, color: t.ink3 }}>Reading your meal&hellip;</Text>
    </View>
   </View>
- </Modal>
+ </ScreenSheet>
 
  {/* ── correct a logged meal ────────────────────────────────────────── */}
- <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+ <ScreenSheet visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} accessibilityRole="button" accessibilityLabel="Close" />
  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
@@ -1669,7 +1670,7 @@ export default function FoodLog() {
  </Pressable>
  </View>
    </KeyboardAvoidingView>
- </Modal>
+ </ScreenSheet>
  {/* A scanned product carries the basis its figures are for — "100 g", "1
      serving" — and that is exactly the question this sheet asks. It used to
      log one of whatever that was, so a member who ate a whole 500 g pot

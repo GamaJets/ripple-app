@@ -34,6 +34,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -800,7 +801,7 @@ export default function CoachChat() {
           rather than here: a coach standing in front of a client wants the
           message, and an editor inside a chat is where somebody edits a
           template by accident while meaning to edit the message. */}
-      <Modal visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
+      <ScreenSheet visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
@@ -827,12 +828,12 @@ export default function CoachChat() {
           <View style={{ height: sp.sm }} />
           <Cta label="Close" wide onPress={() => setTplOpen(false)} />
         </View>
-      </Modal>
+      </ScreenSheet>
       {/* Reporting is its own sheet rather than an Alert, because the list of
           reasons is the part that has to be readable and the note underneath
           is optional: requiring an explanation puts a writing task in front of
           the person least able to do one at that moment. */}
-      <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
+      <ScreenSheet visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
@@ -868,7 +869,7 @@ export default function CoachChat() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

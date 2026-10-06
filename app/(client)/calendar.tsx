@@ -87,6 +87,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -1978,7 +1979,7 @@ export default function Calendar() {
           definition in each tab" — and the definitions here ARE that
           screen's, so a client who learns what a rest day means in one
           place has not learned a second, subtly different thing here. */}
-      <Modal visible={planFor != null} transparent animationType="slide" onRequestClose={() => setPlanFor(null)}>
+      <ScreenSheet visible={planFor != null} transparent animationType="slide" onRequestClose={() => setPlanFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPlanFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '86%', ...elevation.e2 }}>
@@ -2045,9 +2046,9 @@ export default function Calendar() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={showCoach} transparent animationType="slide" onRequestClose={() => setShowCoach(false)}>
+      <ScreenSheet visible={showCoach} transparent animationType="slide" onRequestClose={() => setShowCoach(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCoach(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '82%', ...elevation.e2 }}>
@@ -2097,7 +2098,7 @@ export default function Calendar() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

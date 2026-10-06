@@ -32,6 +32,7 @@
 // fabricated zero or a question, and this is the question.
 import { useEffect, useState } from 'react';
 import { View, Text, TextInput, Modal, Pressable, Image, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { useTheme } from './components';
 import { Field, Flag, Scrim } from './kit';
 import { sp, radius, elevation, type as ty, numeric } from '../theme/scale';
@@ -115,7 +116,7 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
   const field = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   return (
-    <Modal visible={food != null} transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible={food != null} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Scrim onPress={onClose} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2, maxHeight: '90%' }}>
@@ -217,6 +218,6 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }

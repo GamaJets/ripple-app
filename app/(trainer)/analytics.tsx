@@ -25,6 +25,7 @@
 // from a truncated read stays in the chart forever, indistinguishable from a
 // month that really was that quiet.
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { useStickyChoice } from '../../src/ui/useStickyChoice';
@@ -1962,7 +1963,7 @@ export default function TrainerAnalytics() {
       </ScrollView>
 
       {/* ── goal editor ──────────────────────────────────────────────────── */}
-      <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
+      <ScreenSheet visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Scrim onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
@@ -1998,7 +1999,7 @@ export default function TrainerAnalytics() {
           <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>
               </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

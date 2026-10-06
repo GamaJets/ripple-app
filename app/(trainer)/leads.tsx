@@ -82,6 +82,7 @@
 // that a tel: link over a handle dials nothing only after they have tapped it.
 import { useCallback, useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -804,7 +805,7 @@ export default function TrainerLeads() {
           THEIR address. That is what makes this safe under white-label: no
           sending domain is involved, so nobody's prospect meets this software's
           name in their first message. */}
-      <Modal visible={!!drafting} animationType="slide" transparent onRequestClose={() => setDrafting(null)}>
+      <ScreenSheet visible={!!drafting} animationType="slide" transparent onRequestClose={() => setDrafting(null)}>
         <View style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Write to {drafting?.name ?? 'this enquiry'}</Text>
@@ -828,7 +829,7 @@ export default function TrainerLeads() {
             </View>
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── recording a follow-up ─────────────────────────────────────────── */}
       {/* ── the keyboard covered this sheet ────────────────────────────────
@@ -841,7 +842,7 @@ export default function TrainerLeads() {
           wrapper, which is exactly how app/(trainer)/costs.tsx, receipts.tsx and
           invoices.tsx do it — `behavior="padding"` shrinks the flex:1 column and the
           bottom-anchored sheet comes up with it. */}
-      <Modal visible={!!writing} animationType="slide" transparent onRequestClose={() => setWriting(null)}>
+      <ScreenSheet visible={!!writing} animationType="slide" transparent onRequestClose={() => setWriting(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34 }}>
@@ -872,7 +873,7 @@ export default function TrainerLeads() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

@@ -73,6 +73,7 @@
 // because a locale does.
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 
 import { useTheme } from './components';
 import { Icon } from './Icon';
@@ -193,7 +194,7 @@ export function DateSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <ScreenSheet visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       {/* The keyboard arrives at the bottom of the window and this sheet is
           anchored to the bottom of the window, which is the whole of the
           reported bug. `padding` has something to compress here because the
@@ -382,6 +383,6 @@ export function DateSheet({
           </View>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }

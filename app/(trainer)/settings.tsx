@@ -73,6 +73,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Alert, Pressable, TextInput, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
@@ -1295,7 +1296,7 @@ export default function TrainerSettings() {
       {/* The files themselves, one at a time. Named in the coach's own words by
           `FILE_KINDS` in src/lib/gdpr.ts, because "photo_1724.jpg" tells nobody
           which of these is their physiotherapy report. */}
-      <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
+      <ScreenSheet visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
@@ -1325,7 +1326,7 @@ export default function TrainerSettings() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

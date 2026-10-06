@@ -49,6 +49,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -1017,7 +1018,7 @@ export default function PtSessions() {
           not commit: the confirm that follows is where the member is told what
           disputing does to their money, and it is the last thing before the
           write. */}
-      <Modal visible={!!disputeFor} transparent animationType="slide" onRequestClose={() => setDisputeFor(null)}>
+      <ScreenSheet visible={!!disputeFor} transparent animationType="slide" onRequestClose={() => setDisputeFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDisputeFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
@@ -1046,7 +1047,7 @@ export default function PtSessions() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

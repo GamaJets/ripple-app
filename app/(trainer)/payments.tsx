@@ -231,6 +231,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -3139,7 +3140,7 @@ export default function TrainerPayments() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
+      <ScreenSheet visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -3256,7 +3257,7 @@ export default function TrainerPayments() {
             <Ghost label="Cancel" onPress={() => setRefunding(null)} />
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── change a package's name or price ────────────────────────────────
           The one thing a coach could not do without withdrawing the package
@@ -3278,7 +3279,7 @@ export default function TrainerPayments() {
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
           instead of running off the top. */}
-      <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
+      <ScreenSheet visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -3341,7 +3342,7 @@ export default function TrainerPayments() {
             <Ghost label="Cancel" onPress={() => setEditing(null)} />
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

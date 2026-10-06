@@ -13,6 +13,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { Icon } from '../../src/ui/Icon';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -171,7 +172,7 @@ export default function Restaurant() {
       </ScrollView>
 
       {/* ── portion sheet ──────────────────────────────────────────────── */}
-      <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+      <ScreenSheet visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
@@ -225,7 +226,7 @@ export default function Restaurant() {
             </>
           ) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

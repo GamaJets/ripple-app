@@ -8,6 +8,7 @@
 // My Feed on every post, and moderators' Hide For Everyone.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, Modal, ScrollView, Alert, Image, Linking, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { useTheme } from './components';
 import { useAuth } from './auth';
 import { Card, Cta, Ghost, Flag, TonedChip, Rule, Section, SectionHead } from './kit';
@@ -68,7 +69,7 @@ function useField() {
 function Sheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
   const t = useTheme();
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible={open} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '85%', ...elevation.e2 }}>
@@ -80,7 +81,7 @@ function Sheet({ open, onClose, children }: { open: boolean; onClose: () => void
         </ScrollView>
       </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }
 

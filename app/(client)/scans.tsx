@@ -48,6 +48,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
@@ -2712,7 +2713,7 @@ export default function Scans() {
       </ScrollView>
 
       {/* Add / view scans sheet */}
-      <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
+      <ScreenSheet visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowAdd(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -2858,7 +2859,7 @@ export default function Scans() {
           sat there and the scan kept whatever date it had. A `<Modal>` nested
           in the element tree of the modal it is opened from presents above it
           on both platforms, which is the whole fix. */}
-      <Modal visible={showDate} transparent animationType="slide" onRequestClose={() => setShowDate(false)}>
+      <ScreenSheet visible={showDate} transparent animationType="slide" onRequestClose={() => setShowDate(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowDate(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
@@ -2876,7 +2877,7 @@ export default function Scans() {
             </View>
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
       {/* Nested here for the reason the date wheel above is: "Take Photo"
           and "Upload scan" are inside THIS sheet, and while this question
           was a sibling of it iOS presented the question beneath the sheet
@@ -2907,7 +2908,7 @@ export default function Scans() {
           Rendered after the Add sheet so it draws above it, and rendered from
           src/lib/scanSheetConsent.ts rather than typed here, so what somebody
           agrees to cannot drift from what is sent. */}
-      <Modal visible={askSheet != null} transparent animationType="slide"
+      <ScreenSheet visible={askSheet != null} transparent animationType="slide"
         onRequestClose={() => setAskSheet(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
           accessibilityRole="button" accessibilityLabel={SCAN_CONSENT_CANCEL_A11Y}
@@ -2930,10 +2931,10 @@ export default function Scans() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
       {/* ── end of the Add sheet, which the date wheel and the consent
           question above BOTH sit inside, for the same iOS reason ── */}
-      </Modal>
+      </ScreenSheet>
 
 
       {/* ── Correcting or removing one scan ────────────────────────────────
@@ -2944,7 +2945,7 @@ export default function Scans() {
           would INSERT: reusing it would have made every correction a second
           scan on the same day, which `sorted` folds by day so the wrong one
           would simply have won again. */}
-      <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditId(null)}>
+      <ScreenSheet visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditId(null)}>
         {/* The keyboard covered all three fields, and nothing here could move.
             This sheet is anchored to the bottom of the screen and had neither a
             KeyboardAvoidingView nor a scroller, so a decimal-pad keyboard came up
@@ -3049,7 +3050,7 @@ export default function Scans() {
             iOS, so the row above would do nothing anybody could see. The Add
             sheet shipped that bug once; this is the same fix, applied on the
             way in rather than after a report. */}
-        <Modal visible={eShowDate} transparent animationType="slide" onRequestClose={() => setEShowDate(false)}>
+        <ScreenSheet visible={eShowDate} transparent animationType="slide" onRequestClose={() => setEShowDate(false)}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEShowDate(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
@@ -3084,11 +3085,11 @@ export default function Scans() {
               </Text>
             ) : null}
           </View>
-        </Modal>
+        </ScreenSheet>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
+      <ScreenSheet visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
@@ -3135,7 +3136,7 @@ export default function Scans() {
             </View>
           ) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

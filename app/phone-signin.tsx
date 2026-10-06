@@ -11,6 +11,7 @@
 // that does not depend on a text arriving.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
+import { ScreenSheet } from '../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
@@ -198,7 +199,7 @@ export default function PhoneSignIn() {
       </ScrollView>
 
       {/* ── country picker ─────────────────────────────────────────────── */}
-      <Modal visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>
+      <ScreenSheet visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
           <Pressable style={{ flex: 1 }} onPress={() => setPickerOpen(false)} accessibilityLabel="Close" />
           <View style={{
@@ -234,7 +235,7 @@ export default function PhoneSignIn() {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

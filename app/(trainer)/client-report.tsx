@@ -39,6 +39,7 @@
 // attendance rate, no clinical word. See the header of the builder.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Modal } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -662,7 +663,7 @@ export default function ClientReport() {
           `preview` is the doc built at the moment the coach asked to see it,
           and it is the object that gets shared. Rebuilding on the way out would
           let the reads move underneath an approved document. */}
-      <Modal visible={!!preview} animationType="slide" onRequestClose={() => setPreview(null)}>
+      <ScreenSheet visible={!!preview} animationType="slide" onRequestClose={() => setPreview(null)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
           <View style={{ paddingHorizontal: layout.gutter }}>
             {/* The same head as the page under it. The back control returns
@@ -736,7 +737,7 @@ export default function ClientReport() {
             </>
           ) : null}
         </SafeAreaView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

@@ -38,6 +38,7 @@
 // whole read — a sum over a page of a longer list is not a smaller total.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -1237,7 +1238,7 @@ export default function Invoices() {
         </Section>
       </ScrollView>
 
-      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
+      <ScreenSheet visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -1446,9 +1447,9 @@ export default function Invoices() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
-      <Modal visible={!!voidTarget} animationType="slide" transparent onRequestClose={() => setVoidTarget(null)}>
+      <ScreenSheet visible={!!voidTarget} animationType="slide" transparent onRequestClose={() => setVoidTarget(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>
@@ -1472,14 +1473,14 @@ export default function Invoices() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── RECORDING THAT ONE WAS PAID ──────────────────────────────────────
           A sheet rather than `Alert.prompt`, which exists only on iOS — a
           control that silently does nothing on Android is exactly the dead
           button this codebase keeps finding. Its own `visible` identifier for
           the same reason the void sheet has one. */}
-      <Modal visible={!!settleTarget} animationType="slide" transparent onRequestClose={() => setSettleTarget(null)}>
+      <ScreenSheet visible={!!settleTarget} animationType="slide" transparent onRequestClose={() => setSettleTarget(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             {/* The longest confirmation in the file: the number, who and how much, a
@@ -1579,13 +1580,13 @@ export default function Invoices() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── THE DAY TO START CHASING ONE FROM ────────────────────────────────
           Not a due date, and the sheet says so before the coach types
           anything. `due_on` is on the document and cannot move; this is the
           coach's note about their own list and reaches nobody else. */}
-      <Modal visible={!!chaseTarget} animationType="slide" transparent onRequestClose={() => setChaseTarget(null)}>
+      <ScreenSheet visible={!!chaseTarget} animationType="slide" transparent onRequestClose={() => setChaseTarget(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>
@@ -1635,7 +1636,7 @@ export default function Invoices() {
             ) : null}
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── the three months ─────────────────────────────────────────────────
           Siblings of the sheets whose fields open them, for the reason `pick`

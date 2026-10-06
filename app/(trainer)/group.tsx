@@ -70,6 +70,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -901,7 +902,7 @@ export default function Groups() {
       />
 
       {/* ── pick the group's program ──────────────────────────────────── */}
-      <Modal visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
+      <ScreenSheet visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickTpl(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
@@ -936,10 +937,10 @@ export default function Groups() {
             ))}
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── add clients to the group ────────────────────────────────────── */}
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
@@ -983,7 +984,7 @@ export default function Groups() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

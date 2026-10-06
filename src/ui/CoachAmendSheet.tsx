@@ -10,6 +10,7 @@
 // open with what was typed, and say why.
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { useTheme } from './components';
 import { Field, Ghost } from './kit';
 import { sp, radius, hairline, elevation, type as ty, font } from '../theme/scale';
@@ -124,7 +125,7 @@ export function CoachAmendSheet({ entry, coachId, unit, who, onClose, onSaved }:
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, ...ty.body } as const;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <ScreenSheet visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -185,6 +186,6 @@ export function CoachAmendSheet({ entry, coachId, unit, who, onClose, onSaved }:
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }

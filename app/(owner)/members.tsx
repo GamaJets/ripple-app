@@ -17,6 +17,7 @@
 // revenue, which is not the same as zero, so the screen prints a dash.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
@@ -1097,7 +1098,7 @@ export default function OwnerMembers() {
       </ScrollView>
 
       {/* ── open a membership ─────────────────────────────────────────────── */}
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <ScreenSheet visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -1255,10 +1256,10 @@ export default function OwnerMembers() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
 
       {/* ── the dates a membership is paused for ──────────────────────────── */}
-      <Modal visible={!!freezeFor} transparent animationType="slide" onRequestClose={() => setFreezeFor(null)}>
+      <ScreenSheet visible={!!freezeFor} transparent animationType="slide" onRequestClose={() => setFreezeFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFreezeFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
@@ -1329,7 +1330,7 @@ export default function OwnerMembers() {
             </View>
           </>) : null}
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* Outside the modal above: a Modal inside a Modal is the one arrangement
           iOS will not reliably present. Same reason as app/(client)/standing.tsx. */}
@@ -1356,7 +1357,7 @@ export default function OwnerMembers() {
       />
 
       {/* ── the dates a membership runs between ───────────────────────────── */}
-      <Modal visible={!!datesFor} transparent animationType="slide" onRequestClose={() => setDatesFor(null)}>
+      <ScreenSheet visible={!!datesFor} transparent animationType="slide" onRequestClose={() => setDatesFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDatesFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
@@ -1431,7 +1432,7 @@ export default function OwnerMembers() {
             </>);
           })() : null}
         </View>
-      </Modal>
+      </ScreenSheet>
 
       {/* Outside the modal above, for the reason the pause picker is: iOS will
           not reliably present a Modal inside a Modal. */}
@@ -1458,7 +1459,7 @@ export default function OwnerMembers() {
       />
 
       {/* ── take a payment ────────────────────────────────────────────────── */}
-      <Modal visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>
+      <ScreenSheet visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
@@ -1547,7 +1548,7 @@ export default function OwnerMembers() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </ScreenSheet>
     </SafeAreaView>
   );
 }

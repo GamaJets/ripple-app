@@ -54,6 +54,7 @@
 // one tap away, and is what opens when the permission is not granted.
 import { useState } from 'react';
 import { View, Text, Modal, Pressable, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScreenSheet } from './ScreenSheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from './components';
 import { lookupBarcode, normalizeBarcode } from '../lib/openfoodfacts';
@@ -179,7 +180,7 @@ export function BarcodeSheet({
   const scanning = !typing && permission?.granted === true;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <ScreenSheet visible={visible} transparent animationType="slide" onRequestClose={close}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -240,6 +241,6 @@ export function BarcodeSheet({
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </ScreenSheet>
   );
 }
