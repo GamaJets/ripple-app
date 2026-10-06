@@ -101,6 +101,7 @@ import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
+import { sparkY } from '../../src/lib/sparkScale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
@@ -298,8 +299,12 @@ function TrendFigure({ t, label, shown, note, trend, tone }: {
 }) {
   const W = 84, H = 30, pad = 3;
   const pts = (trend ?? []).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  const min = Math.min(...pts), rng = (Math.max(...pts) - min) || 1;
-  const xy = pts.map((v, i) => `${(i / Math.max(1, pts.length - 1)) * W},${pad + (H - pad * 2) * (1 - (v - min) / rng)}`).join(' ');
+  const min = Math.min(...pts), max = Math.max(...pts);
+  // A flat series is drawn down the MIDDLE, not along the floor. Eight weeks of
+  // no training and eight weeks of five-a-week both scaled to 0 under the old
+  // `|| 1` guard and drew the identical line in the identical place. See
+  // src/lib/sparkScale.ts.
+  const xy = pts.map((v, i) => `${(i / Math.max(1, pts.length - 1)) * W},${sparkY(v, min, max, pad, H - pad)}`).join(' ');
   return (
     <View accessible accessibilityLabel={[label, shown ?? 'no figure', note].filter(Boolean).join(', ')}
       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>

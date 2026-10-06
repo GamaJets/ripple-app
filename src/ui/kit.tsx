@@ -29,6 +29,7 @@ import {
 } from '../lib/chartAxis';
 import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON, turn } from './direction';
 import { isWhole, type LoadStatus } from './loadStatus';
+import { sparkY } from '../lib/sparkScale';
 
 /* ── how this kit talks ───────────────────────────────────────────────────
  *
@@ -1147,10 +1148,13 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
   if (n < 2 || drawn.length < 1) return null;
 
   const vals = drawn.map((p) => p.v);
-  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
+  const min = Math.min(...vals), max = Math.max(...vals);
   const top = 8, bottom = h - 18;
   const x = (i: number) => 6 + (i / (n - 1)) * (w - 12);
-  const y = (v: number) => bottom - ((v - min) / rng) * (bottom - top);
+  // `sparkY` and not `(v - min) / (max - min || 1)`: that guard divides safely
+  // and then draws every flat series along the floor, so a reading that has
+  // not moved looks like the lowest it has ever been. See src/lib/sparkScale.ts.
+  const y = (v: number) => sparkY(v, min, max, top, bottom);
   const last = drawn[drawn.length - 1];
 
   // The SVG is drawn in viewBox units and stretched to the real width, so a
@@ -2252,10 +2256,10 @@ export function Legend({ items }: { items: Slice[] }) {
 function plot(data: (number | null | undefined)[], w: number, h: number, padY: number) {
   const pts = readablePoints(data);
   const vals = pts.map((p) => p.v);
-  const min = Math.min(...vals), rng = (Math.max(...vals) - min) || 1;
+  const min = Math.min(...vals), max = Math.max(...vals);
   const n = data.length;
   const x = (i: number) => (n > 1 ? (i / (n - 1)) * w : w / 2);
-  const y = (v: number) => padY + (h - padY * 2) * (1 - (v - min) / rng);
+  const y = (v: number) => sparkY(v, min, max, padY, h - padY);
   return { pts, runs: segments(data), x, y };
 }
 

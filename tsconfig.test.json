@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/sparkScale.ts",
+    "src/lib/sparkScale.test.ts",
     "src/lib/revealOffset.ts",
     "src/lib/revealOffset.test.ts",
     "src/lib/mealSwaps.ts",
