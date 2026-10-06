@@ -448,13 +448,19 @@ export default function OwnerOps() {
       // Supabase at all — sits on "Reading your gym…" for ever, which is the
       // one sentence that means "wait, this is coming".
       if (!USE_SUPABASE) { setZoneRead(true); return; }
-      if (!tenant?.id) return;
+      // Settled either way here too, and for the same reason the line above
+      // says. A tenant read that LANDED and said "no gym" has answered this
+      // question: there is no gym clock, and never will be until one is linked.
+      // Left bare, `zoneRead` stayed false and this screen sat on the waiting
+      // sentence for ever — the fix one line up was made for the demo build and
+      // the identical hole beside it was left open.
+      if (!tenant?.id) { if (isWhole(tenantStatus)) setZoneRead(true); return; }
       const r = await fetchGymZone(supabase as any, tenant.id);
       if (!live) return;
       setZone(r.zone); setZoneErr(r.error); setZoneRead(true);
     })();
     return () => { live = false; };
-  }, [tenant?.id, readTick]);
+  }, [tenant?.id, tenantStatus, readTick]);
 
   /**
    * Every zone this runtime knows, minus the ones a gym must never be in.

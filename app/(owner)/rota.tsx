@@ -18,6 +18,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { ScreenSheet } from '../../src/ui/ScreenSheet';
+import { isWhole } from '../../src/ui/loadStatus';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone, HERO_FIT } from '../../src/ui/kit';
@@ -135,7 +136,18 @@ function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPres
 
 export default function OwnerRota() {
   const t = useTheme();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
+  /**
+   * The tenant read LANDED and this account has no gym on it.
+   *
+   * Settled, and not the same as the read being in flight or having failed.
+   * Every read on this screen opens `if (!tenant?.id) return;`, so with no gym
+   * the zone is never asked, `zoneRead` never becomes true, and the screen sat
+   * on "Checking what time it is at the gym…" for ever — under a dash, beside a
+   * Refresh control that re-entered the same effect and returned at the same
+   * line. Seen on the simulator, 6 Oct 2026.
+   */
+  const noGym = isWhole(tenantStatus) && !tenant?.id;
 
   /**
    * The gym's own IANA zone, or null because it has not set one.
@@ -444,6 +456,10 @@ export default function OwnerRota() {
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 
   const heroNote = (): string => {
+    // First, because it is the only SETTLED one of the three states the bare
+    // `!tenant?.id` test used to stand for, and the other two below are what
+    // this screen said instead of it.
+    if (noGym) return 'Your account is not linked to a gym, so there is no rota to read. That is an account with no gym on it, not a week nobody covered.';
     if (failed) return 'This week could not be read, so cover is not known. That is a failed read, not a covered week.';
     if (!zoneRead) return 'Checking what time it is at the gym, before the week is bucketed by it.';
     if (!loaded) return 'Reading the rota…';
@@ -547,7 +563,9 @@ export default function OwnerRota() {
             turns up. studio-web/app/staff prints the same sentence over the same
             rota — that agreement is the point. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          {!zoneRead
+          {noGym
+            ? 'No gym is linked to this account, so there is no gym clock to read. Times below are this device’s.'
+            : !zoneRead
             ? 'Checking what time it is at the gym…'
             : zoneErr
             ? `The gym’s timezone could not be read, so the times below are this device’s. That is a failed read, not a gym without a timezone: ${zoneErr}`

@@ -41,7 +41,7 @@ is paid again on every turn of the session that opened it.
 | 1,774 | 21k | `studio-web/app/retention/page.tsx` |
 | 1,758 | 23k | `studio-web/app/coach/earnings/page.tsx` |
 | 1,752 | 27k | `app/(trainer)/money.tsx` |
-| 1,744 | 26k | `app/(owner)/ops.tsx` |
+| 1,750 | 27k | `app/(owner)/ops.tsx` |
 | 1,715 | 26k | `app/(client)/foodlog.tsx` |
 | 1,697 | 23k | `scripts/check-site-claims.mjs` |
 | 1,691 | 26k | `app/(trainer)/invoices.tsx` |
@@ -57,7 +57,7 @@ is paid again on every turn of the session that opened it.
 | 1,531 | 22k | `app/(trainer)/sessions.tsx` |
 | 1,507 | 23k | `app/(trainer)/client-body.tsx` |
 
-Total: 47 files, 119,482 lines, ~1728k tokens if every one were read whole.
+Total: 47 files, 119,488 lines, ~1729k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -2715,7 +2715,7 @@ Total: 47 files, 119,482 lines, ~1728k tokens if every one were read whole.
 
 ## `app/(owner)/ops.tsx`
 
-1,744 lines · ~26k tokens · 24 anchors
+1,750 lines · ~27k tokens · 24 anchors
 
 ```
 38-194        §        The order, since the data-layout review
@@ -2726,22 +2726,22 @@ Total: 47 files, 119,482 lines, ~1728k tokens if every one were read whole.
 275-288       default  OwnerOps
 289-396       §        the session fee
 397-440       fn         openStripeSetup
-441-482       fn           id
-483-494       fn         askZone
-495-528       fn         saveZone
-529-571       fn         savePolicy
-572-584       fn         askCurrency
-585-601       fn         saveCurrency
-602-628       fn         saveFee
-629-767       §        resolving a support ticket
-768-768       fn             clocks
-769-813       fn             known
-814-832       fn         refreshAll
-833-842       fn         fbTickets
-843-854       fn         resolveAny
-855-880       fn         openCount
-881-968       fn         goTo
-969-1744      fn         listOf
+441-488       fn           id
+489-500       fn         askZone
+501-534       fn         saveZone
+535-577       fn         savePolicy
+578-590       fn         askCurrency
+591-607       fn         saveCurrency
+608-634       fn         saveFee
+635-773       §        resolving a support ticket
+774-774       fn             clocks
+775-819       fn             known
+820-838       fn         refreshAll
+839-848       fn         fbTickets
+849-860       fn         resolveAny
+861-886       fn         openCount
+887-974       fn         goTo
+975-1750      fn         listOf
 ```
 
 ## `app/(client)/foodlog.tsx`
