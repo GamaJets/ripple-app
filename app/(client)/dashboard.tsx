@@ -1049,7 +1049,7 @@ export default function Home() {
             // One control, going where three of the four rings go, so the card
             // is no less reachable than the row it replaces.
             <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button"
-              accessibilityLabel="Nothing logged yet today. Open Daily Habits"
+              accessibilityLabel="Nothing Logged Yet Today. Open Daily Habits"
               // Top-aligned, not centred: the sentence runs to four lines at the
               // default text size and centring drops the plate to the third of
               // them, where it reads as belonging to the body rather than to the
@@ -1057,7 +1057,7 @@ export default function Home() {
               style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
               <IconPlate icon="plus" tone="brand" size={44} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ ...ty.head, color: t.ink }}>Nothing logged yet today</Text>
+                <Text style={{ ...ty.head, color: t.ink }}>Nothing Logged Yet Today</Text>
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
                   Your calories, protein, water and steps fill in as the day goes. Log a meal, add a
                   glass of water, or let your watch count your steps.

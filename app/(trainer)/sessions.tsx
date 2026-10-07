@@ -930,7 +930,7 @@ export default function TrainerSessions() {
         {/* No subtitle: "clear outstanding outcomes first, then review…" was
             the page describing its own order, which the order already says. */}
         <PageHead title="Mark Sessions" />
-        <InPersonNote what="Marking what happened" />
+        <InPersonNote what="Marking What Happened" />
         {(() => {
           const tz = deviceTimeZone();
           return (

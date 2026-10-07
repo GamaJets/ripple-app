@@ -457,9 +457,9 @@ export function pageStateNote(s: PageState): string | null {
  */
 export function deliveryLine(mode: string | null | undefined): string | null {
   switch (mode) {
-    case 'online': return 'Coaches online';
-    case 'inperson': return 'Coaches in person';
-    case 'hybrid': return 'Coaches online and in person';
+    case 'online': return 'Coaches Online';
+    case 'inperson': return 'Coaches In Person';
+    case 'hybrid': return 'Coaches Online and In Person';
     default: return null;
   }
 }

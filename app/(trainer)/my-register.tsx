@@ -213,7 +213,7 @@ export default function MyRegister() {
 
         {/* ── the board's head: back, and the title on the centre line ──── */}
         <PageHead title="Your Register" subtitle="Your classes" />
-        <InPersonNote what="Your register" />
+        <InPersonNote what="Your Register" />
 
         {/* Two bare percentages sit below this, on the screen a coach opens to
             check they have been paid right. */}

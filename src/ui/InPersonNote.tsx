@@ -42,9 +42,9 @@ import { deliveryNote, HIDDEN_NOT_GONE } from '../lib/coachDelivery';
 
 export function InPersonNote({ what }: {
   /**
-   * What this screen is for, as a noun phrase that completes "… is for the
-   * hours somebody trains with you in the room". Sentence case: it lands mid
-   * sentence, not as a heading.
+   * What this screen is for, as a Title Case noun phrase that completes
+   * "… Is for Training in the Room". Title Case because it lands in a Notice
+   * TITLE, and every title in these apps is Title Case.
    */
   what: string;
 }) {
@@ -57,7 +57,7 @@ export function InPersonNote({ what }: {
           and an amber or red mark on a screen that is merely not yours is the
           app raising an alarm about how somebody has chosen to work. */}
       <Notice tone={t.ink3} kicker="How You Coach"
-        title={`${what} is for the hours somebody trains with you in the room`}
+        title={`${what} Is for Training in the Room`}
         note={`${deliveryNote(delivery)} ${HIDDEN_NOT_GONE}`} />
     </View>
   );

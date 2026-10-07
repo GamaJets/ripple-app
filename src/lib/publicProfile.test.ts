@@ -615,9 +615,12 @@ ok(/href="styles\.css(\?v=[a-f0-9]+)?"/.test(page),
    been asked, and a page that printed a default would invent a fact about
    somebody's business on a crawlable URL. */
 {
-  eq(deliveryLine('online'), 'Coaches online', 'an online coach says so');
-  eq(deliveryLine('inperson'), 'Coaches in person', 'and so does an in-person one');
-  eq(deliveryLine('hybrid'), 'Coaches online and in person', 'and both');
+  // Title Case, like every other label in these apps: this is a chip on a
+  // public page, not a sentence. The page's own copy is held to the same
+  // strings further down, so the two cannot drift apart over a capital.
+  eq(deliveryLine('online'), 'Coaches Online', 'an online coach says so');
+  eq(deliveryLine('inperson'), 'Coaches In Person', 'and so does an in-person one');
+  eq(deliveryLine('hybrid'), 'Coaches Online and In Person', 'and both');
 
   for (const quiet of [null, undefined, '', 'ONLINE', 'remote', 'Online', 'in-person', 'anything']) {
     eq(deliveryLine(quiet as string | null), null,
