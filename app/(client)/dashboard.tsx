@@ -962,7 +962,7 @@ export default function Home() {
               whether a particular write is queued is a fact about that write,
               and src/lib/outbox.ts owns saying so. */}
           {offline ? (
-            <Notice tone={t.warn} kicker="Offline" title="Showing what this phone already had" note={offline} />
+            <Notice tone={t.warn} kicker="Offline" title="Showing What This Phone Already Had" note={offline} />
           ) : null}
 
           {/* The write that FAILED, before the ones still in hand: a lapsed
@@ -970,7 +970,7 @@ export default function Home() {
               because their model is that it happened. */}
           {lapsedKinds.map((k) => (
             <Notice key={`lapsed-${k}`} tone={t.warn} kicker="Not Sent"
-              title="Something waited too long to send" note={lapsedNote(k)}>
+              title="Something Waited Too Long to Send" note={lapsedNote(k)}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}><Ghost label="Got It" onPress={() => outbox?.clearLapsed()} /></View>
               </View>
@@ -984,7 +984,7 @@ export default function Home() {
           ) : null}
 
           {sevInj ? (
-            <Notice tone={t.crit} kicker="From Your Coach" title="Your plan is adjusted for your injury"
+            <Notice tone={t.crit} kicker="From Your Coach" title="Your Plan Is Adjusted for Your Injury"
               note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe. Risky moves are swapped or paused. Let's train safely around it.`}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flexGrow: 2, flexBasis: 180 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
@@ -995,7 +995,7 @@ export default function Home() {
 
           {myInvites.length === 0 && invitesStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Coaching Invitations"
-              title="Could not check for invitations"
+              title="Could Not Check for Invitations"
               note="This is not the same as having none. If a coach has invited you, it will appear here once this loads. Pull down to try again." />
           ) : null}
 

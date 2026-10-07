@@ -2755,7 +2755,7 @@ export default function TrainerClients() {
 
           {rosterStatus === 'error' ? (
             <Notice tone={t.crit} kicker="Roster Unavailable"
-              title="Could not build your attention queue"
+              title="Could Not Build Your Attention Queue"
               note="The clients that did return are still listed below, but this is not an all-clear and the queue cannot be ranked safely." />
           ) : rosterStatus === 'partial' ? (
             <View style={{ marginBottom: sp.md }}>
@@ -2770,7 +2770,7 @@ export default function TrainerClients() {
               cannot tell it from a book with nothing wrong in it. */}
           {driftActingNote && active > 0 ? (
             <View style={{ marginBottom: sp.md }}>
-              <Notice tone={t.ink3} kicker="Suggested Check-ins" title="These are not built on their training"
+              <Notice tone={t.ink3} kicker="Suggested Check-ins" title="These Are Not Built on Their Training"
                 note={driftActingNote} />
             </View>
           ) : null}
@@ -3058,7 +3058,7 @@ export default function TrainerClients() {
               ordinary order pass for the drift order. */}
           {driftErr && active > 0 ? (
             <Notice tone={t.crit} kicker="Order Unavailable"
-              title="Could not read who is drifting"
+              title="Could Not Read Who Is Drifting"
               note={driftErr + ' The list below is in its usual order, not by who needs a call.'} />
           ) : null}
 
@@ -4746,7 +4746,7 @@ export default function TrainerClients() {
                 <Notice
                   tone={t.warn}
                   kicker="Not Read"
-                  title="Your named codes could not be read"
+                  title="Your Named Codes Could Not Be Read"
                   note={codes.reason ?? 'Nothing here is a count. Close this and open it again once you have a connection.'}
                 />
               ) : codes.status === 'partial' ? (
@@ -4887,7 +4887,7 @@ export default function TrainerClients() {
                 <Notice
                   tone={t.warn}
                   kicker="Not Read"
-                  title="What your codes returned could not be read"
+                  title="What Your Codes Returned Could Not Be Read"
                   note={returns.reason ?? 'Nothing here is a figure. Close this and open it again once you have a connection.'}
                 />
               ) : returns.status === 'partial' ? (
@@ -4903,7 +4903,7 @@ export default function TrainerClients() {
                 // screen that ranked them would be spending their money on
                 // noise it had dressed up as a finding. So no comparison is
                 // drawn at all, and the reason is stated instead.
-                <Notice tone={t.s3} kicker="Not Enough Yet" title="Too early to say which is working" note={codeTell.note} />
+                <Notice tone={t.s3} kicker="Not Enough Yet" title="Too Early to Say Which Is Working" note={codeTell.note} />
               )}
 
               {returns.rows.map((c) => {

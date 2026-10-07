@@ -996,7 +996,7 @@ export default function Messages() {
             <Notice
               tone={t.crit}
               kicker="Not Delivered"
-              title="This message was refused"
+              title="This Message Was Refused"
               note={refusedBodyNote(r, now.getTime())}
             >
               {r.body.trim() ? (

@@ -54,7 +54,7 @@ export default function CoachAssessments() {
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
           <PageHead title="Assessments" subtitle="Pick a Client" />
           {id && !askable ? (
-            <Notice kicker="Not Available" title="Assessments need a client with an account"
+            <Notice kicker="Not Available" title="Assessments Need a Client with an Account"
               note="This person was added by hand, so there is no record for tests to be kept on or shared to." />
           ) : null}
           <Section>
@@ -112,10 +112,10 @@ function ClientAssessments({ clientId, who, onSwitch }: { clientId: string; who:
         trailing={<Ghost label="Switch" onPress={onSwitch} a11yLabel="Switch client" />} />
 
       {a.status === 'error' ? (
-        <Notice tone={t.crit} kicker="Not Loaded" title="Their tests could not be read"
+        <Notice tone={t.crit} kicker="Not Loaded" title="Their Tests Could Not Be Read"
           note="This is a failed read, not an empty record. Pull down to try again." />
       ) : a.status === 'partial' ? (
-        <Notice tone={t.warn} kicker="Partial" title="Only part of their history came back" />
+        <Notice tone={t.warn} kicker="Partial" title="Only Part of Their History Came Back" />
       ) : null}
       {said ? <Text style={{ ...ty.label, color: said.tone, marginBottom: sp.md }}>{said.text}</Text> : null}
 

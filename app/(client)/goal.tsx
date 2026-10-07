@@ -370,7 +370,7 @@ export default function Goal() {
                 and the one banner whose whole job is to be noticed lost its
                 mark. It was the only tone= string literal in the tree; every
                 other call passes a theme token. */}
-            <Notice tone={t.warn} kicker="Not Loaded" title="Your goals could not be read"
+            <Notice tone={t.warn} kicker="Not Loaded" title="Your Goals Could Not Be Read"
               note="This is an unread list, not an empty one. Pull down to try again." />
           </Section>
         ) : g.status === 'loading' ? (

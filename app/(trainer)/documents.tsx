@@ -877,10 +877,10 @@ export default function CoachDocumentsScreen() {
             ) : null}
 
             <Section>
-              <Notice kicker="EDITING" title="A document can’t be changed once it’s here" note={COACH_DOC_IMMUTABLE_NOTE} />
+              <Notice kicker="EDITING" title="A Document Can’t Be Changed Once It’s Here" note={COACH_DOC_IMMUTABLE_NOTE} />
             </Section>
             <Section>
-              <Notice kicker="WHO SEES THEM" title="You and the clients you coach" note={COACH_DOC_REACH_NOTE} />
+              <Notice kicker="WHO SEES THEM" title="You and the Clients You Coach" note={COACH_DOC_REACH_NOTE} />
             </Section>
           </>
         )}

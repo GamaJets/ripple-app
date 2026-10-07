@@ -1299,7 +1299,7 @@ export default function Calendar() {
               below is half an answer and the reader has to be told which half is
               missing before they read a quiet day as a lazy one. */}
           {!logKnown ? (
-            <Notice tone={t.warn} kicker="This Day" title="We couldn’t read your training log"
+            <Notice tone={t.warn} kicker="This Day" title="We Couldn’t Read Your Training Log"
               note="Sessions with your coach are still shown below, but workouts you logged yourself are not, and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reloadLog} />
@@ -1311,7 +1311,7 @@ export default function Calendar() {
               same statement as "you have planned nothing", and the button below
               would otherwise invite somebody to re-plan a day they already have. */}
           {planStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Planned Days" title="We couldn’t read what you’ve planned"
+            <Notice tone={t.warn} kicker="Planned Days" title="We Couldn’t Read What You’ve Planned"
               note="Days you marked ahead are not shown, on this day or on the grid. Nothing you planned has been lost, and nothing here should be read as an unplanned day.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setPlanReload((n) => n + 1)} />

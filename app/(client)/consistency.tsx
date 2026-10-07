@@ -320,7 +320,7 @@ export default function Consistency() {
             log loads and the reader needs to know why rather than guess. */}
         {failed ? (
           <View style={{ marginTop: sp.lg }}>
-            <Notice tone={t.warn} kicker="Consistency" title="We couldn’t read your training log"
+            <Notice tone={t.warn} kicker="Consistency" title="We Couldn’t Read Your Training Log"
               note="Your streak and your history are intact. This screen just can't see them right now. The blank weeks below are ours, not yours.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reload} />

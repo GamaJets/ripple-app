@@ -65,11 +65,11 @@ export function OvernightChecks() {
       ) : (
         <>
           {read.status === 'error' ? (
-            <Notice tone={t.warn} kicker="Overnight Checks" title="Your inbox could not be read"
+            <Notice tone={t.warn} kicker="Overnight Checks" title="Your Inbox Could Not Be Read"
               note="Nothing is listed below because the read did not come back. That is not a quiet week. It is an unanswered question, and the checks themselves are not what failed here." />
           ) : null}
           {read.status === 'partial' ? (
-            <Notice tone={t.warn} kicker="Overnight Checks" title="This is part of the week"
+            <Notice tone={t.warn} kicker="Overnight Checks" title="This Is Part of the Week"
               note="Your inbox came back at its row limit, so the figures below are floors rather than counts. There were at least this many, and there may have been more." />
           ) : null}
 

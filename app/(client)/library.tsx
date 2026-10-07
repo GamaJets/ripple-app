@@ -616,7 +616,7 @@ export default function Library() {
          the coach has uploaded. Anything the phone already had is still shown
          underneath — it is real — but the gap is named rather than papered over. */}
      {status === 'error' ? (
-      <Notice tone={t.warn} kicker="Library" title="We couldn’t load your clips"
+      <Notice tone={t.warn} kicker="Library" title="We Couldn’t Load Your Clips"
        note="This is our end, not your coach's. Until the library loads we can't tell you what they have uploaded.">
        <View style={{ marginTop: sp.lg }}>
         <Cta label="Try Again" wide onPress={() => { reload(); }} />
@@ -743,7 +743,7 @@ export default function Library() {
       <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>
      ) : cat.status === 'error' ? (
       // Not "no exercises". We have 917 of them; we could not read them.
-      <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
+      <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
        note="This is our end, not yours. The movements are still there. Try again once you have signal." />
      ) : cat.signedOut ? (
       // The read POLICY is `to authenticated`, so a session that has not been
@@ -753,7 +753,7 @@ export default function Library() {
       // to look" arrived on screen as "The catalogue is empty." over 917
       // movements. app/(client)/exercise.tsx has said this correctly for as
       // long as the flag has existed; this is the same sentence.
-      <Notice tone={t.warn} kicker="Catalogue" title="Sign in to see the exercise list"
+      <Notice tone={t.warn} kicker="Catalogue" title="Sign in to See the Exercise List"
        note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed; all 900-odd movements are still there." />
      ) : catList.length === 0 ? (
       <View>

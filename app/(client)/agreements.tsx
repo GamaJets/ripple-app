@@ -511,7 +511,7 @@ export default function ClientGymAgreementsScreen() {
             <Section>
               <Notice
                 kicker="SIGNING"
-                title="It can’t be taken back"
+                title="It Can’t Be Taken Back"
                 note={SIGNING_RULE}
               />
             </Section>

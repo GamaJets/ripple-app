@@ -311,7 +311,7 @@ export default function Attendance() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your attendance"
+            <Notice tone={t.crit} kicker="Not Read" title="We Couldn’t Read Your Attendance"
               note={events.length
                 // When the list came off this device, say WHEN. "Not confirmed
                 // current" is true of a cache from four minutes ago and of one

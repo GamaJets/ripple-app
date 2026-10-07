@@ -320,7 +320,7 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: topPad + 10 }}>
-          <Notice tone={t.s3} kicker="Stretch" title="This routine has nothing in it"
+          <Notice tone={t.s3} kicker="Stretch" title="This Routine Has Nothing in It"
             note="That is a fault on our side rather than anything you did. Pick another routine and we will look at this one." />
           <View style={{ marginTop: layout.section }}>
             <Cta label="Close" wide onPress={onClose} />

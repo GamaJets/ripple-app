@@ -518,7 +518,7 @@ export default function CheckIn() {
           {mine.status === 'error' ? (
             <View style={{ marginBottom: sp.xl }}>
               <Notice tone={t.warn} kicker="Check-in"
-                title="Your coach’s own questions could not be read"
+                title="Your Coach’s Own Questions Could Not Be Read"
                 note="The six above are safe to send. Anything else your coach asks is missing from this form, so if they ask their own questions, send this when you have signal instead." />
               <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
                 <Ghost label="Try Again" onPress={mine.reload}

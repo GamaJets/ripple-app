@@ -1309,7 +1309,7 @@ export default function Devices() {
        <Notice
         tone={t.warn}
         kicker="Import Workouts"
-        title="This is not all of your training"
+        title="This Is Not All of Your Training"
         note={wkNote} />
       ) : null}
       {wk.map((sm, i) => {

@@ -468,7 +468,7 @@ export default function NotificationPrefs() {
             <Notice
               tone={t.warn}
               kicker="Not Sending Yet"
-              title="This build cannot schedule notifications"
+              title="This Build Cannot Schedule Notifications"
               note="Your choices here are kept and will be honoured, but nothing is being sent on this version of the app at all."
             />
           </Section>

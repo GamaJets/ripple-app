@@ -540,14 +540,14 @@ export default function ClientWeek() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Planned days live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have marked none." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                   note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
@@ -586,7 +586,7 @@ export default function ClientWeek() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their planned days&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their planned days could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Planned Days Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${who} has marked nothing. That is a different answer, and this screen cannot tell you which one you are looking at until the read succeeds.`} />
                   </Section>
                 ) : board.state === 'none' ? (

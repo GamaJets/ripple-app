@@ -271,7 +271,7 @@ export default function Costs() {
         <PageHead title="What It Costs You" />
 
         {status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not Read" title="Your recorded costs could not be read"
+          <Notice tone={t.crit} kicker="Not Read" title="Your Recorded Costs Could Not Be Read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
         ) : null}
         {status === 'partial' ? <PartialRead what="recorded costs" shown={rows.length} onPress={() => { void load(); }} /> : null}

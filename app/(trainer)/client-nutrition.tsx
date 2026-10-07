@@ -728,14 +728,14 @@ export default function ClientNutrition() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="A client's diet, allergens and body live on the server, so there is no local copy of somebody else's to compose against. Nothing below is a claim about what they have disclosed." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                   note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
@@ -807,7 +807,7 @@ export default function ClientNutrition() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their diet and allergens…</Text></Section>
                 ) : profileStatus === 'error' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their profile could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Profile Could Not Be Read"
                       note={`What ${who} avoids is unknown rather than nothing, so no meal can be picked for them from here.`} />
                   </Section>
                 ) : null}
@@ -840,7 +840,7 @@ export default function ClientNutrition() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their current plan…</Text></Section>
                 ) : cn.status === 'error' || cn.status === 'partial' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their current plan could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Current Plan Could Not Be Read"
                       note={`Whether ${who} already has a week from you is unknown rather than no. Nothing below is a claim that they have none, and sending would overwrite a plan you have not been shown.`} />
                   </Section>
                 ) : stale && stale.stale ? (
@@ -852,7 +852,7 @@ export default function ClientNutrition() {
 
                 {profileStatus === 'ready' && !input ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Not Enough Profile" title="There is nothing to scale a plan to"
+                    <Notice tone={t.warn} kicker="Not Enough Profile" title="There Is Nothing to Scale a Plan To"
                       note={`A day's meals are scaled to lean body mass, which needs a weight and a body-fat figure, plus a diet, an activity level, a goal and a number of meals a day. ${who} is missing at least one of those, and this screen will not stand a placeholder body in for it. They set every one of them in their own app.`} />
                   </Section>
                 ) : null}

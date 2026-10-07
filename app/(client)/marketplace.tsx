@@ -67,7 +67,7 @@ export default function ClientMarketplace() {
         <PageHead title="Marketplace" subtitle="Programs From the Coaches at Your Gym" />
 
         {status === 'error' ? (
-          <Notice kicker="Not Loaded" title="Programs could not be read" note="Pull down to try again." />
+          <Notice kicker="Not Loaded" title="Programs Could Not Be Read" note="Pull down to try again." />
         ) : null}
 
         <Section>

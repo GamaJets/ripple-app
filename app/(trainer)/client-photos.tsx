@@ -418,7 +418,7 @@ export default function ClientPhotos() {
 
         {r.status === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="Nobody is listed below because the list did not come back, not because your book is empty. Open this again once you are connected." />
           </Section>
         ) : null}
@@ -435,11 +435,11 @@ export default function ClientPhotos() {
               />
 
               {withdrawn ? (
-                <Notice tone={t.warn} kicker="Withdrawn" title="One of these has gone" note={withdrawn} />
+                <Notice tone={t.warn} kicker="Withdrawn" title="One of These Has Gone" note={withdrawn} />
               ) : null}
 
               {err ? (
-                <Notice tone={t.warn} kicker="Not Loaded" title="Their photos could not be read"
+                <Notice tone={t.warn} kicker="Not Loaded" title="Their Photos Could Not Be Read"
                   note={`${err} That is not the same as ${firstName} having sent none. Nothing came back, so this screen cannot say either way.`} />
               ) : !askable ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>

@@ -407,12 +407,12 @@ export default function Habits() {
               the list below and an empty circle is genuinely unknown. */}
           {unknown ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
+              <Notice tone={t.warn} kicker="Checklist" title="Some of Today’s List Is Missing"
                 note="We couldn’t read your targets or your ticks just now, so anything below may be short a line, and an empty circle here doesn’t mean you skipped it." />
             </View>
           ) : h.status === 'partial' ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
+              <Notice tone={t.warn} kicker="Checklist" title="Some of Today’s List Is Missing"
                 note="There is more on your record than we can read at once, so a line may be missing below and an empty circle here doesn’t mean you skipped it." />
             </View>
           ) : null}
@@ -427,7 +427,7 @@ export default function Habits() {
               run below carries its own floor and prints "or more". */}
           {historyUnread ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Your Runs" title="We couldn’t read your history"
+              <Notice tone={t.warn} kicker="Your Runs" title="We Couldn’t Read Your History"
                 note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost; we simply cannot count them from here." />
             </View>
           ) : historyPartial ? (

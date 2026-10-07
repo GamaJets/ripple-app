@@ -89,7 +89,7 @@ export default function Progression() {
             loads a bar off the numbers below. */}
         {logStatus === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Targets" title="We couldn’t read your training log"
+            <Notice tone={t.warn} kicker="Targets" title="We Couldn’t Read Your Training Log"
               note={tips.length
                 ? 'The targets below come from what this phone had before the read failed, so they may not include your last session. Check them against what you actually lifted.'
                 : 'Targets are worked out from your logged lifts, and we couldn’t read them. This is not a sign you haven’t lifted.'}>

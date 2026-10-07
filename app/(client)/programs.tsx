@@ -218,7 +218,7 @@ export default function Programs() {
             sets, the reps and the rests all come off the program row — so the
             list is shown and the gap is named rather than the screen refusing. */}
         {movements.status === 'error' ? (
-          <Notice tone={t.warn} kicker="Movement Names" title="The names of these movements could not be read"
+          <Notice tone={t.warn} kicker="Movement Names" title="The Names of These Movements Could Not Be Read"
             note="The program itself is below and is complete. What is missing is only the catalogue name for each line, so the rows are listed by their catalogue id. Pull down to try again." />
         ) : null}
         {movements.status === 'ready' && movements.missing.length ? (
@@ -382,10 +382,10 @@ export default function Programs() {
             </Text>
           </View>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Programs" title="The program library could not be read"
+          <Notice tone={t.warn} kicker="Programs" title="The Program Library Could Not Be Read"
             note="This is our end, not yours. The programs are still there. Pull down to try again once you have signal." />
         ) : signedOut ? (
-          <Notice tone={t.warn} kicker="Programs" title="Sign in to see the programs"
+          <Notice tone={t.warn} kicker="Programs" title="Sign in to See the Programs"
             note="These are only available once you are signed in, so this screen was not allowed to look them up. Nothing has been removed." />
         ) : (
           <>

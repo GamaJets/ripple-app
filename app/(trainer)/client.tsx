@@ -1900,12 +1900,12 @@ export default function ClientScreen() {
             the same sentence. A refused roster read is not an empty book. */}
         {!id ? (
           <Section>
-            <Notice tone={t.warn} kicker="No Client" title="This screen was opened without a client"
+            <Notice tone={t.warn} kicker="No Client" title="This Screen Was Opened Without a Client"
               note="Go back to your clients and open somebody from the list." />
           </Section>
         ) : !client && r.status === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="Everything below is still read for this person directly. What is missing is the roster row. Their goal, delivery, weight and unread count come from it." />
           </Section>
         ) : !client && r.status !== 'loading' ? (
@@ -1917,7 +1917,7 @@ export default function ClientScreen() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Goals, planned days, ticks and photos belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have none." />
           </Section>
         ) : noAccount ? (
@@ -2535,7 +2535,7 @@ export default function ClientScreen() {
 
               {att.status === 'error' ? (
                 <View style={{ marginBottom: sp.md }}>
-                  <Notice tone={t.crit} kicker="Not Read" title="Their attendance could not be read"
+                  <Notice tone={t.crit} kicker="Not Read" title="Their Attendance Could Not Be Read"
                     note="The figures below are dashes because the record did not come back. It is NOT a record of them never coming in." />
                 </View>
               ) : null}

@@ -636,13 +636,13 @@ export default function BuildWorkout() {
             </Text>
           </View>
         ) : cat.status === 'error' ? (
-          <Notice tone={t.warn} kicker="Exercise Catalogue" title="The exercise catalogue could not be read"
+          <Notice tone={t.warn} kicker="Exercise Catalogue" title="The Exercise Catalogue Could Not Be Read"
             note="This is our end, not yours. The movements are still there. Nothing can be built until it is read, so nothing has been. Pull down to try again once you have signal." />
         ) : cat.signedOut ? (
-          <Notice tone={t.warn} kicker="Exercise Catalogue" title="Sign in to build a workout"
+          <Notice tone={t.warn} kicker="Exercise Catalogue" title="Sign in to Build a Workout"
             note="The movement catalogue is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed." />
         ) : cat.rows.length === 0 ? (
-          <Notice tone={t.warn} kicker="Exercise Catalogue" title="The catalogue came back empty"
+          <Notice tone={t.warn} kicker="Exercise Catalogue" title="The Catalogue Came Back Empty"
             note="The read worked and returned no movements, so there is nothing to build a workout from. Pull down to try again." />
         ) : (
           <>

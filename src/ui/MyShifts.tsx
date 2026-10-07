@@ -130,7 +130,7 @@ export function MyShifts({ rota }: { rota: MyRota }) {
         status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>Reading your gym’s rota…</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Rota" title="Your shifts could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Rota" title="Your Shifts Could Not Be Read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={rota.refresh} a11yLabel="Read your shifts again" />
             </View>

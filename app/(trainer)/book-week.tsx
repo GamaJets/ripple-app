@@ -186,7 +186,7 @@ export default function BookWeek() {
             Reading your clients’ week…
           </Text>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="This Week" title="This week could not be read"
+          <Notice tone={t.warn} kicker="This Week" title="This Week Could Not Be Read"
             note="This is our end, not yours. It says nothing about whether your clients trained. Pull down to try again once you have signal." />
         ) : isWhole(rosterStatus) && roster.length === 0 ? (
           <EmptyRoster lacks="there is nobody whose week this would be" />

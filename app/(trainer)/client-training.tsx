@@ -1079,14 +1079,14 @@ export default function ClientTraining() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Training belongs to the client and lives on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never trained." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                   note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
@@ -1148,7 +1148,7 @@ export default function ClientTraining() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the program they are on&hellip;</Text></Section>
                 ) : assigned.status === 'error' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="What they are on could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="What They Are on Could Not Be Read"
                       note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no program.`} />
                   </Section>
                 ) : !program && assigned.status === 'partial' ? (
@@ -1170,7 +1170,7 @@ export default function ClientTraining() {
                      to do about it. */
                   <Section>
                     <SectionHead title="Their Program" note="Not in This Read" />
-                    <Notice tone={t.warn} kicker="Row Limit" title="We could not tell what they are on"
+                    <Notice tone={t.warn} kicker="Row Limit" title="We Could Not Tell What They Are On"
                       note={`Your clients' programs came back at the row limit and ${who} was past the end of it, so whether ${who} is on a program is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
@@ -1494,7 +1494,7 @@ export default function ClientTraining() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their logged sessions&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their training could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Training Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing. That is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (

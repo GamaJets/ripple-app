@@ -241,10 +241,10 @@ export default function CoachCheckIns() {
             Reading the check-ins your clients have sent…
           </Text>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Check-Ins" title="These could not be read"
+          <Notice tone={t.warn} kicker="Check-Ins" title="These Could Not Be Read"
             note="This is our end, not yours. Nothing has been lost and nobody has been told anything. Pull down to try again once you have signal." />
         ) : !isWhole(rosterStatus) ? (
-          <Notice tone={t.warn} kicker="Your Clients" title="Your roster could not be read"
+          <Notice tone={t.warn} kicker="Your Clients" title="Your Roster Could Not Be Read"
             note="A check-in is only worth reading beside the name of the person who sent it, and that list did not come back. Pull down to try again." />
         ) : roster.length === 0 ? (
           <EmptyRoster lacks="there is nobody to send you one" />

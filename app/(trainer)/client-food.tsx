@@ -159,14 +159,14 @@ export default function ClientFood() {
         <PageHead title="What They Logged" subtitle={who} onBack={goBack} />
 
         {!clientId ? (
-          <Notice tone={t.warn} kicker="Food Log" title="No client was named"
+          <Notice tone={t.warn} kicker="Food Log" title="No Client Was Named"
             note="Open this from a client to read what they have logged. It is one person's record and there is no list of everybody's." />
         ) : status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl, textAlign: 'center' }}>
             Reading what they logged…
           </Text>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Food Log" title="This could not be read"
+          <Notice tone={t.warn} kicker="Food Log" title="This Could Not Be Read"
             note="This is our end, not yours. It says nothing about whether they have been logging. Pull down to try again once you have signal." />
         ) : isWhole(rosterStatus) && roster.length === 0 ? (
           <EmptyRoster lacks="there is nobody whose food log you could read" />

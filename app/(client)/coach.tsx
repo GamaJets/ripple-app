@@ -509,7 +509,7 @@ export default function Coach() {
               {/* The same disclaimer the Injuries screen and the Injury
                   Document screen carry, in the same words, finally on the
                   screen that actually transmits the injuries. */}
-              <Notice tone={t.s3} kicker="Guidance Only" title="Not medical advice" note={NOT_MEDICAL_ADVICE} />
+              <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice" note={NOT_MEDICAL_ADVICE} />
               <View style={{ marginTop: sp.lg, gap: sp.sm }}>
                 <Cta label="Yes, Use My Numbers" onPress={() => answer('yes')} wide />
                 {/* A Cta and not a Ghost. Both answers are real answers and

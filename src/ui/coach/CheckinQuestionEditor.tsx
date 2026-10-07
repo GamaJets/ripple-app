@@ -88,7 +88,7 @@ export function CheckinQuestionEditor({ questions, status, onChanged }: {
         note={known && live.length ? `${num(live.length)}` : undefined} />
 
       {!known ? (
-        <Notice tone={t.warn} kicker="Your Questions" title="These could not be read"
+        <Notice tone={t.warn} kicker="Your Questions" title="These Could Not Be Read"
           note="Your clients are still being asked whatever you have set. This is a failed read on this screen and not a change to their form." />
       ) : (
         <>

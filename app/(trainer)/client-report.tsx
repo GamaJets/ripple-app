@@ -642,7 +642,7 @@ export default function ClientReport() {
         <View style={{ marginTop: sp.lg }}>
           <Notice
             kicker="What This Is"
-            title="Everything on record, on one page"
+            title="Everything on record, on One Page"
             note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment: only what was entered, and by whom. Anything that could not be read says so on the page."
           />
         </View>

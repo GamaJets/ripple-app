@@ -413,7 +413,7 @@ export default function IntakeScreen() {
               <Head t={t} id="readiness" done={sectionDone('readiness')} />
 
               <View style={{ marginTop: sp.md }}>
-                <Notice tone={t.s3} kicker="Not Medical Advice" title="These are screening questions"
+                <Notice tone={t.s3} kicker="Not Medical Advice" title="These Are Screening Questions"
                   note={`${BRAND.label} does not score them and does not interpret them. Your coach sees what you answered, in your words.`} />
               </View>
 
@@ -459,7 +459,7 @@ export default function IntakeScreen() {
                   questionnaire has carried for forty years. */}
               {yeses.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Notice tone={t.s5} kicker="Worth a Conversation" title="Speak to a doctor before you start"
+                  <Notice tone={t.s5} kicker="Worth a Conversation" title="Speak to a Doctor Before You Start"
                     note={READINESS_SEE_A_DOCTOR} />
                 </View>
               ) : null}

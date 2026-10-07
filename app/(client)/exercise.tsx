@@ -669,7 +669,7 @@ export default function ExerciseScreen() {
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
     </View>
   ) : status === 'error' ? (
-    <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
+    <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
       note="Nothing below is missing because it does not exist. We could not reach the catalogue. Try again once you have signal." />
   ) : clip ? (
     <ExerciseVideo video={clip} exerciseName={exName} />

@@ -97,10 +97,10 @@ export default function CoachMarketplace() {
         <PageHead title="Marketplace" subtitle="Sell Your Programs to Members of Your Gym" />
 
         {status === 'error' ? (
-          <Notice kicker="Not Loaded" title="Your listings could not be read" note="Pull down to try again. Nothing has been changed." />
+          <Notice kicker="Not Loaded" title="Your Listings Could Not Be Read" note="Pull down to try again. Nothing has been changed." />
         ) : null}
         {cur && !currency && cur.gap ? (
-          <Notice kicker="No Currency" title="Programs cannot be priced yet" note={myCurrencyLine(cur.gap, 'a program cannot be put on sale')} />
+          <Notice kicker="No Currency" title="Programs Cannot Be Priced Yet" note={myCurrencyLine(cur.gap, 'a program cannot be put on sale')} />
         ) : null}
 
         {making ? (

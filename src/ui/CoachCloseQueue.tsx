@@ -113,7 +113,7 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
         {status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>Working out which month your gym is closing…</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Month End" title="Your own rows could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Month End" title="Your Own Rows Could Not Be Read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={queue.refresh} a11yLabel="Read your outstanding work for the month again" />
             </View>

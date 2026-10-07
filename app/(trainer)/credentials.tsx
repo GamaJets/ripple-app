@@ -318,7 +318,7 @@ export default function TrainerCredentials() {
             /* Not "you have added none". A coach reading that would add the
                same qualification a second time, and a coach checking whether
                their insurance is on their profile would be told it is not. */
-            <Notice tone={t.warn} kicker="Credentials" title="We couldn’t load your credentials"
+            <Notice tone={t.warn} kicker="Credentials" title="We Couldn’t Load Your Credentials"
               note="This is our end. Don’t read it as your profile being empty. Until it loads we can’t tell you what is on it.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
@@ -429,7 +429,7 @@ export default function TrainerCredentials() {
               <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your reviews…" />
             </View>
           ) : listState === 'unreadable' ? (
-            <Notice tone={t.warn} kicker="Reviews" title="We couldn’t load your reviews"
+            <Notice tone={t.warn} kicker="Reviews" title="We Couldn’t Load Your Reviews"
               note="This is our end, not an empty profile. Until it loads we can’t tell you what clients have written or whether anything is waiting on a reply.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />

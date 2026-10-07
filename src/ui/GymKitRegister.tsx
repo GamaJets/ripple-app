@@ -101,7 +101,7 @@ export function GymKitRegister({ kit }: { kit: MyGymKit }) {
         status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>Reading your gym’s register…</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Gym Kit" title="The register could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Gym Kit" title="The Register Could Not Be Read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={kit.refresh} a11yLabel="Read the gym’s equipment register again" />
             </View>

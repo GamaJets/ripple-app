@@ -33,10 +33,10 @@ export default function MyAssessments() {
         <PageHead title="My Assessments" subtitle="Tests Your Coach Recorded With You" />
 
         {a.status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not Loaded" title="Your tests could not be read"
+          <Notice tone={t.crit} kicker="Not Loaded" title="Your Tests Could Not Be Read"
             note="This is a failed read, not an empty record. Pull down to try again." />
         ) : a.status === 'partial' ? (
-          <Notice tone={t.warn} kicker="Partial" title="Only part of your history came back" />
+          <Notice tone={t.warn} kicker="Partial" title="Only Part of Your History Came Back" />
         ) : null}
 
         {!series.length && isWhole(a.status) ? (

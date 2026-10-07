@@ -486,7 +486,7 @@ export default function InjuryDoc() {
             sending, names who to, and says the member is asked first. The
             per-document truth is printed against each document in the list
             below, once there is an answer to print. */}
-        <Notice tone={t.brand} kicker="Private" title="Your coach never sees the file"
+        <Notice tone={t.brand} kicker="Private" title="Your Coach Never Sees the File"
           note={`${SCREEN_PROMISE} ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below (the area, how bad it is and your note), the same as if you had typed it in yourself.`} />
 
         {busy ? (
@@ -609,7 +609,7 @@ export default function InjuryDoc() {
             <Rule />
             <Section>
               <Notice tone={t.warn} kicker={result.stored === 'ready' ? 'Saved, Not Read' : 'Nothing Saved'}
-                title="We could not read that"
+                title="We Could Not Read That"
                 note={result.error ?? 'Something went wrong reading that document.'}>
                 <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
                   <Ghost label="Try Another Photo" onPress={() => pick(true)} />
