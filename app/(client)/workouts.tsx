@@ -20,6 +20,7 @@ import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState, StatusBar } from 'react-native';
+import Svg, { Defs, LinearGradient as SvgGradient, Stop, Rect } from 'react-native-svg';
 import { ScreenSheet } from '../../src/ui/ScreenSheet';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SessionSteps } from '../../src/ui/SessionSteps';
@@ -421,6 +422,11 @@ function MetricCols({ t, items }: { t: Theme; items: { label: string; value: str
     </View>
   );
 }
+
+/** How far up the hero picture the scrim reaches. Tall enough that the words
+ *  sit entirely inside the dark half and the fade starts above them, so no
+ *  line of text meets the gradient's own edge. */
+const SCRIM_H = 190;
 
 export default function Train() {
   const insets = useSafeAreaInsets();
@@ -2248,11 +2254,38 @@ export default function Train() {
               <Icon name="train" size={34} color={t.brandBright} />
             </View>
           )}
-          {/* The words over the picture, on a scrim, as the mockup draws them.
-              The scrim is what makes the night inks readable over any frame;
-              the same sentence is spoken once, from the group. */}
+          {/* ── the scrim, and why it is drawn rather than filled ──────────
+              The words over the picture need a dark ground to stay readable on
+              any frame. That ground was a flat `rgba(0,0,0,0.62)` block, and a
+              flat block has a HARD TOP EDGE: on the Train tab it cut a straight
+              horizontal line across the middle of the lifter, half the body in
+              daylight and half in grey, which reads as a rendering fault rather
+              than a treatment.
+
+              A gradient has no edge to notice. It is drawn with react-native-svg
+              — already in the bundle, used by every chart in the kit — and NOT
+              with expo-linear-gradient, which is a native module: adding one
+              means new binaries for all three apps and cannot reach anybody over
+              an OTA. The stops run transparent to 0.72, slightly darker at the
+              foot than the flat fill was, because a gradient gives less cover
+              per pixel and the inks still have to clear the picture under them.
+
+              Decorative and hidden from the screen reader: the group below
+              carries the whole sentence. */}
+          <Svg width="100%" height={SCRIM_H} pointerEvents="none"
+            accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+            style={{ position: 'absolute', start: 0, end: 0, bottom: 0 }}>
+            <Defs>
+              <SvgGradient id="heroScrim" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#000" stopOpacity="0" />
+                <Stop offset="0.55" stopColor="#000" stopOpacity="0.45" />
+                <Stop offset="1" stopColor="#000" stopOpacity="0.72" />
+              </SvgGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroScrim)" />
+          </Svg>
           <View accessible accessibilityLabel={`${program.title}${blockCounted ? `, week ${blk.week.index + 1} of ${blk.week.count}` : ''}. ${dayTitle}. ${cardDay}, ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
-            style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: 18, paddingTop: sp.lg, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.62)' }}>
+            style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: 18, paddingTop: sp.lg, paddingBottom: sp.lg }}>
             {/* The program, and the week of it — the week only when it was
                 COUNTED from a start date the coach set. A block with no date,
                 an unreadable one or one not yet begun sits on week one by
