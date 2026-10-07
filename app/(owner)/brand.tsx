@@ -356,7 +356,17 @@ export default function OwnerBrand() {
           <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
             {/* Off while a swatch write is in flight — this button and those
                 swatches write the same column of the same row. */}
-            <Ghost label="Clear the Gym's Colour" disabled={colorBusy} onPress={() => { void clearColor(); }} />
+            {/* The label names what the tap actually clears. Every sentence on
+                this card already distinguishes a gym's colour from this
+                device's — including the one directly above, which says "A
+                colour picked here changes this device only" — and then the
+                button under it offered to clear a gym colour that cannot exist.
+                `clearColor` was already honest about it; only the label was not.
+                Gated on `status === 'ready'` so an unread gym keeps the gym
+                wording: under a failed read there may well be a gym colour, and
+                this is not the place to decide there is not. */}
+            <Ghost label={status === 'ready' && !tenant ? "Clear This Device's Colour" : "Clear the Gym's Colour"}
+              disabled={colorBusy} onPress={() => { void clearColor(); }} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Puts the gym back to having chosen no colour, and the app back to its own. Not the same as picking teal.
