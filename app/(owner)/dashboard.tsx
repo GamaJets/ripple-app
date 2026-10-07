@@ -21,6 +21,7 @@ import { sp, layout, radius, hairline, type as ty, value, font, grown } from '..
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
+import { sparkY } from '../../src/lib/sparkScale';
 import { plainExact } from '../../src/lib/units';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -994,9 +995,14 @@ function NightSpark({ data, spoken }: { data: (number | null | undefined)[]; spo
   const W = 96, H = 44, PAD = 5;
   const pts = data.map((v, i) => ({ i, v })).filter((p): p is { i: number; v: number } => typeof p.v === 'number' && Number.isFinite(p.v));
   if (pts.length < 2 || data.length < 2) return null;
-  const min = Math.min(...pts.map((p) => p.v)), rng = (Math.max(...pts.map((p) => p.v)) - min) || 1;
+  const min = Math.min(...pts.map((p) => p.v)), max = Math.max(...pts.map((p) => p.v));
   const x = (i: number) => PAD + (i / (data.length - 1)) * (W - PAD * 2);
-  const y = (v: number) => PAD + (H - PAD * 2) * (1 - (v - min) / rng);
+  // `sparkY` and not `(v - min) / (max - min || 1)`. That guard divides safely
+  // and then draws every flat series along the FLOOR, so a gym that delivered
+  // the same number of sessions every month for a year — on the hero of the
+  // owner's own board — is drawn identically to one that delivered none.
+  // src/lib/sparkScale.ts has the arithmetic and the reason.
+  const y = (v: number) => sparkY(v, min, max, PAD, H - PAD);
   // Unbroken runs: consecutive indices only.
   const runs: { i: number; v: number }[][] = [];
   for (const p of pts) {

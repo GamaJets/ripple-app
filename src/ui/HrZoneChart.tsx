@@ -117,6 +117,10 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const n = pts.length;
   const lo = Math.max(40, (stats?.low ?? 60) - 10);
   const hi = Math.min(Math.round(maxHr(age) * 1.06), (stats?.high ?? Math.round(maxHr(age) * 0.9)) + 12);
+  // An AXIS, not the samples' own range: `lo` and `hi` come from the member's
+  // age and their recorded low/high, never from the beats being drawn, so a
+  // run of identical bpm still has the whole zone band to sit in.
+  // spark-ok: the bounds cannot collapse when the readings are equal.
   const span = hi - lo || 1;
   const padTop = 6, padBottom = 6;
   const chartH = height - padTop - padBottom;
