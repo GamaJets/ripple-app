@@ -33,6 +33,8 @@
     "src/lib/rosterStatReachChip.test.ts",
     "src/lib/autoImportPlan.ts",
     "src/lib/autoImportPlan.test.ts",
+    "src/lib/listOwner.ts",
+    "src/lib/listOwner.test.ts",
     "src/lib/authGateStatus.ts",
     "src/lib/authGateStatus.test.ts",
     "src/lib/codeAttempt.ts",

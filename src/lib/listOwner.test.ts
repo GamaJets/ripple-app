@@ -42,7 +42,19 @@ ok(!foreignList(A, ''), 'nor with a blank one');
 // sessions both reporting it must not read as the same person — and neither
 // side of the comparison may be built from it.
 ok(!foreignList('unknown', 'unknown'), "'unknown' is not an account on either side");
-ok(!foreignList('unknown', B), "'unknown' held is not a real account");
+// Settled 15 Oct 2026, when this file was first run. It had asserted the
+// opposite — that a list held for 'unknown' is NOT foreign to a real account,
+// which is to say adoptable by them — and that is the exact defect `unclaimed`
+// above argues against: every session on the handset that had ever reported
+// 'unknown' would be adoptable by whoever signed in next.
+//
+// The implementation was right and the assertion was stale. It costs nothing
+// to keep it strict: the one caller, src/ui/workoutLog.tsx, composes `heldFor`
+// only from `setLog`'s owner, which is a real id or null and never the
+// 'unknown' literal src/ui/clientData.tsx publishes. So this is the safe
+// answer to a value that does not arrive, rather than a behaviour anybody
+// relies on.
+ok(foreignList('unknown', B), "a list held for 'unknown' is foreign to a real account, not adoptable by them");
 ok(!foreignList(A, 'unknown'), "'unknown' claiming is not a real account");
 
 /* ── 2. which rows may carry which id ─────────────────────────────────────── */

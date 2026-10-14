@@ -33,8 +33,11 @@ import { execSync } from 'node:child_process';
  * stopped being true is itself a failure.
  */
 const KNOWN = new Map([
-  ['src/lib/listOwner.test.ts',
-    'It fails, and registering it would turn the suite red on something no screen runs. src/lib/listOwner.ts is imported by NOTHING — it is a fix for the account-mixing defect its own header traces through src/ui/workoutLog.tsx, written, argued at length, and never wired in. The one failing assertion is a genuine disagreement about intent, not a typo: the test says a list held for "unknown" is not foreign to a real account, and the module says it is, because its `unclaimed` note argues that treating a recorded-but-unusable owner as adoptable is the exact defect it exists to refuse. Deciding that settles how a half-signed-in member\'s queued sets are handled, so it is a product decision and not a sweep. Entry goes when the module is either wired in or deleted.'],
+  // Empty, and that is the point: the six this check was written for are all
+  // registered now, listOwner.test.ts last, once the module it covers was
+  // wired into src/ui/workoutLog.tsx and its one stale assertion settled.
+  // An entry here is a test the suite does not run, with the reason and what
+  // would let it in. The list may only shrink with the work.
 ]);
 
 const files = execSync("git ls-files 'src/**/*.test.ts'", { encoding: 'utf8' })

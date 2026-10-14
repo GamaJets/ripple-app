@@ -83,6 +83,8 @@ import {
   adoptIds, byNewest, dropRefused, isQueued, queueCacheKey, queuedSessions,
   readQueue, serverId, sessionKey, toQueueRows, withoutStored,
 } from '../lib/workoutQueue';
+import { listOwnerAct, mayWriteUnder } from '../lib/listOwner';
+import type { UidRead } from '../lib/authedUid';
 import { useAuthRevision } from './authRevision';
 import { useLiveRead, useRecoverRead } from './readRefresh';
 
@@ -224,6 +226,29 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // twice.
   const listRef = useRef<WorkoutEntry[]>([]);
   const uidRef = useRef<string | null>(null);
+  /**
+   * WHO the list in memory is held for, which is not the same as who is signed
+   * in now — and the gap between those two is the whole defect
+   * src/lib/listOwner.ts was written for.
+   *
+   * `uidRef` is cleared on sign-out. `listRef` is NOT, and nothing below used
+   * to notice: member A logs a session in a basement, the insert is never
+   * answered so the entries stay queued in memory, A signs out, B signs in,
+   * and the hydrate merges what is still in `listRef` into B's log and sends
+   * it as `entryToRow(B, e)`. The row lands in `workouts` with `user_id = B`,
+   * made by B's own session, so RLS is satisfied, PostgREST returns it, and
+   * `classifyWrite` says 'stored'. Nothing afterwards can tell A's lifts from
+   * sets B performed, in the history B's coach programs from.
+   *
+   * Written only by `setLog`, which already takes the owner as an argument, so
+   * this cannot drift from what was actually filed.
+   *
+   * It holds a real id or null, never the `'unknown'` literal
+   * src/ui/clientData.tsx publishes — nothing here composes that — so
+   * `listOwner`'s stricter reading of a recorded-but-unusable owner costs this
+   * provider nothing and is the safe default if one ever arrives.
+   */
+  const heldForRef = useRef<string | null>(null);
   // False once the device's queue could not be read, or once a server read came
   // back truncated.
   //
@@ -250,8 +275,27 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
       .catch(() => { /* the session is correct this run either way */ });
   };
 
+  /**
+   * Act on what an auth read means for the list this provider is holding.
+   *
+   * The decision itself is `listOwnerAct` in src/lib/listOwner.ts — pure, and
+   * tested over the sign-in → sign-out → sign-in sequence the defect lives in.
+   * This is only the part that touches React.
+   *
+   * 'drop' stops holding the rows. It does NOT delete them: they are on the
+   * disk under their own account's key, and `writeQueue` refuses a null owner,
+   * so nothing here can write an empty list over anybody's queue file.
+   */
+  const releaseIfForeign = (read: UidRead) => {
+    if (listOwnerAct(heldForRef.current, read) !== 'drop') return;
+    listRef.current = [];
+    heldForRef.current = null;
+    setLogState([]);
+  };
+
   const setLog = (next: WorkoutEntry[], owner: string | null) => {
     listRef.current = next;
+    heldForRef.current = owner;
     setLogState(next);
     writeQueue(owner, next);
   };
@@ -277,14 +321,27 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         // the provider behind "We couldn't read your training log" on Home. The
         // queue is left alone rather than read: it is keyed by account, and
         // there is no account to key it by.
-        if (!sess?.session) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!sess?.session) { uidRef.current = null; setUid(null); releaseIfForeign({ uid: null, fate: 'signed-out' });
+          setServerStatus('ready'); setQueueStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { reportError('workoutLog.hydrate.auth', authErr); setServerStatus('error'); return; }
+        if (authErr) { reportError('workoutLog.hydrate.auth', authErr);
+          // 'hold': an outage that cleared the list would end a session on a
+          // dropped connection, and one that adopted it would file it under a
+          // guess. `listOwnerAct` answers 'hold' here and this moves nothing.
+          releaseIfForeign({ uid: null, fate: 'unreadable' });
+          setServerStatus('error'); return; }
         const id = auth?.user?.id;
         // Genuinely signed out: there is no history to fetch, and saying so is
         // accurate rather than a swallowed failure.
-        if (!id) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!id) { uidRef.current = null; setUid(null); releaseIfForeign({ uid: null, fate: 'signed-out' });
+          setServerStatus('ready'); setQueueStatus('ready'); return; }
+        // BEFORE the merges below, every one of which folds `listRef.current`
+        // into this account's log. A list still held for somebody else is let
+        // go of here — not migrated, not deleted. Those rows are already on the
+        // disk under `queueCacheKey(theirId)`, account-scoped, so they are read
+        // back whole the next time that person signs in.
+        releaseIfForeign({ uid: id, fate: null });
         uidRef.current = id;
         setUid(id);
         cacheable.current = true;
@@ -440,6 +497,15 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   const flushQueue = async (): Promise<void> => {
     const owner = uidRef.current;
     if (!USE_SUPABASE || !owner) return;
+    // The reconnect edge reaches the defect faster than the hydrate does. This
+    // closure is registered once and reads `uidRef` and `listRef`
+    // independently, so between an account change and the hydrate landing
+    // those two are B and A's rows — and this loop would send them as B's.
+    // `mayWriteUnder` is the same rule `releaseIfForeign` uses, asked at the
+    // one other place an insert is composed. Nothing is dropped here: the
+    // hydrate that is already in flight decides that, and this simply does not
+    // send somebody else's work under this account in the meantime.
+    if (!mayWriteUnder(heldForRef.current, owner)) return;
     for (const t of queuedSessions(listRef.current.filter(isQueued))) {
       // ── does the server already have this session? ──────────────────────
       //
