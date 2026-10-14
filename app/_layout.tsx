@@ -25,6 +25,7 @@ import { BadgeWatchProvider } from '../src/ui/badgeWatch';
 import { NotifyPrefsProvider } from '../src/ui/notifyPrefs';
 import { ReminderSyncProvider } from '../src/ui/reminderSync';
 import { MotivationNudgeProvider } from '../src/ui/motivationNudges';
+import { AutoImportWorkoutsProvider } from '../src/ui/autoImportWorkouts';
 import { IS_PHYSICAL_DEVICE } from '../src/ui/nativeModules';
 import { DeviceSleepProvider } from '../src/ui/deviceSleep';
 import { SessionsProvider } from '../src/ui/sessions';
@@ -308,6 +309,13 @@ export default function RootLayout() {
                 {/* Inside WorkoutLogProvider, because a streak and a quiet week
                     are facts about the training log — and it refuses to arm
                     anything off an incomplete read of it. Renders nothing. */}
+                {/* Before the nudges, and inside the workout log, because the
+                    nudges are computed FROM that log and this is what puts the
+                    member's actual training into it. The order is the whole
+                    point: on 14 Oct 2026 the phone said "Nothing logged for 17
+                    days" to somebody whose fortnight of sessions was sitting
+                    unread in Apple Health. Renders nothing. */}
+                <AutoImportWorkoutsProvider>
                 <MotivationNudgeProvider>
                 <MyTrainerProfileProvider>
                 {/* How the coach says they coach. One row, one column, and it sits
@@ -398,6 +406,7 @@ export default function RootLayout() {
                 </CoachDeliveryProvider>
                 </MyTrainerProfileProvider>
                 </MotivationNudgeProvider>
+                </AutoImportWorkoutsProvider>
                 </BadgeWatchProvider>
               </WorkoutLogProvider>
             </SessionsProvider>

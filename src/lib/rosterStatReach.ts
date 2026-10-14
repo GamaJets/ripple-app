@@ -141,6 +141,19 @@ export function lastActiveChip(lastActive: string | null | undefined): string {
   const s = String(lastActive ?? '').trim();
   if (!s || s === STAT_UNKNOWN) return STAT_UNKNOWN;
   if (/\bago$/.test(s)) return `Last Active ${s}`;
-  // Only the words are lifted; a digit or a symbol starts no word to lift.
-  return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  // The house rule, not a blanket capitalise: a short preposition stays down
+  // unless it opens the string, which is what scripts/check-caps.mjs enforces
+  // everywhere it can see. A blanket `\b[a-z]` gave "Added By You" and shipped
+  // on 14 Oct 2026 because this function's test existed and had never been
+  // added to `npm test` — see tsconfig.test.json, which is where a test file
+  // becomes a test.
+  return s.split(' ').map((w, i) => (
+    i > 0 && CHIP_MINOR.has(w) ? w : w.replace(/^[a-z]/, (c) => c.toUpperCase())
+  )).join(' ');
 }
+
+/** Short words that stay lowercase inside a title unless they open it. The
+ *  same list scripts/check-caps.mjs holds, kept short on purpose: it only has
+ *  to cover the phrases `lastActiveCell` can produce. */
+const CHIP_MINOR = new Set(['a', 'an', 'the', 'of', 'on', 'in', 'to', 'for',
+  'and', 'or', 'with', 'per', 'at', 'by', 'from', 'as']);
