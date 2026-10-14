@@ -118,6 +118,18 @@ export function OtpCodeEntry({
       <Text style={{ ...ty.title, color: t.ink }}>{title}</Text>
       <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xxl }}>
         Sent to {sentTo}.
+        {/* Said on the screen that is waiting for the code, because the one
+            thing somebody does when it has not arrived is decide the app is
+            broken. Reported 14 Oct 2026: a coach signing up read "no email is
+            received to verify the email address" — and Resend had the send as
+            Sent AND Delivered to Apple, at 10:26, the same minute
+            `confirmation_sent_at` records. It reached their mail provider and
+            they never saw it.
+
+            Email only. An SMS does not have a junk folder, and a line telling
+            somebody to go looking in one they do not have is the app wasting
+            their attention while a text is on its way. */}
+        {channel === 'email' ? ' If it is not there in a minute, check your junk or spam folder.' : ''}
       </Text>
 
       {/* ── the boxes, and the one field that actually holds the code ──────
