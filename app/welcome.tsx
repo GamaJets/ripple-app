@@ -17,7 +17,7 @@ import { passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from '../
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { openLegalDoc } from '../src/ui/legal';
-import { USE_SUPABASE } from '../src/lib/config';
+import { USE_SUPABASE, PHONE_SIGNIN_ENABLED } from '../src/lib/config';
 import { VARIANT } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
@@ -365,6 +365,13 @@ export default function Welcome() {
               scanner, an invitation sent to a mistyped address. A texted code
               has none of those failure modes. Email and password stay below,
               because an existing member has no phone on their account yet. */}
+          {/* Offered only when there is something behind it. The Supabase
+              project has no SMS provider, so this door answered every number
+              in every country with "Unsupported phone provider" — and it was
+              the FIRST control on the sign-up screen, so it was the one people
+              took. See PHONE_SIGNIN_ENABLED in src/lib/config.ts for how to
+              turn it back on, and what has to be true first. */}
+          {PHONE_SIGNIN_ENABLED ? (<>
           <Pressable onPress={() => router.push('/phone-signin')} accessibilityRole="button"
             accessibilityLabel="Continue with Your Phone Number"
             style={{
@@ -379,6 +386,7 @@ export default function Welcome() {
             <Text style={{ ...ty.caption, color: t.ink3 }}>or</Text>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
           </View>
+          </>) : null}
           <Text style={lab}>Full Name</Text>
               <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full Name" />
             </>

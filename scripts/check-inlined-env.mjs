@@ -157,6 +157,8 @@ const UNSET = new Map([
     'A Stripe price id for the Starter plan. src/lib/planOffer.ts states outright that no EXPO_PUBLIC_STRIPE_PRICE_* is set in any eas.json profile and that this is the project as it stands: in-app plan purchase is not offered, and src/lib/billing.ts refuses with the name of the missing variable rather than opening a checkout that cannot complete.'],
   ['EXPO_PUBLIC_STRIPE_PRICE_PRO', 'As above — the Pro plan\'s Stripe price id. src/lib/planOffer.ts and app/(trainer)/billing.tsx both document the state.'],
   ['EXPO_PUBLIC_STRIPE_PRICE_STUDIO', 'As above — the Studio plan\'s Stripe price id.'],
+  ['EXPO_PUBLIC_PHONE_SIGNIN',
+    'Phone sign-in is finished and has nothing behind it: the Supabase project has no SMS provider, and `auth.users` has never held an account with a phone on it — 31 users, 0 phones. With none configured, signInWithOtp({ phone }) answers every number in every country with "Unsupported phone provider". On 2026-10-14 somebody signing up as a coach read that under a well-formed UAE mobile and took it to mean their country was unsupported, because the phone door was the first control on the sign-up screen. app/welcome.tsx now draws that door only when this is set, which is this gate\'s own remedy — stop offering the feature rather than blaming the build. Turning it on needs a real provider first: Authentication → Providers → Phone with Twilio Verify, and for the UAE, Twilio geo permissions plus a registered transactional sender ID. src/lib/config.ts carries the same note at the flag.'],
 ]);
 
 /**
