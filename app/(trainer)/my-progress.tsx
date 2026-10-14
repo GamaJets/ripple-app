@@ -63,7 +63,7 @@
 // That is the whole chain a coach could not complete: scan → body → target.
 import { useCallback, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -456,7 +456,16 @@ export default function MyProgress() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* No KeyboardAvoidingView around this scroller. It had one, with
+          `behavior="padding"`, on top of the scroller's own
+          `automaticallyAdjustKeyboardInsets` — and the two fight: padding
+          shortens the KAV's box by the keyboard height while the insets add
+          that height again, so a focused field scrolls against a viewport that
+          has already shrunk. On 14 Oct 2026 that came back as a photograph of
+          app/welcome.tsx showing a number pad and nothing above it on a real
+          handset. app/phone-signin.tsx reached the same conclusion first and
+          states it: the wrapper goes, rather than sitting beside the mechanism
+          that works. */}
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
           {/* ── header. Whose body this is, said before anything else ───────
@@ -886,7 +895,6 @@ export default function MyProgress() {
           </Section>
 
         </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -24,7 +24,7 @@
 // "Passwords don't match" line is ink text beside a red dot instead of red
 // text.
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
+import { View, Text, Pressable, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
@@ -133,7 +133,16 @@ export default function ResetPassword() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* No KeyboardAvoidingView around this scroller. It had one, with
+          `behavior="padding"`, on top of the scroller's own
+          `automaticallyAdjustKeyboardInsets` — and the two fight: padding
+          shortens the KAV's box by the keyboard height while the insets add
+          that height again, so a focused field scrolls against a viewport that
+          has already shrunk. On 14 Oct 2026 that came back as a photograph of
+          app/welcome.tsx showing a number pad and nothing above it on a real
+          handset. app/phone-signin.tsx reached the same conclusion first and
+          states it: the wrapper goes, rather than sitting beside the mechanism
+          that works. */}
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {/* The door's night head, and the stage's one sentence as its line:
               each of the four stages used to carry its own paragraph under a
@@ -184,7 +193,6 @@ export default function ResetPassword() {
           </View>
           )}
         </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

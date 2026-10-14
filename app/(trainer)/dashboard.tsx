@@ -259,8 +259,8 @@ const NEW_THIS_WEEK_DAYS = 7;
  * The one line of status under a name on the roster, in words, and the mark
  * beside it.
  *
- * The board writes four states — On track, Needs check-in, Missing progress,
- * New this week — and every one of them is DERIVED here from facts the screen
+ * The board writes four states — On Track, Needs Check-in, Nothing Recorded,
+ * New This Week — and every one of them is DERIVED here from facts the screen
  * already reads rather than declared: the drift verdict (src/lib/clientDrift.ts,
  * measured against the client's own earlier rate), the joined date, and the
  * two facts a hand-added client carries. The order is the order a coach acts
@@ -269,7 +269,7 @@ const NEW_THIS_WEEK_DAYS = 7;
  * been able to judge.
  *
  * `tone` is null where there is no state to mark — a book with no drift read
- * yet, or a client added by hand, about whom "missing progress" would be a
+ * yet, or a client added by hand, about whom "nothing recorded" would be a
  * claim that there was a record to be missing from. Never colour alone: the
  * words carry the state and the dot repeats it (kit rule two).
  */
@@ -281,14 +281,20 @@ const NEW_THIS_WEEK_DAYS = 7;
 // of its own), blue for new, the accent for on track. Absent wherever `tone`
 // is null, and on the adherence line, which is a sentence and not a state.
 function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolean, today: string): { words: string; tone: string | null; chip?: Tone } {
-  if (d && d.status === 'at_risk') return { words: 'Needs check-in', tone: driftTone(t, d), chip: 'red' };
+  if (d && d.status === 'at_risk') return { words: 'Needs Check-in', tone: driftTone(t, d), chip: 'red' };
   if (d && d.status === 'watch') return { words: 'Slipping', tone: driftTone(t, d), chip: 'amber' };
   const days = c.joinedAt ? daysBetween(c.joinedAt, today) : null;
-  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New this week', tone: t.brand, chip: 'blue' };
+  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New This Week', tone: t.brand, chip: 'blue' };
   // No account behind them, so there is no activity to be missing — see the
   // note on `attnReason`, which learned this the expensive way.
-  if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
-  if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d), chip: 'purple' };
+  if (c.handAdded) return { words: `Added by You · ${c.goal}`, tone: null };
+  // "Nothing Recorded", which is what the board directly above this row calls
+  // the same band: the Roster Health legend counts this client under it, the
+  // Needs Attention chip says it of them by name, and the Notice below spells
+  // it out. The row alone said "Missing progress" — one client, one screen,
+  // two names for their state, and the one the row used also reads as a
+  // verdict on the client rather than a statement about the record.
+  if (d && d.status === 'idle') return { words: 'Nothing Recorded', tone: driftTone(t, d), chip: 'purple' };
   if (d) return { words: STATUS_LABEL.on_track, tone: driftTone(t, d), chip: 'brand' };
   // No drift verdict to speak, and a figure THEY submitted that says something.
   // This was a separate "Below target" flag on a second line of the row; the
@@ -4655,7 +4661,14 @@ export default function TrainerClients() {
               with nothing to scroll. The title and the two buttons stay put so
               the sheet can always be finished or abandoned. */}
           <View style={sheet(t, { maxHeight: '88%' })}>
-            <Text style={{ ...ty.title, color: t.ink }}>Add a Client</Text>
+            {/* "Invite a Client", which is what every button that opens this
+                sheet says — here, on the leaderboard, twice in the builder,
+                and in the sentence join-code.tsx tells a coach to follow.
+                It was titled "Add a Client", one space away from the OTHER
+                sheet on this screen, which is headed "Add Client" and types
+                somebody onto the roster by hand. Two sheets, two jobs, and
+                nothing in either title to tell a coach which one they got. */}
+            <Text style={{ ...ty.title, color: t.ink }}>Invite a Client</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>

@@ -1484,7 +1484,16 @@ export default function LogSession() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* No KeyboardAvoidingView around this scroller. It had one, with
+          `behavior="padding"`, on top of the scroller's own
+          `automaticallyAdjustKeyboardInsets` — and the two fight: padding
+          shortens the KAV's box by the keyboard height while the insets add
+          that height again, so a focused field scrolls against a viewport that
+          has already shrunk. On 14 Oct 2026 that came back as a photograph of
+          app/welcome.tsx showing a number pad and nothing above it on a real
+          handset. app/phone-signin.tsx reached the same conclusion first and
+          states it: the wrapper goes, rather than sitting beside the mechanism
+          that works. */}
         {/* ── the keyboard was sitting on the field you were typing into ────
             `KeyboardAvoidingView` with behavior="padding" pads the BOTTOM of
             its own container — and this ScrollView already fills that
@@ -2409,7 +2418,6 @@ export default function LogSession() {
             onSkip={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))}
             onDone={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))} />
         ) : null}
-      </KeyboardAvoidingView>
 
       <ScreenSheet visible={picker} transparent animationType="slide" onRequestClose={() => setPicker(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>

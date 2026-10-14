@@ -10,6 +10,9 @@
 // the second.
 import {
   hourInWindow, inQuiet, quietFromRow, quietAvailability, hourLabel, windowLabel,
+} from './quietHours';
+import { fmtClock } from './format';
+import {
   zoneMovedNote, deviceZone, SUGGESTED_QUIET,
   QUIET_HELD_NOT_DELAYED, QUIET_ZONE_NOTE, QUIET_ORDER_NOTE, type QuietHours,
 } from './quietHours';
@@ -86,9 +89,14 @@ ok(unread.note !== notYet.note, 'the two are different sentences, because they a
 
 eq(hourLabel(0), 'midnight', 'midnight is not "0am"');
 eq(hourLabel(12), 'midday', 'and midday is not "0pm"');
-eq(hourLabel(22), '10pm', 'and 22 is what a coach thinks in');
-eq(hourLabel(7), '7am', 'as is 7');
-eq(windowLabel(W(22, 7)), '10pm to 7am', 'the window reads as a sentence');
+// The clock itself is fmtClock's now, so these are asserted against it rather
+// than against a spelling this file would be the only place to decide. What
+// matters here is that the two NAMED hours keep their words and the rest are
+// whatever the reader's locale writes — including a 24-hour one, where this
+// test's old "10pm" was a claim about the reader that was never true.
+eq(hourLabel(22), fmtClock(22, 0), 'and 22 is whatever the reader\'s clock calls it');
+eq(hourLabel(7), fmtClock(7, 0), 'as is 7');
+eq(windowLabel(W(22, 7)), `${fmtClock(22, 0)} to ${fmtClock(7, 0)}`, 'the window reads as a sentence');
 
 eq(SUGGESTED_QUIET.fromHour, 22, 'the offered starting point is an ordinary night');
 ok(!/held back|in the morning/i.test(QUIET_HELD_NOT_DELAYED.split('but')[0] ?? ''),

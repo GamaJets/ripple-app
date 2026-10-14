@@ -43,6 +43,7 @@
 // Pure — no react, no supabase, no clock of its own. `now` is passed in.
 import { appLocale } from './locale';
 import { localDate } from './localDate';
+import { fmtClock } from './format';
 import { isoDay } from './weekStart';
 
 /**
@@ -101,10 +102,20 @@ function dayLabel(day: string): string {
   return d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** An hour of the day as the reader's own locale writes it — "6 pm", "18". */
+/**
+ * An hour of the day as the reader's own locale writes it — "6 pm", "18".
+ *
+ * Through `fmtClock`, which is the app's one answer to this question. This was
+ * its own `toLocaleTimeString(locale, { hour: 'numeric' })`, and the day period
+ * comes back from Intl in CAPITALS: Log a Session read "Start Hour  10 AM" and
+ * "Goes into Tamer's record as today at 10 AM", while the Schedule two taps
+ * away said "10 am". Seen on an iPhone 17 Pro, 14 Oct 2026. `fmtClock` walks
+ * `formatToParts` so it can lower-case that part, which src/lib/format.ts
+ * records as a deliberate house choice, and it drops the ":00" a whole hour
+ * does not need.
+ */
 export function hourLabel(hour: number): string {
-  const d = new Date(2000, 0, 1, clampHour(hour), 0, 0, 0);
-  return d.toLocaleTimeString(appLocale(), { hour: 'numeric' });
+  return fmtClock(clampHour(hour), 0);
 }
 
 /** Any number the steppers can produce, brought back onto the clock. The

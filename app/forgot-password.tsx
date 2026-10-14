@@ -10,7 +10,7 @@
 // above a `ty.title`, the field lost its 1px border for a `surface2` fill, and
 // the error is ink text beside a coloured dot rather than coloured text.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
@@ -51,7 +51,16 @@ export default function ForgotPassword() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* No KeyboardAvoidingView around this scroller. It had one, with
+          `behavior="padding"`, on top of the scroller's own
+          `automaticallyAdjustKeyboardInsets` — and the two fight: padding
+          shortens the KAV's box by the keyboard height while the insets add
+          that height again, so a focused field scrolls against a viewport that
+          has already shrunk. On 14 Oct 2026 that came back as a photograph of
+          app/welcome.tsx showing a number pad and nothing above it on a real
+          handset. app/phone-signin.tsx reached the same conclusion first and
+          states it: the wrapper goes, rather than sitting beside the mechanism
+          that works. */}
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {/* The door's night head, carried onto this step. "If an account
               exists" stays word for word: it is the sentence that stops this
@@ -90,7 +99,6 @@ export default function ForgotPassword() {
           )}
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

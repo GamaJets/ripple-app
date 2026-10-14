@@ -4611,6 +4611,15 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(phoneAuthError('Invalid login credentials').includes('six digits'), 'a wrong code explains what a right one looks like');
   ok(phoneAuthError('over_sms_send_rate_limit').includes('Wait'), 'a rate limit says to wait rather than retrying blindly');
   ok(phoneAuthError('phone_provider_disabled').includes('email'), 'a disabled provider points at the path that still works');
+  // The string Supabase actually returns, reported from a real handset on
+  // 14 Oct 2026 and read by the person as a verdict on their UAE number.
+  // The branch above matched the error CODE and Supabase sends the MESSAGE.
+  ok(phoneAuthError('Unsupported phone provider').includes('email'),
+    'the message Supabase really sends is caught too, not just the code');
+  ok(!phoneAuthError('Unsupported phone provider').toLowerCase().includes('provider'),
+    "and the word 'provider' never reaches the person — it is about a dashboard, not them");
+  // A well-formed UAE mobile is not what went wrong, and this file says so.
+  ok(isPlausiblePhone('543432492', 'AE'), 'the number in that report was always valid');
   ok(phoneAuthError('something unheard of') === 'something unheard of', 'an unknown failure is passed through, not replaced with a guess');
 }
 

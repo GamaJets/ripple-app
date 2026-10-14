@@ -246,7 +246,23 @@ export function phoneAuthError(
   if (m.includes('invalid phone') || m.includes('phone number')) {
     return 'That does not look like a mobile number. Check the country and try again.';
   }
-  if (m.includes('signups not allowed') || m.includes('phone_provider_disabled')) {
+  // `unsupported phone provider` is the one that actually came back. Reported
+  // 14 Oct 2026 from a real handset: somebody entering +971 543432492 read
+  // "Unsupported phone provider" under the field, in those words, and
+  // concluded their UAE number was the problem. It was not — the number was
+  // well formed and this file had already accepted it. Supabase says that when
+  // the project has NO SMS provider configured at all, so phone sign-in was
+  // failing for every country equally.
+  //
+  // The branch below existed and was right; it matched on the error CODE
+  // (`phone_provider_disabled`) and Supabase sent the error MESSAGE. Nothing
+  // matched, and the last line of this function hands an unrecognised string
+  // straight to the person — which is how a developer's sentence about a
+  // dashboard setting ended up on the sign-up screen of a public build.
+  if (m.includes('signups not allowed')
+    || m.includes('phone_provider_disabled')
+    || m.includes('unsupported phone provider')
+    || m.includes('sms provider')) {
     return 'Signing in by phone is not switched on yet. Use your email and password for now.';
   }
   // Nothing recognised and nothing said. `retryLine` is then the whole of what

@@ -70,6 +70,8 @@ export function hourInWindow(hour: number, fromHour: number, toHour: number): bo
 }
 
 /** A coach's window, as `notify_quiet_hours` stores it. */
+import { fmtClock } from './format';
+
 export interface QuietHours {
   /** 0–23, inclusive — quiet begins at the top of this hour. */
   fromHour: number;
@@ -135,13 +137,26 @@ export function inQuiet(hour: number, q: QuietHours | null): boolean {
   return hourInWindow(hour, q.fromHour, q.toHour);
 }
 
-/** "10pm", "7am", "12 midday". Lower case, for the middle of a sentence. */
+/**
+ * "10 pm", "7 am", and the two hours that have names. For the middle of a
+ * sentence, so the clock part is left exactly as the reader's locale writes it.
+ *
+ * The clock itself is `fmtClock`'s, not this file's. This was
+ * `${n % 12}${n < 12 ? 'am' : 'pm'}` — a 12-hour clock hand-built in English,
+ * which src/lib/format.ts records removing from the rest of the app for the
+ * reason that most of the world reads 24 and "10pm" is not a time to a coach
+ * in Berlin. It was one of three such clocks still standing on 14 Oct 2026;
+ * the other two were in the Schedule and on Log a Session.
+ *
+ * Midnight and midday keep their words. They are not a formatting preference:
+ * "0am" is not a time, and on a 12-hour locale Intl answers midnight with
+ * "12 am", which reads as noon to about half the people who see it.
+ */
 export function hourLabel(h: number): string {
   const n = Math.max(0, Math.min(23, Math.floor(h)));
   if (n === 0) return 'midnight';
   if (n === 12) return 'midday';
-  const suffix = n < 12 ? 'am' : 'pm';
-  return `${n % 12}${suffix}`;
+  return fmtClock(n, 0);
 }
 
 /** "10pm to 7am". Sentence case, no full stop. */

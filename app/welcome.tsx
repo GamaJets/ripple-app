@@ -9,7 +9,7 @@
 // label above, and the notice is ink text beside a coloured dot rather than
 // coloured text.
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
@@ -264,8 +264,28 @@ export default function Welcome() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      {/* ── the screen that came up blank with a keypad on it ────────────
+          Reported 14 Oct 2026 with a photograph: somebody signing up with an
+          email and a password got a number pad and nothing above it — not the
+          hero, not the six code boxes, not a word. Email sign-up ends on this
+          screen's OTP stage, so that blank area WAS the thing they were meant
+          to type into.
+
+          This had both mechanisms at once. `behavior="padding"` shortens the
+          KeyboardAvoidingView's own box by the keyboard height, and
+          `automaticallyAdjustKeyboardInsets` adds that same height to the
+          scroller's insets — so when iOS brought the focused box into view it
+          scrolled against a viewport that had already shrunk, and on a handset
+          shorter than the one this was built on the content went off the top
+          with nothing left on screen.
+
+          app/phone-signin.tsx hit this first and its header records the
+          conclusion in one line: the wrapper is REMOVED rather than left
+          beside the working mechanism, because two of them fighting is worse
+          than one. scripts/check-keyboard.mjs accepts either and cannot see
+          both, which is why this survived here — see the note added to its
+          header. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
           {/* ── the night head ──────────────────────────────────────────
               The door's ground carried onto the form as a hero card: whose app
@@ -466,7 +486,6 @@ export default function Welcome() {
           </>
           )}
         </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -464,6 +464,41 @@ for (const f of files) {
         // exists for — it did, until this line was written.
         const kav = [...stack].reverse().find((s) => s.name === 'KeyboardAvoidingView');
         frame.lifted = !!kav && src.slice(kav.contentStart, m.index).replace(/[{}\s]/g, '') !== '';
+
+        // ── rule 3: both mechanisms at once ──────────────────────────────
+        //
+        // The two of them fight. `behavior="padding"` shortens the KAV's own
+        // box by the keyboard height; `automaticallyAdjustKeyboardInsets` adds
+        // that height to this scroller's insets. Apply both and a focused
+        // field is scrolled into view against a viewport that has already
+        // shrunk by the same amount — on a handset shorter than the one it was
+        // built on, the content goes off the top and the screen is blank with
+        // a keyboard on it.
+        //
+        // Reported 14 Oct 2026 with a photograph of app/welcome.tsx: somebody
+        // signing up with an email and a password got a number pad and nothing
+        // above it. Email sign-up ends on that screen's six code boxes, so the
+        // blank area was the thing they had to type into.
+        //
+        // Rules 1 and 2 could not see it. Rule 1 asks whether a field has A
+        // way out from under the keyboard and stops at the first one it finds,
+        // which is the right question for the bug this file was written for
+        // and the wrong one for having two. app/phone-signin.tsx had already
+        // reached the conclusion in prose — "the wrapper is REMOVED rather
+        // than left beside the working mechanism, because two of them fighting
+        // is worse than one" — and nothing held the rest of the tree to it.
+        //
+        // Only an UNLIFTED KAV counts, which is the same `lifted` test rule 1
+        // uses one line above. A sheet whose KAV has a scrim above the
+        // scroller is the documented, working combination and is left alone:
+        // there the padding compresses the scrim, the sheet rises as one, and
+        // the insets inside it are not a second lift of the same content.
+        if (kav && !frame.lifted && /automaticallyAdjustKeyboardInsets/.test(open)) {
+          const line = lineOf(src, m.index);
+          if (!excused(lines, line - 1)) {
+            problems.push({ rel, line, doubled: true, kavLine: lineOf(src, kav.index) });
+          }
+        }
       }
       stack.push(frame);
     }
@@ -500,11 +535,20 @@ if (problems.length) {
       console.error('    the two and no KeyboardAvoidingView either — the sheet can neither rise nor\n    scroll, so the keyboard simply covers it\n');
       continue;
     }
+    if (p.doubled) {
+      console.error(`    this scroller has automaticallyAdjustKeyboardInsets AND sits inside the`);
+      console.error(`    KeyboardAvoidingView opened on line ${p.kavLine}, which has nothing above the`);
+      console.error('    scroller for its padding to compress. The two lifts add up and the content\n    can scroll off the top — a blank screen with a keyboard on it.\n');
+      continue;
+    }
     console.error(`    a TextInput inside the scroller opened on line ${p.scrollerLine}, which has no`);
     console.error(p.deadWrapper
       ? '    automaticallyAdjustKeyboardInsets — and the KeyboardAvoidingView above it is the\n    scroller\'s own wrapper, so its padding has nothing to push\n'
       : '    automaticallyAdjustKeyboardInsets and no KeyboardAvoidingView above it\n');
   }
+  console.error('If a scroller has BOTH: delete the KeyboardAvoidingView. The insets are the page');
+  console.error('mechanism and they work on their own — see app/phone-signin.tsx, which removed its');
+  console.error('wrapper rather than leaving it beside them.\n');
   console.error('For a PAGE scroller: put `automaticallyAdjustKeyboardInsets` on it, add');
   console.error('`keyboardDismissMode="interactive"` so the keyboard can be dragged away, and raise');
   console.error('the contentContainer paddingBottom if the field is near the end of the screen — see');
