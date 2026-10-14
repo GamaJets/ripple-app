@@ -49,10 +49,42 @@ const EVENING_HOUR = 19;
 export function MotivationNudgeProvider({ children }: { children: ReactNode }) {
   const { log, status } = useWorkoutLog();
   const { loaded } = useNotifyPrefs();
-  const done = useRef(false);
+  /**
+   * The log this provider last armed against, not a boolean "have we armed".
+   *
+   * ── the notification that had stopped being true ──────────────────────
+   *
+   * Reported from a real handset on 14 Oct 2026, at 19:00: "It has been a
+   * week — Nothing logged for 17 days." The member had a cycling session
+   * recorded that same day, and `public.workouts` has it. The sentence was
+   * correct when it was armed — the session before it was 18 days earlier —
+   * and had become false by the time it was delivered.
+   *
+   * `done` was a `useRef(false)` latched on the first whole read, so the
+   * `log` already in this effect's dependencies could change all it liked and
+   * nothing re-planned. That is the case here twice over: the session was
+   * written by the member's COACH, server-side, so it arrived in this log
+   * through a refresh rather than through anything the member did.
+   *
+   * Keyed on the log's own shape, so a re-plan happens when, and only when,
+   * the thing the plan was computed from has moved. The async block below
+   * already cancels the ids it wrote before arming new ones, so running again
+   * is what it was built for.
+   *
+   * ── what this does NOT fix, stated plainly ────────────────────────────
+   *
+   * An app that is never opened between the session and the fire time still
+   * delivers the stale banner, because a local notification cannot re-read
+   * anything at fire time. That is the limit this file's header already names,
+   * and closing it needs the nudge to be sent from a server that reads the log
+   * at send time. This narrows the window to "the app was not opened"; it does
+   * not remove it.
+   */
+  const armedFor = useRef<string | null>(null);
+  const signature = `${log.length}:${log.reduce((a2, e) => Math.max(a2, Date.parse(e.t) || 0), 0)}`;
 
   useEffect(() => {
-    if (done.current) return;
+    if (armedFor.current === signature) return;
     // The preferences have to have seeded the latch first, or a member who
     // turned these off would be armed once on every launch before the store
     // answered.
@@ -66,7 +98,7 @@ export function MotivationNudgeProvider({ children }: { children: ReactNode }) {
     // tells somebody who trained this morning that it has been a week. The pure
     // module refuses a null, and this is where the null comes from.
     if (!isWhole(status)) return;
-    done.current = true;
+    armedFor.current = signature;
 
     void (async () => {
       // Cancel first, by the ids this provider wrote. Never a blanket cancel:
@@ -108,7 +140,7 @@ export function MotivationNudgeProvider({ children }: { children: ReactNode }) {
       }
       try { await AsyncStorage.setItem(ARMED_KEY, JSON.stringify(ids)); } catch { /* best effort */ }
     })();
-  }, [loaded, status, log]);
+  }, [loaded, status, log, signature]);
 
   return <>{children}</>;
 }
