@@ -508,7 +508,7 @@ export default function TrainerLeads() {
                 note={`${num(conversion.matched)} of ${num(conversion.checked)} checked`} />
             ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: sp.xl }}>
-              <Donut slices={sourceSlices} centre={num(book.rows.length)} sub={book.rows.length === 1 ? 'enquiry' : 'enquiries'}
+              <Donut slices={sourceSlices} centre={num(book.rows.length)} sub={book.rows.length === 1 ? 'Enquiry' : 'Enquiries'}
                 spoken={`Where they came from: ${sourceSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
               <Legend items={sourceSlices} />
             </View>

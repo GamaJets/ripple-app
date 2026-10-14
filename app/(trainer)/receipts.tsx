@@ -398,7 +398,7 @@ export default function Receipts() {
                   The rows under it keep every amount and every count. */}
               {methodRings.map((d, i) => (
                 <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg, marginBottom: sp.md }}>
-                  <Donut slices={d.slices} centre={d.centre} sub="recorded" spoken={d.spoken} />
+                  <Donut slices={d.slices} centre={d.centre} sub="Recorded" spoken={d.spoken} />
                   <Legend items={d.slices} />
                 </View>
               ))}

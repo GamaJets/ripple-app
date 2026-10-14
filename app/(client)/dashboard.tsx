@@ -899,7 +899,7 @@ export default function Home() {
               <HeroRing
                 value={logKnown ? wk.days / Math.max(1, goalDays) : null}
                 figure={logKnown ? `${num(wk.days)}/${num(goalDays)}` : null}
-                sub="this week"
+                sub="This Week"
                 spoken={logKnown ? `${num(wk.days)} of ${num(goalDays)} training days this week` : 'This week could not be counted'}
               />
             </Pressable>

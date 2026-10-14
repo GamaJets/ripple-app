@@ -1071,7 +1071,7 @@ export default function Financials() {
             <Section key={m.ccy}>
               <SectionHead title="Costs by Category" note={[costs.monthLabel, m.ccy].filter(Boolean).join(' · ')} />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
-                <Donut slices={m.slices} centre={String(m.slices.length)} sub={m.slices.length === 1 ? 'category' : 'categories'}
+                <Donut slices={m.slices} centre={String(m.slices.length)} sub={m.slices.length === 1 ? 'Category' : 'Categories'}
                   spoken={`Recorded costs in ${m.ccy}, ${total ?? 'an amount this app cannot state'}. ${m.slices.map((s) => `${s.label} ${s.shown ?? ''}`).join(', ')}`} />
                 <View style={{ flex: 1, minWidth: 160 }}><Legend items={m.slices} /></View>
               </View>
@@ -1312,7 +1312,7 @@ export default function Financials() {
                 <Section>
                   <SectionHead title="Health Score" note="From Your Figures" />
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
-                    <Ring value={pctOf100 / 100} figure={num(r.score)} sub="of 100" tone={tone}
+                    <Ring value={pctOf100 / 100} figure={num(r.score)} sub="Of 100" tone={tone}
                       spoken={`Health score, ${num(r.score)} out of 100, ${note}`} />
                     <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
                       <TonedChip label={`Grade ${r.grade}`} tone={tone} />

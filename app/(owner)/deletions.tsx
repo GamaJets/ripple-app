@@ -381,7 +381,7 @@ export default function OwnerDeletions() {
                 <Ring size={120} tone={ringTone}
                   value={soonest == null ? null : Math.max(0, Math.min(30, soonest)) / 30}
                   figure={soonest != null ? String(Math.max(0, soonest)) : clear ? '0' : null}
-                  sub={soonest != null ? (soonest <= 0 ? 'overdue' : soonest === 1 ? 'day left' : 'days left') : clear ? 'waiting' : undefined}
+                  sub={soonest != null ? (soonest <= 0 ? 'Overdue' : soonest === 1 ? 'Day Left' : 'Days Left') : clear ? 'Waiting' : undefined}
                   spoken={`Waiting on you, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
                 <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
                   {failed || overdue ? <TonedChip label={failed ? 'Not Read' : 'Overdue'} tone="red" icon="info" /> : null}

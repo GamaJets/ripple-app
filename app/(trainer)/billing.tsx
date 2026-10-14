@@ -242,7 +242,7 @@ export default function TrainerBilling() {
             <Ring size={104} tone={trial.state?.expired ? 'neutral' : 'brand'}
               value={trial.state ? trial.state.daysLeft / TRIAL_DAYS : null}
               figure={trial.state ? String(trial.state.daysLeft) : null}
-              sub={trial.state?.daysLeft === 1 ? 'day left' : 'days left'}
+              sub={trial.state?.daysLeft === 1 ? 'Day Left' : 'Days Left'}
               spoken={trial.state
                 ? (trial.state.expired ? 'Your Free Days Are Used Up' : `${trial.state.daysLeft} of ${TRIAL_DAYS} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`)
                 : 'Free trial days not read'} />

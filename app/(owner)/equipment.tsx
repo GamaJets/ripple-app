@@ -407,7 +407,7 @@ export default function OwnerEquipment() {
             <Section>
               <SectionHead title="Needing Attention" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
-                <Donut slices={slices} centre={loaded ? figure : null} sub="need you" size={112}
+                <Donut slices={slices} centre={loaded ? figure : null} sub="Need You" size={112}
                   spoken={`Needing attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
                 {sum && queue.length > 0
                   ? <View style={{ flex: 1, minWidth: 140 }}><Legend items={slices} /></View>

@@ -529,7 +529,7 @@ export default function OwnerRota() {
                 {/* `coverRate` is null with no shifts and with nothing booked,
                     and null draws the track and a dash — never a full ring over
                     a week nobody has rostered. */}
-                <Ring size={104} value={rate} figure={pct(rate)} sub="covered" tone={(cov?.uncovered?.length ?? 0) > 0 ? 'red' : 'brand'}
+                <Ring size={104} value={rate} figure={pct(rate)} sub="Covered" tone={(cov?.uncovered?.length ?? 0) > 0 ? 'red' : 'brand'}
                   spoken={rate == null ? 'Booked hours covered, not known' : `${pct(rate)} of booked hours have somebody rostered`} />
               </View>
               {loaded ? (

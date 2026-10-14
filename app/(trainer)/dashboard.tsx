@@ -2705,7 +2705,7 @@ export default function TrainerClients() {
             <Section>
               <SectionHead title="Roster Health" />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
-                <Donut slices={slices} centre={num(bands.total)} sub={bands.total === 1 ? 'client' : 'clients'}
+                <Donut slices={slices} centre={num(bands.total)} sub={bands.total === 1 ? 'Client' : 'Clients'}
                   spoken={`Roster health. ${slices.map((x) => `${x.shown} ${x.label.toLowerCase()}`).join(', ')}, of ${num(bands.total)}.`} />
                 <Legend items={slices} />
               </View>

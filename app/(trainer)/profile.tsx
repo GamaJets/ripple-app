@@ -498,7 +498,7 @@ export default function CoachProfile() {
             meta={missing.length
               ? `Still to add: ${missing.join(', ')}.`
               : pageState === 'live' ? 'Everything a client reads is filled in, and your page is being served.' : 'Everything a client reads is filled in.'}
-            ring={<HeroRing value={filledN / filled.length} figure={`${filledN}/${filled.length}`} sub="filled in"
+            ring={<HeroRing value={filledN / filled.length} figure={`${filledN}/${filled.length}`} sub="Filled In"
               spoken={`${filledN} of ${filled.length} profile details filled in`} />}
             cta={missing.length
               ? { label: 'Finish Your Profile', onPress: () => setEditing(true) }

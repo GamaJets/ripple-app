@@ -1360,7 +1360,7 @@ export default function TrainerAnalytics() {
                 read as one picture of one roster. The legend carries every
                 count in words; the colours repeat it. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg }}>
-              <Donut slices={healthSlices} centre={fig(clients)} sub={clients === 1 ? 'client' : 'clients'}
+              <Donut slices={healthSlices} centre={fig(clients)} sub={clients === 1 ? 'Client' : 'Clients'}
                 spoken={`Roster health: ${healthSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
               <Legend items={healthSlices} />
             </View>
@@ -1613,7 +1613,7 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Nothing is recorded as taken this month, so there is no split to draw.</Text>
           ) : sourceDonuts.map((d, i) => (
             <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg }}>
-              <Donut slices={d.slices} centre={d.centre} sub="this month" spoken={d.spoken} />
+              <Donut slices={d.slices} centre={d.centre} sub="This Month" spoken={d.spoken} />
               <Legend items={d.slices} />
             </View>
           ))}

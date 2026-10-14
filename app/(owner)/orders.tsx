@@ -283,7 +283,7 @@ export default function OwnerOrders() {
             <Section>
               <SectionHead title="Need Attention" note={loaded ? `${list.length} in ${WINDOW_DAYS} Days` : undefined} />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
-                <Donut slices={slices} centre={loaded ? String(needsAPerson) : null} sub="need you" size={120}
+                <Donut slices={slices} centre={loaded ? String(needsAPerson) : null} sub="Need You" size={120}
                   spoken={`Need attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
                 <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
                   {/* The alarm colour only when somebody paid and got nothing,

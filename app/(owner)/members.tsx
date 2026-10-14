@@ -812,7 +812,7 @@ export default function OwnerMembers() {
                 });
                 return (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap', marginTop: sp.lg }}>
-                    <Donut slices={slices} centre={known ? num(list.length) : null} sub={list.length === 1 ? 'membership' : 'memberships'}
+                    <Donut slices={slices} centre={known ? num(list.length) : null} sub={list.length === 1 ? 'Membership' : 'Memberships'}
                       spoken={known
                         ? `Membership mix. ${slices.map((x) => `${x.label}, ${x.shown}`).join('. ')}`
                         : 'Membership mix, not read'} />

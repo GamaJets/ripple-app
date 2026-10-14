@@ -240,7 +240,7 @@ export default function Glucose() {
             <Ring size={120}
               value={known && g.summary.inTypicalPct != null ? g.summary.inTypicalPct / 100 : null}
               figure={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}%` : null}
-              sub="in range"
+              sub="In Range"
               spoken={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}% of readings within the quoted range` : 'Share of readings in range, not shown'} />
             <View style={{ flex: 1, minWidth: 0, gap: sp.xs }}>
               <Text style={{ ...ty.caption, color: t.ink3 }}>Latest</Text>

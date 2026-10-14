@@ -1088,7 +1088,7 @@ export default function FoodLog() {
  <Ring size={156} tone={remK != null && remK < 0 ? 'red' : 'brand'}
   value={pctEaten != null ? pctEaten / 100 : null}
   figure={!dayWhole ? null : remK == null ? num(tot.k) : num(Math.abs(remK))}
-  sub={remK == null ? 'kcal eaten' : remK >= 0 ? 'kcal left' : 'kcal over'}
+  sub={remK == null ? 'kcal Eaten' : remK >= 0 ? 'kcal Left' : 'kcal Over'}
   spoken={pctEaten != null ? `${pctEaten}% of today's calories eaten` : 'Today’s calories against target, not drawn'} />
  </View>
  {dayWhole && target ? null : <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md, textAlign: 'center' }}>{dayNote}</Text>}

@@ -764,7 +764,7 @@ export default function OwnerOverview() {
             ];
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap' }}>
-                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.sessions30)} sub="sessions"
+                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.sessions30)} sub="Sessions"
                   spoken={trainersUnknown
                     ? (loading ? 'Delivery, not read yet' : 'Delivery could not be read')
                     : `Of ${num(roll.sessions30)} sessions in 30 days, ${num(roll.delivered30)} delivered, ${num(roll.unmarked30)} awaiting an outcome, ${num(notDelivered30)} missed or cancelled`} />

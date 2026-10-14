@@ -321,7 +321,7 @@ export default function OwnerTrainers() {
             });
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap' }}>
-                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.trainers)} sub={roll.trainers === 1 ? 'trainer' : 'trainers'}
+                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.trainers)} sub={roll.trainers === 1 ? 'Trainer' : 'Trainers'}
                   spoken={trainersUnknown
                     ? (loading ? 'Roster health, not read yet' : 'Roster health could not be read')
                     : `${num(roll.trainers)} trainer${roll.trainers === 1 ? '' : 's'}. ${slices.map((x) => `${x.label}, ${x.shown}`).join('. ')}`} />

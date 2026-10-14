@@ -300,7 +300,7 @@ export default function TrainerAdSpend() {
                     this card and is in no slice. */}
                 {read.status === 'ready' ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginBottom: sp.md }}>
-                    <Donut slices={spendSlices} centre={money(spendSlices.reduce((n, x) => n + (x.value ?? 0), 0), combined.currency)} sub="matched"
+                    <Donut slices={spendSlices} centre={money(spendSlices.reduce((n, x) => n + (x.value ?? 0), 0), combined.currency)} sub="Matched"
                       spoken={`Matched ad spend by code: ${spendSlices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`} />
                     <Legend items={spendSlices} />
                   </View>

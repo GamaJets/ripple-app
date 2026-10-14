@@ -7221,7 +7221,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
             {resting ? (
               <View style={{ alignItems: 'center', marginTop: sp.xl }}>
-                <HeroRing size={136} value={ringValue} figure={restClock(rest)} sub="rest" spoken={`Rest ${restClock(rest)}`} />
+                <HeroRing size={136} value={ringValue} figure={restClock(rest)} sub="Rest" spoken={`Rest ${restClock(rest)}`} />
                 {restLine}
               </View>
             ) : (

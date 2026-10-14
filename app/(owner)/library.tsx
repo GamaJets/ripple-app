@@ -256,7 +256,7 @@ export default function OwnerLibrary() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                 <Ring size={120} tone="purple"
                   value={countable && rows.length > 0 ? illustrated / rows.length : null}
-                  figure={countable ? figure : null} sub="movements"
+                  figure={countable ? figure : null} sub="Movements"
                   spoken={`Movements in the catalogue, ${countable ? `${figure}, ${illustrated} illustrated` : 'no figure'}, ${note}`} />
                 <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>
               </View>

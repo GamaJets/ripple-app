@@ -446,7 +446,7 @@ export default function ClientCancellationsScreen() {
                         never stands in for the four numbers. */}
                     {countable ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.md }}>
-                        <Donut slices={whoSlices} centre={num(tally.sessions)} sub={tally.sessions === 1 ? 'hour' : 'hours'}
+                        <Donut slices={whoSlices} centre={num(tally.sessions)} sub={tally.sessions === 1 ? 'Hour' : 'Hours'}
                           spoken={`Hours cancelled, by who ended them: ${whoSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
                         <Legend items={whoSlices} />
                       </View>

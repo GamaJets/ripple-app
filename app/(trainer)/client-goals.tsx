@@ -696,7 +696,7 @@ export default function ClientGoals() {
                             style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
                             {/* The approved look's ring, where the bar was: the
                                 same percentage, off the same whole read. */}
-                            <Ring size={108} value={pct / 100} figure={`${pct}%`} sub="of the way" spoken={`${pct} percent of the way`} />
+                            <Ring size={108} value={pct / 100} figure={`${pct}%`} sub="Of the Way" spoken={`${pct} percent of the way`} />
                             <View style={{ flex: 1, minWidth: 0 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
                               <Text style={{ ...ty.hero, color: t.ink }}>{figure}</Text>

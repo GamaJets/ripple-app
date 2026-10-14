@@ -350,7 +350,7 @@ export default function OwnerGrowth() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginBottom: sp.lg }}>
             <Ring size={112} tone="brand"
               value={idlePct == null ? null : (100 - idlePct) / 100}
-              figure={idlePct == null ? null : `${num(100 - idlePct)}%`} sub="active"
+              figure={idlePct == null ? null : `${num(100 - idlePct)}%`} sub="Active"
               spoken={idlePct == null ? 'Active trainers, no figure' : `${num(100 - idlePct)}% of trainers active, ${num(roll.trainers - idle)} of ${num(roll.trainers)}`} />
             <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>
               {idlePct == null ? 'No share to state yet.' : `${num(roll.trainers - idle)} of ${num(roll.trainers)} trainers had a client or a session in the last 30 days.`}
@@ -409,7 +409,7 @@ export default function OwnerGrowth() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginBottom: sp.lg }}>
             <Ring size={112} tone="blue"
               value={churn.headline.pct == null ? null : (100 - churn.headline.pct) / 100}
-              figure={churn.headline.pct == null ? null : `${num1(100 - churn.headline.pct)}%`} sub="stayed"
+              figure={churn.headline.pct == null ? null : `${num1(100 - churn.headline.pct)}%`} sub="Stayed"
               spoken={churn.headline.pct == null ? 'Members who stayed, no figure' : `${num1(100 - churn.headline.pct)}% of members stayed, ${churn.headline.label ?? ''}`} />
             {/* Always shown, never only on the failure. Under a rate it says
                 what the rate is OVER — "2 of 20 on the books when August
@@ -536,7 +536,7 @@ export default function OwnerGrowth() {
                   { label: 'At Risk', value: ca.atRisk, tone: 'amber' as Tone, shown: num(ca.atRisk) },
                 ];
                 return (<>
-                  <Donut slices={mix} centre={num(ca.total)} sub="clients"
+                  <Donut slices={mix} centre={num(ca.total)} sub="Clients"
                     spoken={`${num(ca.total)} clients, ${num(ca.engaged)} engaged, ${num(ca.atRisk)} at risk`} />
                   <View style={{ flex: 1, minWidth: 140 }}><Legend items={mix} /></View>
                 </>);

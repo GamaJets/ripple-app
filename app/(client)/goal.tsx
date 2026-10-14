@@ -395,7 +395,7 @@ export default function Goal() {
                       truncated series. */}
                   <View accessible accessibilityLabel={[goalLabel(lead), [fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' '), `${leadProgress.pct}% of the way`, `${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`].join(', ')}
                     style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
-                    <Ring size={120} value={Math.max(0, Math.min(100, leadProgress.pct)) / 100} figure={`${leadProgress.pct}%`} sub="of the way"
+                    <Ring size={120} value={Math.max(0, Math.min(100, leadProgress.pct)) / 100} figure={`${leadProgress.pct}%`} sub="Of the Way"
                       spoken={`${leadProgress.pct}% of the way to your goal`} />
                     <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>Now</Text>

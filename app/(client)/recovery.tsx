@@ -409,7 +409,7 @@ export default function Recovery() {
     <Ring size={116}
      value={rv.readiness != null ? rv.readiness.score / 100 : null}
      figure={rv.readiness != null ? String(rv.readiness.score) : null}
-     sub="of 100"
+     sub="Of 100"
      spoken={rv.readiness != null ? `Readiness ${rv.readiness.score} out of 100, ${rv.readiness.label}` : 'Readiness, no score yet'} />
     <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
      {rv.readiness != null ? <TonedChip label={rv.readiness.label} tone="neutral" /> : null}

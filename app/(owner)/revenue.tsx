@@ -477,7 +477,7 @@ export default function OwnerRevenue() {
           <Section>
             <SectionHead title="How It Was Paid" note="Payments Recorded" />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
-              <Donut slices={sources} centre={num(sources.length)} sub={sources.length === 1 ? 'method' : 'methods'}
+              <Donut slices={sources} centre={num(sources.length)} sub={sources.length === 1 ? 'Method' : 'Methods'}
                 spoken={`How the last 30 days were paid. ${sources.map((s) => `${s.label} ${s.shown ?? ''}`).join(', ')}`} />
               <View style={{ flex: 1, minWidth: 160 }}><Legend items={sources} /></View>
             </View>

@@ -936,10 +936,10 @@ export default function OwnerClassAnalytics() {
                 reads as "nobody came". */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap', gap: sp.lg }}>
               <Ring size={120} tone="purple" value={totals.fill ?? null}
-                figure={totals.fillPct == null ? null : `${totals.fillPct}%`} sub="places booked"
+                figure={totals.fillPct == null ? null : `${totals.fillPct}%`} sub="Places Booked"
                 spoken={totals.fillPct == null ? 'Average fill, not known' : `Average fill, ${totals.fillPct}% of places booked`} />
               <Ring size={120} tone="brand" value={totals.show ?? null}
-                figure={totals.showPct == null ? null : `${totals.showPct}%`} sub="booked turned up"
+                figure={totals.showPct == null ? null : `${totals.showPct}%`} sub="Booked Turned Up"
                 spoken={totals.showPct == null ? 'Average show, not known' : `Average show, ${totals.showPct}% of those booked turned up`} />
             </View>
           </Section>

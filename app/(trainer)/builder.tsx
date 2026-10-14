@@ -2754,7 +2754,7 @@ export default function Builder() {
                   // "0/1" over one word, as the Home board's "3/5 · this week":
                   // "of 1 on a program" did not fit the ring and was cut off.
                   figure={ringFor && onCount != null ? `${num(onCount)}/${num(roster.length)}` : null}
-                  sub={ringFor ? 'assigned' : reading ? 'reading' : 'not read'}
+                  sub={ringFor ? 'Assigned' : reading ? 'Reading' : 'Not Read'}
                   spoken={ringFor && onCount != null
                     ? `${num(onCount)} of ${num(roster.length)} clients on a program you assigned`
                     : reading ? 'Reading who is on a program' : 'Who is on a program could not be read'} />

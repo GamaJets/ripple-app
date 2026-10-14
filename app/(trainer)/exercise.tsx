@@ -547,7 +547,7 @@ export default function TrainerExercise() {
                       other screen: fine, slipping, needs you. */}
                   {isWhole(rosterAsk) && isWhole(rosterStatus) && rosterJudged.length ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.lg }}>
-                      <Donut centre={num(rosterJudged.length)} sub={rosterJudged.length === 1 ? 'client' : 'clients'}
+                      <Donut centre={num(rosterJudged.length)} sub={rosterJudged.length === 1 ? 'Client' : 'Clients'}
                         slices={rosterBands.map((b) => ({ label: LEVEL_TITLE[b.level], value: b.rows.length, tone: LEVEL_TONE[b.level], shown: num(b.rows.length) }))}
                         spoken={`${num(rosterJudged.length)} on your book. ${rosterBands.map((b) => `${LEVEL_TITLE[b.level]}, ${num(b.rows.length)}`).join('. ')}.`} />
                       <Legend items={rosterBands.map((b) => ({ label: LEVEL_TITLE[b.level], value: b.rows.length, tone: LEVEL_TONE[b.level], shown: num(b.rows.length) }))} />

@@ -163,6 +163,14 @@ const VISIBLE = new Map([
   // row that can say more, and the first two callers both wrote a sentence in
   // it — "Marked on this phone · waiting to send" — which is the right thing to
   // write there. Same standing as <Notice title>: case-visible, and prose.
+  // The word under a figure, which is the gate's own definition of a label:
+  // "the label above or beside a value". ty.micro at 12pt, no transform, so
+  // what is typed is what is read. Seen on an iPhone 17 Pro, 14 Oct 2026, on
+  // the coach's Roster Health donut: "2 / clients", with "Active Clients"
+  // in the tile directly above it and "On Track" in the legend beside it.
+  ['Ring', ['sub']],             // kit.tsx:2037
+  ['Donut', ['sub']],            // kit.tsx:2033
+  ['HeroRing', ['sub']],         // kit.tsx:2256
   ['FigureCard', ['title']],     // ty.section, through SectionHead
   ['ActionBlock', ['title']],    // ty.section
   ['Expandable', ['title']],     // ty.head

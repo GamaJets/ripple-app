@@ -141,7 +141,7 @@ export default function Progression() {
             <SectionHead title="Next Session at a Glance" />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
               <Donut
-                slices={mix} centre={whole ? String(tips.length) : null} sub={tips.length === 1 ? 'lift' : 'lifts'}
+                slices={mix} centre={whole ? String(tips.length) : null} sub={tips.length === 1 ? 'Lift' : 'Lifts'}
                 spoken={whole
                   ? `${tips.length} lift${tips.length === 1 ? '' : 's'}: ${mix.filter((m) => (m.value ?? 0) > 0).map((m) => `${m.shown} ${m.label}`).join(', ')}`
                   : 'The mix of targets is not counted, because not every session could be read'} />

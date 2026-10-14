@@ -222,7 +222,7 @@ export default function ClientIntakeScreen() {
                 {ci.status === 'ready' && ci.state !== 'unknown' ? (
                   <Ring size={96} tone={ci.progress.complete ? 'brand' : 'amber'}
                     value={ci.progress.of ? ci.progress.done / ci.progress.of : null}
-                    figure={`${ci.progress.done}/${ci.progress.of}`} sub="sections"
+                    figure={`${ci.progress.done}/${ci.progress.of}`} sub="Sections"
                     spoken={`${ci.progress.done} of ${ci.progress.of} sections of the intake finished`} />
                 ) : null}
                 <Text style={{ ...ty.body, color: t.ink2, flex: 1, minWidth: 0 }}>
