@@ -20,7 +20,7 @@ export default function Resources() {
 
         <Section>
           <SectionHead title="From Your Coach" />
-          <ListRow icon="pencil" tone="teal" title="Documents From Your Coach" note="Waivers and forms your coach asks you to read"
+          <ListRow icon="pencil" tone="teal" title="Documents from Your Coach" note="Waivers and forms your coach asks you to read"
             onPress={() => router.push({ pathname: '/(client)/coach-documents', params: { kind: 'paperwork' } })} />
           <ListRow icon="video" tone="blue" title="Exercise Library" note="How-to videos from your coach"
             onPress={() => router.push('/(client)/library')} />

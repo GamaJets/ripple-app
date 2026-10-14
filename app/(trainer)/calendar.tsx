@@ -230,7 +230,17 @@ const dateLabel = (iso: string) => fmtDay(iso);
  *  selected on the grid. Never `${d.getDate()}/${d.getMonth() + 1}`: a coach in
  *  the United States reads that month-first, so "Wed 9/12" is 9 December here
  *  and 12 September there, and it was the last sentence before a cancellation. */
-const dateOfLabel = (d: Date) => `${DOW[d.getDay()]} ${d.getDate()} ${MON_SHORT[d.getMonth()]}`;
+/**
+ * A date as the reader's own locale orders it.
+ *
+ * This was `${DOW[d.getDay()]} ${d.getDate()} ${MON_SHORT[d.getMonth()]}`. The
+ * NAMES were already localised — DOW and MON_SHORT come from
+ * src/lib/calendarNames.ts — but the ORDER was hardcoded day-first, so on a
+ * month-first locale this screen printed "Wed 14 Oct" in the day sheet while
+ * its own hero, three inches above, printed "WED, OCT 14" from `fmtDay`.
+ * Half-localising a date is the shape that makes a reader doubt both halves.
+ */
+const dateOfLabel = (d: Date) => fmtDay(d.toISOString());
 
 /**
  * A selectable pill. Takes the theme as a prop rather than calling useTheme —

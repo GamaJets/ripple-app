@@ -428,7 +428,7 @@ export default function TrainerVideos() {
   // it and that, and the section was running with neither:
   //
   //  · `useProgramTemplates` seeds three built-in starters — Push · Pull ·
-  //    Legs, Fat-loss Circuit, Tone & Sculpt — so the list is NEVER empty. A
+  //    Legs, Fat-Loss Circuit, Tone & Sculpt — so the list is NEVER empty. A
   //    coach who has saved nothing (which, against phgfwzpkkwdysftlgkoq today,
   //    is every coach: `program_templates` holds zero rows) was shown the
   //    movements of three demonstration programs, counted, and told how many

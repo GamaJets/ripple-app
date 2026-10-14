@@ -241,7 +241,7 @@ export default function BuildWorkout() {
         <>
           <Rule />
           <Section>
-            <SectionHead title="How To Split It" note="One Session or a Day Each" />
+            <SectionHead title="How to Split It" note="One Session or a Day Each" />
             <Segmented
               options={[
                 { key: 'together', label: 'One Session' },

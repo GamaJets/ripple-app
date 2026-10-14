@@ -42,7 +42,7 @@ function seed(): ProgramTemplate[] {
   const mk = (name: string, p: Program): ProgramTemplate => ({ id: 'seed_' + name.toLowerCase().replace(/[^a-z]+/g, '-'), name, program: { ...p, title: name } });
   return [
     mk('Push · Pull · Legs', buildProgram('muscle', 28)),
-    mk('Fat-loss Circuit', buildProgram('fatloss', 30)),
+    mk('Fat-Loss Circuit', buildProgram('fatloss', 30)),
     mk('Tone & Sculpt', buildProgram('tone', 26)),
   ];
 }

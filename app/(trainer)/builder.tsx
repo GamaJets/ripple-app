@@ -3184,7 +3184,7 @@ export default function Builder() {
             building for a client or themselves. Same picker, same generator;
             the week loads into the builder below to edit before assigning. */}
         <Section>
-          <SectionHead title="Build From Muscles"
+          <SectionHead title="Build from Muscles"
             note={targets.length ? `${targets.length} Picked` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
             Tap the body or pick muscles below, built from the catalogue and the equipment answer above.
@@ -3213,7 +3213,7 @@ export default function Builder() {
             <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{targetedCoverageNote(byMuscle.coverage)}</Flag>
           ) : null}
           <View style={{ height: sp.md }} />
-          <Cta label="Build From These Muscles" onPress={buildFromMuscles} wide
+          <Cta label="Build from These Muscles" onPress={buildFromMuscles} wide
             disabled={!byMuscle?.program.days.length}
             a11yLabel={byMuscle?.program.days.length
               ? `Build a ${byMuscle.program.days.length}-day week from the picked muscles. It loads into the builder below, over what is there.`

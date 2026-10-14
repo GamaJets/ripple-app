@@ -3574,7 +3574,7 @@ export default function TrainerClients() {
               reason on them — DE-EMPHASISED, never removed. `showsInPerson`
               resolves every unknown to "show everything", so a roster that
               failed to load or a question nobody answered hides nothing. */}
-          <SectionHead title="Everybody On Your Book" />
+          <SectionHead title="Everybody on Your Book" />
           <ChipGrid
             tone={t.brand}
             items={[

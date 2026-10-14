@@ -246,7 +246,7 @@ function ActionsSheet({ target, me, moderator, onClose, onHideForMe, onBlock, on
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>{mine ? `Your ${noun}` : `${noun} by ${target.authorName}`}</Text>
           {!mine ? <Ghost label={`Report ${noun}`} icon="info" onPress={() => { setMsg(null); setStep('report'); }} /> : null}
           {!mine && target.kind === 'post' && onHideForMe ? (
-            <Ghost label="Hide From My Feed" icon="eye-off" onPress={() => run(onHideForMe(target.id))} />
+            <Ghost label="Hide from My Feed" icon="eye-off" onPress={() => run(onHideForMe(target.id))} />
           ) : null}
           {!mine ? (
             <Ghost label={`Block ${target.authorName}`} icon="lock" onPress={() => Alert.alert(

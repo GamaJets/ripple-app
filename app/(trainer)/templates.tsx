@@ -495,7 +495,7 @@ export default function Templates() {
                       shape of the program without opening it. Drawn off the
                       template's own days, so there is nothing to withhold. */}
                   <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{dayCount(tpl)} Days · {exCount(tpl)} Exercises{isStarter(tpl.id) ? ' · Starter' : ''}</Text>
                   {/* Present tense, and only ever about who is ON something.
                       Nothing behind this line reads a session or an adherence
                       figure, so it must never be read as saying a program
