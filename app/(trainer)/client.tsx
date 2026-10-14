@@ -102,6 +102,7 @@ import { useSettings } from '../../src/ui/settings';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { sparkY } from '../../src/lib/sparkScale';
+import { lastActiveChip } from '../../src/lib/rosterStatReach';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
@@ -1774,7 +1775,7 @@ export default function ClientScreen() {
                 is the literal '—' everywhere it is built. The real answer is a
                 section of its own below — src/lib/nextUp.ts. */}
             <Text style={{ ...ty.caption, color: t.ink3 }} numberOfLines={2}>
-              {client ? `${COACHED_MODE_SHORT[client.mode]} · ${/\bago$/.test(client.lastActive) ? `last active ${client.lastActive}` : client.lastActive}` : 'Your book'}
+              {client ? `${COACHED_MODE_SHORT[client.mode]} · ${lastActiveChip(client.lastActive)}` : 'Your Book'}
             </Text>
           </View>
         </View>
@@ -1795,7 +1796,7 @@ export default function ClientScreen() {
           <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
             <Ring size={108} tone={driftName === 'red' || driftName === 'amber' ? driftName : 'brand'}
               value={adherencePct == null ? null : adherencePct / 100}
-              figure={adherencePct == null ? null : `${adherencePct}%`} sub="adherence"
+              figure={adherencePct == null ? null : `${adherencePct}%`} sub="Adherence"
               spoken={adherencePct == null ? 'Adherence, no check-in to read it from' : `Adherence ${adherencePct} percent, from their latest check-in`} />
             <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', justifyContent: 'center', gap: sp.md }}>
               <TrendFigure t={t} label="Weight" tone="blue"
@@ -1817,8 +1818,8 @@ export default function ClientScreen() {
               : `Activity status, ${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`}
             style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
             <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>
-              {drift?.quietDays == null ? 'Recent activity unknown' : `${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record`}
-              {!unasked && seenDays != null && seen ? ` · in the app ${seenDays} / ${seen.windowDays} days` : ''}
+              {drift?.quietDays == null ? 'Recent Activity Unknown' : `${drift.quietDays} ${drift.quietDays === 1 ? 'Day' : 'Days'} Since Anything on Record`}
+              {!unasked && seenDays != null && seen ? ` · In the App ${seenDays} / ${seen.windowDays} Days` : ''}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{unasked ?? lastSeenLine(drift, driftFailed, who)}</Text>
           </View>
@@ -2340,7 +2341,7 @@ export default function ClientScreen() {
               check-in is, how many messages are unread — and is left off
               rather than written as a nought when there is nothing to say. */}
           {id ? (
-            <ListRow icon="check" title="Check-Ins" tone="brand"
+            <ListRow icon="check" title="Check-ins" tone="brand"
               note={unasked ? undefined : latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined}
               onPress={() => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); }} />
           ) : null}

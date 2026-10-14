@@ -102,3 +102,45 @@ export function weightDeltaCell(delta: number | null | undefined, reach: StatRea
   if (!reachIsWhole(reach)) return null;
   return delta ?? null;
 }
+
+/**
+ * One `lastActive` cell, cased for a chip that sits beside Title Case siblings.
+ *
+ * ── what went wrong ───────────────────────────────────────────────────────
+ *
+ * 14 Oct 2026, on the coach's own client profile: "Online · just added", under
+ * a roster row reading "Fat Loss · Online · just added" and a legend reading
+ * "On Track". Three call sites had each written this cell's display form by
+ * hand and landed on three conventions — app/(trainer)/client.tsx lower-cased
+ * the prefix ("last active 3d ago"), app/(trainer)/dashboard.tsx capitalised it
+ * ("Last active 3d ago"), and both passed the status phrases straight through
+ * in the lower case the roster stores them in.
+ *
+ * scripts/check-caps.mjs is built for exactly this and could not see it: its
+ * rule 2 compares the segments of a `·` run, and every one of these runs is
+ * assembled from variables at runtime, so there are no literals on the line to
+ * compare. The gate's own header names this miss.
+ *
+ * ── what it does, and the one thing it leaves alone ───────────────────────
+ *
+ * The stored phrases — "just added", "added by you", "no activity yet" — are
+ * STATUS WORDS, and the house rule puts those in Title Case. They keep their
+ * stored spelling in src/lib/rosterStatReach.ts and src/ui/roster.tsx because
+ * src/lib/lastActiveLine.ts and src/lib/leaderboardFacts.ts both match them by
+ * exact value to build prose sentences, where lower case is correct; casing
+ * here, at the one place that draws them as a chip, is what keeps those two
+ * registers from having to agree.
+ *
+ * An elapsed form is left as typed. "3d ago" is a measurement, and this
+ * codebase does not capitalise those — src/lib/coverage.test.ts asserts the
+ * same thing of kcal. It gets the prefix the two screens already wanted.
+ *
+ * The dash is returned untouched: it is the app's unknown-not-zero sign.
+ */
+export function lastActiveChip(lastActive: string | null | undefined): string {
+  const s = String(lastActive ?? '').trim();
+  if (!s || s === STAT_UNKNOWN) return STAT_UNKNOWN;
+  if (/\bago$/.test(s)) return `Last Active ${s}`;
+  // Only the words are lifted; a digit or a symbol starts no word to lift.
+  return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}

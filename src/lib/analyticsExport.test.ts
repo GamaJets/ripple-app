@@ -59,8 +59,8 @@ const holed = buildAnalyticsExport(HOLES, { roster: 'error', sessions: 'error', 
 const cells = holed.csv.split('\r\n').map((l) => l.split(','));
 const row = (label: string) => cells.find((c) => c[0]?.replace(/^"|"$/g, '').startsWith(label));
 eq(row('Clients')?.[1], '', 'a client count nobody could read is an EMPTY cell');
-eq(row('Sessions delivered')?.[1], '', 'and so is a session count');
-eq(row('Average adherence')?.[1], '', 'and an average');
+eq(row('Sessions Delivered')?.[1], '', 'and so is a session count');
+eq(row('Average Adherence')?.[1], '', 'and an average');
 ok(!/,0,/.test(holed.csv), 'no unknown figure anywhere in the file leaves as a zero');
 
 eq(holed.complete, false, 'and the file knows it is incomplete');

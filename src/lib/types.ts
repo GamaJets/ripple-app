@@ -34,7 +34,7 @@ export const COACHED_MODES: readonly CoachedMode[] = ['online', 'inperson', 'hyb
 /** For a coach's own surfaces, where the subject is the client, not the reader. */
 export const COACHED_MODE_SHORT: Record<CoachedMode, string> = {
   online: 'Online',
-  inperson: 'In-person',
+  inperson: 'In-Person',
   hybrid: 'Hybrid',
 };
 

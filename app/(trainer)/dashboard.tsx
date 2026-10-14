@@ -54,6 +54,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { trialCard } from '../../src/lib/trialGate';
+import { STATUS_LABEL } from '../../src/lib/status';
+import { lastActiveChip } from '../../src/lib/rosterStatReach';
 import { useTrialReading } from '../../src/ui/trialReading';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
@@ -287,17 +289,17 @@ function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolea
   // note on `attnReason`, which learned this the expensive way.
   if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
   if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d), chip: 'purple' };
-  if (d) return { words: 'On track', tone: driftTone(t, d), chip: 'brand' };
+  if (d) return { words: STATUS_LABEL.on_track, tone: driftTone(t, d), chip: 'brand' };
   // No drift verdict to speak, and a figure THEY submitted that says something.
   // This was a separate "Below target" flag on a second line of the row; the
   // row has one line now, so it is that line's words where nothing above had
   // a better claim to it. Never said of a hand-added client — they returned
   // above, and they have no check-in to have scored.
-  if (c.adherence != null && c.adherence < 80) return { words: `Below target · ${c.adherence}% adherence`, tone: t.warn };
+  if (c.adherence != null && c.adherence < 80) return { words: `Below Target · ${c.adherence}% Adherence`, tone: t.warn };
   return {
     words: driftRead
-      ? `${c.goal} · ${c.lastActive} · no drift reading yet`
-      : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${c.lastActive}`,
+      ? `${c.goal} · ${lastActiveChip(c.lastActive)} · No Drift Reading Yet`
+      : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${lastActiveChip(c.lastActive)}`,
     tone: null,
   };
 }
@@ -524,7 +526,7 @@ const REACH_SHORTCUTS: Shortcut[] = [
 ];
 
 /** What the book has SENT the coach, which is a different question from what
- *  the coach can go and read. Check-Ins is here rather than under the book
+ *  the coach can go and read. Check-ins is here rather than under the book
  *  because it is a queue with people waiting at the end of it: twelve clients
  *  filled in a form and are waiting to hear back, and until this screen existed
  *  the only way to reach one was to open a named client and look. An online
@@ -533,7 +535,7 @@ const REACH_SHORTCUTS: Shortcut[] = [
  *  than one who does. supabase/parts/3340 is what tells them a form arrived,
  *  and it opens this same screen on the person who sent it. */
 const SENT_SHORTCUTS: Shortcut[] = [
-  ['heart', 'Check-Ins', '/(trainer)/checkins'],
+  ['heart', 'Check-ins', '/(trainer)/checkins'],
   // What everybody did, between the one-client screen and the drift bands
   // below — neither of which answers "what happened this week".
   ['trending', 'This Week', '/(trainer)/book-week'],
@@ -1910,7 +1912,7 @@ export default function TrainerClients() {
     // absence of a record is not a reason to ring somebody; it is the reason
     // `idle` exists in src/lib/clientDrift.ts, and that band is raised here
     // only when the read behind it actually covered them.
-    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '%, below target', tone: t.warn };
+    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below Target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '%, below target', tone: t.warn };
     if (c.unread != null && c.unread > 0) { const said = c.unread + ' unread message' + (c.unread > 1 ? 's' : ''); return { kind: 'unread', state: 'Waiting on you', line: said + ' in your thread.', reason: said, tone: t.brand }; }
     const prog = isWhole(programStatus) ? getProgram(c.id) : undefined;
     if (prog) {
@@ -2585,7 +2587,7 @@ export default function TrainerClients() {
           }}>
             <View>
               <Text style={{ ...ty.hero, ...numeric, color: t.nightInk }}>{fig(todaySessions === null ? null : num(todaySessions.length))}</Text>
-              <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 4 }}>{todaySessions?.length === 1 ? 'session today' : 'sessions today'}</Text>
+              <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 4 }}>{todaySessions?.length === 1 ? 'Session Today' : 'Sessions Today'}</Text>
             </View>
             {nextUp ? (
               <View style={{ flexShrink: 1, minWidth: 0, alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end', gap: 4 }}>
@@ -2800,7 +2802,7 @@ export default function TrainerClients() {
                   The row itself opens their profile. */}
               {needsAttention.slice(0, 4).map((c, index) => {
                 const a = attnFor(c);
-                const aged = /\bago$/.test(c.lastActive) ? `Last active ${c.lastActive}` : null;
+                const aged = /\bago$/.test(c.lastActive) ? `Last Active ${c.lastActive}` : null;
                 return (
                   /* The kit's AttentionRow, which is this contract as a
                      component: it speaks the row as one sentence, names the
@@ -2971,6 +2973,15 @@ export default function TrainerClients() {
           {(() => {
             const card = trialCard(trialReading, billingAvailable());
             if (!card) return null;
+            /* `ink3` and not `crit` for an expired trial. Nothing is gated on
+               it — the card's own note says "Nothing has been switched off" —
+               and the sparkle on the next line already chose a neutral ink for
+               exactly that reason. A red border over a reassuring sentence is
+               the app raising an alarm about a fact it is simultaneously
+               telling the coach not to worry about, and it is the first thing
+               on their busiest screen. The day the trial gates something, this
+               becomes `t.crit` again in one place. */
+            const tone = card.expired ? t.ink3 : t.brand;
             const body = (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                 <Icon name="sparkle" size={20} color={card.expired ? t.ink3 : t.brand} />
@@ -2984,11 +2995,11 @@ export default function TrainerClients() {
               </View>
             );
             return billingAvailable() ? (
-              <Card onPress={() => router.push('/(trainer)/billing')} tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+              <Card onPress={() => router.push('/(trainer)/billing')} tone={tone} style={{ marginBottom: sp.md }}>
                 {body}
               </Card>
             ) : (
-              <Card tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+              <Card tone={tone} style={{ marginBottom: sp.md }}>
                 {body}
               </Card>
             );
@@ -3066,7 +3077,7 @@ export default function TrainerClients() {
               the other two renders, and explicitly not an all-clear. */}
           {bands && bands.total > 0 && bands.unknown === bands.total ? (
             <Notice tone={t.s5} kicker="Nothing Recorded"
-              title={`No record for ${bands.total === 1 ? 'this client' : 'any of your ' + bands.total + ' clients'}`}
+              title={`No Record for ${bands.total === 1 ? 'This Client' : 'Any of Your ' + bands.total + ' Clients'}`}
               note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine. It means there is nothing here to judge them on.`} />
           ) : null}
 

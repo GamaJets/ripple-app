@@ -289,8 +289,8 @@ export function trialCard(reading: TrialReading, billingOpen: boolean): TrialCar
   if (reading.source !== 'account' || !s) return null;
   return {
     title: s.expired
-      ? 'Your free trial has ended'
-      : `${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left in your free trial`,
+      ? 'Your Free Trial Has Ended'
+      : `${s.daysLeft} Day${s.daysLeft === 1 ? '' : 's'} Left in Your Free Trial`,
     // Neither half claims a consequence. `PLANS` features ("Up to 3 clients")
     // are checked nowhere, and no screen refuses anything on an expired trial,
     // so "upgrade to keep coaching" would be a false statement about what the

@@ -234,14 +234,14 @@ export default function CoachCheckIns() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <PageHead title="Check-Ins" subtitle="What your clients sent you" onBack={goBack} />
+        <PageHead title="Check-ins" subtitle="What your clients sent you" onBack={goBack} />
 
         {status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl, textAlign: 'center' }}>
             Reading the check-ins your clients have sent…
           </Text>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Check-Ins" title="These Could Not Be Read"
+          <Notice tone={t.warn} kicker="Check-ins" title="These Could Not Be Read"
             note="This is our end, not yours. Nothing has been lost and nobody has been told anything. Pull down to try again once you have signal." />
         ) : !isWhole(rosterStatus) ? (
           <Notice tone={t.warn} kicker="Your Clients" title="Your Roster Could Not Be Read"
