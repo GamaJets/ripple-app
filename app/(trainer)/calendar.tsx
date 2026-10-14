@@ -189,7 +189,7 @@ import {
   setCalendarWrite, type RemoteBusyRead,
 } from '../../src/ui/calendarSync';
 import { BRAND } from '../../src/lib/brands';
-import { fmtDay, fmtTime, fmtClock, monthNames, monthNamesShort, weekdayNameShort, num } from '../../src/lib/format';
+import { fmtDay, fmtTime, fmtClock, monthNames, weekdayNameShort, num } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -213,10 +213,6 @@ import { useRevealSelected } from '../../src/ui/useRevealSelected';
 // not change while the app runs (src/lib/locale.ts).
 const DOW = Array.from({ length: 7 }, (_, i) => weekdayNameShort(i));
 const MON = monthNames();
-/** The abbreviated months. NOT `MON_SHORT[m]`, which was what this file
- *  did — three characters off a month name is an abbreviation in English and
- *  nothing at all in most other languages. */
-const MON_SHORT = monthNamesShort();
 
 function dayKey(iso: string) {
   const d = new Date(iso);
@@ -3285,7 +3281,7 @@ export default function TrainerSchedule() {
             const n = selDaySessions.filter((s) => s.status === 'booked').length;
             const counted = countable && n > 0;
             return (
-              <SectionHead title={`${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
+              <SectionHead title={`${dateOfLabel(selDate)}`}
                 note={!known ? 'Not Read' : counted ? `${n} ${n === 1 ? 'session' : 'sessions'}` : 'Add'}
                 onPress={counted ? () => router.push('/(trainer)/sessions') : () => { setAddClient(null); setAddOpen(true); }} />
             );
@@ -3743,8 +3739,8 @@ export default function TrainerSchedule() {
               a list of settings it has nothing to do with. The label carries
               the date because the date is what it acts on. */}
           <View style={{ marginTop: sp.lg }}>
-            <Cta wide label={`Add a Session · ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
-              a11yLabel={`Add a session on ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
+            <Cta wide label={`Add a Session · ${dateOfLabel(selDate)}`}
+              a11yLabel={`Add a session on ${dateOfLabel(selDate)}`}
               onPress={() => { setAddClient(null); setAddOpen(true); }} />
           </View>
         </Section>
@@ -4214,7 +4210,7 @@ export default function TrainerSchedule() {
             already. ("Add a Session" was the other; it now sits on the day
             card itself.) */}
         <ScheduleOperations
-          selectedDay={`${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
+          selectedDay={`${dateOfLabel(selDate)}`}
           // Three notes, not two. "Set the times you offer every week" is an
           // instruction, and giving it to a coach whose week we simply could
           // not read sends them to re-enter times that are already on the
@@ -4541,7 +4537,7 @@ export default function TrainerSchedule() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Out Time</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            {DOW[selDate.getDay()]} {selD} {MON_SHORT[selM]}. Nobody can book across this, and any open slots inside it are withdrawn.
+            {dateOfLabel(selDate)}. Nobody can book across this, and any open slots inside it are withdrawn.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: sp.sm, paddingBottom: sp.md }}>
@@ -4707,7 +4703,7 @@ export default function TrainerSchedule() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Time from Your Calendar</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            {`From ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}, for the next ${busyDays} days.`}
+            {`From ${dateOfLabel(selDate)}, for the next ${busyDays} days.`}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             {(() => {
