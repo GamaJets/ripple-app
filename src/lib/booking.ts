@@ -362,19 +362,72 @@ export function waitlistLine(position: number, waiting: number): string {
  *  shape is that the guard below cannot tell them apart and must not. */
 export interface BusySpan { startsAt: string; durationMin: number }
 
-/** Whether a proposed slot overlaps any existing session for the trainer. */
+/**
+ * Why this client cannot be put in a diary slot, or null when they can.
+ *
+ * ── what it is protecting against ─────────────────────────────────────────
+ *
+ * `sessions.client_id` is `REFERENCES clients(id)`, and a hand-added client
+ * is not a row in `clients` — they are in `manual_clients`, which is the whole
+ * point of them: somebody the coach keeps a record of who has never installed
+ * anything. So a session naming one can never be written, and the foreign key
+ * is what says no.
+ *
+ * It said no at the wrong moment. The Add Session sheet listed every client on
+ * the roster, the coach picked one, the row was drawn on the calendar, the
+ * insert was refused, and the alert that followed said "was not saved, so it
+ * is not on your calendar" over a hero reading "1 Session Today". Seen on an
+ * iPhone 17 Pro, 14 Oct 2026.
+ *
+ * ── and why the chip is not simply hidden ─────────────────────────────────
+ *
+ * A coach looking for a client they added yesterday and not finding them in
+ * the list reads it as the roster being broken, which is the exact complaint
+ * the empty-roster branch of that sheet already records. The name stays; this
+ * is the sentence that goes with it.
+ */
+export function whyNotBookable(client: { name: string; handAdded?: boolean } | null | undefined): string | null {
+  if (!client) return null;
+  if (!client.handAdded) return null;
+  const who = client.name.trim() || 'This client';
+  return `${who} was added by hand and has no Repple account, so there is no diary of theirs for a session to go into. Send them your coaching code and book them in once they have joined.`;
+}
+
+/**
+ * The first existing span a proposed slot runs into, or null for a clear hour.
+ *
+ * `overlaps` is the same rule and returns only the yes/no, which is all the
+ * double-booking guard needs. What the guard's CALLER needs is the thing in
+ * the way, because the two things that can be in the way are not the same
+ * news. On 14 Oct 2026 the Add Session sheet refused a 9 am booking with "You
+ * already have a session that overlaps 9 am", on a screen whose hero said "No
+ * Sessions Today" and whose own strip listed "9 am · Open" three lines above
+ * the button. Both were true: the coach had no booked session and did have an
+ * open slot, and one sentence was being asked to describe either.
+ */
+export function firstOverlap<T extends BusySpan>(
+  startsAt: string,
+  durationMin: number,
+  existing: readonly T[]
+): T | null {
+  const s = Date.parse(startsAt);
+  const e = s + durationMin * 60_000;
+  return existing.find((x) => {
+    const xs = Date.parse(x.startsAt);
+    const xe = xs + x.durationMin * 60_000;
+    return s < xe && xs < e;
+  }) ?? null;
+}
+
+/** Whether a proposed slot overlaps any existing session for the trainer.
+ *  One rule, shared with `firstOverlap`, so the guard and the sentence that
+ *  explains it can never disagree about what counts as a clash. */
 export function overlaps(
   startsAt: string,
   durationMin: number,
   existing: readonly BusySpan[]
 ): boolean {
-  const s = Date.parse(startsAt);
-  const e = s + durationMin * 60_000;
-  return existing.some((x) => {
-    const xs = Date.parse(x.startsAt);
-    const xe = xs + x.durationMin * 60_000;
-    return s < xe && xs < e;
-  });
+  return firstOverlap(startsAt, durationMin, existing) !== null;
 }
 
 /* ── How much bookable diary is left ──────────────────────────────────────

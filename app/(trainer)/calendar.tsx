@@ -21,7 +21,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme, DataHue } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Flag, Field, Notice, AttentionRow, SyncBadge, TonedChip, IconPlate, DayBars, HeroCard, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
-import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, weeklyFromSlots, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
+import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, weeklyFromSlots, classClashes, classCheckCaveat, firstOverlap, whyNotBookable, type CancellationPolicy } from '../../src/lib/booking';
 // "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
 // file's header for why trainer_availability was empty: offering 07:00–19:00 in
 // quarters meant forty-eight separate additions for ONE day.
@@ -189,7 +189,7 @@ import {
   setCalendarWrite, type RemoteBusyRead,
 } from '../../src/ui/calendarSync';
 import { BRAND } from '../../src/lib/brands';
-import { fmtDay, fmtTime, monthNames, monthNamesShort, weekdayNameShort, num } from '../../src/lib/format';
+import { fmtDay, fmtTime, fmtClock, monthNames, monthNamesShort, weekdayNameShort, num } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -317,12 +317,26 @@ const MINUTES = SERIES_MINUTES;
 /** An hour of the day as a person says it, including the 24 that means the
  *  end of it. Written once because three places were saying it and only two
  *  of them knew about midnight. */
-const hourLabel = (h: number) => (h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`);
+const hourLabel = (h: number) => (h === 24 ? 'midnight' : fmtClock(h, 0));
 /** A weekly slot's start, written once so the list row, the heading above the
  *  picker and the Add button cannot drift apart. Minutes are always shown,
  *  including :00 — "Wed 9am" and "Wed 9:15am" side by side reads as two
  *  different kinds of thing. */
-const avTime = (h: number, m: number) => `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+// The reader's own clock, and not a 12-hour one hand-built in English.
+//
+// This was `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`,
+// which is the exact string src/lib/format.ts says it removed from the rest of
+// the app: most of the world reads 24 hours, the United Kingdom this file was
+// written for included, and "9am" is not a time to a coach in Berlin. The Add
+// Session sheet showed three spellings of one clock at once — "7 am · Open" in
+// the strip of what is already booked (fmtTime, so locale-correct), "7am" on
+// the hour chips and "9:00am" in the heading over them, all in view together.
+//
+// `fmtClock` is that one formatter: it asks Intl whether this reader is on a
+// 12- or 24-hour clock, keeps the house form of dropping ":00" from a whole
+// hour where there is a day period to carry it, and leaves the spacing to the
+// locale.
+const avTime = (h: number, m: number) => fmtClock(h, m);
 const DURS = [30, 45, 60, 90];
 
 /**
@@ -353,7 +367,7 @@ function TimeGrid({ t, hour, minute, onHour, onMinute }: {
         onLayout={strip.onLayout} onScroll={strip.onScroll} scrollEventThrottle={64}
         contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
         {HOURS.map((h) => (
-          <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={hour === h}
+          <Chip key={h} t={t} label={fmtClock(h, 0)} on={hour === h}
             {...strip.chip(h)} onPress={() => onHour(h)} />
         ))}
       </ScrollView>
@@ -404,7 +418,7 @@ export default function TrainerSchedule() {
    * is theirs, not the clock's. */
   const now = useNow();
   const router = useRouter();
-  const { sessions, status: sessionsStatus, addSession, releaseSession, removeSession, refresh, rescheduleClientSession } = useSessions();
+  const { sessions, status: sessionsStatus, addSession, assignSession, releaseSession, removeSession, refresh, rescheduleClientSession } = useSessions();
   // ── The empty diary that was not empty ───────────────────────────────────
   //
   // Every figure and every empty-state sentence below was built straight off
@@ -704,6 +718,12 @@ export default function TrainerSchedule() {
   const [addMinute, setAddMinute] = useState(0);
   const [addDur, setAddDur] = useState(60);
   const [addClient, setAddClient] = useState<string | null>(null);
+  // Putting a client into a slot that is ALREADY open, which had no path at
+  // all: the row offered Offer It Round and Remove, and the Add Session sheet
+  // refused the hour because the coach's own open slot overlapped it.
+  const [assignFor, setAssignFor] = useState<TrainingSession | null>(null);
+  const [assignTo, setAssignTo] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
   // Opened from a client's own profile ("Book a Session"), the coach has already
   // said who this is for. Asking them again on the next screen is the step that
   // made booking-for-a-client feel like it did not exist.
@@ -2171,6 +2191,17 @@ export default function TrainerSchedule() {
     : null;
 
   async function handleAdd() {
+    /* Before anything is drawn. `sessions.client_id` references `clients(id)`
+       and a hand-added client is not in that table, so the insert can never
+       land — and the old order was to draw the row, let the server refuse it,
+       and then say "not saved, so it is not on your calendar" over a calendar
+       that was showing it. src/lib/booking.ts carries the reason and the
+       wording. */
+    const cannot = whyNotBookable(roster.find((c) => c.id === addClient) ?? null);
+    if (cannot) {
+      Alert.alert('No Diary to Book Into', cannot, [{ text: 'OK' }]);
+      return;
+    }
     const d = new Date(selY, selM, selD); d.setHours(addHour, addMinute, 0, 0);
     const s: TrainingSession = {
       id: `ms${SEQ++}`, trainerId: '', clientId: addClient,
@@ -2189,7 +2220,26 @@ export default function TrainerSchedule() {
     }
     const res = addSession(s);
     if (!res.ok) {
-      Alert.alert('Time Not Available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}. Pick another time.`, [{ text: 'OK' }]);
+      /* Which thing is in the way, in the coach's own words.
+         This said "You already have a session that overlaps 9 am" on a screen
+         whose hero read "No Sessions Today" and whose strip of what is already
+         on the day listed "9 am · Open" three lines above the button. The
+         coach had no session; they had their own published open slot, and the
+         advice — "Pick another time" — was not what they wanted to do with it.
+         A coach cannot book a client into an open slot from here yet; what
+         they can do is take the slot back, which is the Remove on its row, so
+         that is what this names rather than sending them away from the hour
+         they meant. `firstOverlap` is the guard's own rule, so the refusal and
+         the reason can never describe different clashes. */
+      const hit = firstOverlap(s.startsAt, s.durationMin, sessions);
+      const when = `${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}`;
+      Alert.alert('Time Not Available',
+        hit?.status === 'available'
+          ? `You have an open slot across ${when}, one you have published for clients to take. Book a client into it on its row below, or remove it and add this session instead.`
+          : hit?.status === 'blocked'
+            ? `You have blocked out ${when}. Free that time up on its row below, or pick another time.`
+            : `You already have a session booked across ${when}. Pick another time.`,
+        [{ text: 'OK' }]);
       return;
     }
     setAddOpen(false);
@@ -2809,6 +2859,42 @@ export default function TrainerSchedule() {
   // come back, leaving the clients missing from that read never hearing the slot
   // was free. When we do not know who everyone is, we say so rather than offer
   // the slot to a fraction of the room.
+  /**
+   * The coach putting one of their own clients into one of their own open
+   * slots, confirmed by the server before the row changes.
+   *
+   * `useSessions().assignSession` is a trainer-side update and not the
+   * client's `book_session` RPC — that one writes `auth.uid()`, so a coach
+   * calling it books themselves into the hour. Its header has the rest.
+   */
+  async function doAssign() {
+    const slot = assignFor;
+    const who = assignTo;
+    if (!slot || !who || assignBusy) return;
+    setAssignBusy(true);
+    const ok = await assignSession(slot.id, who);
+    setAssignBusy(false);
+    if (!ok) {
+      // An update that matches no row is not an error, so this covers both a
+      // failed write and the race the guard is really there for: a client of
+      // theirs taking the slot between the sheet opening and this tap.
+      Alert.alert('Not Booked',
+        `${nameOf(who)} was not put into ${timeLabel(slot.startsAt)}, so nothing has changed and the slot is as it was. Either the save failed, or somebody took that slot while this sheet was open. Pull down to refresh and check before trying again.`,
+        [{ text: 'OK' }]);
+      return;
+    }
+    setAssignFor(null);
+    const push = await sendPushChecked([who], 'Session booked',
+      `Your session on ${DOW[new Date(slot.startsAt).getDay()]} at ${timeLabel(slot.startsAt)} is confirmed.`,
+      { route: '/(client)/calendar' });
+    Alert.alert('Session Booked',
+      `${timeLabel(slot.startsAt)} with ${nameOf(who)} is confirmed, and it is now on their calendar in the Repple app.\n\n` +
+        (push.ok
+          ? `${nameOf(who)} was sent a notification. They will see it if they have notifications on.`
+          : `We couldn't send ${nameOf(who)} a notification${push.error ? ` (${push.error})` : ''}, so message them to let them know.`),
+      [{ text: 'Great' }]);
+  }
+
   function reoffer(s: TrainingSession) {
     if (rosterStatus !== 'ready') {
       Alert.alert(
@@ -3030,7 +3116,13 @@ export default function TrainerSchedule() {
             on this root the trailing edge is already the diary's one add
             control, which must not move. A tab root has nothing to go back to,
             so that slot was a blank of exactly a control's width. */}
-        <PageHead title="Calendar"
+        {/* "Schedule" and not "Calendar". The tab under this screen, the
+            feature index in src/lib/features.ts and the first-run card in
+            src/lib/guideContent.ts all name it Schedule; only this head said
+            Calendar, so the tour told a new coach to open Schedule and the
+            screen that opened was headed something else. check-caps' rule 3
+            is this bug in its casing form and could not see a different word. */}
+        <PageHead title="Schedule"
           leading={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />}
           trailing={<Ghost icon="plus" a11yLabel="Add a Session" onPress={() => { setAddClient(null); setAddOpen(true); }} />} />
 
@@ -3512,6 +3604,14 @@ export default function TrainerSchedule() {
                   </>) : s.status === 'blocked' ? (
                     <View style={{ flex: 1 }}><Ghost label="Free This Time Up" onPress={() => removeOpen(s)} /></View>
                   ) : (<>
+                    {/* The coach's own client, into the coach's own open hour.
+                        This row offered only Offer It Round and Remove, and
+                        the Add Session sheet refused the time because this
+                        very slot overlapped it — so a coach with a published
+                        diary and somebody standing in front of them had to
+                        delete the slot and re-create it as a booking, with
+                        nothing anywhere saying so. */}
+                    <View style={{ flex: 1 }}><Ghost label="Book a Client In" onPress={() => { setAssignTo(null); setAssignFor(s); }} /></View>
                     {/* "Re-offer" on a slot that has never been booked reads
                         as though somebody had cancelled — a coach seeing it on
                         an ordinary open hour looks for the booking that was
@@ -4286,7 +4386,7 @@ export default function TrainerSchedule() {
                 onLayout={avFromStrip.onLayout} onScroll={avFromStrip.onScroll} scrollEventThrottle={64}
                 contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.map((h) => (
-                  <Chip key={'af' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avFrom === h}
+                  <Chip key={'af' + h} t={t} label={fmtClock(h, 0)} on={avFrom === h}
                     {...avFromStrip.chip(h)}
                     onPress={() => { setAvFrom(h); if (avTo <= h) setAvTo(Math.min(24, h + 1)); }} />
                 ))}
@@ -4445,7 +4545,7 @@ export default function TrainerSchedule() {
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>From · {hourLabel(blkFrom)}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {HOURS.map((h) => (
-                  <Chip key={'bf' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={blkFrom === h}
+                  <Chip key={'bf' + h} t={t} label={fmtClock(h, 0)} on={blkFrom === h}
                     onPress={() => { setBlkFrom(h); if (blkTo <= h) setBlkTo(Math.min(24, h + 1)); }} />
                 ))}
               </ScrollView>
@@ -4526,6 +4626,71 @@ export default function TrainerSchedule() {
           nothing — and it is shown whether the list is empty or not, because a
           coach looking at three real periods will otherwise take them for the
           whole week. */}
+      {/* ── putting a client into an hour that is already open ───────────
+          The gap this closes is in `assignSession`'s header in
+          src/ui/sessions.tsx. Only the clients who can actually hold a slot
+          are offered, which is `whyNotBookable`'s rule and the same exclusion
+          `reoffer` above already makes for the same reason: a hand-added
+          client is not a row in `clients`, so `sessions.client_id` cannot
+          point at them. Unlike the Add Session sheet, the names are not listed
+          and then refused — there is nothing here to explain away, so the
+          count says who is on offer and the note says who is not. */}
+      <ScreenSheet visible={assignFor !== null} animationType="slide" transparent onRequestClose={() => setAssignFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Book a Client In</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+            {assignFor ? `${timeLabel(assignFor.startsAt)} on ${dateOfLabel(selDate)}, ${assignFor.durationMin} min. The slot stops being open and goes onto their calendar.` : ''}
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(() => {
+              const can = roster.filter((c) => c.handAdded !== true);
+              const held = roster.length - can.length;
+              if (!can.length) {
+                return (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                    {rosterStatus === 'loading'
+                      ? 'Reading your clients…'
+                      : rosterStatus === 'error'
+                        ? 'Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book. The slot stays open either way.'
+                        : held > 0
+                          ? `Everybody on your roster was added by hand, so none of them has a Repple account for a session to go into. Send them your coaching code, and this slot stays open in the meantime.`
+                          : 'No clients on your roster yet, so there is nobody to book in. The slot stays open for somebody to take.'}
+                  </Text>
+                );
+              }
+              return (<>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+                  {can.map((c) => (
+                    <Chip key={c.id} t={t} label={c.name} on={c.id === assignTo} onPress={() => setAssignTo(c.id)} />
+                  ))}
+                </View>
+                {/* Said rather than silently shortened. A coach who cannot find
+                    somebody in this list must be able to tell "they are not on
+                    my roster" from "they cannot be booked yet". */}
+                {held > 0 ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    {`${held} ${held === 1 ? 'client was' : 'clients were'} added by hand and ${held === 1 ? 'is' : 'are'} not listed: with no Repple account there is no diary of theirs for a session to go into.`}
+                  </Text>
+                ) : null}
+                {rosterStatus === 'partial' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    Part of your roster did not load, so somebody may be missing from this list.
+                  </Text>
+                ) : null}
+              </>);
+            })()}
+          </ScrollView>
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+            <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAssignFor(null)} /></View>
+            <View style={{ flex: 2 }}>
+              <Cta label={assignBusy ? 'Booking…' : 'Book Them In'} wide disabled={!assignTo || assignBusy} onPress={doAssign} />
+            </View>
+          </View>
+        </View>
+      </ScreenSheet>
+
       <ScreenSheet visible={busyOpen} animationType="slide" transparent onRequestClose={() => setBusyOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />

@@ -116,6 +116,27 @@ interface SessionsValue {
    *  slot shows as booked on this device alone — and the reminder that was just
    *  scheduled is for a session nobody else knows about. */
   bookSession: (id: string, clientId: string) => Promise<boolean>;
+  /**
+   * The COACH putting one of their own clients into one of their own open
+   * slots. Resolves true only when the server took it.
+   *
+   * `bookSession` cannot do this and must not be made to: it calls the
+   * `book_session` RPC, which writes `auth.uid()` as the client and can write
+   * nothing else, so a coach calling it books THEMSELVES into the hour. That
+   * is right for the client's own app and useless here.
+   *
+   * There was no coach-side path at all. An open slot's row offered only
+   * "Offer It Round" and "Remove", and the Add Session sheet refused the hour
+   * because the coach's own open slot overlapped it — so a coach with a
+   * published diary and a client in front of them had to delete the slot and
+   * re-create it as a booking, and nothing anywhere said so.
+   *
+   * No new SQL: `sessions_trainer` is ALL on `trainer_id = auth.uid()`, for
+   * both USING and WITH CHECK, so the coach may update their own row directly.
+   * This is the same trainer-side update `releaseSession` already does in the
+   * other direction.
+   */
+  assignSession: (id: string, clientId: string) => Promise<boolean>;
   /** Cancel → slot returns to available and is flagged re-offered. Resolves
    *  true only when the server accepted it; false means the client is still
    *  booked in and the coach's screen is the only thing that says otherwise.
@@ -564,10 +585,39 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         const { data, error } = await supabase.from('sessions')
           .insert({ trainer_id: uid, client_id: s.clientId ?? null, starts_at: s.startsAt, duration_min: s.durationMin, status: s.status, released: s.released })
           .select().single();
-        if (error || !data) return false;
+        // ── and the row comes back off the calendar when it is refused ────
+        //
+        // Reading `error` stopped this function REPORTING a refusal as a save.
+        // It did not stop the refused slot being drawn: the optimistic row
+        // above was added and nothing ever took it away, so the coach got the
+        // truthful alert on top of the untruthful calendar. Seen on an iPhone
+        // 17 Pro, 14 Oct 2026, booking a hand-added client — who has no Repple
+        // account for `client_id` to point at, so the insert can never land:
+        // "9 pm with Test Client was not saved, so it is not on your calendar
+        // and Test Client has not been booked", over a hero reading "1 Session
+        // Today · Next: Test Client at 9 pm" and a day list reading "1
+        // session". The coach is then one dismissed dialog away from a session
+        // they believe is booked and nobody else can see.
+        //
+        // This is the rule `bookSession` and `releaseSession` below already
+        // state in their own headers — what is drawn is what the server has
+        // confirmed. `addSession` keeps its optimistic paint, because the sheet
+        // closing onto a visibly empty hour is its own kind of lie while the
+        // insert is in flight; it just no longer keeps it once the answer is no.
+        //
+        // The `!USE_SUPABASE || !uid` branch above returns before any of this.
+        // There was no server to refuse, the local row is the whole record, and
+        // removing it would delete the only copy.
+        if (error || !data) {
+          setSessions((p) => p.filter((x) => x.id !== entry.id));
+          return false;
+        }
         setSessions((p) => p.map((x) => (x.id === entry.id ? rowToSession(data) : x)));
         return true;
-      } catch { return false; }
+      } catch {
+        setSessions((p) => p.filter((x) => x.id !== entry.id));
+        return false;
+      }
     })();
     return { ok: true, saved };
   };
@@ -642,6 +692,30 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     } catch { return false; }
     if (booked) apply(uid);
     return booked;
+  };
+
+  const assignSession: SessionsValue['assignSession'] = async (id, clientId) => {
+    // Drawn only once the server has taken it, which is the rule `bookSession`
+    // and `releaseSession` state either side of this one. A coach who is told
+    // the client is in and finds the hour empty tomorrow is the failure every
+    // one of these three guards against.
+    const apply = () => setSessions((p) => p.map((x) => (
+      x.id === id ? { ...x, status: 'booked' as const, clientId, released: false } : x)));
+    if (!USE_SUPABASE || !uid) { apply(); return false; }
+    try {
+      // `.eq('status', 'available')` is the race: between the coach reading the
+      // row and tapping, a client of theirs may have taken the very slot being
+      // assigned. An update that matches no row changes nothing and is NOT an
+      // error in PostgREST, so the returned rows are what is counted — the same
+      // trap `releaseSession` records below.
+      const { data, error } = await supabase.from('sessions')
+        .update({ status: 'booked', client_id: clientId, released: false })
+        .eq('id', id).eq('trainer_id', uid).eq('status', 'available')
+        .select('id');
+      if (error || !data || !data.length) return false;
+      apply();
+      return true;
+    } catch { return false; }
   };
 
   const releaseSession: SessionsValue['releaseSession'] = async (id) => {
@@ -920,17 +994,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   // `useCallback` would freeze the state they close over with them, which is
   // the bug one level down.
   const impl = useRef({
-    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    hydrate, addSession, bookSession, assignSession, releaseSession, cancelMyBooking, removeSession,
     approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
   });
   impl.current = {
-    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    hydrate, addSession, bookSession, assignSession, releaseSession, cancelMyBooking, removeSession,
     approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
   };
 
   const refreshStable = useCallback(() => impl.current.hydrate(), []);
   const addStable = useCallback<SessionsValue['addSession']>((...a) => impl.current.addSession(...a), []);
   const bookStable = useCallback<SessionsValue['bookSession']>((...a) => impl.current.bookSession(...a), []);
+  const assignStable = useCallback<SessionsValue['assignSession']>((...a) => impl.current.assignSession(...a), []);
   const releaseStable = useCallback<SessionsValue['releaseSession']>((...a) => impl.current.releaseSession(...a), []);
   const cancelStable = useCallback<SessionsValue['cancelMyBooking']>((...a) => impl.current.cancelMyBooking(...a), []);
   const removeStable = useCallback<SessionsValue['removeSession']>((...a) => impl.current.removeSession(...a), []);
@@ -946,6 +1021,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     refresh: refreshStable,
     addSession: addStable,
     bookSession: bookStable,
+    assignSession: assignStable,
     releaseSession: releaseStable,
     cancelMyBooking: cancelStable,
     removeSession: removeStable,
@@ -955,7 +1031,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     rescheduleClientSession: rescheduleClientStable,
   }), [
     sessions, status, cachedNote,
-    refreshStable, addStable, bookStable, releaseStable, cancelStable, removeStable,
+    refreshStable, addStable, bookStable, assignStable, releaseStable, cancelStable, removeStable,
     approveStable, disputeStable, rescheduleMineStable, rescheduleClientStable,
   ]);
 

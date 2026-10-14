@@ -23,7 +23,7 @@ import {
   feeAmountLine, unstatedCurrency, unstatedCurrencyCoach, noticeLabel, cancelWarningLine, feeRecordedLine,
   waitlistOrder, nextWaitlistClaim, waitlistPosition, waitlistLine, ordinal,
   openSlotWindow, slotWindowLine, weeklyFromSlots, SLOT_WARN_DAYS,
-  classClashes, classCheckCaveat, overlaps,
+  classClashes, classCheckCaveat, overlaps, firstOverlap, whyNotBookable,
   type CancellationPolicy, type WaitlistEntry,
 } from './booking';
 
@@ -492,3 +492,46 @@ if (errors.length) {
   process.exit(1);
 }
 console.log('booking.test.ts — all assertions passed');
+
+/* ── which thing is in the way ────────────────────────────────────────────
+   The Add Session sheet refused a 9 am booking with "You already have a
+   session that overlaps", on a screen whose hero said "No Sessions Today" and
+   whose strip listed "9 am · Open". Both halves were true of different rows,
+   and one sentence was describing either. `firstOverlap` hands the caller the
+   row so the sentence can name it. */
+{
+  const day = (h: number, status: string, id: string) =>
+    ({ id, status, startsAt: new Date(2026, 9, 14, h, 0).toISOString(), durationMin: 60 });
+  const book = new Date(2026, 9, 14, 9, 0).toISOString();
+
+  const open = firstOverlap(book, 60, [day(9, 'available', 'open9')]);
+  eq(open?.id, 'open9', 'the open slot in the way is handed back, not just a yes');
+  eq(open?.status, 'available', 'and it carries what kind of thing it is');
+
+  eq(firstOverlap(book, 60, [day(9, 'booked', 'b9')])?.status, 'booked',
+    'a real booking is distinguishable from an open slot');
+
+  eq(firstOverlap(book, 60, [day(7, 'available', 'open7'), day(11, 'booked', 'b11')]), null,
+    'an hour with nothing across it is clear');
+
+  // The guard and the sentence must never disagree about what counts.
+  for (const existing of [[day(9, 'available', 'a')], [day(8, 'booked', 'b')], []]) {
+    eq(overlaps(book, 60, existing), firstOverlap(book, 60, existing) !== null,
+      'overlaps and firstOverlap answer the same question');
+  }
+}
+
+/* ── who can actually be put in a slot ────────────────────────────────────
+   sessions.client_id references clients(id). A hand-added client is in
+   manual_clients, so the insert can never land — and it used to land as a
+   drawn calendar row plus an alert saying the row was not there. */
+{
+  eq(whyNotBookable({ name: 'Test Client', handAdded: true })?.includes('no Repple account'), true,
+    'a hand-added client is refused before the write, by name');
+  eq(whyNotBookable({ name: 'Tamer', handAdded: false }), null, 'a joined client is bookable');
+  eq(whyNotBookable({ name: 'Tamer' }), null, 'and so is one whose origin was never marked');
+  eq(whyNotBookable(null), null, 'nobody picked is not a refusal');
+  // A blank name must not produce "  was added by hand".
+  eq(whyNotBookable({ name: '   ', handAdded: true })?.startsWith('This client'), true,
+    'a client with no readable name still gets a sentence that reads');
+}
