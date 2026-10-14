@@ -62,9 +62,14 @@ export function MotivationNudgeProvider({ children }: { children: ReactNode }) {
    *
    * `done` was a `useRef(false)` latched on the first whole read, so the
    * `log` already in this effect's dependencies could change all it liked and
-   * nothing re-planned. That is the case here twice over: the session was
-   * written by the member's COACH, server-side, so it arrived in this log
-   * through a refresh rather than through anything the member did.
+   * nothing re-planned.
+   *
+   * And it had changed, in the plainest way there is. The member logged that
+   * session THEMSELVES, in this app, at 04:02 — `workouts.logged_by` is null,
+   * which is what self-logged means here. Fifteen hours before the banner
+   * fired, the entry was sitting in the very list this effect depends on. No
+   * refresh, no second device, no coach writing it server-side: the app had
+   * the answer in memory and the latch is the only reason it did not look.
    *
    * Keyed on the log's own shape, so a re-plan happens when, and only when,
    * the thing the plan was computed from has moved. The async block below
