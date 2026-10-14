@@ -2014,6 +2014,33 @@ export default function ClientScreen() {
             own words — the review asks that safety information is met before
             a program is changed, and a coach who taps the row has read its
             note. */}
+        {/* The program under this heading can be the DEVICE'S COPY, and this
+            screen was the one screen in the family that did not say so.
+            `useAssignedPrograms` caches, and `programLine` has no branch for
+            a cached read — so a copy taken before the coach assigned anything
+            prints "No program of yours is assigned to <name>" as a flat fact.
+
+            Seen on an iPhone 17 Pro, 14 Oct 2026: this row read "Build Tamer a
+            Program · No program of yours is assigned to Tamer that this app
+            can read", while the builder's ring two taps away counted 1 of 2
+            assigned and the roster's own filter said "No Program · 1". Tamer
+            had a program, written that morning. A later visit, with the live
+            read landed, read "Their Program · Chest Workout · 1 day a week."
+
+            That is not a cosmetic disagreement on this screen of all screens:
+            the row is a button into the builder, and builder.tsx's own header
+            is about a coach assigning over a bespoke program the screen never
+            showed them — "no undo, no history row, and nothing that tells the
+            client their next session changed".
+
+            `cachedNote` exists for exactly this, carries the age, and is
+            non-null for precisely as long as the copy is what is being served,
+            so it needs no gate of its own. Eleven screens render it, including
+            app/(trainer)/client-week.tsx, which is the coach's view of the
+            same program one tap away. This one had nothing. */}
+        {id && ap.cachedNote ? (
+          <Section><Flag tone={t.warn}>{ap.cachedNote}</Flag></Section>
+        ) : null}
         {id ? (
           <Section>
             <SectionHead title="Current Plan and Goal" />
