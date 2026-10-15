@@ -62,7 +62,7 @@ export function WeeklyVolumeCard() {
   const open = () => router.push('/(client)/trends');
   return (
     <Section>
-      <SectionHead title="This Week's Volume" note={known && shown != null ? `${shown.toLocaleString()} ${wu}` : undefined} onPress={open} />
+      <SectionHead title="This Week’s Volume" note={known && shown != null ? `${shown.toLocaleString()} ${wu}` : undefined} onPress={open} />
       <Gate status={status} empty={!weeks.some((w) => w.t.kg > 0)}
         emptyLine="Log a workout and your week appears here."
         errorLine={LOG_ERROR} partialLine={LOG_PARTIAL}>

@@ -947,7 +947,7 @@ export default function ClientBody() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Scans belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never been scanned." />
+              note="Scans belong to the client and live on the server, so there is no local copy of somebody else’s to fall back on. Nothing below is a claim that they have never been scanned." />
           </Section>
         ) : (
           <>

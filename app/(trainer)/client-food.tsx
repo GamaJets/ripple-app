@@ -160,7 +160,7 @@ export default function ClientFood() {
 
         {!clientId ? (
           <Notice tone={t.warn} kicker="Food Log" title="No Client Was Named"
-            note="Open this from a client to read what they have logged. It is one person's record and there is no list of everybody's." />
+            note="Open this from a client to read what they have logged. It is one person’s record and there is no list of everybody’s." />
         ) : status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl, textAlign: 'center' }}>
             Reading what they logged…

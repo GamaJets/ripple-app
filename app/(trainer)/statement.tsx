@@ -696,7 +696,7 @@ export default function StatementOfRecord() {
                 <Notice
                   kicker="Nothing Recorded"
                   title="This Period Has Nothing in It"
-                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it. Money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
+                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it. Money a client handed you in cash, sent by transfer, or paid at a gym’s front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year’s statement."
                 />
                 <Rule />
               </>

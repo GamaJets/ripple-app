@@ -30,7 +30,14 @@ const cloud = (m: ProviderMeta) => makeCloudProvider(m);
 
 export const PROVIDERS: WearableProvider[] = [
   appleHealth,
-  cloud({ id: 'whoop', name: 'WHOOP', icon: '🔴', kind: 'cloud', blurb: 'Strain, recovery, sleep & heart rate via the WHOOP API', metrics: ['Strain', 'Recovery', 'Sleep', 'Heart rate', 'Calories'] }),
+  // 'Workouts' belongs on this list and was missing from it. WHOOP is the one
+  // cloud vendor this build reads sessions from — `whoopWorkouts` in
+  // supabase/functions/wearable-day/index.ts, reached through
+  // `fetchWorkouts` on the cloud provider — and leaving it off the row told
+  // somebody deciding whether to connect their strap that Repple would not
+  // take their training from it. It does, and since 14 Oct 2026 it takes it
+  // without being asked; see src/ui/autoImportWorkouts.tsx.
+  cloud({ id: 'whoop', name: 'WHOOP', icon: '🔴', kind: 'cloud', blurb: 'Strain, recovery, workouts, sleep & heart rate via the WHOOP API', metrics: ['Strain', 'Recovery', 'Workouts', 'Sleep', 'Heart rate', 'Calories'] }),
   cloud({ id: 'oura', name: 'Oura Ring', icon: '💍', kind: 'cloud', blurb: 'Readiness, HRV & sleep via the Oura API', metrics: ['Readiness', 'HRV', 'Sleep', 'Resting HR'] }),
   // The three that cannot be connected. Each blurb states the gap in its own
   // words rather than deferring to the "Unavailable" button, because the button

@@ -1525,7 +1525,7 @@ export default function Devices() {
      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
       {hkBusy
        ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Working out what is ready to write…" />
-       : <Cta label="See What's Ready" onPress={reviewHk} />}
+       : <Cta label="See What’s Ready" onPress={reviewHk} />}
      </View>
     ) : hkPlan.writable.length === 0 && hkPlan.skipped.length === 0 ? (
      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>

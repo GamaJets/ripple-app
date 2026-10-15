@@ -1324,7 +1324,7 @@ export default function CoachProfile() {
         <Section>
           <SectionHead title="Your Training & Devices" />
           <ListRow icon="dumbbell" tone="orange" title="My Training"
-            note="Your own workouts, apart from every client's"
+            note="Your own workouts, apart from every client’s"
             onPress={() => router.push('/(trainer)/my-training')} />
 
 

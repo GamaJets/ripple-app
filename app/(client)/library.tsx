@@ -617,7 +617,7 @@ export default function Library() {
          underneath — it is real — but the gap is named rather than papered over. */}
      {status === 'error' ? (
       <Notice tone={t.warn} kicker="Library" title="We Couldn’t Load Your Clips"
-       note="This is our end, not your coach's. Until the library loads we can't tell you what they have uploaded.">
+       note="This is our end, not your coach’s. Until the library loads we can’t tell you what they have uploaded.">
        <View style={{ marginTop: sp.lg }}>
         <Cta label="Try Again" wide onPress={() => { reload(); }} />
        </View>

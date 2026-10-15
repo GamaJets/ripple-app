@@ -269,7 +269,7 @@ export default function ThisWeek() {
         {logStatus === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Read Your Training Log"
-              note="Days you have already trained may not be marked below. Nothing has been lost. This screen just can't see it right now." />
+              note="Days you have already trained may not be marked below. Nothing has been lost. This screen just can’t see it right now." />
           </View>
         ) : logStatus === 'partial' ? (
           /* The other status that produces the same unmarked week, and the one
@@ -440,7 +440,7 @@ export default function ThisWeek() {
             is silent about anything before that, not a claim about a member who
             has been training here for two years. */}
         <Section>
-          <SectionHead title="Programs You've Been On"
+          <SectionHead title="Programs You’ve Been On"
             note={hist.earlierCount == null ? undefined : `${hist.earlierCount} Earlier`} />
           <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, 'you')}</Text>
           {hist.entries.map((e, i) => (

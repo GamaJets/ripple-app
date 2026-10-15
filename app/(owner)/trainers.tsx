@@ -515,7 +515,7 @@ export default function OwnerTrainers() {
                   // 75/session fee" invites the reader to supply their own
                   // money for it, which is the wrong-amount bug without even a
                   // wrong symbol to notice.
-                  <Notice kicker="No Currency" title="Set your gym's currency in Ops to value these sessions." />
+                  <Notice kicker="No Currency" title="Set your gym’s currency in Ops to value these sessions." />
                 ) : (
                   <Notice kicker="No Session Fee" title="Set a session fee in Ops to value delivered sessions." />
                 )}

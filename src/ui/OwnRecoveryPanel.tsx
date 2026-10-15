@@ -233,7 +233,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
             until the read lands, so a tap made too early writes 1 over the five
             glasses logged on another handset this morning. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-          <Ghost icon="minus" a11yLabel="Take a glass off today's count"
+          <Ghost icon="minus" a11yLabel="Take a glass off today’s count"
             onPress={removeWater} disabled={!hydration.showCount} />
           <View style={{ flex: 1 }}>
             <Cta wide label={hydration.showCount ? 'Add a Glass' : 'Reading Today’s Glasses…'}

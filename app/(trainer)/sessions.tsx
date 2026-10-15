@@ -1142,7 +1142,7 @@ export default function TrainerSessions() {
                 <TextInput
                   value={filter.text}
                   onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
-                  placeholder="Search a client's name"
+                  placeholder="Search a client’s name"
                   placeholderTextColor={t.ink3}
                   accessibilityLabel="Search these sessions by client name"
                   autoCapitalize="none"

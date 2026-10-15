@@ -1919,7 +1919,7 @@ export default function ClientScreen() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Goals, planned days, ticks and photos belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have none." />
+              note="Goals, planned days, ticks and photos belong to the client and live on the server, so there is no local copy of somebody else’s to fall back on. Nothing below is a claim that they have none." />
           </Section>
         ) : noAccount ? (
           <Section>
@@ -2055,7 +2055,7 @@ export default function ClientScreen() {
                   : '')}
               tone={ap.status === 'error' ? t.warn : 'brand'}
               onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
-            <ListRow icon="target" title="What They're Working Toward"
+            <ListRow icon="target" title="What They’re Working Toward"
               note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
               tone={goalStatus === 'error' ? t.warn : 'blue'}
               onPress={go('/(trainer)/client-goals')} />
@@ -2278,7 +2278,7 @@ export default function ClientScreen() {
 
           {/* Movement, strength, mobility and custom tests. The client reads
               the same rows under My Assessments. */}
-          <ListRow icon="target" title="Assessments" note="Record a test and compare to last time"
+          <ListRow icon="target" title="Assessments" note="Record a test and compare to last time."
             tone="teal" onPress={go('/(trainer)/assessments')} />
 
           {/* Directly under the body composition and above the plan, because

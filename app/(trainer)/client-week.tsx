@@ -541,7 +541,7 @@ export default function ClientWeek() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Planned days live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have marked none." />
+              note="Planned days live on the server and belong to the client, so there is no local copy of somebody else’s to fall back on. Nothing below is a claim that they have marked none." />
           </Section>
         ) : (
           <>

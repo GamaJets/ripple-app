@@ -608,7 +608,7 @@ export default function ClientGoals() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Goals live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have not set any." />
+              note="Goals live on the server and belong to the client, so there is no local copy of somebody else’s to fall back on. Nothing below is a claim that they have not set any." />
           </Section>
         ) : (
           <>

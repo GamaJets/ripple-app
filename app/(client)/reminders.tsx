@@ -322,7 +322,7 @@ export default function Reminders() {
         ) : read === 'error' ? (
           <Notice tone={t.warn} kicker="Not Read"
             title="Your Saved Reminders Could Not Be Read on This Phone"
-            note="What is set below is this screen's starting point rather than yours, so saving is switched off: it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
+            note="What is set below is this screen’s starting point rather than yours, so saving is switched off: it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
         ) : null}
 
 

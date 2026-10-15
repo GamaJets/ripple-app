@@ -544,7 +544,7 @@ export default function OwnerRevenue() {
             under the title now also calls; this button is the same action
             beside the sentence that explains why it is needed. */}
         {trainersUnread ? (
-          <Notice tone={t.warn} kicker="Nothing Here Is Your Gym's"
+          <Notice tone={t.warn} kicker="Nothing Here Is Your Gym’s"
             title="Your Roster Could Not Be Read"
             note="Every figure on this screen is a roll-up of your trainers, so none of them can be stated.">
             <View style={{ marginTop: sp.lg }}>

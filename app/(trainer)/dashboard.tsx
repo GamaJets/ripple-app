@@ -4202,7 +4202,7 @@ export default function TrainerClients() {
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} accessibilityLabel="Private note, your client cannot see this" multiline style={{ ...field(t, 44), flex: 1 }} />
+                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can’t see this)…" placeholderTextColor={t.ink3} accessibilityLabel="Private note, your client cannot see this" multiline style={{ ...field(t, 44), flex: 1 }} />
                   {/* The text is cleared only once the note is stored. It used
                       to be cleared immediately, which is how a note that was
                       never saved anywhere also stopped being recoverable by

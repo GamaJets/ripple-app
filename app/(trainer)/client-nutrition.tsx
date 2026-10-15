@@ -729,7 +729,7 @@ export default function ClientNutrition() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="A client's diet, allergens and body live on the server, so there is no local copy of somebody else's to compose against. Nothing below is a claim about what they have disclosed." />
+              note="A client’s diet, allergens and body live on the server, so there is no local copy of somebody else’s to compose against. Nothing below is a claim about what they have disclosed." />
           </Section>
         ) : (
           <>

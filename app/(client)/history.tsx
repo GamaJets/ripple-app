@@ -1036,7 +1036,7 @@ function ImportFromAnotherApp({ onImported, open }: {
        the kit's Expandable. The picked file, the preview and the result are
        this component's own state, above the fold, so none of them is lost by
        folding it. */
-    <Expandable title="Bring In Another App's History" note="A Strong or Hevy export" defaultOpen={open}>
+    <Expandable title="Bring In Another App’s History" note="A Strong or Hevy export" defaultOpen={open}>
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
         Export your log from Strong or Hevy and open it here. Sets come in as sets, one session per day per
         lift. Anything the file does not say clearly is left out rather than guessed at, and you see the count

@@ -2358,14 +2358,14 @@ export default function Train() {
           </Flag>
         ) : !injRead ? (
           <Notice tone={t.crit} kicker="Injury" title="Your Injuries Could Not Be Read"
-            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet. If something is hurt, take it easy on it or skip it, and pull down to try again." />
+            note="So nothing in today’s plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet. If something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
           <Cta label="Start Workout" wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'guided', startedAt: at }); void startLiveActivity(workout.focus || 'Workout', at); setSession(true); }} />
         ) : start.note && start.safety ? (
           // A heading rather than a footnote, because this one is the app
           // having taken today's session away from them for their own safety.
-          <Notice tone={t.crit} kicker="Injury" title="Today's Session Is on Hold" note={start.note} />
+          <Notice tone={t.crit} kicker="Injury" title="Today’s Session Is on Hold" note={start.note} />
         ) : start.note ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
         ) : null}
@@ -3332,7 +3332,7 @@ export default function Train() {
               </Text>
 
               <View style={{ marginTop: layout.section }}>
-                <SectionHead title="Today's Sessions" />
+                <SectionHead title="Today’s Sessions" />
                 {/* Same three causes as the calendar's day list above. */}
                 {todayCardio.length === 0 && workoutLogStatus !== 'ready' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>

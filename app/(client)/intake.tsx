@@ -512,7 +512,7 @@ export default function IntakeScreen() {
                 onChangeText={(v) => edit((d) => ({ ...d, want: { ...d.want, headline: v } }))} />
               <Field t={t} label="By when, if there is a when?"
                 value={draft.want.by}
-                placeholder="e.g. my sister's wedding in June"
+                placeholder="e.g. my sister’s wedding in June"
                 onChangeText={(v) => edit((d) => ({ ...d, want: { ...d.want, by: v } }))} />
               <Field t={t} label="Why now?" multiline
                 value={draft.want.why}

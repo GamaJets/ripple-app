@@ -96,7 +96,7 @@ export default function ShareSessionClip() {
         {/* ── caption ────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Caption" />
-          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session: 20 min full-body burner 🔥 #Warehouse"
+          <TextInput value={caption} onChangeText={setCaption} placeholder="Today’s session: 20 min full-body burner 🔥 #Warehouse"
             placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
           {/* Said once, plainly, and not as an apology: the coach is choosing
@@ -127,7 +127,7 @@ export default function ShareSessionClip() {
         <Section>
           <SectionHead title="No Clip Today?" />
           <ListRow icon="sparkle" tone="purple" title="Make a Share Card"
-            note="Your week's real numbers as a graphic you can post"
+            note="Your week’s real numbers as a graphic you can post"
             onPress={() => router.push('/(trainer)/share-kit')} />
         </Section>
 

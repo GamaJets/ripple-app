@@ -1080,7 +1080,7 @@ export default function ClientTraining() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Training belongs to the client and lives on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never trained." />
+              note="Training belongs to the client and lives on the server, so there is no local copy of somebody else’s to fall back on. Nothing below is a claim that they have never trained." />
           </Section>
         ) : (
           <>

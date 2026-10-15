@@ -1429,7 +1429,7 @@ export default function Financials() {
             {r.strengths.length > 0 ? (<>
               <Rule />
               <Section>
-                <SectionHead title="What's Working" />
+                <SectionHead title="What’s Working" />
                 {flagList(r.strengths)}
               </Section>
             </>) : null}

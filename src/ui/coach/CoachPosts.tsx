@@ -67,7 +67,7 @@ export function CoachPosts() {
   return (
     <Section>
       <SectionHead title="Share Kit" note="Posts for Instagram, TikTok and More" />
-      <ListRow icon="trophy" title="A Client Win" note="Only with your client's yes" onPress={() => router.push('/(trainer)/share-kit')} />
+      <ListRow icon="trophy" title="A Client Win" note="Only with your client’s yes" onPress={() => router.push('/(trainer)/share-kit')} />
 
       <ListRow icon="sparkle" title="An Offer or Package"
         note={pkgs === null ? 'Your packages could not be read' : pkgs.length ? `${pkgs.length} to choose from` : 'Add a package first, under Payments'}

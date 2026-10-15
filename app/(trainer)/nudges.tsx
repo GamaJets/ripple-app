@@ -255,7 +255,7 @@ export default function Nudges() {
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
-              note="Who has gone quiet is worked out from training records that live on the server, and there is no local copy of somebody else's. Nothing below is a claim that everybody is fine." />
+              note="Who has gone quiet is worked out from training records that live on the server, and there is no local copy of somebody else’s. Nothing below is a claim that everybody is fine." />
           </Section>
         ) : n.status === 'loading' ? (
           <Section>

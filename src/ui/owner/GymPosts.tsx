@@ -72,7 +72,7 @@ export function GymPosts() {
   return (
     <Section>
       <SectionHead title="Share Kit" note="Posts for Instagram, TikTok and More" />
-      <ListRow icon="calendar" title="This Week's Classes"
+      <ListRow icon="calendar" title="This Week’s Classes"
         note={classStatus === 'error' ? 'Your timetable could not be read' : classStatus === 'loading' ? 'Reading your timetable…' : `${week.length} in the next seven days`}
         onPress={() => setBuild(!brand ? noBrand() : classStatus === 'error'
           ? { ok: false, why: 'Your timetable could not be read. Try again when you have a connection.' }

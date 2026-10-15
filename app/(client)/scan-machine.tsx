@@ -414,7 +414,7 @@ export default function ScanMachine() {
                     {/* 'No' is recorded, not merely dismissed: a dismissal asks
                         again on the next tap and that is how a question becomes
                         a nag. The machine is still pickable from the list. */}
-                    <Ghost label="No, I'll Pick It Myself" onPress={() => { photoAI.answer('no'); setAskPhoto(false); setManual(true); setNeedsPick(true); setExercise(''); }} />
+                    <Ghost label="No, I’ll Pick It Myself" onPress={() => { photoAI.answer('no'); setAskPhoto(false); setManual(true); setNeedsPick(true); setExercise(''); }} />
                   </View>
                 </Notice>
               ) : (

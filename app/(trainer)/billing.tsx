@@ -208,7 +208,7 @@ export default function TrainerBilling() {
         {!available ? (
           <View style={{ marginTop: sp.xl }}>
             <Notice tone={t.ink3} kicker="Not Live Yet" title="Billing Is Not Switched On"
-              note="Billing turns on once the platform's Stripe keys and plan prices are configured. You'll be able to subscribe and manage payment here." />
+              note="Billing turns on once the platform’s Stripe keys and plan prices are configured. You’ll be able to subscribe and manage payment here." />
           </View>
         ) : null}
 

@@ -428,7 +428,7 @@ export default function Templates() {
               {shortcuts.map((tpl) => {
                 const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
                 const weeks = isBlock(tpl.program) ? weekCount(tpl.program) : 1;
-                const shape = `${weeks > 1 ? `${num(weeks)} weeks · ` : ''}${num(dayCount(tpl))} days · ${num(exCount(tpl))} exercises`;
+                const shape = `${weeks > 1 ? `${num(weeks)} Weeks · ` : ''}${num(dayCount(tpl))} Days · ${num(exCount(tpl))} Exercises`;
                 return (
                   <Pressable key={tpl.id} onPress={() => openInBuilder(tpl)}
                     accessibilityRole="button"

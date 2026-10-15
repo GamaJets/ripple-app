@@ -256,7 +256,7 @@ export default function Injuries() {
             SUGGESTIONS they confirm one at a time — see app/(client)/injury-doc
             for why it is never allowed to write on its own. */}
         <ListRow icon="camera" title="Read It Off a Document"
-          note="Physio report, scan or doctor's note. You confirm what it finds. Nothing is added on its own."
+          note="Physio report, scan or doctor’s note. You confirm what it finds. Nothing is added on its own."
           onPress={() => router.push('/(client)/injury-doc')} />
 
         {/* An injury on this screen is in the list; whether it reached the

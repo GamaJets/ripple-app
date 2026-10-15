@@ -47,7 +47,7 @@ export default function CoachCommunity() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} refreshControl={pull} keyboardShouldPersistTaps="handled">
-        <PageHead title="Coach Community" subtitle="Your Gym's Boards, and What Members Have Reported" />
+        <PageHead title="Coach Community" subtitle="Your Gym’s Boards, and What Members Have Reported" />
         {hasGym ? (
           <Segmented style={{ marginTop: sp.lg }} value={board} onChange={setBoard}
             options={[{ key: 'gym', label: 'Your Gym' }, { key: 'mine', label: 'Your Clients' }] as const} />
