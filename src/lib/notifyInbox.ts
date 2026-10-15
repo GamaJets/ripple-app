@@ -917,6 +917,12 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     to: 'trainer', title: 'A client has sent a check-in',
     route: '/(trainer)/checkins?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
   },
+  {
+    where: 'supabase/parts/3460 · finish_coach_session',
+    when: 'a coach finishes a booked session they ran, from the logger',
+    to: 'client', title: 'Coach Dave logged your session',
+    route: '/(client)/workouts', icon: 'dumbbell',
+  },
 ];
 
 /* ── Where a stored row is allowed to send you ─────────────────────────────

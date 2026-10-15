@@ -41,6 +41,7 @@ import { classifyWrite, registerFlush, type WriteOutcome } from '../lib/offlineQ
 // See the 'class-attendance' arm of `send`.
 import { classRoster } from '../lib/classAttendance';
 import { entryToRow } from '../lib/workoutRow';
+import { finishAnswer } from '../lib/coachSessionFinish';
 import type { WorkoutEntry } from '../lib/mockData';
 import {
   dropSent, enqueueAct, floorQueueKey, readFloorQueue, singleFlight,
@@ -267,6 +268,27 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         const seen = await classRoster(a.classId);
         if (seen === null) return 'unsent';
         return seen.some((m) => m.userId === a.userId) ? 'stored' : 'refused';
+      }
+      case 'coach-session-finish': {
+        // ONE call for the rows and the outcome (supabase/parts/3460). The rows
+        // are `entryToRow` minus the fields the server sets itself — user_id,
+        // logged_by, session_id, workout_uid, workout_pos are all decided inside
+        // the function from auth.uid() and the arguments, never from the body.
+        const rows = (a.entries as WorkoutEntry[]).map((e) => {
+          const { user_id: _u, ...row } = entryToRow(a.clientId, e) as unknown as Record<string, unknown>;
+          void _u;
+          return row;
+        });
+        const { data, error } = await supabase.rpc('finish_coach_session', {
+          p_session: a.sessionId,
+          p_client: a.clientId,
+          p_workout_uid: a.workoutUid,
+          p_rows: rows,
+          p_rate_cents: a.rateCents === undefined ? null : a.rateCents,
+          p_pr_count: a.prCount ?? null,
+        });
+        if (error) return classifyWrite(error as never, null);
+        return finishAnswer(data);
       }
       case 'session-outcome': {
         // `a.outcome` is null for a RETRACTION, and this is the same statement
