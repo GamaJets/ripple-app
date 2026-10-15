@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useTheme } from './components';
-import { Section, SectionHead, Spark, Cta, Ghost, Notice, fig } from './kit';
+import { Section, SectionHead, Spark, Cta, Ghost, Notice, Flag, fig } from './kit';
 import { MuscleBody } from './MuscleBody';
 import { layerNames } from './muscleArt';
 import { sp, radius, font, type as ty } from '../theme/scale';
@@ -15,6 +15,7 @@ import {
 } from '../lib/inbodyProgress';
 import { weightIn, type WeightUnit } from '../lib/units';
 import { dayLabel } from '../lib/bodyFigures';
+import { END_ALIGN } from './direction';
 import type { Goal } from '../lib/types';
 
 export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
@@ -47,6 +48,8 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
 
   const tone = (v: Verdict) => (v === 'good' ? t.good : v === 'bad' ? t.crit : t.ink3);
   const shown = (def: Pick<ProgressDef, 'mass'>, v: number | null) => (v == null ? null : def.mass ? weightIn(v, unit) : v);
+  // A change we cannot convert is unknown, not zero: say so with `none`.
+  const signedOr = (v: number | null, decimals: number, none: string) => (v == null ? none : signed(v, decimals));
   const unitOf = (def: Pick<ProgressDef, 'mass' | 'unit'>) => (def.mass ? unit : def.unit);
   const word = (v: Verdict) => (v === 'good' ? 'better' : v === 'bad' ? 'worse' : 'no change in direction');
 
@@ -71,12 +74,14 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
     );
   }
 
-  const Delta = ({ c, def, label }: { c: DeltaCell; def: ProgressDef; label: string }) => (
+  // Lowercase and CALLED, not rendered as <Delta …/>: a component declared in
+  // the render body remounts its subtree on every render (check:remount).
+  const delta = (c: DeltaCell, def: ProgressDef, label: string) => (
     <View style={{ flex: 1, alignItems: 'flex-end' }}
       accessibilityLabel={c.delta == null ? `${label}: none` : `${label}: ${signed(c.delta, def.decimals)} ${unitOf(def)}, ${word(c.verdict)}`}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
       <Text style={{ ...ty.label, ...font('600'), color: tone(c.verdict) }}>
-        {c.delta == null ? '—' : signed(def.mass ? (weightIn(c.delta, unit) ?? 0) : c.delta, def.decimals)}
+        {signedOr(shown(def, c.delta), def.decimals, '—')}
       </Text>
     </View>
   );
@@ -101,8 +106,8 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
               <Text style={{ ...ty.label, color: t.ink2 }}>{r.def.label}</Text>
               <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{fig(shown(r.def, r.latest))} <Text style={{ ...ty.caption, color: t.ink3 }}>{unitOf(r.def)}</Text></Text>
             </View>
-            <Delta c={r.vsPrevious} def={r.def} label="vs last" />
-            {sum.first ? <Delta c={r.vsFirst} def={r.def} label="vs first" /> : null}
+            {delta(r.vsPrevious, r.def, 'vs last')}
+            {sum.first ? delta(r.vsFirst, r.def, 'vs first') : null}
           </View>
         ))}
         {onUpload ? <View style={{ marginTop: sp.md }}><Cta label="Upload InBody Scan" wide onPress={onUpload} /></View> : null}
@@ -133,16 +138,16 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
                   <Text style={{ ...ty.label, color: t.ink2 }}>{s.label}</Text>
                   <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>
                     {fig(weightIn(s.kg, unit))}{' '}
-                    <Text style={{ color: tone(s.verdict) }}>{s.delta == null ? '' : signed(weightIn(s.delta, unit) ?? 0, 2)}</Text>
+                    <Text style={{ color: tone(s.verdict) }}>{signedOr(s.delta == null ? null : weightIn(s.delta, unit), 2, '')}</Text>
                   </Text>
                 </View>
               ))}
             </View>
           </View>
           {seg.imbalances.map((b) => (
-            <Text key={b.pair} style={{ ...ty.caption, color: t.warn, marginTop: sp.sm }}>
+            <Flag key={b.pair} tone={t.warn} style={{ marginTop: sp.sm }}>
               {b.pair === 'arms' ? 'Arms' : 'Legs'}: the {b.heavier} side carries {b.pct}% more lean mass.
-            </Text>
+            </Flag>
           ))}
         </Section>
       ) : null}
@@ -185,16 +190,16 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
           <View style={{ marginTop: sp.md, padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface2 }}>
             <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
               <Text style={{ flex: 1.4, ...ty.micro, color: t.ink3 }}>Side by side</Text>
-              <Text style={{ flex: 1, ...ty.micro, color: t.ink3, textAlign: 'right' }}>{dayLabel(pair.a.takenAt)}</Text>
-              <Text style={{ flex: 1, ...ty.micro, color: t.ink3, textAlign: 'right' }}>{dayLabel(pair.b.takenAt)}</Text>
-              <Text style={{ flex: 0.8, ...ty.micro, color: t.ink3, textAlign: 'right' }}>Change</Text>
+              <Text style={{ flex: 1, ...ty.micro, color: t.ink3, textAlign: END_ALIGN }}>{dayLabel(pair.a.takenAt)}</Text>
+              <Text style={{ flex: 1, ...ty.micro, color: t.ink3, textAlign: END_ALIGN }}>{dayLabel(pair.b.takenAt)}</Text>
+              <Text style={{ flex: 0.8, ...ty.micro, color: t.ink3, textAlign: END_ALIGN }}>Change</Text>
             </View>
             {pair.rows.map((r) => (
               <View key={r.label} style={{ flexDirection: 'row', paddingVertical: 3 }}>
                 <Text style={{ flex: 1.4, ...ty.caption, color: t.ink2 }}>{r.label}</Text>
-                <Text style={{ flex: 1, ...ty.caption, color: t.ink, textAlign: 'right' }}>{fig(r.a)}</Text>
-                <Text style={{ flex: 1, ...ty.caption, color: t.ink, textAlign: 'right' }}>{fig(r.b)}</Text>
-                <Text style={{ flex: 0.8, ...ty.caption, ...font('600'), color: tone(r.verdict), textAlign: 'right' }}>
+                <Text style={{ flex: 1, ...ty.caption, color: t.ink, textAlign: END_ALIGN }}>{fig(r.a)}</Text>
+                <Text style={{ flex: 1, ...ty.caption, color: t.ink, textAlign: END_ALIGN }}>{fig(r.b)}</Text>
+                <Text style={{ flex: 0.8, ...ty.caption, ...font('600'), color: tone(r.verdict), textAlign: END_ALIGN }}>
                   {r.delta == null ? '—' : signed(r.delta, 2)}
                 </Text>
               </View>

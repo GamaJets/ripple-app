@@ -7,6 +7,7 @@
 // decided by the member's goal (down for fat loss, up for muscle, no verdict
 // otherwise), so a client bulking is never shown red for gaining.
 import { METRIC_DEFS, type ScanMetrics } from './inbodyMetrics';
+import { deltaFigure, deltaMagnitude, deltaSign } from './deltaLabel';
 import type { Goal } from './types';
 
 export interface ProgressScan {
@@ -185,9 +186,11 @@ export function compareScans(x: ProgressScan, y: ProgressScan, goal?: Goal | nul
   return { a, b, rows };
 }
 
-/** "+1.2" / "−0.4" / "0", with a real minus sign. */
+/** "+1.2" / "−0.4" / "0", with a real minus and the reader's own decimal. */
 export function signed(delta: number, decimals: number): string {
-  const f = +delta.toFixed(decimals);
-  if (f === 0) return '0';
-  return (f > 0 ? '+' : '−') + Math.abs(f).toFixed(decimals);
+  // zero-ok: zero after rounding IS "no movement", and the compact cells that
+  // use this (vs last / vs first) have no room for the words "No change".
+  const f = deltaFigure(delta, decimals);
+  if (f == null || f === 0) return '0';
+  return deltaSign(f, decimals) + (deltaMagnitude(f, decimals) ?? '0');
 }

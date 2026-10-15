@@ -358,6 +358,7 @@
     "src/lib/packageEdit.test.ts",
     "src/lib/builderProgression.test.ts",
     "src/lib/floorQueue.test.ts",
+    "src/lib/coachSessionFinish.test.ts",
     "src/lib/scanTargets.test.ts",
     "src/lib/inbodyProgress.test.ts",
     "src/lib/rosterImport.test.ts",

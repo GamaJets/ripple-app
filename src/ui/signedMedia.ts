@@ -34,7 +34,11 @@ const cache = new Map<string, { url: string; until: number }>();
  *  bucket and must be signed; anything else is still a vendor CDN path and is
  *  resolved by frameUrls instead. Named explicitly rather than sniffed,
  *  because a wrong guess here is a broken picture with no error to read. */
-const OURS = ['stills/', 'anim/', 'equipment/'];
+const OURS = ['stills/', 'anim/', 'equipment/', 'images/'];
+// 'images/' is the RepDB stills, uploaded by scripts/upload-exercise-media.ts at
+// the catalogue's own path (images/flat/<id>-start.webp), so a catalogue row's
+// path IS its object key. Free-exercise-db paths ('Folder_Name/0.jpg') never
+// start with it.
 
 /** True for a path that lives in our bucket and therefore needs signing. A
  *  bare filename — 'bench-leg-pull-in.webp' — is an animation key, which the
