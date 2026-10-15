@@ -44,7 +44,9 @@ export function useCatalogueThumbs(rows: ThumbRow[]): (row: ThumbRow) => string 
   // draws its own empty tile rather than being handed a broken image.
   return (row: ThumbRow) => {
     if (!row.thumbPath) return null;
-    if (needsSigning(row.thumbPath)) return thumbs.get(row.thumbPath) ?? null;
+    // Not signed (yet, or at all): the unsigned fallback, which is the dev CDN
+    // for RepDB rows and nothing in release — never a broken image.
+    if (needsSigning(row.thumbPath)) return thumbs.get(row.thumbPath) ?? frameUrls([row.thumbPath], row.source ?? null)[0] ?? null;
     return frameUrls([row.thumbPath], row.source ?? null)[0] ?? null;
   };
 }

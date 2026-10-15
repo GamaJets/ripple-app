@@ -783,7 +783,7 @@ export default function Library() {
         // Ours if it is in our bucket, the vendor CDN otherwise — the two
         // catalogues are still mixed while the machine rows have no picture.
         const thumb = e.thumbPath && needsSigning(e.thumbPath)
-          ? (thumbs.get(e.thumbPath) ?? null)
+          ? (thumbs.get(e.thumbPath) ?? frameUrls([e.thumbPath], e.source)[0] ?? null)
           : (frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null);
         // Why this row is in the results, when the answer is not visible in its
         // title. Null on almost every row, including every row in an unfiltered

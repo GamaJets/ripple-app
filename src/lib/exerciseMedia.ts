@@ -29,6 +29,26 @@ export const FRAME_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exerci
  */
 export const REPDB_FRAME_BASE = 'https://cdn.jsdelivr.net/npm/@repdb/exercises@2026.8.1';
 
+/** Development build or not, without touching React Native at import time
+ *  (the node tests have no `__DEV__`). */
+const DEV_FLAG = (globalThis as { __DEV__?: boolean }).__DEV__;
+const IS_DEV: boolean = typeof DEV_FLAG === 'boolean' ? DEV_FLAG : process.env.NODE_ENV !== 'production';
+
+/**
+ * The UNSIGNED fallback host for RepDB stills, or null.
+ *
+ * The RepDB stills are served from our private `exercise-demos` bucket at the
+ * catalogue's own path (`images/flat/<id>-start.webp`), signed per request by
+ * src/ui/signedMedia.ts — `needsSigning` claims the `images/` prefix. This is
+ * only what a screen shows when signing gave nothing back: in a development
+ * build the public npm CDN, so screens work before the upload has run; in a
+ * release build null, so frameUrls returns no frames and the screen says "no
+ * demonstration" instead of spending somebody else's bandwidth.
+ */
+export function repdbFrameBase(isDev: boolean = IS_DEV): string | null {
+  return isDev ? REPDB_FRAME_BASE : null;
+}
+
 /** True while frames are served from somebody else's servers rather than our
  *  own storage. Drives the on-screen warning, so nobody demoes this without
  *  knowing what they are looking at. */
@@ -58,6 +78,7 @@ export const FRAMES_ARE_UNHOSTED = false;
 export function frameUrls(
   paths: readonly string[] | null | undefined,
   source?: string | null,
+  repdbBase: string | null = repdbFrameBase(),
 ): string[] {
   if (!paths || !paths.length) return [];
   // Two catalogues, two path shapes, two hosts. RepDB stores
@@ -65,7 +86,8 @@ export function frameUrls(
   // Deciding by the SOURCE column rather than by sniffing the string, because a
   // guess that gets it wrong produces a 404 the client reads as a broken app.
   const repdb = source === 'repdb';
-  const base = repdb ? REPDB_FRAME_BASE : FRAME_BASE;
+  const base = repdb ? repdbBase : FRAME_BASE;
+  if (!base) return [];
   const shape = repdb
     ? /^images\/[\w-]+\/[\w-]+\.(webp|png|jpg|jpeg)$/i
     : /^[\w.-]+\/\d+\.(jpg|jpeg|png|webp)$/i;

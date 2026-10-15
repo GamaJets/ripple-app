@@ -6,7 +6,7 @@
 // "no picture of this movement" — which the screen says out loud — and "a URL
 // we built out of a row we did not understand", which renders as a grey box
 // the client reads as the app being broken.
-import { frameUrls, FRAME_BASE, REPDB_FRAME_BASE, EVAL_DEMO_BASE, demoCaption, demoIsShippable, evalAnimationUrl } from './exerciseMedia';
+import { frameUrls, repdbFrameBase, FRAME_BASE, REPDB_FRAME_BASE, EVAL_DEMO_BASE, demoCaption, demoIsShippable, evalAnimationUrl } from './exerciseMedia';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -134,6 +134,16 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   for (const bad of ['../../etc/passwd', 'nested/path.webp', 'file.exe', '', '   ']) {
     ok(evalAnimationUrl(bad, 'evaluation') === null, `"${bad}" is not turned into a URL`);
   }
+}
+
+// RepDB stills are signed out of exercise-demos; the unsigned fallback is the
+// npm CDN in development only, and nothing in release ("no demonstration").
+{
+  ok(repdbFrameBase(true) === REPDB_FRAME_BASE, 'development falls back to the CDN');
+  ok(repdbFrameBase(false) === null, 'release has no unsigned host');
+  const p = ['images/flat/ab-wheel-rollout-start.webp'];
+  ok(frameUrls(p, 'repdb', null).length === 0, 'no host, no frames: never a broken image');
+  ok(frameUrls(['Barbell_Curl/0.jpg'], null, null)[0]?.startsWith(FRAME_BASE) === true, 'the free-exercise-db source is unaffected');
 }
 
 if (errors.length) {
