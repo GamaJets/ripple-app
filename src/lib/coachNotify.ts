@@ -111,7 +111,7 @@ export const CHANNEL_QUIET_COST_BOOK =
  * screens the coach has to open to see. `book` is that channel, and
  * `bookAlert` below is the rule that decides when it has something to say.
  */
-export type CoachChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin' | 'book';
+export type CoachChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin' | 'book' | 'training';
 
 export interface CoachChannelDef {
   key: CoachChannel;
@@ -239,6 +239,34 @@ export const COACH_CHANNELS: readonly CoachChannelDef[] = [
     // is being held up.
     key: 'book', title: 'Your Own Book', quietCost: CHANNEL_QUIET_COST_BOOK, local: true,
     note: 'A session waiting on an outcome, an invoice past its due date, and a client who has stopped training.',
+  },
+  {
+    // ── the seventh, and the one that is about the reader's own training ──
+    //
+    // Added 15 Oct 2026 so a quiet week can be said from the SERVER. The
+    // nudge existed and was LOCAL: src/ui/motivationNudges.tsx arms it while
+    // the app is open and it fires later on that handset, which cannot reach
+    // the one person it is most for — somebody who has not opened the app in
+    // a week. src/lib/motivationNudge.ts's header has always said so.
+    //
+    // It needed a channel because of a rule notifyDispatch.ts states plainly:
+    // "an unclassified route is a kind that silently never pushes". A
+    // notification with no channel lands in the in-app list and stops there.
+    // None of the six fitted — a nudge about your own training is not a
+    // message from a client, a booking, money, paperwork or your book — and
+    // riding one of them would mute two things with one switch.
+    //
+    // A COACH channel and not a member-only one, because coaches train too:
+    // my-training, my-progress and my-nutrition are their own screens, and the
+    // same quiet week is the same fact about whoever it is said to. That also
+    // keeps `MemberChannel` a subset of this type, which is what the rest of
+    // this file and notifyDispatch.ts are written against.
+    //
+    // No quiet cost. Muting this costs a reminder and nothing else — no money
+    // held up, no insurance lapsing — which is the whole difference between
+    // this switch and `book` or `money`.
+    key: 'training', title: 'Your Training', quietCost: null, local: false,
+    note: 'A week with nothing logged, and a streak about to break.',
   },
 ];
 

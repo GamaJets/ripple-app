@@ -226,6 +226,18 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // somebody later moves server-side is a kind that silently never pushes.
   ['/(client)/injuries', 'admin'],
 
+  // ── training ────────────────────────────────────────────────────────────
+  // The quiet-week pass, server-side from 15 Oct 2026. It opens Consistency
+  // rather than the Train tab, and the route choice is the mapping: Train is
+  // ALREADY on 'clients' above, carrying a coach's answer to a filmed set, and
+  // a nudge about your own quiet fortnight riding that switch would mean
+  // muting one mutes the other.
+  //
+  // Consistency is also simply the right screen to land on. It is the one that
+  // shows the weeks with nothing in them, which is what the notification is
+  // about.
+  ['/(client)/consistency', 'training'],
+
   // ── book ────────────────────────────────────────────────────────────────
   // The coach's own book, and the three routes here are named almost word for
   // word by that channel's own note: 'A session waiting on an outcome, an

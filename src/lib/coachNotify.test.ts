@@ -31,10 +31,16 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 
 /* ── the catalogue ─────────────────────────────────────────────────────── */
 
-eq(COACH_CHANNELS.length, 6, 'six channels');
+// Seven since 15 Oct 2026. 'training' was added so a quiet week could be said
+// from the server: notifyDispatch.ts's rule is that "an unclassified route is
+// a kind that silently never pushes", so the nudge needed a channel of its
+// own, and none of the six fitted a notification about the reader's own
+// training. See the entry in coachNotify.ts for why it is a coach channel and
+// not a member-only one.
+eq(COACH_CHANNELS.length, 7, 'seven channels');
 const keys = COACH_CHANNELS.map((c) => c.key);
-eq(new Set(keys).size, 6, 'each named once');
-for (const k of ['chat', 'bookings', 'money', 'clients', 'admin', 'book'] as CoachChannel[]) {
+eq(new Set(keys).size, 7, 'each named once');
+for (const k of ['chat', 'bookings', 'money', 'clients', 'admin', 'book', 'training'] as CoachChannel[]) {
   ok(keys.includes(k), `${k} is one of them`);
   ok(channelDef(k) != null, `and has a definition`);
 }

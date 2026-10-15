@@ -74330,6 +74330,1318 @@ revoke all on public.check_in_answers from anon, authenticated, public;
 grant select, insert, update, delete on public.check_in_answers to authenticated;
 grant all on public.check_in_answers to service_role;
 
+-- ▶ three-things-parts-3340-to-3380-got-wrong.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Three defects in parts 3340-3380, found by reviewing them after they were
+-- applied.
+--
+-- All three are the same mistake wearing different clothes: a part that
+-- created something new, correctly, and did not look at what already existed
+-- around it. Recorded in that shape because the next part to add a route, a
+-- board or a policy will be tempted by each one again.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Neither new notification was ever pushed
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Parts 3340 and 3350 insert rows into `notifications` with routes
+-- '/(trainer)/checkins' and '/(client)/workouts'. `notification_channel` —
+-- last defined in part 3320 — has never heard of either, so both fell to its
+-- `else null`, and `notifications_dispatch_push` (part 900) filters on
+-- `n.channel is not null`. Part 900's own comment says it: an unclassified row
+-- is never pushed.
+--
+-- So the rows landed in the in-app bell and nothing reached a phone, which is
+-- the entire stated purpose of both parts. "A check-in reaches the coach" did
+-- not.
+--
+-- ── Why this was not caught ──────────────────────────────────────────────
+--
+-- There are two copies of this mapping and only one of them was updated.
+-- src/lib/notifyDispatch.ts carries `CHANNEL_BY_ROUTE` for the app's own
+-- switches and got both routes; this function is the half the DATABASE reads
+-- when deciding whether to send, and it did not. Every test over
+-- `SERVER_WRITTEN` passed, because the tests read the TypeScript copy.
+--
+-- The duplication is deliberate and documented (an edge function under Deno
+-- cannot import the app's modules), so the lesson is not "remove one". It is
+-- that a new server-written notification is TWO edits, and this part is the
+-- second half of two of them.
+create or replace function public.notification_channel(p_route text, p_title text)
+returns text
+language plpgsql
+immutable
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  r text := split_part(btrim(coalesce(p_route, '')), '?', 1);
+  t text := btrim(coalesce(p_title, ''));
+begin
+  if r <> '' then
+    return case r
+      when '/(client)/messages'         then 'chat'
+      when '/(trainer)/chat'            then 'chat'
+
+      when '/(trainer)/calendar'        then 'bookings'
+      when '/(client)/calendar'         then 'bookings'
+      when '/(client)/bookings'         then 'bookings'
+      when '/(client)/pt-sessions'      then 'bookings'
+      when '/(client)/classes'          then 'bookings'
+      when '/(client)/request-session'  then 'bookings'
+      when '/(trainer)/sessions'        then 'bookings'
+
+      when '/(trainer)/payments'        then 'money'
+      when '/(client)/packages'         then 'money'
+      when '/(client)/explore'          then 'money'
+      when '/(client)/offers'           then 'money'
+
+      when '/(trainer)/dashboard'       then 'clients'
+      when '/(trainer)/leads'           then 'clients'
+      when '/(trainer)/client-goals'    then 'clients'
+      when '/(trainer)/client-training' then 'clients'
+      when '/(trainer)/client-photos'   then 'clients'
+      when '/(client)/my-coach'         then 'clients'
+      when '/(client)/trainers'         then 'clients'
+      -- Part 3320.
+      when '/(client)/assessments'      then 'clients'
+      when '/(client)/community'        then 'clients'
+      when '/(trainer)/community'       then 'clients'
+      when '/(owner)/community'         then 'clients'
+      -- Part 3390, closing parts 3340 and 3350. The check-in a client sent
+      -- and the coach's answer to a form check: both are the coaching
+      -- relationship, which is what 'clients' has always meant, and both
+      -- already carry that switch in src/lib/notifyDispatch.ts.
+      when '/(trainer)/checkins'        then 'clients'
+      when '/(client)/workouts'         then 'clients'
+
+      when '/(trainer)/documents'       then 'admin'
+      when '/(trainer)/client-intake'   then 'admin'
+      when '/(trainer)/credentials'     then 'admin'
+      when '/(client)/intake'           then 'admin'
+      when '/(client)/injuries'         then 'admin'
+
+      when '/(trainer)/invoices'        then 'book'
+      when '/(trainer)/nudges'          then 'book'
+      when '/(trainer)/builder'         then 'book'
+
+      -- '/(client)/notices' stays deliberately unclassified; see part 1870.
+      else null
+    end;
+  end if;
+
+  return case t
+    when 'An invoice from your gym'        then 'money'
+    when 'Your coaching has ended'         then 'clients'
+    when 'A client has signed the release' then 'admin'
+    else null
+  end;
+end
+$function$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A member could post an EVENT to their gym's board
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3330 added `and (kind = 'post' or public.community_moderates(tenant_id))`
+-- to `community_posts_insert`, under a heading saying resources and events are
+-- staff's. Part 3370 recreated that policy to widen it for a coach's board and
+-- rebuilt it from part 3300's text — the version BEFORE 3330 — so the clause
+-- was dropped without anybody deciding to drop it.
+--
+-- The hole: any member of a gym could insert `kind = 'event'` on the members
+-- channel, and it would then draw in `UpcomingEvents` on every member's
+-- Community screen as a gym event. ('resource' stayed shut, but only by
+-- accident: it requires the coaches channel, which `community_can_read`
+-- already denies a client.)
+--
+-- The lesson is the one `git log -p -- <file>` answers and reading the latest
+-- part does not: a policy may have been rewritten since the part that created
+-- it, and recreating it from the original is a silent revert.
+drop policy if exists community_posts_insert on public.community_posts;
+create policy community_posts_insert on public.community_posts
+  for insert to authenticated
+  with check (
+    author_id = (select auth.uid())
+    and (
+      (tenant_id is not null and public.community_can_read(tenant_id, channel))
+      or (coach_id is not null and public.coach_board_can_read(coach_id))
+    )
+    -- Restored from part 3330, widened for a coach's own board: on a gym's
+    -- board the staff decide what is an event, and on a coach's board the
+    -- coach does.
+    and (
+      kind = 'post'
+      or (tenant_id is not null and public.community_moderates(tenant_id))
+      or (coach_id is not null and public.coach_board_moderates(coach_id))
+    )
+    and exists (select 1 from public.community_rules_acceptance a
+                 where a.user_id = (select auth.uid()) and a.version >= 1)
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · On a coach's board, nobody could reply to a post or report one
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `community_comments.tenant_id` and `community_reports.tenant_id` are both
+-- `not null`, and both stamp triggers copy the value off the post. Part 3370
+-- made a coach-scoped post's `tenant_id` null, so every comment and every
+-- report on one failed with 23502 and the app drew its generic "could not be
+-- saved" sentence.
+--
+-- Blocks and hides were unaffected, because they key on the post id and the
+-- author id alone — which is why the commit claimed, wrongly, that a coach's
+-- board had "the same reports, blocks and hides a gym's has". Two of the four
+-- worked. REPORTING is the one that matters most: it is the moderation path
+-- Apple requires of any feed, and part 3370's own header invokes it.
+--
+-- Both columns become nullable and carry the post's scope instead. The
+-- policies are untouched: they are keyed on the post through
+-- `community_can_read`-style EXISTS clauses over `community_posts`, which the
+-- post's own SELECT policy already narrows correctly for both kinds of board.
+alter table public.community_comments alter column tenant_id drop not null;
+alter table public.community_reports  alter column tenant_id drop not null;
+
+comment on column public.community_comments.tenant_id is
+  'The gym whose board the parent post is on, or NULL when the post is on a coach''s own board (part 3370). Stamped from the post and never trusted from the client.';
+comment on column public.community_reports.tenant_id is
+  'The gym whose board the reported post is on, or NULL when it is on a coach''s own board (part 3370). Stamped from the post.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · A NULL tenant made the image-path CHECK pass anything
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `community_posts_image_own_folder` (part 3330) is
+-- `check (image_path is null or image_path like tenant_id::text || '/' || author_id::text || '/%')`.
+-- With `tenant_id` null the pattern is null, the comparison is null, and a
+-- CHECK constraint passes on null — so a coach-scoped post could name any
+-- object key at all. The read policy on the bucket grants a read to anybody
+-- who can read a post naming that object, so a fabricated key would be a
+-- grant over somebody else's folder. It is hard to exploit (the key carries a
+-- random token and has to be known exactly) and it is still wrong.
+--
+-- Rewritten so the scope decides the folder: a gym's post is under its tenant,
+-- a coach's board post is under the coach. Photos on a coach's board are NOT
+-- enabled by this — `communitymedia_obj_insert` still requires the uploader's
+-- own tenant as the first folder, and `uploadCommunityImage` refuses without
+-- one. Closing that properly is a storage-policy change and a decision about
+-- whose folder a coach's cohort photo belongs in; this constraint is written
+-- so that it cannot be the thing standing in the way, and so that a null
+-- tenant can never again mean "any path is fine".
+alter table public.community_posts drop constraint if exists community_posts_image_own_folder;
+alter table public.community_posts add constraint community_posts_image_own_folder
+  check (
+    image_path is null
+    or (tenant_id is not null and image_path like tenant_id::text || '/' || author_id::text || '/%')
+    or (coach_id is not null and image_path like coach_id::text || '/' || author_id::text || '/%')
+  );
+
+-- ▶ what-a-column-grant-cannot-say-and-two-coach-board-gaps.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Three more from the same review as part 3390, and the first of them is the
+-- interesting one: a grant written carefully, checked against the live
+-- database, documented at length — and still not enforcing what its own header
+-- claims. The other two are the coach's board finishing what part 3370 opened.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · A coach could still rewrite the question their client asked
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3350's header says it plainly: "a coach may WRITE two columns and no
+-- others". It does not hold, and the reason is worth keeping, because the part
+-- that got it wrong got the hard half right.
+--
+-- A column grant is held by a ROLE. Part 3350 revoked table-wide UPDATE from
+-- `authenticated` and granted back three columns:
+--
+--     grant update (note) on public.form_clips to authenticated;
+--     grant update (coach_reply, coach_replied_at) ...
+--
+-- `note` is granted so the MEMBER can edit their own question, and the comment
+-- beside it says "their `for all` policy from part 2617 is what keeps it to
+-- their own row". That is true of the member. It says nothing about the coach,
+-- who holds the identical column grant — every `authenticated` session does —
+-- and whose own policy `form_clips_coach_reply` is `using (is_my_client(...))`
+-- with no mention of columns, because a policy cannot mention columns.
+--
+-- So a coach could rewrite "does my knee cave on rep 4" into anything at all,
+-- on a video of their client's body, with no record that it had been changed.
+-- Nothing in the app does this. The point is that the database allowed it while
+-- documenting that it did not.
+--
+-- ── Why a trigger and not more policy ────────────────────────────────────
+--
+-- The two mechanisms PostgreSQL offers each see half of what is needed. A
+-- column grant knows the column and not the row; an RLS policy knows the row
+-- and not the column. "This column, by this person only" is outside both, and a
+-- BEFORE UPDATE trigger is the only place both facts are in scope at once.
+--
+-- `path` is frozen in the same breath. It was never granted to anybody but is
+-- in the member's own `for all` policy, so they could repoint their own clip --
+-- harmless on its own, and not something worth leaving reachable on a row that
+-- also carries a coach's written answer.
+create or replace function public.form_clips_freeze_members_own()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- The member's row is the member's. They may edit their question; nobody
+  -- else may, whatever grants their role happens to hold.
+  if auth.uid() is distinct from old.user_id then
+    if new.note is distinct from old.note then
+      raise exception 'The question on a form check belongs to the person who asked it.'
+        using errcode = '42501';
+    end if;
+    if new.path is distinct from old.path then
+      raise exception 'A form check''s video cannot be repointed.'
+        using errcode = '42501';
+    end if;
+    if new.user_id is distinct from old.user_id or new.set_id is distinct from old.set_id then
+      raise exception 'A form check cannot be moved to another person or another set.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+revoke execute on function public.form_clips_freeze_members_own() from public, anon, authenticated;
+
+drop trigger if exists form_clips_freeze_members_own on public.form_clips;
+create trigger form_clips_freeze_members_own
+  before update on public.form_clips
+  for each row execute function public.form_clips_freeze_members_own();
+
+comment on column public.form_clips.note is
+  'The member''s own question about the set. Theirs to edit and nobody else''s: enforced by the trigger form_clips_freeze_members_own, because the column-level grant in part 3350 is held by the role and so by the coach too.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A photo on a coach's own board had nowhere to go
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 3390 left this open on purpose and said why: the folder question had not
+-- been decided. Deciding it — the first folder is the BOARD, which on a gym's
+-- board is the tenant and on a coach's board is the coach.
+--
+-- That keeps the one property the original policy was built around: the first
+-- folder names who the object belongs with and the second names who put it
+-- there, so an object's own key is enough to decide both questions without
+-- reading a single row.
+--
+-- A coach's client uploads under the coach's folder, which looks odd written
+-- down and is right: it is the coach's board, it is the coach who answers for
+-- what is on it, and `coach_board_can_read` is the same roster the posts use.
+-- ── A folder name is text, and a uuid cast on text that is not one RAISES ──
+--
+-- `nullif(folder, '')::uuid` inside a policy looked fine and is not: an object
+-- key whose first folder is not a uuid would abort the statement with 22P02
+-- instead of failing the check, and PostgreSQL promises no evaluation order
+-- that would stop it. A guarded helper is the whole of the fix — it returns
+-- false for anything that is not a uuid, which is what a policy wants.
+create or replace function public.coach_board_can_read_folder(f text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select case
+    when f ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then public.coach_board_can_read(f::uuid)
+    else false
+  end;
+$$;
+
+revoke execute on function public.coach_board_can_read_folder(text) from public, anon;
+grant  execute on function public.coach_board_can_read_folder(text) to authenticated;
+
+drop policy if exists communitymedia_obj_insert on storage.objects;
+create policy communitymedia_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'community-media'
+    and (storage.foldername(name))[2] = (select auth.uid())::text
+    and array_length(storage.foldername(name), 1) = 2
+    and (
+      -- A gym's board: the uploader's own tenant, exactly as before.
+      (storage.foldername(name))[1] = (select public.my_tenant())::text
+      -- Or a board belonging to a coach they are on the roster of — or their
+      -- own, since `coach_board_can_read` admits the coach first.
+      or public.coach_board_can_read_folder((storage.foldername(name))[1])
+    )
+  );
+
+-- The read side needs the same second clause, or an uploader cannot see the
+-- object they just put there until a post names it — which is the state the
+-- composer is in between the upload and the insert.
+drop policy if exists communitymedia_obj_read on storage.objects;
+create policy communitymedia_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'community-media'
+    and (
+      exists (select 1 from public.community_posts p where p.image_path = objects.name)
+      or ((storage.foldername(name))[2] = (select auth.uid())::text
+          and (
+            (storage.foldername(name))[1] = (select public.my_tenant())::text
+            or public.coach_board_can_read_folder((storage.foldername(name))[1])
+          ))
+    )
+  );
+
+-- And the delete, which had the same shape and so the same gap: on a coach's
+-- board nobody could take their own photo back down.
+drop policy if exists communitymedia_obj_delete on storage.objects;
+create policy communitymedia_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'community-media'
+    and (
+      -- Your own object, on either kind of board.
+      ((storage.foldername(name))[2] = (select auth.uid())::text
+       and (
+         (storage.foldername(name))[1] = (select public.my_tenant())::text
+         or public.coach_board_can_read_folder((storage.foldername(name))[1])
+       ))
+      -- Or you moderate the board it is on. A gym's staff, as before; and the
+      -- coach whose board it is, which is the clause that was missing.
+      or exists (select 1 from public.tenants t
+                  where t.id::text = (storage.foldername(name))[1] and public.community_moderates(t.id))
+      or (storage.foldername(name))[1] = (select auth.uid())::text
+    )
+  );
+
+-- ▶ a-report-nobody-could-read-resolve-or-be-told-about.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- On a coach's own board, every step of moderation was dead.
+--
+-- Part 3370's commit said a coach's board has "the same reports, blocks and
+-- hides a gym's has". Part 3390 found that untrue and fixed the half it saw:
+-- `community_reports.tenant_id` was `not null`, so filing a report on a
+-- coach-scoped post failed outright with 23502. It made the column nullable
+-- and moved on.
+--
+-- That bought the ability to WRITE a report into a hole nobody could get it
+-- out of. Four policies and one trigger still key on the tenant alone, and on
+-- a coach's board the tenant is null:
+--
+--   community_reports_read       `community_moderates(tenant_id)` → the coach
+--                               cannot see the report. Only its reporter can.
+--   community_reports_resolve    the coach cannot dismiss or action it.
+--   community_comments_moderate  the coach cannot hide a comment on their own
+--                               board.
+--   community_comments_read      `hidden_at is null or community_moderates(...)`
+--                               → having hidden one, they cannot see it to
+--                               change their mind.
+--   community_reports_notify_moderators
+--                               `where p.tenant_id = new.tenant_id`, and
+--                               `null = null` is null, so the insert notified
+--                               nobody at all.
+--
+-- So a client on a coach's cohort board could report a post, and the report
+-- would be stored, announced to no one, visible to no one, and resolvable by
+-- no one. This is the moderation path Apple requires of any feed with
+-- user-generated content, which is the reason part 3370's header invokes it.
+--
+-- ── The lesson, which is part 3390's lesson a second time ────────────────
+--
+-- Part 3390 wrote: "a part that created something new, correctly, and did not
+-- look at what already existed around it". Part 3390 then did the same thing.
+-- It made a column nullable without asking which policies read that column,
+-- and a nullable key silently fails every predicate built on it rather than
+-- raising anything. `alter column ... drop not null` is not a local change; it
+-- is a change to every expression that compares the column.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- The board a post, comment or report belongs to
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Only `community_posts` carries `coach_id`; comments and reports reach it
+-- through the post. Two small functions rather than repeated subqueries in
+-- four policies, because the next policy to need this should not be a fifth
+-- copy of the join.
+--
+-- SECURITY DEFINER and `stable`: these are read inside policies on the very
+-- tables whose own policies would otherwise recurse. The same shape and the
+-- same reason as `community_can_read` and `community_moderates`.
+create or replace function public.community_post_coach(p_post uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select p.coach_id from public.community_posts p where p.id = p_post;
+$$;
+
+create or replace function public.community_report_coach(p_post uuid, p_comment uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select case
+    when p_post is not null then public.community_post_coach(p_post)
+    when p_comment is not null then (
+      select public.community_post_coach(c.post_id)
+        from public.community_comments c where c.id = p_comment
+    )
+    else null
+  end;
+$$;
+
+-- The standing rule: a new function is granted to PUBLIC, and PUBLIC includes
+-- anon. Revoke first, then grant the one role that may call it.
+revoke execute on function public.community_post_coach(uuid) from public, anon;
+revoke execute on function public.community_report_coach(uuid, uuid) from public, anon;
+grant  execute on function public.community_post_coach(uuid) to authenticated;
+grant  execute on function public.community_report_coach(uuid, uuid) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · A coach can read, and resolve, a report on their own board
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `coach_board_moderates` already returns false for a null argument — it opens
+-- `c is not null and c = auth.uid()` — so a gym post, whose coach is null,
+-- cannot reach the coach clause by accident. The gym clause is untouched.
+drop policy if exists community_reports_read on public.community_reports;
+create policy community_reports_read on public.community_reports
+  for select to authenticated
+  using (
+    reporter_id = (select auth.uid())
+    or public.community_moderates(tenant_id)
+    or public.coach_board_moderates(public.community_report_coach(post_id, comment_id))
+  );
+
+drop policy if exists community_reports_resolve on public.community_reports;
+create policy community_reports_resolve on public.community_reports
+  for update to authenticated
+  using (
+    public.community_moderates(tenant_id)
+    or public.coach_board_moderates(public.community_report_coach(post_id, comment_id))
+  )
+  with check (
+    public.community_moderates(tenant_id)
+    or public.coach_board_moderates(public.community_report_coach(post_id, comment_id))
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A coach can hide a comment on their own board, and still see it
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The read clause matters as much as the write one. Hiding a comment a coach
+-- could then no longer see is a decision they cannot revisit, and "I hid the
+-- wrong one" is the ordinary case.
+drop policy if exists community_comments_read on public.community_comments;
+create policy community_comments_read on public.community_comments
+  for select to authenticated
+  using (
+    exists (select 1 from public.community_posts p where p.id = community_comments.post_id)
+    and (
+      hidden_at is null
+      or public.community_moderates(tenant_id)
+      or public.coach_board_moderates(public.community_post_coach(post_id))
+    )
+    and not exists (
+      select 1 from public.community_blocks b
+       where b.blocker_id = (select auth.uid()) and b.blocked_id = community_comments.author_id
+    )
+  );
+
+drop policy if exists community_comments_moderate on public.community_comments;
+create policy community_comments_moderate on public.community_comments
+  for update to authenticated
+  using (
+    public.community_moderates(tenant_id)
+    or public.coach_board_moderates(public.community_post_coach(post_id))
+  )
+  with check (
+    public.community_moderates(tenant_id)
+    or public.coach_board_moderates(public.community_post_coach(post_id))
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · And somebody is told
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Two inserts rather than one statement with an OR, because the two boards
+-- have different recipients and different routes: a gym's staff go to their
+-- own variant's screen, and a coach goes to the coach app.
+--
+-- The route is '/(trainer)/community', which `notification_channel` already
+-- maps to 'clients' (part 3320) — so this one reaches a phone. That is worth
+-- stating, because part 3390 exists entirely because two notifications did
+-- not, and the check is one query: a route this function writes must appear in
+-- that function's CASE or `notifications_dispatch_push` drops the row.
+create or replace function public.community_reports_notify_moderators()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_body  text;
+  v_coach uuid;
+begin
+  v_body := 'A ' || case when new.post_id is not null then 'post' else 'comment' end
+    || ' was reported for '
+    || case new.reason
+         when 'spam'       then 'spam'
+         when 'harassment' then 'harassment'
+         when 'hate'       then 'hate speech'
+         when 'sexual'     then 'sexual content'
+         when 'violence'   then 'violence'
+         else 'another reason' end
+    || '. Open Community to review it.';
+
+  -- A gym's board: its staff, as before.
+  if new.tenant_id is not null then
+    insert into public.notifications (user_id, title, body, icon, route)
+    select p.id,
+           'New Report In Community',
+           v_body,
+           'bell',
+           case p.role when 'owner' then '/(owner)/community' else '/(trainer)/community' end
+      from public.profiles p
+     where p.tenant_id = new.tenant_id
+       and p.role in ('owner', 'trainer')
+       and p.id <> new.reporter_id;
+  end if;
+
+  -- A coach's own board: the coach, who is the only moderator it has.
+  v_coach := public.community_report_coach(new.post_id, new.comment_id);
+  if v_coach is not null and v_coach <> new.reporter_id then
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (v_coach, 'New Report In Your Group', v_body, 'bell', '/(trainer)/community');
+  end if;
+
+  return null;
+exception when others then
+  -- Unchanged, and deliberate: a report that is filed and not announced is bad,
+  -- and a report that cannot be filed because announcing it failed is worse.
+  return null;
+end $function$;
+
+revoke execute on function public.community_reports_notify_moderators() from public, anon, authenticated;
+
+-- ▶ a-coachs-events-had-no-index-because-the-query-was-new.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- One index, and the four that were considered and are not here.
+--
+-- Part 3370 gave a coach's board `community_posts_coach_feed_idx` —
+-- `(coach_id, created_at desc, id desc) where coach_id is not null` — which
+-- serves the board feed exactly: one coach's rows, already in the order the
+-- feed reads them.
+--
+-- It does not serve the EVENTS query, and until 2 Oct 2026 that did not matter,
+-- because nothing asked it. `UpcomingEvents` read with no coach id and was
+-- drawn only on the gym branch, so a coach's own event reached no screen; the
+-- commit that fixed that is the reason this index is now worth having. A query
+-- written after the indexes is a query with none.
+--
+--   explain, before:
+--     Limit
+--       -> Sort                     Sort Key: event_at, id
+--            -> Index Scan using community_posts_coach_feed_idx
+--                 Index Cond: (coach_id = ...)
+--                 Filter: (channel = 'members' AND kind = 'event' AND event_at > now())
+--
+-- The sort is the cost: that index is ordered by `created_at`, the screen reads
+-- by `event_at`, so every one of a coach's posts is fetched, filtered down to
+-- the events, and then sorted — on a screen that wants the next five.
+--
+-- This mirrors `community_posts_events_idx`, which does the same job for a
+-- gym's board and cannot do it here: it leads with `tenant_id`, and a
+-- coach-scoped post has none.
+--
+-- `id` is in the key where the gym's equivalent stops at `event_at`, because
+-- the query orders by both and a trailing `id` makes the ordering complete
+-- rather than nearly so.
+--
+-- Written WITHOUT `concurrently` deliberately: all three community tables hold
+-- zero rows today, so this takes no lock worth having an opinion about, and
+-- `create index concurrently` cannot run inside the transaction a migration is
+-- applied in. The day one of these tables is large, that trade reverses.
+create index if not exists community_posts_coach_events_idx
+  on public.community_posts (coach_id, event_at, id)
+  where kind = 'event' and coach_id is not null;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- What was considered and deliberately not added
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Written down because the honest answer to "add the coach indexes" was "one
+-- of them", and the next person to look at this will otherwise see four
+-- obvious gaps and fill them.
+--
+-- · A coach mirror of `community_posts_kind_idx`
+--   `(tenant_id, channel, kind, created_at desc)`. The feed query does filter
+--   `kind`, so a `(coach_id, kind, created_at desc, id desc)` index would be a
+--   fractionally better match than the existing coach feed index. It would
+--   also duplicate it almost entirely. `coach_id` is already the selective
+--   column — one coach's cohort, not a gym's whole membership — and the sort
+--   order is already right, so what the extra index buys is skipping past the
+--   events while walking a list that is tens of rows long. That is not a cost
+--   anybody will measure.
+--
+-- · `channel` in either key. `community_posts_scope_chk` requires
+--   `channel = 'members'` for every coach-scoped post, so on this board the
+--   column is a constant and carries no selectivity at all. The gym's indexes
+--   lead with it because a gym has two channels.
+--
+-- · A coach mirror of `community_reports_open_idx`
+--   `(tenant_id, created_at desc) where resolved_at is null`. There is nothing
+--   to index on: `community_reports` has no `coach_id`, and the policy added
+--   in part 3410 reaches the coach through
+--   `coach_board_moderates(community_report_coach(post_id, comment_id))` — a
+--   function call, which no B-tree can serve. Denormalising a coach id onto
+--   the table to make it indexable would add a second source of truth for
+--   which board a report is on, and part 3390 is an entire part about what
+--   happens when a stamped copy and the real answer drift apart.
+--
+-- · A coach mirror of `community_comments_tenant_idx` `(tenant_id)`. Comments
+--   are read by their post — `community_comments_post_idx` is
+--   `(post_id, created_at, id)` and serves that exactly, on both kinds of
+--   board, because a post id is a post id. The tenant index is for a different
+--   question nobody is asking here.
+
+-- ▶ a-curl-is-not-a-full-body-movement.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A third of the catalogue was filed as "Full body", and a curl is not.
+--
+-- `exercises.muscle_group` reads 'Full body' on 196 of 615 rows. 143 of those
+-- are `category = 'strength'` — a Barbell Preacher Curl, a Barbell Calf Raise,
+-- a Dumbbell Hip Thrust — and a group target cannot reach any of them. Asking
+-- for Arms returns 26 movements while 52 arm movements sit outside it.
+--
+-- Found on 3 Oct 2026 by a different route: Build a Workout offered "Or
+-- instead: Barbell Overhead Extension" under a calf raise, because on a
+-- full-body session the pool is the whole catalogue. That was fixed in
+-- src/lib/builtWorkout.ts by matching on `primary_muscles`, which is accurate
+-- throughout. This part fixes the column that was wrong underneath it.
+--
+-- ── How each row was placed, and why not by the catalogue's own filing ────
+--
+-- The obvious approach — take the group the catalogue already uses for each
+-- muscle — reproduces its own contradictions. It files gluteus medius under
+-- 'Core', and its 32 correctly-filed gluteus maximus rows split so evenly that
+-- the winner holds 44%. Learning the mapping from that data would have
+-- laundered the inconsistency into something that looked authoritative.
+--
+-- So the placement is by muscle, and the SECOND muscle is what separates the
+-- biggest group. 64 rows name gluteus maximus first, and they are three
+-- different things:
+--
+--   · with `quadriceps`  — squats, lunges, leg presses        → Legs
+--   · with `hamstrings`  — Romanian deadlifts, good mornings  → Hamstrings
+--   · with neither       — hip thrusts, glute bridges         → Glutes
+--
+-- The rest follow their primary muscle: triceps, biceps, brachialis and the
+-- forearms to Arms; gastrocnemius and soleus to Calves; the deltoids to
+-- Shoulders; pectoralis major to Chest; latissimus dorsi and trapezius to
+-- Back; erector spinae to Lower back; rectus abdominis and obliques to Core;
+-- hip flexors to Core, which is the one place the catalogue's own filing was
+-- followed over anatomy, because it is consistent about it (93%).
+--
+-- ── Seven rows that KEEP "Full body", because it was right ───────────────
+--
+-- The rule is wrong for movements that genuinely are whole-body, and reading
+-- the output is what caught them. A Turkish Get Up is not a shoulder exercise
+-- because its first named muscle is a deltoid, and a Back Lever is not a lower
+-- back exercise:
+--
+--   Kettlebell Turkish Get Ups · Bear Crawl · Back Lever · Crow Pose
+--   Dumbbell Farmer's Walk · Kettlebell Farmer's Walk · Heel-to-Toe Walk
+--
+-- ── What is NOT touched ──────────────────────────────────────────────────
+--
+-- The other 53 'Full body' rows: 25 stretches, 14 cardio, 8 olympic lifts, 3
+-- plyometric and 3 with no primary muscles at all (they are equipment entries
+-- — 'Cable Machine'). A clean and jerk IS full body. A rowing machine is a
+-- defensible 'Full body'. Nothing here improves them.
+--
+-- ── Reversible ───────────────────────────────────────────────────────────
+--
+-- Every row is named below with the group it moves to, so the whole part can
+-- be undone with:
+--
+--   update public.exercises set muscle_group = 'Full body'
+--    where name in (<the 136 names below>);
+--
+-- 136 rows. After this, 'Full body' holds 60.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+update public.exercises e
+   set muscle_group = v.grp
+  from (values
+    ('Barbell Overhead Extension', 'Arms'),
+    ('Barbell Preacher Curl', 'Arms'),
+    ('Barbell Wrist Curl', 'Arms'),
+    ('Bilateral Dumbbell Wrist Curl', 'Arms'),
+    ('Cable Curl', 'Arms'),
+    ('Cable Hammer Curl', 'Arms'),
+    ('Cable Tricep Kickback', 'Arms'),
+    ('Cheat Curl', 'Arms'),
+    ('Close-Grip Barbell Curl', 'Arms'),
+    ('Close-Grip Bench Press', 'Arms'),
+    ('Close-Grip Dumbbell Bench Press', 'Arms'),
+    ('Close-Grip EZ-Bar Bench Press', 'Arms'),
+    ('Close-Grip Incline Bench Press', 'Arms'),
+    ('Concentration Curl', 'Arms'),
+    ('Double Kettlebell Bicep Curl', 'Arms'),
+    ('Dumbbell Reverse Curl', 'Arms'),
+    ('Dumbbell Reverse Wrist Curl', 'Arms'),
+    ('Dumbbell Skull Crusher', 'Arms'),
+    ('Dumbbell Tricep Extension', 'Arms'),
+    ('Dumbbell Tricep Kickback', 'Arms'),
+    ('Dumbbell Wrist Curl', 'Arms'),
+    ('EZ Bar Spider Curl', 'Arms'),
+    ('EZ-Bar Lying Triceps Extension', 'Arms'),
+    ('EZ-Bar Overhead Tricep Extension', 'Arms'),
+    ('EZ-Bar Reverse Curl', 'Arms'),
+    ('EZ-Bar Wrist Curl', 'Arms'),
+    ('Incline Dumbbell Curl', 'Arms'),
+    ('Incline Hammer Curl', 'Arms'),
+    ('Kettlebell Close-Grip Floor Press', 'Arms'),
+    ('Kettlebell Concentration Curl', 'Arms'),
+    ('Kettlebell Hammer Curl', 'Arms'),
+    ('Kettlebell Overhead Tricep Extension', 'Arms'),
+    ('Kettlebell Reverse Wrist Curl', 'Arms'),
+    ('Kettlebell Skull Crusher', 'Arms'),
+    ('Kettlebell Wrist Curl', 'Arms'),
+    ('Lying Tricep Extension', 'Arms'),
+    ('Machine Preacher Curl', 'Arms'),
+    ('One Arm Kettlebell Bicep Curl', 'Arms'),
+    ('One-Arm Kettlebell Tricep Kickback', 'Arms'),
+    ('Preacher Hammer Curl', 'Arms'),
+    ('Reverse Curl', 'Arms'),
+    ('Seated Dumbbell Tricep Extension', 'Arms'),
+    ('Single Arm Tricep Pushdown', 'Arms'),
+    ('Single-Arm Dumbbell Overhead Tricep Extension', 'Arms'),
+    ('Single-Arm Hammer Curl', 'Arms'),
+    ('Skull Crusher', 'Arms'),
+    ('Strict Curl', 'Arms'),
+    ('TRX Bicep Curl', 'Arms'),
+    ('TRX Triceps Extension', 'Arms'),
+    ('V-Bar Tricep Pushdown', 'Arms'),
+    ('Chin Tuck Hold', 'Back'),
+    ('Barbell Calf Raise', 'Calves'),
+    ('Dumbbell Calf Raise', 'Calves'),
+    ('Hack Squat Calf Raise', 'Calves'),
+    ('Plate-Loaded Donkey Calf Raise', 'Calves'),
+    ('Machine Assisted Dips', 'Chest'),
+    ('L Sit', 'Core'),
+    ('Banded Clamshell', 'Glutes'),
+    ('Banded Fire Hydrant', 'Glutes'),
+    ('Banded Glute Bridge', 'Glutes'),
+    ('Banded Hip Thrust', 'Glutes'),
+    ('Banded Kneeling Hip Thrust', 'Glutes'),
+    ('Banded Lateral Walk', 'Glutes'),
+    ('Banded Seated Hip Abduction', 'Glutes'),
+    ('Banded Standing Hip Abduction', 'Glutes'),
+    ('Banded Sumo Walk', 'Glutes'),
+    ('Dumbbell Hip Thrust', 'Glutes'),
+    ('Glute Bridge Hold', 'Glutes'),
+    ('Glute Kickback Hold', 'Glutes'),
+    ('High-Foot Leg Press', 'Glutes'),
+    ('Kettlebell Hip Thrust', 'Glutes'),
+    ('Pilates Kneeling Side Kick', 'Glutes'),
+    ('Plate-Loaded Glute Drive', 'Glutes'),
+    ('Reverse Tabletop Hip Pulses', 'Glutes'),
+    ('Single-Leg Glute Bridge Hold', 'Glutes'),
+    ('Smith Machine Hip Thrust', 'Glutes'),
+    ('Stability Ball Hip Bridge', 'Glutes'),
+    ('Banded Good Morning', 'Hamstrings'),
+    ('Banded Romanian Deadlift', 'Hamstrings'),
+    ('EZ-Bar Romanian Deadlift', 'Hamstrings'),
+    ('Kettlebell Swing', 'Hamstrings'),
+    ('One Arm Kettlebell Swing', 'Hamstrings'),
+    ('One-Arm Dumbbell Swing', 'Hamstrings'),
+    ('One-Arm Single-Leg Dumbbell Romanian Deadlift', 'Hamstrings'),
+    ('One-Arm Single-Leg Kettlebell Romanian Deadlift', 'Hamstrings'),
+    ('Smith Machine Good Morning', 'Hamstrings'),
+    ('Warrior III', 'Hamstrings'),
+    ('Banded Squat', 'Legs'),
+    ('Barbell Reverse Lunge', 'Legs'),
+    ('Bodyweight Reverse Lunge', 'Legs'),
+    ('Chair Pose', 'Legs'),
+    ('Cossack Squat', 'Legs'),
+    ('Crescent Lunge', 'Legs'),
+    ('Dancer Pose', 'Legs'),
+    ('Dumbbell Front Squat', 'Legs'),
+    ('Dumbbell Lunge', 'Legs'),
+    ('Dumbbell Pistol Squat', 'Legs'),
+    ('Dumbbell Somersault Squat', 'Legs'),
+    ('Dumbbell Split Squat', 'Legs'),
+    ('Dumbbell Squat', 'Legs'),
+    ('Dumbbell Sumo Squat', 'Legs'),
+    ('Eagle Pose', 'Legs'),
+    ('Extended Side Angle Pose', 'Legs'),
+    ('Heel-Elevated Squat', 'Legs'),
+    ('Horizontal Leg Press', 'Legs'),
+    ('Kettlebell Bulgarian Split Squat', 'Legs'),
+    ('Kettlebell Goblet Lunge', 'Legs'),
+    ('Kettlebell Lunge Press', 'Legs'),
+    ('Kettlebell Offset Reverse Lunge and Press', 'Legs'),
+    ('Kettlebell Reverse Lunge', 'Legs'),
+    ('Kettlebell Rotational Lunge', 'Legs'),
+    ('Kettlebell Sumo Deadlift', 'Legs'),
+    ('Kettlebell Windmills', 'Legs'),
+    ('Lunge', 'Legs'),
+    ('One Arm Kettlebell Front Squat', 'Legs'),
+    ('Pause Squat', 'Legs'),
+    ('Pistol Squat', 'Legs'),
+    ('Reverse Lunge', 'Legs'),
+    ('Side Lunge', 'Legs'),
+    ('Single Leg Press', 'Legs'),
+    ('Smith Machine Bulgarian Split Squat', 'Legs'),
+    ('Smith Machine Front Squat', 'Legs'),
+    ('Smith Machine Reverse Lunge', 'Legs'),
+    ('Smith Machine Split Squat', 'Legs'),
+    ('Split Squat', 'Legs'),
+    ('Stability Ball Wall Squat', 'Legs'),
+    ('Step Ups', 'Legs'),
+    ('Sumo Squat', 'Legs'),
+    ('Tree Pose', 'Legs'),
+    ('TRX Lunge', 'Legs'),
+    ('TRX Pistol Squat', 'Legs'),
+    ('TRX Squat', 'Legs'),
+    ('Wall Sit', 'Legs'),
+    ('Warrior I', 'Legs'),
+    ('Warrior II', 'Legs'),
+    ('Dumbbell Windmill', 'Shoulders')
+  ) as v(nm, grp)
+ where e.name = v.nm
+   and e.muscle_group = 'Full body'
+   and e.category = 'strength';
+
+-- ▶ the-one-fact-an-online-coach-needed-the-page-to-carry.sql
+
+-- A coach who works online could not say so on their own public page.
+--
+-- ── what the page carried, and what it implied ────────────────────────────
+--
+-- `public_coach_page` returned a name, a tagline, a bio, specialties, offers,
+-- a SESSION FEE, a join code and a review aggregate. Nothing in that list says
+-- where coaching happens, and a stranger reading a per-session price with no
+-- mention of distance reasonably concludes they have to turn up somewhere.
+--
+-- For a coach who works online that is the whole proposition inverted. Not
+-- being limited to the people who can reach a particular gym is the thing they
+-- put at the top of every post they write, and the one address in this product
+-- they can put in a bio could not carry it.
+--
+-- ── null stays null, and is not rendered ──────────────────────────────────
+--
+-- `trainers.delivery_mode` is nullable and most rows are null: a coach who has
+-- never been asked, one who skipped the question, one whose write did not land.
+-- None of those is "in person". This returns the column exactly as it stands
+-- and src/lib/publicProfile.ts prints nothing for null, because a page that
+-- defaulted would be inventing a fact about somebody's business on a crawlable
+-- URL that search engines keep.
+--
+-- It is the coach's OWN declaration and never the derived shape in
+-- src/lib/coachDelivery.ts. That one widens when a roster read fails, which is
+-- right for deciding what to put away inside the coach's app and wrong for a
+-- claim published under their name: a page may only say what the coach said.
+--
+-- ── everything else about this function is unchanged ──────────────────────
+--
+-- Same arguments, same security definer, same pinned search_path, same row
+-- filter (a coach who has BOTH opted into the directory and asked for a page),
+-- and the same grants re-stated below. It is one more output column; the order
+-- of the existing ones is untouched because web/coach.html reads them by name.
+
+-- ── why a drop, and not just a replace ────────────────────────────────────
+--
+-- Adding an output column changes the row type a set-returning function
+-- declares, and Postgres refuses that under `create or replace`: "cannot change
+-- return type of existing function". So it is dropped first. The drop takes the
+-- grants with it, which is exactly why the revoke-and-grant at the foot of this
+-- file is not optional bookkeeping — without it the function would come back
+-- executable by PUBLIC, and `anon` is in PUBLIC.
+drop function if exists public.public_coach_page(text);
+
+create or replace function public.public_coach_page(p_handle text)
+returns table (
+  display_name text,
+  brand_color  text,
+  tagline      text,
+  bio          text,
+  specialties  text[],
+  offers       text[],
+  session_fee  numeric,
+  currency     text,
+  join_code    text,
+  rating_count integer,
+  rating_sum   integer,
+  credentials  jsonb,
+  delivery_mode text
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+  select
+    coalesce(nullif(btrim(coalesce(t.brand_name, '')), ''),
+             nullif(btrim(coalesce(p.full_name,  '')), '')),
+    t.brand_color,
+    nullif(btrim(coalesce(t.tagline, '')), ''),
+    nullif(btrim(coalesce(t.bio, '')), ''),
+    t.specialties,
+    t.offers,
+    case when t.session_fee is not null and t.session_fee > 0 then t.session_fee end,
+    cc.currency,
+    nullif(btrim(coalesce(t.join_code, '')), ''),
+    coalesce(r.n, 0),
+    coalesce(r.s, 0),
+    coalesce(c.items, '[]'::jsonb),
+    -- Only the three the app can set. Anything else is treated as not said,
+    -- which is the same answer src/lib/publicProfile.ts gives for a value it
+    -- does not recognise, so the two cannot drift into disagreeing.
+    case when t.delivery_mode in ('online', 'inperson', 'hybrid') then t.delivery_mode end
+  from public.trainers t
+  left join public.profiles p  on p.id  = t.id
+  -- The coach's currency, in the order src/lib/currencySource.ts shows them.
+  -- `profiles.tenant_id`, NOT `trainers.tenant_id` — part 711 leaves the latter
+  -- pointing at a gym the coach has left, and part 941 is the same correction
+  -- made in `issue_coach_invoice()`.
+  left join lateral (
+    select nullif(upper(btrim(coalesce(
+             case when pr.tenant_id is not null
+                  then (select tn.currency from public.tenants tn where tn.id = pr.tenant_id)
+                  else t.currency
+             end, ''))), '') as currency
+      from public.profiles pr
+     where pr.id = t.id
+  ) cc on true
+  left join lateral (
+    select count(*)::int as n, sum(v.rating)::int as s
+      from public.coach_reviews v
+     where v.coach_id = t.id
+       and v.withdrawn_at is null
+  ) r on true
+  left join lateral (
+    select jsonb_agg(
+             jsonb_build_object(
+               'kind',       k.kind,
+               'title',      k.title,
+               'issuer',     nullif(btrim(coalesce(k.issuer, '')), ''),
+               'reference',  nullif(btrim(coalesce(k.reference, '')), ''),
+               'expires_on', k.expires_on)
+             order by k.kind, k.title) as items
+      from public.coach_credentials k
+     where k.coach_id = t.id
+       and k.verification = 'self_declared'
+       and (k.expires_on is null or k.expires_on >= current_date)
+  ) c on true
+ where t.listed = true
+   and t.public_page = true
+   and t.public_handle is not null
+   and t.public_handle = lower(btrim(coalesce(p_handle, '')));
+$function$;
+
+-- Re-stated because `create or replace` grants EXECUTE to PUBLIC, which includes
+-- anon. This function is one of exactly two deliberate anon entry points in this
+-- database — scripts/check-grants.mjs names both — so the revoke-then-grant is
+-- what keeps that list true rather than accidental.
+revoke execute on function public.public_coach_page(text) from public;
+grant execute on function public.public_coach_page(text) to anon, authenticated;
+
+-- ▶ a-week-with-nothing-logged-said-by-something-that-is-awake.sql
+
+-- A week with nothing logged, said by something that is awake.
+--
+-- ── the notification that was true when it was armed ──────────────────────
+--
+-- 14 Oct 2026, 19:00, on the owner's own handset: "It has been a week —
+-- Nothing logged for 17 days." He had logged a cycling session that morning,
+-- in the app, at 04:02. `workouts.logged_by` is null on that row, which is
+-- what self-logged means here.
+--
+-- The sentence was correct when it was armed and false when it was delivered,
+-- and src/ui/motivationNudges.tsx now re-plans whenever the log moves. That
+-- narrows the window to "the app was not opened in between" and cannot close
+-- it, because a local notification cannot re-read anything when it fires.
+-- src/lib/motivationNudge.ts has said so since it was written:
+--
+--     "They do NOT reach somebody who has not opened the app for a week, and
+--      that is the case a 'you have not trained in a week' nudge most wants to
+--      reach. Closing that needs a server."
+--
+-- This is that server.
+--
+-- ── why this needed a seventh channel rather than an existing one ─────────
+--
+-- src/lib/notifyDispatch.ts states the rule: "an unclassified route is a kind
+-- that silently never pushes". A notification whose route maps to no channel
+-- lands in the in-app list and stops there, so shipping this against `null`
+-- would have been the bug unfixed, dressed as fixed.
+--
+-- None of the six fitted. A nudge about your own training is not a client
+-- message, a booking, money, paperwork, or the coach's own book — and riding
+-- one of them means one switch mutes two unrelated things. `/(client)/workouts`
+-- was already taken: part 3350 maps it to 'clients' for a coach's answer to a
+-- filmed set.
+--
+-- So: a 'training' channel, and the route is '/(client)/consistency' — which
+-- is both free and the right screen to land on, being the one that shows the
+-- weeks with nothing in them.
+--
+-- It is a COACH channel as well as a member one, because coaches train too:
+-- my-training, my-progress and my-nutrition are their own screens, and a quiet
+-- week is the same fact about whoever it is said to. That also keeps
+-- `MemberChannel` a subset of `CoachChannel`, which is what src/lib's notify
+-- modules are written against.
+--
+-- ── when it fires, and the fact that decided it ───────────────────────────
+--
+-- Hourly at :55, which is clear of the six passes already scheduled (:12, :19,
+-- :26, :33, :40, :48 — part 1890). The work is gated by `claim_notice_pass`,
+-- which is part 1890's machinery and does two things in one statement: it is
+-- only true when it is the intended hour in THAT PERSON'S zone, and it claims
+-- the person for the UTC day so two ticks racing cannot both send.
+--
+-- The hour passed in is 15. Measured on the live database before choosing it:
+--
+--     members 16 · with a stored zone 0 · ever trained 4 · quiet >= 7 days 3
+--
+-- Not one member has a zone today, so `notice_hour_due` falls to its no-zone
+-- branch and every one of them gets the exact UTC hour. 15:00 UTC is 19:00 in
+-- Asia/Dubai, which is where this product's members are and which is the same
+-- EVENING_HOUR src/ui/motivationNudges.tsx uses on the handset. A member who
+-- later sets quiet hours acquires a zone and moves to their own 19:00-21:00,
+-- with no change here.
+--
+-- Blast radius on the first tick is three people.
+--
+-- ── what it refuses to say ────────────────────────────────────────────────
+--
+-- Nothing to somebody who has never logged anything. "It has been a week" to a
+-- member who has not started is not a nudge, it is a stranger's assumption,
+-- and src/lib/motivationNudge.ts already refuses it — `Infinity` is "not a
+-- quiet week" there rather than a very long one. The `exists` clause below is
+-- that same refusal.
+--
+-- Nothing after ninety days. Past that a member has not lapsed, they have
+-- left, and a cheerful note about a short session counting is the app not
+-- having noticed.
+--
+-- Not twice in a week. The claim stops a second send the same day; the
+-- `not exists` on the last seven days of this route is what stops it becoming
+-- a daily one. That is the nagging this family of notifications refuses, in
+-- part 612's words.
+--
+-- The member's own switch is honoured without this file doing anything: the
+-- row carries the route, part 900's dispatcher derives 'training' from it
+-- through `notification_channel` below, and send-push applies the switch and
+-- the quiet hours. This part cannot route around either, which is the point of
+-- writing a row rather than calling the sender.
+
+-- ── 1 · the channel vocabulary, widened in both places that police it ─────
+--
+-- Both constraints list the channels by value, so a 'training' row would be
+-- refused by the first and a 'training' preference by the second. Dropped and
+-- re-added rather than altered, which is how a CHECK is changed.
+alter table public.notifications
+  drop constraint if exists notifications_channel_chk;
+alter table public.notifications
+  add constraint notifications_channel_chk
+  check (channel is null or channel = any (array['chat','bookings','money','clients','admin','book','training']));
+
+alter table public.notify_channel_prefs
+  drop constraint if exists notify_channel_prefs_channel_chk;
+alter table public.notify_channel_prefs
+  add constraint notify_channel_prefs_channel_chk
+  check (channel = any (array['chat','bookings','money','clients','admin','book','training']));
+
+-- ── 2 · the route map, taken from the live database and added to ──────────
+--
+-- The body below is `pg_get_functiondef` output with exactly one line added.
+-- Written that way on purpose: a previous part in this repository was
+-- hand-typed from an older copy and silently dropped a `verification =
+-- self_declared` clause, which would have published credentials nobody had
+-- declared. Thirty-seven routes in, thirty-eight out, checked.
+
+create or replace function public.notification_channel(p_route text, p_title text)
+returns text
+language plpgsql
+immutable
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  r text := split_part(btrim(coalesce(p_route, '')), '?', 1);
+  t text := btrim(coalesce(p_title, ''));
+begin
+  if r <> '' then
+    return case r
+      when '/(client)/messages'         then 'chat'
+      when '/(trainer)/chat'            then 'chat'
+
+      when '/(trainer)/calendar'        then 'bookings'
+      when '/(client)/calendar'         then 'bookings'
+      when '/(client)/bookings'         then 'bookings'
+      when '/(client)/pt-sessions'      then 'bookings'
+      when '/(client)/classes'          then 'bookings'
+      when '/(client)/request-session'  then 'bookings'
+      when '/(trainer)/sessions'        then 'bookings'
+
+      when '/(trainer)/payments'        then 'money'
+      when '/(client)/packages'         then 'money'
+      when '/(client)/explore'          then 'money'
+      when '/(client)/offers'           then 'money'
+
+      when '/(trainer)/dashboard'       then 'clients'
+      when '/(trainer)/leads'           then 'clients'
+      when '/(trainer)/client-goals'    then 'clients'
+      when '/(trainer)/client-training' then 'clients'
+      when '/(trainer)/client-photos'   then 'clients'
+      when '/(client)/my-coach'         then 'clients'
+      when '/(client)/trainers'         then 'clients'
+      when '/(client)/assessments'      then 'clients'
+      when '/(client)/community'        then 'clients'
+      when '/(trainer)/community'       then 'clients'
+      when '/(owner)/community'         then 'clients'
+      when '/(trainer)/checkins'        then 'clients'
+      when '/(client)/workouts'         then 'clients'
+
+      when '/(trainer)/documents'       then 'admin'
+      when '/(trainer)/client-intake'   then 'admin'
+      when '/(trainer)/credentials'     then 'admin'
+      when '/(client)/intake'           then 'admin'
+      when '/(client)/injuries'         then 'admin'
+
+      when '/(client)/consistency'      then 'training'
+
+      when '/(trainer)/invoices'        then 'book'
+      when '/(trainer)/nudges'          then 'book'
+      when '/(trainer)/builder'         then 'book'
+
+      else null
+    end;
+  end if;
+
+  return case t
+    when 'An invoice from your gym'        then 'money'
+    when 'Your coaching has ended'         then 'clients'
+    when 'A client has signed the release' then 'admin'
+    else null
+  end;
+end
+$function$;
+
+-- No revokes re-stated. `create or replace` keeps the grants a function
+-- already has, parts 900 and 1870 already revoked this one from public, anon
+-- and authenticated, and part 3390 — the previous part to redefine it — states
+-- none for the same reason. There is a second reason too:
+-- scripts/check-notify-routes.mjs finds the definition by searching a part
+-- for the LAST mention of this routine's qualified name, so anything after
+-- the body carrying that name again — a revoke, or a comment like this one
+-- spelling it out — makes the gate read that instead and classify no routes
+-- at all. Which it did, twice, while this part was being written.
+
+-- ── 3 · the pass ──────────────────────────────────────────────────────────
+
+create or replace function public.run_quiet_week_nudges()
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_due  uuid[];
+  v_sent int := 0;
+  r      record;
+begin
+  -- Who is due THIS tick. `claim_notice_pass` is part 1890's: it keeps only
+  -- the people for whom it is currently the intended local hour, and claims
+  -- each of them for the UTC day in the same statement, so a second tick in
+  -- the same hour finds nothing left to do.
+  select public.claim_notice_pass(
+           'quiet-week',
+           coalesce(array_agg(c.id), '{}'::uuid[]),
+           15)
+    into v_due
+    from public.clients c
+   where exists (select 1 from public.workouts w where w.user_id = c.id)
+     and (select max(w.performed_at) from public.workouts w where w.user_id = c.id)
+           between now() - interval '90 days' and now() - interval '7 days';
+
+  for r in
+    select c.id,
+           (select max(w.performed_at) from public.workouts w where w.user_id = c.id) as last_at
+      from public.clients c
+     where c.id = any(coalesce(v_due, '{}'::uuid[]))
+  loop
+    -- Re-checked rather than trusted from the claim. The claim was made
+    -- against a set gathered at the top of this function; a member who logged
+    -- a session in the seconds since is no longer quiet, and telling them
+    -- otherwise is the exact defect this whole part is about.
+    if r.last_at is null or r.last_at > now() - interval '7 days' then
+      continue;
+    end if;
+
+    -- Not twice in a week. See the header.
+    if exists (
+      select 1
+        from public.notifications n
+       where n.user_id = r.id
+         and n.route = '/(client)/consistency'
+         and n.created_at > now() - interval '7 days'
+    ) then
+      continue;
+    end if;
+
+    -- The same words the handset uses, so a member who gets one from each
+    -- source over a fortnight is not reading two different apps. Sentence
+    -- case: src/lib/motivationNudge.ts says "it is a notification title, not a
+    -- label", and every other row in this table is written the same way.
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.id,
+      'It has been a week',
+      'Nothing logged for ' || greatest(1, (current_date - r.last_at::date))
+        || ' days. A short session counts. It is the coming back that matters.',
+      'train',
+      '/(client)/consistency');
+
+    v_sent := v_sent + 1;
+  end loop;
+
+  return v_sent;
+end $fn$;
+
+revoke all on function public.run_quiet_week_nudges() from public, anon, authenticated;
+
+comment on function public.run_quiet_week_nudges() is
+  'Writes one "it has been a week" notification per member who has trained before, whose last session was between seven and ninety days ago, for whom it is currently the intended local hour, and who has not had this notification in the last seven days. Returns how many were written. The push, the channel switch and the quiet hours are all part 900''s dispatcher and send-push; this writes a row and nothing else.';
+
+-- ── 4 · hourly, on a minute nothing else uses ─────────────────────────────
+select cron.unschedule('quiet-week-nudges')
+ where exists (select 1 from cron.job where jobname = 'quiet-week-nudges');
+
+select cron.schedule('quiet-week-nudges', '55 * * * *', $cron$select public.run_quiet_week_nudges();$cron$);
+
 -- ▶ a-session-the-coach-ran-is-one-workout-in-the-clients-record.sql
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -74576,90 +75888,8 @@ grant execute on function public.finish_coach_session(uuid, uuid, uuid, jsonb, i
 revoke all on function public.derived_workout_uid(uuid, timestamptz) from public, anon;
 grant execute on function public.derived_workout_uid(uuid, timestamptz) to authenticated;
 
--- ── §2 · notification_channel learns the routes CHANNEL_BY_ROUTE already has ─
---
--- Part 3320's body plus two routes. src/lib/notifyDispatch.ts classified
--- '/(client)/workouts' and '/(trainer)/checkins' as 'clients'; this function
--- did not, so part 3350's form-check answer and part 3340's check-in reached
--- the bell and never a phone — and so would the push above. Now the SQL and
--- the TS table name the same 34 routes.
-
--- Revoked first: the function exists already (part 3320), and the case body
--- stays the last thing in this file that names it, which is what
--- scripts/check-notify-routes.mjs reads.
-revoke all on function public.notification_channel(text, text) from public;
-revoke all on function public.notification_channel(text, text) from anon;
-revoke all on function public.notification_channel(text, text) from authenticated;
-
-create or replace function public.notification_channel(p_route text, p_title text)
-returns text
-language plpgsql
-immutable
-set search_path to 'public', 'pg_temp'
-as $function$
-declare
-  r text := split_part(btrim(coalesce(p_route, '')), '?', 1);
-  t text := btrim(coalesce(p_title, ''));
-begin
-  if r <> '' then
-    return case r
-      when '/(client)/messages'         then 'chat'
-      when '/(trainer)/chat'            then 'chat'
-
-      when '/(trainer)/calendar'        then 'bookings'
-      when '/(client)/calendar'         then 'bookings'
-      when '/(client)/bookings'         then 'bookings'
-      when '/(client)/pt-sessions'      then 'bookings'
-      when '/(client)/classes'          then 'bookings'
-      when '/(client)/request-session'  then 'bookings'
-      when '/(trainer)/sessions'        then 'bookings'
-
-      when '/(trainer)/payments'        then 'money'
-      when '/(client)/packages'         then 'money'
-      when '/(client)/explore'          then 'money'
-      when '/(client)/offers'           then 'money'
-
-      when '/(trainer)/dashboard'       then 'clients'
-      when '/(trainer)/leads'           then 'clients'
-      when '/(trainer)/client-goals'    then 'clients'
-      when '/(trainer)/client-training' then 'clients'
-      when '/(trainer)/client-photos'   then 'clients'
-      when '/(client)/my-coach'         then 'clients'
-      when '/(client)/trainers'         then 'clients'
-      -- Part 3320.
-      when '/(client)/assessments'      then 'clients'
-      when '/(client)/community'        then 'clients'
-      when '/(trainer)/community'       then 'clients'
-      when '/(owner)/community'         then 'clients'
-
-      -- Part 3460: a coach-run session landed in the record (finish_coach_session); also part 3350's form-check answer, which CHANNEL_BY_ROUTE already classified and this function did not.
-      when '/(client)/workouts'      then 'clients'
-      -- Part 3460: part 3340's weekly check-in, classified in CHANNEL_BY_ROUTE and missing here.
-      when '/(trainer)/checkins'     then 'clients'
-
-      when '/(trainer)/documents'       then 'admin'
-      when '/(trainer)/client-intake'   then 'admin'
-      when '/(trainer)/credentials'     then 'admin'
-      when '/(client)/intake'           then 'admin'
-      when '/(client)/injuries'         then 'admin'
-
-      when '/(trainer)/invoices'        then 'book'
-      when '/(trainer)/nudges'          then 'book'
-      when '/(trainer)/builder'         then 'book'
-
-      -- '/(client)/notices' stays deliberately unclassified; see part 1870.
-      else null
-    end;
-  end if;
-
-  return case t
-    when 'An invoice from your gym'        then 'money'
-    when 'Your coaching has ended'         then 'clients'
-    when 'A client has signed the release' then 'admin'
-    else null
-  end;
-end
-$function$;
+-- notification_channel: not redefined. Live already classifies /(client)/workouts and
+-- /(trainer)/checkins (migration fix_notification_channel_and_coach_board).
 
 -- ▶ a-scan-that-moves-the-targets-says-so.sql
 
@@ -74761,26 +75991,33 @@ revoke all on function public.scan_targets_changed(uuid, int, int, int, int, tex
 revoke all on function public.scan_targets_changed(uuid, int, int, int, int, text, boolean) from anon;
 grant execute on function public.scan_targets_changed(uuid, int, int, int, int, text, boolean) to authenticated;
 
--- ── notification_channel learns the two nutrition routes this part writes ──
---
--- Part 3320's body plus the routes CHANNEL_BY_ROUTE (src/lib/notifyDispatch.ts)
--- classifies and this function did not: the two this part's notifications use,
--- and the two part 3460 adds. Without them part 900's dispatcher drops each
--- row's push and the notification reaches only the in-app bell.
+-- ▶ 3470b-the-two-routes-part-3470-writes.sql
 
--- Revoked first: the function exists already (part 3320), and the case body
--- stays the last thing in this file that names it, which is what
--- scripts/check-notify-routes.mjs reads.
+-- ═══════════════════════════════════════════════════════════════════════════
+-- THE TWO ROUTES PART 3470 WRITES, TAUGHT TO notification_channel
+--
+-- Part 3470's notifications use '/(client)/nutrition' and
+-- '/(trainer)/client-nutrition'. notification_channel did not classify
+-- either, so part 900's dispatcher dropped the push and the row reached only
+-- the bell. This is part 3450's definition, unchanged, plus those two routes
+-- ('clients', the member's coaching relationship — the same switch as a
+-- check-in). Applied to production 2026-10-15 as migration
+-- p3470b_notification_channel_nutrition_routes.
+--
+-- Revoked first: the function exists already, and the case body stays the
+-- last thing in this file that names it (scripts/check-notify-routes.mjs).
+-- ═══════════════════════════════════════════════════════════════════════════
+
 revoke all on function public.notification_channel(text, text) from public;
 revoke all on function public.notification_channel(text, text) from anon;
 revoke all on function public.notification_channel(text, text) from authenticated;
 
-create or replace function public.notification_channel(p_route text, p_title text)
-returns text
-language plpgsql
-immutable
-set search_path to 'public', 'pg_temp'
-as $function$
+CREATE OR REPLACE FUNCTION public.notification_channel(p_route text, p_title text)
+ RETURNS text
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
 declare
   r text := split_part(btrim(coalesce(p_route, '')), '?', 1);
   t text := btrim(coalesce(p_title, ''));
@@ -74810,19 +76047,15 @@ begin
       when '/(trainer)/client-photos'   then 'clients'
       when '/(client)/my-coach'         then 'clients'
       when '/(client)/trainers'         then 'clients'
-      -- Part 3320.
       when '/(client)/assessments'      then 'clients'
       when '/(client)/community'        then 'clients'
       when '/(trainer)/community'       then 'clients'
       when '/(owner)/community'         then 'clients'
+      when '/(trainer)/checkins'        then 'clients'
+      when '/(client)/workouts'         then 'clients'
 
-      -- Part 3470: carried from part 3460 (and 3350's form-check answer), so whichever of the two lands last keeps both.
-      when '/(client)/workouts'      then 'clients'
-      -- Part 3470: carried from part 3460 (part 3340's check-in).
-      when '/(trainer)/checkins'     then 'clients'
-      -- Part 3470: scan_targets_changed tells the member their targets moved, or went to their coach.
-      when '/(client)/nutrition'     then 'clients'
-      -- Part 3470: scan_targets_changed asks the coach to review targets a new scan suggests.
+      -- Part 3470: a scan moved the member's targets / asks the coach to review them.
+      when '/(client)/nutrition'        then 'clients'
       when '/(trainer)/client-nutrition' then 'clients'
 
       when '/(trainer)/documents'       then 'admin'
@@ -74831,11 +76064,12 @@ begin
       when '/(client)/intake'           then 'admin'
       when '/(client)/injuries'         then 'admin'
 
+      when '/(client)/consistency'      then 'training'
+
       when '/(trainer)/invoices'        then 'book'
       when '/(trainer)/nudges'          then 'book'
       when '/(trainer)/builder'         then 'book'
 
-      -- '/(client)/notices' stays deliberately unclassified; see part 1870.
       else null
     end;
   end if;
