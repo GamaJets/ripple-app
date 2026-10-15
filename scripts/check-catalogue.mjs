@@ -69,7 +69,7 @@
 //     seeded and no part mentions them.
 //   · anything conditional. A `where` clause more interesting than the ones
 //     below, a `do $$` block, a trigger, a partial index — none of it is
-//     modelled. The four statement shapes it understands are listed in
+//     modelled. The five statement shapes it understands are listed in
 //     `replay()`; a part using a fifth trips invariant 4 and has to be taught.
 //   · CONTENT. Whether a description reads well, whether an image path
 //     resolves, whether met is plausible. It checks identity and reachability
@@ -99,6 +99,7 @@ const WRITERS = [
   { file: '75-retire-superseded-exercises.sql' },
   { file: '76-catalogue-dedupe-rekey.sql' },
   { file: '2260-a-fresh-database-would-have-built-a-different-catalogue.sql' },
+  { file: '3430-a-curl-is-not-a-full-body-movement.sql' },
 ];
 
 const problems = [];
@@ -130,7 +131,7 @@ if (problems.length) fail();
 
 // ── Replay ────────────────────────────────────────────────────────────────
 //
-// The four statement shapes the parts use, and nothing else:
+// The five statement shapes the parts use, and nothing else:
 //
 //   A. insert into public.exercises … values (…) on conflict (id) do nothing
 //      / do update  — reads the first two columns of each row, which are
@@ -141,6 +142,21 @@ if (problems.length) fail();
 //   C. delete … where source is distinct from 'repdb' and id not in (protected)
 //      — part 75.
 //   D. delete from public.exercises where id in ('a','b',…)  — parts 76, 2260.
+//
+//   E. update public.exercises set muscle_group = v.grp from (values …) as
+//      v(nm, grp) where e.name = v.nm …  — part 3430's 136 regroupings.
+//      DELIBERATELY NOT MODELLED, and declared so that invariant 4 stays
+//      satisfied without pretending otherwise: the replay carries id, name and
+//      source, and nothing in it is a `muscle_group`. The statement creates no
+//      row, removes none, renames none and restamps none, so every invariant
+//      below reads exactly the same with it as without it.
+//
+//      What that leaves uncovered is worth saying rather than implying: nothing
+//      here checks that a movement's group is RIGHT, or even that it is one of
+//      the eleven. If part 3430 had written 'Legz' this file would be silent.
+//      The guard for that is the column's own check constraint, if one is ever
+//      added, and until then the SELECT that was run against production when
+//      the part was applied.
 //
 // plus part 76's rekey-by-slug, which is shaped like B but computed, and the
 // `source` rewrites in 75 and 2260, which change no ids and are modelled only

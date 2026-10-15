@@ -214,7 +214,7 @@ export interface MemberChannelDef {
 }
 
 /** The subset of `CoachChannel` a member can actually be a recipient on. */
-export type MemberChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin';
+export type MemberChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin' | 'training';
 
 /**
  * The five, and why there are five rather than six.
@@ -249,6 +249,19 @@ export const MEMBER_CHANNELS: readonly MemberChannelDef[] = [
   {
     key: 'admin', title: 'Forms And Paperwork', wholeChannel: false,
     note: 'An intake form to fill in, an injury your coach has asked you to add, and a document to sign.',
+  },
+  {
+    // Added 15 Oct 2026 with the server-side quiet-week pass. `wholeChannel`
+    // is false for the reason the others are: a handset can still send
+    // something about training without naming a channel, and this switch stops
+    // the server's sends rather than every send there could ever be.
+    //
+    // On by default, like the rest — `DEFAULT_NOTIFY_PREFS.off` is `{}` and a
+    // channel is off only once it is in there. That is the owner's decision
+    // and it is the one a member can undo in one tap, which is more than the
+    // local nudge ever offered them from a server they could not see.
+    key: 'training', title: 'Your Training', wholeChannel: false,
+    note: 'A week with nothing logged, and a streak about to break.',
   },
 ];
 
