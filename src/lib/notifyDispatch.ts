@@ -190,6 +190,11 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // under a bar belongs to it rather than to the chat thread it did not
   // travel through.
   ['/(client)/workouts', 'clients'],
+  // Part 3470: a new InBody scan moved the member's targets (or sent them to
+  // their coach), and the coach's half — targets a scan suggests, to review.
+  // Their coaching relationship, the same switch as a check-in.
+  ['/(client)/nutrition', 'clients'],
+  ['/(trainer)/client-nutrition', 'clients'],
   // Part 3320: a coach's assessment of a client, and the community board's
   // replies and reports, written by triggers.
   ['/(client)/assessments', 'clients'],

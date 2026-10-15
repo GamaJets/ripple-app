@@ -343,6 +343,9 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // document or a figure. The bell would say "we have no idea what this is"
   // over the most personal thing a client writes.
   ['/(trainer)/checkins', 'heart'],
+  // Part 3470: targets an InBody scan moved, on both sides.
+  ['/(client)/nutrition', 'sparkle'],
+  ['/(trainer)/client-nutrition', 'sparkle'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -916,6 +919,24 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     when: 'a client fills in their weekly check-in (an insert on check_ins), and they have a coach',
     to: 'trainer', title: 'A client has sent a check-in',
     route: '/(trainer)/checkins?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
+  },
+  {
+    where: 'supabase/parts/3470 · scan_targets_changed (proposed, coach)',
+    when: 'a client with a coach saves an InBody scan that suggests new targets',
+    to: 'trainer', title: 'New InBody scan: targets to review',
+    route: '/(trainer)/client-nutrition?clientId=00000000-0000-0000-0000-000000000000', icon: 'sparkle',
+  },
+  {
+    where: 'supabase/parts/3470 · scan_targets_changed (proposed, member)',
+    when: 'the same scan, told to the member whose coach now reviews it',
+    to: 'client', title: 'Your scan went to your coach',
+    route: '/(client)/nutrition', icon: 'sparkle',
+  },
+  {
+    where: 'supabase/parts/3470 · scan_targets_changed (applied)',
+    when: 'a member without a coach saves an InBody scan and their targets are rebuilt',
+    to: 'client', title: 'Your daily targets were updated',
+    route: '/(client)/nutrition', icon: 'sparkle',
   },
 ];
 
