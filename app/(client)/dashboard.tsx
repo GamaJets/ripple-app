@@ -1392,6 +1392,12 @@ export default function Home() {
               tabs already (owner, 21 Sep 2026); the approved Home has no tile
               row. The third goes to whichever this client actually has: a
               session to book, a check-in to send, or their own report. */}
+          {/* InBody upload had no door on Home: it was the "Add Scan" button
+              inside the weight card on Progress, which nobody looking for
+              "InBody" or "upload" would read as theirs. `add=inbody` opens
+              the upload sheet directly; `at` makes every tap open it again. */}
+          <ListRow icon="progress" tone="teal" title="Upload InBody Scan" note="Snap your printout and the numbers are read for you"
+            onPress={() => router.push({ pathname: '/(client)/scans', params: { add: 'inbody', at: String(Date.now()) } } as any)} />
           <ListRow icon="moon" tone="purple" title="Sleep" note="Last night and how recovered you are"
             onPress={() => router.push('/(client)/recovery')} />
           {booksSessions ? (

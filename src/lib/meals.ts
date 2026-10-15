@@ -6,6 +6,7 @@
 //
 // Pure & UI-free: identical on client and server, trivially unit-testable. The RN
 // screens render these objects; they never reimplement the math.
+import type { ScanBody } from './scanTargets';
 import type { Diet, BodyStats } from './types';
 import { macrosFor, applyCoachAdjust, type CoachAdjust } from './nutrition';
 import type { EnergyPlan } from './goalEnergy';
@@ -815,7 +816,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
 }
 
 // ── Client shape the planner needs (subset of the full client) ──
-export interface PlanInput extends BodyStats {
+export interface PlanInput extends BodyStats, ScanBody {
   id: string;
   weightKg: number;          // latest weight (also used to seed)
   mealsPerDay: 3 | 4 | 5;

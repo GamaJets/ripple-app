@@ -4,6 +4,7 @@
 import type { BodyStats, Macros, Goal, Diet } from './types';
 import { planKcal, type EnergyPlan } from './goalEnergy';
 import { num } from './format';
+import { scanBody, type ScanBody } from './scanTargets';
 
 export const GOAL_ADJ: Record<Goal, number> = {
   fatloss: -0.20,
@@ -30,9 +31,12 @@ export const DEFICIT_PROTEIN_PER_KG_LBM = 2.2;
  * second copy of this formula living there would be one more place for the two
  * to drift apart.
  */
-export function maintenanceFor(s: Pick<BodyStats, 'weightKg' | 'bodyFatPct' | 'activity'>): { lbm: number; bmr: number; tdee: number } {
-  const lbm = s.weightKg * (1 - s.bodyFatPct / 100);
-  const bmr = 370 + 21.6 * lbm;
+export function maintenanceFor(s: Pick<BodyStats, 'weightKg' | 'bodyFatPct' | 'activity'> & ScanBody): { lbm: number; bmr: number; tdee: number } {
+  // A measured InBody figure beats a derived one: the scan's own lean body mass
+  // and its own BMR are read straight off the printout (see scanBody in
+  // ./scanTargets.ts for what counts as a believable reading). Without them this
+  // is exactly the Katch–McArdle it always was.
+  const { lbm, bmr } = scanBody(s);
   return { lbm, bmr, tdee: bmr * s.activity };
 }
 
@@ -52,7 +56,7 @@ export function maintenanceFor(s: Pick<BodyStats, 'weightKg' | 'bodyFatPct' | 'a
  * its input straight down — otherwise the meal plan and the target it is
  * scaled to would have been built from two different calorie figures.
  */
-export function macrosFor(s: BodyStats & { energyPlan?: EnergyPlan | null }): Macros {
+export function macrosFor(s: BodyStats & ScanBody & { energyPlan?: EnergyPlan | null }): Macros {
   const { lbm, bmr, tdee } = maintenanceFor(s);
   const plan = s.energyPlan && s.energyPlan.kind === 'derived' ? s.energyPlan : null;
   const kcal = plan
