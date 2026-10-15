@@ -71,6 +71,7 @@ import { useRecipeSearch, useRecipeDetail, searchRecipesOnce } from '../../src/u
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { reportError } from '../../src/lib/reportError';
 import { useWearables } from '../../src/ui/wearables';
+import { scanBodyOf, newestScan } from '../../src/lib/scanTargets';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor, macroWords } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
 // The one place the coach's adjust and the day type are folded together. The
@@ -914,7 +915,7 @@ export default function Nutrition() {
   const energyPlan = useMemo(() => energyPlanFor({
     goal: openWeightGoal,
     weightSeries: c.weightSeries,
-    tdeeKcal: maintenanceFor({ weightKg: w, bodyFatPct: bf, activity: c.activity }).tdee,
+    tdeeKcal: maintenanceFor({ weightKg: w, bodyFatPct: bf, activity: c.activity, ...scanBodyOf(newestScan(c.scans)?.metrics) }).tdee,
     nowMs: Date.now(),
   }), [openWeightGoal, c.weightSeries, w, bf, c.activity, nowHour]);
   const observedPace = observedRateKg(energyPlan);
@@ -953,8 +954,11 @@ export default function Nutrition() {
   const coachOverride = useMemo(() => (coachPlanCurrent && coachDay != null
     ? planDayOverride(coachPlan!, coachDay)
     : (coachAdjust?.mealOverride ?? {})), [coachPlanCurrent, coachDay, coachPlan, coachAdjust]);
-  const input = useMemo(() => ({ id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, dislikes: c.dislikes, energyPlan }),
-    [c.id, w, bf, c.activity, c.goal, diet, c.mealsPerDay, coachOverride, override, cyclingAdjust, c.avoid, c.dislikes, energyPlan]);
+  // The newest scan's own BMR and lean mass, so the targets and the week of
+  // meals built on them use what InBody measured rather than a formula's guess.
+  const scanFig = useMemo(() => scanBodyOf(newestScan(c.scans)?.metrics), [c.scans]);
+  const input = useMemo(() => ({ id: c.id, weightKg: w, bodyFatPct: bf, ...scanFig, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, dislikes: c.dislikes, energyPlan }),
+    [c.id, w, bf, scanFig, c.activity, c.goal, diet, c.mealsPerDay, coachOverride, override, cyclingAdjust, c.avoid, c.dislikes, energyPlan]);
   const { plan, target, tot } = useMemo(() => buildPlan(input), [input]);
   // Snacks are ideas, not plan slots: they do not move the targets or the
   // macro split above, because a snack nobody has eaten yet is not a

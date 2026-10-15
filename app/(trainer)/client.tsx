@@ -2236,6 +2236,9 @@ export default function ClientScreen() {
             ))}
             tone={scansFailed ? t.warn : 'blue'}
             onPress={go('/(trainer)/client-body')} />
+          {/* The client's InBody scans as one view — the same one they see. */}
+          <ListRow icon="trending" title="InBody Progress" note="Latest vs last and first, trends, segmental lean, compare"
+            tone="teal" onPress={go('/(trainer)/client-inbody')} />
 
           {/* Movement, strength, mobility and custom tests. The client reads
               the same rows under My Assessments. */}

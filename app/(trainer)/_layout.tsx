@@ -104,6 +104,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="client-week" options={{ href: null, title: 'Their Week' }} />
         <Tabs.Screen name="client" options={{ href: null, title: 'Client' }} />
         <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
+        <Tabs.Screen name="client-inbody" options={{ href: null, title: 'InBody Progress' }} />
         <Tabs.Screen name="assessments" options={{ href: null, title: 'Assessments' }} />
         <Tabs.Screen name="community" options={{ href: null, title: 'Coach Community' }} />
         <Tabs.Screen name="client-training" options={{ href: null, title: 'Their Training' }} />

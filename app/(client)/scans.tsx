@@ -44,7 +44,7 @@
 // there is one answer per figure and not two. The masses convert; the litres,
 // the kcal, the level and the score do not, because they are not masses, and
 // each says which it is by its own declared unit rather than by its name.
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useStickyChoice } from '../../src/ui/useStickyChoice';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
@@ -96,7 +96,9 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 // through the same module, and each figure says which instrument produced it.
 // See the header of src/lib/bodyFigures.ts for the full account.
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { scanBodyOf, scanTuning, newestScan } from '../../src/lib/scanTargets';
 import { useBrand } from '../../src/ui/brand';
 import { SharePostButton, ShareIconButton } from '../../src/ui/SharePost';
 import { progressPost, scanPost } from '../../src/lib/postCard';
@@ -351,6 +353,11 @@ export default function Scans() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const coachNutrition = useCoachNutrition();
+  // `?add=inbody` opens the upload sheet straight away — the entry points on
+  // Home, Body Trends and Measurements link here, so "Upload InBody Scan" is
+  // one tap from anywhere a member looks for it, not a CTA inside a weight card.
+  const routeParams = useLocalSearchParams<{ add?: string; at?: string }>();
   // Both units, because this screen now builds a document that carries tape
   // measurements as well as body weights. NULL on `clients.weight_unit` /
   // `length_unit` means nobody has chosen — the settings provider resolves that
@@ -736,6 +743,14 @@ export default function Scans() {
   const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const addAsked = useRef<string | null>(null);
+  useEffect(() => {
+    if (routeParams.add !== 'inbody') return;
+    const key = `${routeParams.add}:${routeParams.at ?? ''}`;
+    if (addAsked.current === key) return;
+    addAsked.current = key;
+    setShowAdd(true);
+  }, [routeParams.add, routeParams.at]);
   // The dated list under the chart shows the newest handful and offers the
   // rest behind one tap. A member with three years of monthly scans has forty
   // rows, and forty rows between the chart and everything else on this screen
@@ -937,6 +952,19 @@ export default function Scans() {
    * because the question is an Alert: the answer arrives in a callback, and the
    * save has to start again from the top with it rather than resume mid-way.
    */
+  /** Records what the scan did to the targets: a notification for the member,
+   *  and — when the coach set the targets by hand — a proposal for the coach.
+   *  See supabase/parts/3470. A failure here never un-saves the scan. */
+  const tellTargets = async (scanId: string, m: { kcal: number; protein: number; carbs: number; fat: number }, propose: boolean) => {
+    try {
+      const { error } = await supabase.rpc('scan_targets_changed', {
+        p_scan_id: scanId, p_kcal: m.kcal, p_protein: m.protein, p_carbs: m.carbs, p_fat: m.fat,
+        p_basis: scanMx?.bmr ? 'BMR from scan × activity' : 'Katch–McArdle from lean mass × activity',
+        p_propose: propose,
+      });
+      if (error) reportError('scans.targetsChanged', error);
+    } catch (e) { reportError('scans.targetsChanged', e); }
+  };
   const saveScan = async (unitSettled?: { muscleKg: number | null }) => {
     // The two weights come back as the kilograms the scan row stores, whatever
     // unit they were typed in. This is the write that used to file a client's
@@ -1014,10 +1042,13 @@ export default function Scans() {
     const isNewest = !curLatestISO || newISO >= curLatestISO;
     // Only meaningful when there was a previous body to compare against — and
     // only when the read that would have shown one actually answered.
+    const prevScan = newestScan(cd.scans);
     const before = (historyKnown && cd.weightKg != null && cd.bodyFatPct != null)
-      ? macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet })
+      ? macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet, ...scanBodyOf(prevScan?.metrics) })
       : null;
-    const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+    // The confirmed scan's OWN BMR and lean mass, when the sheet read them.
+    const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet, ...scanBodyOf(scanMx) });
+    const coachAdj = cd.coachingMode === 'solo' ? null : coachNutrition.get(cd.id);
     const pw = cd.weightKg, pf = cd.bodyFatPct;
     // Awaited, and the answer read. `addScan` returns Promise<boolean> for
     // exactly this reason and the call used to discard it, so every branch
@@ -1092,9 +1123,19 @@ export default function Scans() {
       return;
     }
     if (!before) {
+      void tellTargets(scanId, after, coachAdj ? scanTuning(null, after, coachAdj).kind === 'propose' : false);
       Alert.alert('Scan Saved', 'Your first measurements are in. Daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
       return;
     }
+    const tuning = scanTuning(before, after, coachAdj);
+    if (tuning.kind === 'propose') {
+      void tellTargets(scanId, after, true);
+      Alert.alert('Scan Saved · Sent to Your Coach',
+        'Your coach sets your targets, so they have not been changed. Your new scan suggests ' + after.kcal + ' kcal / ' + after.protein
+        + 'g protein, and your coach has been asked to review it.');
+      return;
+    }
+    if (tuning.kind === 'apply') void tellTargets(scanId, after, false);
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
@@ -1895,7 +1936,7 @@ export default function Scans() {
                 : progressMetric === 'weight' ? 'No weight on record yet. Add a check-in or an InBody scan.'
                 : 'No scans yet. Add your InBody report to start tracking.'}
               onPress={() => router.push('/(client)/body-trends')}
-              cta={{ label: latest ? 'Add Scan' : 'Add Your First Scan', onPress: () => setShowAdd(true) }}>
+              cta={{ label: latest ? 'Upload InBody Scan' : 'Upload Your First InBody Scan', onPress: () => setShowAdd(true) }}>
               {figure && scansLanded ? (
                 <View style={{ marginTop: sp.md }}>
                   <TonedChip tone={progressWas && progressGood ? 'brand' : 'neutral'} label={progressWas
@@ -2085,7 +2126,8 @@ export default function Scans() {
             Its own Add Scan button is gone: the hero's is the screen's one
             action, and two of them on one screen was the duplicate. */}
         <Section>
-          <SectionHead title={latest ? 'Latest InBody Scan' : 'Your First InBody Scan'} />
+          <SectionHead title={latest ? 'Latest InBody Scan' : 'Your First InBody Scan'}
+            onPress={() => router.push('/(client)/inbody')} />
           {/* The scan's OWN figures and the scan's OWN date. This is the one
               place on the screen whose subject really is the scan, so it may
               differ from the Weight tile below, and it says the date out loud
@@ -2096,6 +2138,12 @@ export default function Scans() {
               ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
               : 'Snap or upload your report, and the numbers are read for you.'}
           </Text>
+          {/* The scans as their own view: vs last and first, every trend,
+              segmental lean, history and compare. */}
+          <View style={{ marginTop: sp.md }}>
+            <Ghost icon="trending" label={latest ? 'InBody Progress' : 'Upload InBody Scan'}
+              onPress={() => (latest ? router.push('/(client)/inbody') : setShowAdd(true))} />
+          </View>
         </Section>
 
         {/* ── the dated list, as the board draws it under the chart ────────

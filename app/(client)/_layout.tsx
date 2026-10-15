@@ -178,6 +178,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="checkin" options={{ href: null, title: 'Weekly Check-in' }} />
       <Tabs.Screen name="activity" options={{ href: null, title: 'Activity' }} />
       <Tabs.Screen name="measurements" options={{ href: null, title: 'Body Measurements' }} />
+      <Tabs.Screen name="inbody" options={{ href: null, title: 'InBody Progress' }} />
       <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & Limitations' }} />
       {/* href: null is not decoration. A route file in this directory with no
           Tabs.Screen entry gets a TAB BUTTON — expo-router's default — so

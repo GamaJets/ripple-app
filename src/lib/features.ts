@@ -307,6 +307,7 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'activity', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity', icon: 'bell', area: 'progress', meGroup: 'body', keywords: 'feed updates' },
   { key: 'trends', label: 'Trends', note: 'Weekly volume & estimated 1RM over time', route: '/(client)/trends', icon: 'trending', area: 'progress', keywords: 'trend trends graph chart volume tonnage 1rm estimated over time progress' },
   { key: 'body-trends', label: 'Composition Trends', note: 'Weight, body fat, muscle & InBody score over time', route: '/(client)/body-trends', icon: 'trending', area: 'progress', keywords: 'body composition trend weight body fat skeletal muscle inbody score graph over time' },
+  { key: 'inbody-upload', label: 'Upload InBody Scan', note: 'Photograph or upload your InBody printout, check the numbers, save', route: '/(client)/scans', icon: 'progress', area: 'progress', keywords: 'inbody upload scan printout body composition photo camera ocr add scan bmr visceral lean muscle' },
   // The long view, and the only screen in the app that shows more than ten
   // weeks. 'year' and 'months' are in the keywords because that is what the
   // question sounds like when a member asks it.
