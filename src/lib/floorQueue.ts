@@ -103,7 +103,24 @@ export type FloorAct =
    *  always meant to happen. `rateCents` is left `undefined` on a retraction:
    *  `clearMyOutcome` does not touch the snapshot either, and a rate is not
    *  what the coach took back. */
-  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string | null; rateCents?: number | null };
+  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string | null; rateCents?: number | null }
+  /** A coach's Finish on a booked session: the hour's rows AND the outcome, as
+   *  ONE act, sent as ONE call to `finish_coach_session` (supabase/parts/3460).
+   *
+   *  Replaces the `session-log` + `session-outcome` pair for the case that has
+   *  a session. Two acts had two answers, and a lost acknowledgement on the
+   *  first could be replayed as a second copy of the hour. This act carries
+   *  `workoutUid`, minted on the coach's phone when Save was pressed, and the
+   *  RPC is idempotent on it — so replaying it after an answer that never
+   *  arrived writes nothing twice, and answers 'already'.
+   *
+   *  `prCount` is what the coach's screen counted against the client's history
+   *  and is used ONLY for the sentence in the client's notification; a PR is
+   *  defined in src/lib/exerciseHistory.ts and nowhere in SQL (see prNotify.ts).
+   *  `rateCents` follows the `session-outcome` convention: undefined is "do not
+   *  touch the rate". */
+  | { kind: 'coach-session-finish'; clientId: string; clientName: string | null; sessionId: string; workoutUid: string;
+      entries: unknown[]; rateCents?: number | null; prCount?: number | null };
 
 /** A queued act with the two things every queue entry needs: an id that says it
  *  has not been sent, and the instant it happened. Deliberately the same shape
@@ -160,6 +177,9 @@ export function supersedeKey(a: FloorAct): string | null {
   switch (a.kind) {
     case 'class-attendance': return `class:${a.classId}:${a.userId}`;
     case 'session-outcome': return `session:${a.sessionId}`;
+    // The workout id IS the identity: two offers of one Finish are the same
+    // write, and the RPC answers the second with 'already' anyway.
+    case 'coach-session-finish': return `finish:${a.workoutUid}`;
     case 'session-log': {
       const body = logBody(a.entries);
       // Entries that will not serialise cannot reach the device either, so
@@ -307,9 +327,37 @@ function usableAct(v: unknown): v is FloorAct {
       // an act this build cannot send.
       return typeof a.sessionId === 'string' && !!a.sessionId
         && (a.outcome === null || (typeof a.outcome === 'string' && !!a.outcome));
+    case 'coach-session-finish':
+      return typeof a.clientId === 'string' && !!a.clientId
+        && typeof a.sessionId === 'string' && !!a.sessionId
+        && typeof a.workoutUid === 'string' && UUID_SHAPE.test(a.workoutUid)
+        && Array.isArray(a.entries) && a.entries.length > 0
+        && (a.prCount == null || (typeof a.prCount === 'number' && Number.isInteger(a.prCount) && a.prCount >= 0));
     default:
       return false;
   }
+}
+
+/** The shape the RPC's `uuid` parameter accepts. An act carrying anything else
+ *  would be refused by PostgREST on every flush, so it is not an act this build
+ *  can send. */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A fresh workout id for a coach's Finish. The platform's `crypto.randomUUID`
+ * where there is one (Hermes on SDK 5x, every browser, node ≥ 19), and a
+ * v4-shaped id from `Math.random` otherwise — that fallback is not
+ * cryptographic and does not need to be: the id is an idempotency key the
+ * server scopes to one coach's one client, not a secret.
+ */
+export function mintWorkoutUid(rand: () => number = Math.random): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (rand === Math.random && typeof c?.randomUUID === 'function') {
+    try { const id = c.randomUUID(); if (UUID_SHAPE.test(id)) return id; } catch { /* fall through */ }
+  }
+  const h = (n: number) => Array.from({ length: n }, () => Math.floor(rand() * 16).toString(16)).join('');
+  const variant = (8 + Math.floor(rand() * 4)).toString(16);
+  return `${h(8)}-${h(4)}-4${h(3)}-${variant}${h(3)}-${h(12)}`;
 }
 
 /**
@@ -369,6 +417,11 @@ export function actLine(a: FloorAct): string {
       // is still carrying.
       if (a.outcome == null) return `${whose}: outcome taken back`;
       return `${whose} marked ${a.outcome.replace(/_/g, ' ')}`;
+    }
+    case 'coach-session-finish': {
+      const n = a.entries.length;
+      const who = a.clientName?.trim();
+      return `${who ? `${who}’s session` : 'A session'}: ${n} exercise${n === 1 ? '' : 's'}, to be marked completed`;
     }
   }
 }

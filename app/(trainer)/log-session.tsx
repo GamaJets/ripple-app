@@ -143,7 +143,7 @@ import { hitSlopFor } from '../../src/lib/a11y';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useFloorQueue } from '../../src/ui/floorQueue';
 import {
-  floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine,
+  floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine, mintWorkoutUid,
 } from '../../src/lib/floorQueue';
 // When the session happened, which this screen never asked. See the module
 // header: `new Date().toISOString()` at the moment Save was pressed put a
@@ -186,6 +186,7 @@ import type { MyCurrency } from '../../src/lib/currencySource';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { planOffer, prefillDay, prefillLine, targetLine } from '../../src/lib/planPrefill';
 import { notifySuccess, tapLight } from '../../src/ui/haptics';
+import { finishPrCount } from '../../src/lib/coachSessionFinish';
 // The two clocks a coach on the floor asked for — "No timer when logging". The
 // rest arithmetic, the digits and the three-two-one rule are the member
 // runner's own (src/lib/restTimer.ts), and the noise goes through the one door
@@ -1329,59 +1330,83 @@ export default function LogSession() {
      * only the third, which is the one worth keeping. A queued write is never
      * reported as saved; see rule 1 in src/lib/floorQueue.ts.
      */
-    const out = await queue.attempt({
-      kind: 'session-log', clientId: picked, clientName: pickedName, entries, sessionId,
-    });
-
-    /* ── and then the session, which is a SECOND write with its own answer ──
+    /* ── a booked session that is being closed: ONE act ───────────────────
      *
-     * In this order on purpose. The entries are twenty minutes of typing that
-     * exists nowhere else; the outcome is one tap that can be made again from
-     * the Mark Sessions queue. So the log goes first, and a log the SERVER
-     * REFUSED stops the outcome dead — supabase/parts/370 spends a client's
-     * session credit at delivery, and spending it for an hour whose record was
-     * refused is the one ending nobody would ever find.
-     *
-     * A log the server never ANSWERED does not stop it. That is not the same
-     * event: the entries are on this phone and going up, the coach is standing
-     * in the same basement for both writes, and refusing to record the outcome
-     * because of the weather would put the session back in the queue for a
-     * reason that has nothing to do with the session. It is offered, it comes
-     * back queued too, and `finishReport` says so in as many words.
+     * supabase/parts/3460. The rows, the outcome and the client's notification
+     * go in a single call to `finish_coach_session`, idempotent on a workout id
+     * minted here, at the press. The two-act path below (rows, then outcome)
+     * is kept for everything that is NOT a session being closed — a log with
+     * no booking, or a session the coach chose not to mark delivered — because
+     * those have no outcome to set and nothing to deduct.
      */
+    let out: Awaited<ReturnType<typeof queue.attempt>>;
     let outcomeAnswer: OutcomeAnswer = 'not-asked';
     if (sessionId && markDelivered) {
-      // 'full' joins 'refused' here for the same reason and a stronger one: the
-      // log did not reach anybody and is not going to, so spending a client's
-      // session credit for an hour with no record would be the ending point 4
-      // of the decision exists to prevent, with not even a queue entry to
-      // explain it later.
-      if (out === 'refused' || out === 'full') {
-        outcomeAnswer = 'not-attempted';
-      } else {
-        // Snapshotted here and carried into the queue rather than recomputed at
-        // flush time, exactly as the marking screen does it: a session finished
-        // on Tuesday and sent on Thursday is worth what it was worth on
-        // Tuesday. A snapshot already written is a historical fact and nothing
-        // here rewrites or backfills one — this decides only what is filed from
-        // now on. Converted by whatever currency actually resolves, never by a
-        // factor of a hundred. Null converts to undefined, which is "do not
-        // touch the rate" — a coach with no fee or no currency recorded must
-        // not have a zero written into the column payroll is settled from.
-        const rateCents = rateCentsToSnapshot({
-          gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
-        }) ?? undefined;
-        const marked = await queue.attempt({
-          kind: 'session-outcome', sessionId, clientName: pickedName,
-          outcome: 'completed', rateCents,
-        });
-        // A device that would not keep the mark is not a server that refused
-        // it, but for the session it is the same fact and the same sentence:
-        // nothing was recorded and nothing is waiting. `OutcomeAnswer` has no
-        // 'full' arm because the outcome is one tap that can be made again from
-        // the Mark Sessions queue — unlike the entries above, which exist
-        // nowhere else — so it is reported as the refusal it functionally is.
-        outcomeAnswer = marked === 'full' ? 'refused' : marked;
+      const rateCents = rateCentsToSnapshot({
+        gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+      }) ?? undefined;
+      out = await queue.attempt({
+        kind: 'coach-session-finish', clientId: picked, clientName: pickedName, sessionId,
+        workoutUid: mintWorkoutUid(), entries, rateCents,
+        prCount: finishPrCount(entries, hist, histStatus === 'ready'),
+      });
+      // One answer for both halves, because they are one transaction: the
+      // server either wrote the rows AND set the outcome, or did neither.
+      outcomeAnswer = out === 'full' ? 'refused' : out;
+    } else {
+      out = await queue.attempt({
+        kind: 'session-log', clientId: picked, clientName: pickedName, entries, sessionId,
+      });
+
+      /* ── and then the session, which is a SECOND write with its own answer ──
+       *
+       * In this order on purpose. The entries are twenty minutes of typing that
+       * exists nowhere else; the outcome is one tap that can be made again from
+       * the Mark Sessions queue. So the log goes first, and a log the SERVER
+       * REFUSED stops the outcome dead — supabase/parts/370 spends a client's
+       * session credit at delivery, and spending it for an hour whose record was
+       * refused is the one ending nobody would ever find.
+       *
+       * A log the server never ANSWERED does not stop it. That is not the same
+       * event: the entries are on this phone and going up, the coach is standing
+       * in the same basement for both writes, and refusing to record the outcome
+       * because of the weather would put the session back in the queue for a
+       * reason that has nothing to do with the session. It is offered, it comes
+       * back queued too, and `finishReport` says so in as many words.
+       */
+      if (sessionId && markDelivered) {
+        // 'full' joins 'refused' here for the same reason and a stronger one: the
+        // log did not reach anybody and is not going to, so spending a client's
+        // session credit for an hour with no record would be the ending point 4
+        // of the decision exists to prevent, with not even a queue entry to
+        // explain it later.
+        if (out === 'refused' || out === 'full') {
+          outcomeAnswer = 'not-attempted';
+        } else {
+          // Snapshotted here and carried into the queue rather than recomputed at
+          // flush time, exactly as the marking screen does it: a session finished
+          // on Tuesday and sent on Thursday is worth what it was worth on
+          // Tuesday. A snapshot already written is a historical fact and nothing
+          // here rewrites or backfills one — this decides only what is filed from
+          // now on. Converted by whatever currency actually resolves, never by a
+          // factor of a hundred. Null converts to undefined, which is "do not
+          // touch the rate" — a coach with no fee or no currency recorded must
+          // not have a zero written into the column payroll is settled from.
+          const rateCents = rateCentsToSnapshot({
+            gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+          }) ?? undefined;
+          const marked = await queue.attempt({
+            kind: 'session-outcome', sessionId, clientName: pickedName,
+            outcome: 'completed', rateCents,
+          });
+          // A device that would not keep the mark is not a server that refused
+          // it, but for the session it is the same fact and the same sentence:
+          // nothing was recorded and nothing is waiting. `OutcomeAnswer` has no
+          // 'full' arm because the outcome is one tap that can be made again from
+          // the Mark Sessions queue — unlike the entries above, which exist
+          // nowhere else — so it is reported as the refusal it functionally is.
+          outcomeAnswer = marked === 'full' ? 'refused' : marked;
+        }
       }
     }
 

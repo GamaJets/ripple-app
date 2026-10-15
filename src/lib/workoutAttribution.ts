@@ -9,13 +9,22 @@ import type { WorkoutEntry } from './mockData';
 
 /** The logged-by line for a workout, or null when the person logged it themselves. */
 export function attributionLine(
-  e: Pick<WorkoutEntry, 'loggedBy' | 'amendedAt' | 'amendedBy'>,
+  e: Pick<WorkoutEntry, 'loggedBy' | 'amendedAt' | 'amendedBy'> & { sessionId?: string | null },
   coachName: string | null,
   viewerIsTheClient: boolean,
 ): string | null {
   if (!e.loggedBy) return null;
   const who = coachName?.trim() || 'your coach';
-  const by = viewerIsTheClient ? `Logged by ${who}` : 'Logged by you';
+  // A session the coach RAN with the member (the rows carry the booking,
+  // part 3460's finish_coach_session) reads as something done together, not
+  // something done to them: "Logged with Coach Dave". A coach typing up a
+  // session after the fact, with no booking, stays "Logged by".
+  const first = coachName?.trim().split(/\s+/)[0];
+  const by = !viewerIsTheClient
+    ? 'Logged by you'
+    : e.sessionId
+      ? (first ? `Logged with Coach ${first}` : 'Logged with your coach')
+      : `Logged by ${who}`;
   if (!e.amendedAt) return by;
   const when = new Date(e.amendedAt);
   const stamp = Number.isNaN(when.getTime())
