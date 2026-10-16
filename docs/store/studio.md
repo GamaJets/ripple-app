@@ -18,9 +18,9 @@ Repple Studio is the owner's app for a gym or studio on Repple.
 • Members and memberships: joins, freezes, renewals and who is drifting away.
 • Coaches: the rota, sessions run and pay.
 • Classes and attendance.
-• Revenue, orders and costs, with a month-end close.
+• Revenue, orders and costs, with a month-end readiness check (the close itself is done on the Repple Studio web console).
 • Analytics: active clients, retention, sessions per coach, revenue, and InBody progress across your members.
-• Announcements, documents and your gym's own branding for the member app.
+• Announcements to your members, and your gym's own branding for the member app.
 
 Studio works alongside Repple (for members) and Repple Coach (for your trainers).
 
