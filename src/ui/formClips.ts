@@ -35,6 +35,8 @@ export interface FormClip {
   coachReply: string | null;
   /** When that answer was written. Null whenever `coachReply` is. */
   coachRepliedAt: string | null;
+  /** Where in the clip the answer points, in ms. Part 3520. Null: the whole set. */
+  coachReplyAtMs: number | null;
 }
 
 /** A clip chosen and not yet sent. */
@@ -64,8 +66,17 @@ export async function pickFormClip(source: 'camera' | 'library'): Promise<{ clip
   }
   try {
     const res = source === 'camera'
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: MAX_CLIP_SECONDS })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+      // Compressed on the phone where the platform offers it (iOS: medium
+      // capture quality, 720p re-export from the library). A minute of 4K is
+      // several hundred MB and a coach judging a squat needs none of it.
+      ? await ImagePicker.launchCameraAsync({
+        mediaTypes: ['videos'], videoMaxDuration: MAX_CLIP_SECONDS,
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+      })
+      : await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'], videoMaxDuration: MAX_CLIP_SECONDS,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
+      });
     if (res.canceled || !res.assets || !res.assets[0]) return { clip: null, error: null };
     const a = res.assets[0];
     return {
@@ -185,7 +196,7 @@ export async function fetchFormClip(workoutId: string, setIndex: number): Promis
   try {
     const { data, error } = await supabase
       .from('form_clips')
-      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at')
+      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at, coach_reply_at_ms')
       .eq('workout_id', workoutId)
       .eq('set_index', setIndex)
       .maybeSingle();
@@ -200,6 +211,7 @@ export async function fetchFormClip(workoutId: string, setIndex: number): Promis
       createdAt: String(r.created_at),
       coachReply: typeof r.coach_reply === 'string' && r.coach_reply.trim() ? r.coach_reply : null,
       coachRepliedAt: typeof r.coach_replied_at === 'string' ? r.coach_replied_at : null,
+      coachReplyAtMs: typeof r.coach_reply_at_ms === 'number' ? r.coach_reply_at_ms : null,
     };
   } catch (e) {
     reportError('formClips.read', e);
@@ -224,7 +236,7 @@ export async function fetchFormClipsFor(memberId: string, limit = 20): Promise<F
   try {
     const { data, error } = await supabase
       .from('form_clips')
-      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at')
+      .select('id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at, coach_reply_at_ms')
       .eq('user_id', memberId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -238,6 +250,7 @@ export async function fetchFormClipsFor(memberId: string, limit = 20): Promise<F
       createdAt: String(r.created_at),
       coachReply: typeof r.coach_reply === 'string' && r.coach_reply.trim() ? r.coach_reply : null,
       coachRepliedAt: typeof r.coach_replied_at === 'string' ? r.coach_replied_at : null,
+      coachReplyAtMs: typeof r.coach_reply_at_ms === 'number' ? r.coach_reply_at_ms : null,
     }));
   } catch (e) {
     reportError('formClips.list', e);
@@ -253,7 +266,7 @@ export async function fetchFormClipsFor(memberId: string, limit = 20): Promise<F
  * who currently coaches them. A coach who has since been changed gets nothing,
  * which is the point.
  */
-export async function formClipUrl(path: string, seconds = 60 * 30): Promise<string | null> {
+export async function formClipUrl(path: string, seconds = 60 * 10): Promise<string | null> {
   if (!USE_SUPABASE || !path) return null;
   try {
     const { data, error } = await supabase.storage.from(FORM_CLIP_BUCKET).createSignedUrl(path, seconds);
@@ -307,13 +320,13 @@ export async function deleteFormClip(clip: FormClip): Promise<{ ok: boolean; err
  * column grant in supabase/parts/3350 permits: a coach cannot touch the
  * member's own question or the path the video lives at.
  */
-export async function replyToFormClip(clip: FormClip, reply: string): Promise<{ ok: boolean; error: string | null }> {
+export async function replyToFormClip(clip: FormClip, reply: string, atMs: number | null = null): Promise<{ ok: boolean; error: string | null }> {
   if (!USE_SUPABASE) return { ok: false, error: 'This build has no server.' };
   const body = replyText(reply);
   if (!body) return { ok: false, error: 'Write something first. An empty reply is not an answer.' };
   const { error, count } = await supabase
     .from('form_clips')
-    .update({ coach_reply: body, coach_replied_at: new Date().toISOString() }, { count: 'exact' })
+    .update({ coach_reply: body, coach_replied_at: new Date().toISOString(), coach_reply_at_ms: atMs }, { count: 'exact' })
     .eq('id', clip.id);
   if (error) {
     reportError('formClips.reply', error, { clipId: clip.id });
@@ -323,4 +336,49 @@ export async function replyToFormClip(clip: FormClip, reply: string): Promise<{ 
     return { ok: false, error: 'That clip is no longer there. They may have taken it back, and your reply was not saved.' };
   }
   return { ok: true, error: null };
+}
+
+/** One unanswered clip for the coach's Today inbox, with whose it is. */
+export interface WaitingClip { clip: FormClip; memberId: string; memberName: string | null }
+
+/**
+ * Every clip waiting on an answer from this coach, oldest first — the order a
+ * coach should answer in. RLS (`form_clips_coach_read`) is what scopes it to
+ * their own clients; a coach who also trains themselves sees their own clips
+ * excluded by `neq('user_id', me)`. `null` is a failed read, not an empty inbox.
+ */
+export async function fetchWaitingFormClips(me: string, limit = 25): Promise<WaitingClip[] | null> {
+  if (!USE_SUPABASE || !me) return null;
+  try {
+    const { data, error } = await supabase
+      .from('form_clips')
+      .select('id, user_id, workout_id, set_index, path, note, created_at, coach_reply, coach_replied_at, coach_reply_at_ms')
+      .is('coach_reply', null)
+      .neq('user_id', me)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    if (error) { reportError('formClips.waiting', error); return null; }
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const ids = [...new Set(rows.map((r) => String(r.user_id)))];
+    const names = new Map<string, string>();
+    if (ids.length) {
+      const { data: ps, error: pe } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      if (pe) reportError('formClips.waitingNames', pe);
+      for (const p of (ps ?? []) as { id: string; full_name: string | null }[]) {
+        if (p.full_name?.trim()) names.set(p.id, p.full_name.trim());
+      }
+    }
+    return rows.map((r) => ({
+      memberId: String(r.user_id),
+      memberName: names.get(String(r.user_id)) ?? null,
+      clip: {
+        id: String(r.id), workoutId: String(r.workout_id), setIndex: Number(r.set_index), path: String(r.path),
+        note: typeof r.note === 'string' && r.note.trim() ? r.note : null,
+        createdAt: String(r.created_at), coachReply: null, coachRepliedAt: null, coachReplyAtMs: null,
+      },
+    }));
+  } catch (e) {
+    reportError('formClips.waiting', e);
+    return null;
+  }
 }

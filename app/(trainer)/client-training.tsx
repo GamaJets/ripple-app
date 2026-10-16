@@ -81,7 +81,7 @@ import {
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { fetchFormClipsFor, formClipUrl, replyToFormClip, type FormClip } from '../../src/ui/formClips';
-import { clipNoteLine, replyText, MAX_REPLY_CHARS } from '../../src/lib/formCheck';
+import { clipNoteLine, replyText, MAX_REPLY_CHARS, parseClipStamp, clipStampLabel } from '../../src/lib/formCheck';
 // ── the two modules the coach could not reach ──────────────────────────────
 //
 // P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
@@ -2087,10 +2087,12 @@ function FormChecks({ memberId }: { memberId: string }) {
 function FormClipReply({ clip, onSaved }: { clip: FormClip; onSaved: (c: FormClip) => void }) {
   const t = useTheme();
   const [draft, setDraft] = useState(clip.coachReply ?? '');
+  const [stamp, setStamp] = useState(clipStampLabel(clip.coachReplyAtMs) ?? '');
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const body = replyText(draft);
-  const changed = (body ?? '') !== (clip.coachReply ?? '');
+  const atMs = parseClipStamp(stamp);
+  const changed = (body ?? '') !== (clip.coachReply ?? '') || (atMs !== 'invalid' && atMs !== clip.coachReplyAtMs);
 
   return (
     <View style={{ marginTop: sp.md }}>
@@ -2108,17 +2110,33 @@ function FormClipReply({ clip, onSaved }: { clip: FormClip; onSaved: (c: FormCli
           paddingHorizontal: sp.md, paddingVertical: sp.sm, minHeight: 72, textAlignVertical: 'top',
         }}
       />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>At</Text>
+        <TextInput
+          value={stamp}
+          onChangeText={(v: string) => { setStamp(v); if (said) setSaid(null); }}
+          placeholder="0:12"
+          placeholderTextColor={t.ink3}
+          keyboardType="numbers-and-punctuation"
+          maxLength={5}
+          accessibilityLabel="Moment in the clip this answer is about, minutes and seconds. Optional"
+          style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 6, minWidth: 64 }}
+        />
+        <Text style={{ ...ty.caption, color: atMs === 'invalid' ? t.ink : t.ink3, flex: 1 }}>
+          {atMs === 'invalid' ? 'Use m:ss, like 0:12.' : 'Optional. Leave empty for the whole set.'}
+        </Text>
+      </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
         <Ghost label={busy ? 'Sending…' : clip.coachReply ? 'Save Your Answer' : 'Send Your Answer'}
           icon="check"
           a11yLabel={changed && !busy ? 'Send this answer to them' : 'Write an answer first'}
           onPress={async () => {
-            if (busy || !changed || !body) return;
+            if (busy || !changed || !body || atMs === 'invalid') return;
             setBusy(true); setSaid(null);
-            const out = await replyToFormClip(clip, body);
+            const out = await replyToFormClip(clip, body, atMs);
             setBusy(false);
             if (!out.ok) { setSaid(out.error); return; }
-            onSaved({ ...clip, coachReply: body, coachRepliedAt: new Date().toISOString() });
+            onSaved({ ...clip, coachReply: body, coachRepliedAt: new Date().toISOString(), coachReplyAtMs: atMs });
             setSaid('Sent. They have been told you answered.');
           }} />
         {clip.coachRepliedAt && !changed ? (

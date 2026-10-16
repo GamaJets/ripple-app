@@ -8,6 +8,7 @@ import {
   formClipPath, isOwnClipPath, clipRefusal, clipRefusalLine, clipNoteLine,
   MEMBER_CONSENT_NOTE, MAX_CLIP_SECONDS, MAX_CLIP_BYTES, FORM_CLIP_BUCKET,
   replyText, replyLine, MAX_REPLY_CHARS,
+  clipExpiryLine, parseClipStamp, clipStampLabel, FORM_CLIP_DAYS,
 } from './formCheck';
 
 const errors: string[] = [];
@@ -117,6 +118,20 @@ ok((replyLine('brace harder', null) ?? '').length > 0, 'and still says so when t
 // It never quotes the answer: the words are drawn in full underneath, and a
 // line that both summarises and repeats them says it twice.
 ok(!/brace harder/.test(replyLine('brace harder', 'Tue') ?? ''), 'the line introduces the answer rather than repeating it');
+
+// ── expiry and stamps (part 3520) ──
+{
+  const now = Date.parse('2026-10-16T12:00:00Z');
+  ok(clipExpiryLine('2026-10-16T12:00:00Z', now) === 'Deleted automatically in 30 days.', 'a new clip has thirty days');
+  ok(clipExpiryLine('2026-09-16T13:00:00Z', now) === 'Deleted automatically within a day.', 'the last day says so');
+  ok(clipExpiryLine('2026-01-01T00:00:00Z', now) === 'Deleted automatically within a day.', 'never a negative count');
+  ok(clipExpiryLine('nonsense', now).includes('30 days'), 'an unreadable date still states the rule');
+  ok(parseClipStamp('') === null && parseClipStamp('  ') === null, 'empty is the whole set');
+  ok(parseClipStamp('12') === 12000 && parseClipStamp('0:12') === 12000 && parseClipStamp('1:05') === 65000, 'seconds and m:ss');
+  ok(parseClipStamp('1:75') === 'invalid' && parseClipStamp('abc') === 'invalid' && parseClipStamp('-3') === 'invalid', 'nonsense is refused');
+  ok(parseClipStamp('11:00') === 'invalid', 'past ten minutes is refused, as the database would');
+  ok(clipStampLabel(12000) === '0:12' && clipStampLabel(65000) === '1:05' && clipStampLabel(null) === null, 'labels');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('formCheck: ok (the key cannot leave the member’s folder, no coach means no clip, consent is said before the camera opens, and an empty answer is not an answer)');
