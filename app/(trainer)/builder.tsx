@@ -2042,11 +2042,23 @@ export default function Builder() {
   // is the custom case working, not an error, and the Add button stays there
   // whether the search found anything or not.
   const pickTerm = custom.trim().toLowerCase();
+  const catByNameEarly = (name: string) => cat.rows.find((r) => exerciseSlug(r.name) === exerciseSlug(name))?.group ?? null;
   const ownList = useMemo(
     () => mergeExerciseLists(coachEx.saved, LIB),
     [coachEx.saved],
   );
-  const ownShown = ownList.filter((x) => pickTerm === '' || x.name.toLowerCase().includes(pickTerm));
+  // The library sheet's muscle filter: one group at a time, or none. Drawn
+  // only from groups the catalogue actually holds, never a list we invented,
+  // and it narrows both lists below the same way the search box does.
+  const [libGroup, setLibGroup] = useState<string | null>(null);
+  const libGroups = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const r of cat.rows) { const g = (r.group || '').trim(); if (g) n.set(g, (n.get(g) ?? 0) + 1); }
+    return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([g]) => g);
+  }, [cat.rows]);
+  const groupOk = (g: string | null | undefined) => libGroup == null || (g || '').trim() === libGroup;
+  const ownShown = ownList.filter((x) => (pickTerm === '' || x.name.toLowerCase().includes(pickTerm))
+    && (libGroup == null || groupOk((x.group || '').trim() || catByNameEarly(x.name))));
   // Hidden from the catalogue list when the coach's own list already offers the
   // same movement, so "Bench Press" is not two rows that do the same thing.
   //
@@ -2062,7 +2074,7 @@ export default function Builder() {
     // one of the two hides half the catalogue from whoever is holding the
     // phone, and matching neither the synonyms hides Heel Flicks from every
     // coach who calls the movement "butt kicks".
-    (e) => !ownSlugs.has(e.id) && matchesSearch(pickTerm, e.name, e.display, e.synonyms),
+    (e) => !ownSlugs.has(e.id) && groupOk(e.group) && matchesSearch(pickTerm, e.name, e.display, e.synonyms),
   );
 
   // A picture for every movement on this screen: the ones already in the days
@@ -5080,8 +5092,12 @@ export default function Builder() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setPickerDay(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={[sheet, { maxHeight: '82%' }]}>
-          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
+        <View style={[sheet, { maxHeight: '92%' }]}>
+          {/* The library sheet's grab handle: says "this is a sheet over your
+              program" and not a new page, as in the mockups. Decorative. */}
+          <View importantForAccessibility="no" accessibilityElementsHidden
+            style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: t.ring, marginBottom: sp.md }} />
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Exercise Library</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
             {/* The chosen group is cleared with every keystroke on purpose: it
                 was an answer about the name that was in the box, and carrying
@@ -5121,6 +5137,14 @@ export default function Builder() {
               movement it DOES hold arrives with its own `muscle_group` and
               asking the coach to restate it would be asking them to disagree
               with the library — see `customAdd`. */}
+          {libGroups.length > 1 ? (
+            <View style={{ marginTop: sp.md }}>
+              <Segmented scroll
+                options={[{ key: '__all', label: 'All' }, ...libGroups.map((g) => ({ key: g, label: g }))]}
+                value={libGroup ?? '__all'}
+                onChange={(k) => { setLibGroup(k === '__all' ? null : k); setCatShown(30); }} />
+            </View>
+          ) : null}
           {customAdd.needsGroup ? (
             <View style={{ marginTop: sp.md }}>
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.sm }}>{MUSCLE_GROUP_WHY}</Text>

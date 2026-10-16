@@ -87,6 +87,7 @@ import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
 import { inboxAge } from '../../src/lib/notifyInbox';
+import { inboxTabs, inBucket, type InboxBucket } from '../../src/lib/todayInbox';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
@@ -1947,6 +1948,14 @@ export default function TrainerClients() {
     // used to be `?? 999`, which sorted exactly those clients to the bottom.
     return (a.adherence ?? -1) - (b.adherence ?? -1);
   });
+  // The Today inbox: the same queue, split by the job it asks of the coach.
+  // See src/lib/todayInbox.ts. The filter never adds or removes a person from
+  // the queue; it only narrows what the four rows below show.
+  const [inboxTab, setInboxTab] = useState<InboxBucket>('all');
+  const attnKinds = needsAttention.map((c) => attnFor(c)?.kind ?? null);
+  const inboxSegs = inboxTabs(attnKinds);
+  const inboxSel: InboxBucket = inboxSegs.some((x) => x.key === inboxTab) ? inboxTab : 'all';
+  const inboxRows = needsAttention.filter((c, i) => inBucket(attnKinds[i], inboxSel));
   /* ── the book's adherence, as one figure ─────────────────────────────
    *
    * The mean of every client who has submitted a check-in, and ONLY under a
@@ -2749,7 +2758,12 @@ export default function TrainerClients() {
                   somebody who wrote gets Reply and their thread, everybody
                   else gets the AI draft the coach reviews before it is sent.
                   The row itself opens their profile. */}
-              {needsAttention.slice(0, 4).map((c, index) => {
+              {inboxSegs.length ? (
+                <Segmented scroll style={{ marginBottom: sp.md }}
+                  options={inboxSegs.map((x) => ({ key: x.key, label: `${x.label} ${num(x.count)}`, a11yLabel: `${x.label}, ${num(x.count)}` }))}
+                  value={inboxSel} onChange={setInboxTab} />
+              ) : null}
+              {inboxRows.slice(0, 4).map((c, index) => {
                 const a = attnFor(c);
                 const aged = /\bago$/.test(c.lastActive) ? `Last active ${c.lastActive}` : null;
                 return (
@@ -2791,9 +2805,9 @@ export default function TrainerClients() {
                       : { label: 'Nudge', onPress: () => draftNudge(c) }} />
                 );
               })}
-              {needsAttention.length > 4 ? (
+              {inboxRows.length > 4 ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {needsAttention.length - 4} more {needsAttention.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
+                  {inboxRows.length - 4} more {inboxRows.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
                 </Text>
               ) : null}
             </View>
