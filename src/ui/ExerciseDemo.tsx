@@ -267,7 +267,7 @@ export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
       ))}
       {!ready ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator />
+          <ActivityIndicator color={t.ink3} />
         </View>
       ) : null}
     </View>

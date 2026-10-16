@@ -7,6 +7,11 @@ import { Icon } from './Icon';
 // Scale only — this renders *after* a crash, so it imports no theme provider,
 // no kit, nothing that could itself throw. `scale` is plain constants.
 import { sp, radius, type as ty } from '../theme/scale';
+
+// Repple Dark v2 (src/theme/tokens.ts), spelled out because this screen draws
+// when the theme provider itself may be what threw. It used the old teal
+// palette, the one screen the v2 redesign never reached.
+const V2 = { bg: '#07090a', ink: '#f2f6f4', ink2: '#a3afab', brand: '#2ee27a', brandInk: '#03180b', crit: '#ff6b6e' } as const;
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 // Plain module, no hook and no context: this component renders after a crash
@@ -88,16 +93,16 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#0d0d0d', alignItems: 'center', justifyContent: 'center', padding: sp.xxl }}>
-          <Icon name="wrench" size={40} color="#2dd4bf" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: '#ffffff', textAlign: 'center', marginTop: sp.md, marginBottom: sp.sm }}>Something Went Wrong</Text>
-          <Text style={{ ...ty.body, color: '#898781', textAlign: 'center', marginBottom: sp.xl }}>This screen hit an unexpected error. Your data is safe. Tap below to reload.</Text>
-          <Pressable onPress={this.reset} accessibilityRole="button" accessibilityLabel="Reload the app" style={{ backgroundColor: '#2dd4bf', borderRadius: radius.sm, paddingVertical: sp.lg, paddingHorizontal: 34 }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: '#062e2a' }}>Reload</Text>
+        <View style={{ flex: 1, backgroundColor: V2.bg, alignItems: 'center', justifyContent: 'center', padding: sp.xxl }}>
+          <Icon name="wrench" size={40} color={V2.brand} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: V2.ink, textAlign: 'center', marginTop: sp.md, marginBottom: sp.sm }}>Something Went Wrong</Text>
+          <Text style={{ ...ty.body, color: V2.ink2, textAlign: 'center', marginBottom: sp.xl }}>This screen hit an unexpected error. Your data is safe. Tap below to reload.</Text>
+          <Pressable onPress={this.reset} accessibilityRole="button" accessibilityLabel="Reload the app" style={{ backgroundColor: V2.brand, borderRadius: radius.sm, paddingVertical: sp.lg, paddingHorizontal: 34 }}>
+            <Text style={{ ...ty.label, fontWeight: '600', color: V2.brandInk }}>Reload</Text>
           </Pressable>
           {this.state.error ? (
             <ScrollView style={{ maxHeight: 200, marginTop: sp.xl, alignSelf: 'stretch' }}>
-              <Text selectable style={{ ...ty.caption, fontFamily: 'Courier', color: '#e66767' }}>{String(this.state.error.message || '')}
+              <Text selectable style={{ ...ty.caption, fontFamily: 'Courier', color: V2.crit }}>{String(this.state.error.message || '')}
 
 {String(this.state.error.stack || '')}</Text>
             </ScrollView>
