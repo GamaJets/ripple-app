@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/exerciseProgress.ts",
+    "src/lib/exerciseProgress.test.ts",
     "src/lib/watchSync.ts",
     "src/lib/watchSync.test.ts",
     "src/lib/studioAnalytics.ts",
