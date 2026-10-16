@@ -1284,6 +1284,7 @@ export default function FoodLog() {
  </>)}
 
  <ListRow icon="meals" title="Eating Out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
+ <ListRow icon="meals" title="Meal Photos" note="Snap a plate for your coach" onPress={() => router.push('/(client)/meal-photos')} />
  </Section>
 
  {/* ── today's entries, or an honest empty state ──────────────────── */}

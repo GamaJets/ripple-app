@@ -234,6 +234,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
   { key: 'restaurant', label: 'Eating Out', note: 'Estimate restaurant macros', route: '/(client)/restaurant', icon: 'meals', area: 'meals', keywords: 'restaurant eating out dining takeout macros estimate cuisine' },
+  { key: 'meal-photos', label: 'Meal Photos', note: 'Snap a plate for your coach', route: '/(client)/meal-photos', icon: 'meals', area: 'meals', keywords: 'meal photo picture plate coach comment food camera' },
   // Filed under Nutrition because the screen reads CGM values against the meals
   // they surround — that is what somebody is looking at it FOR. The label is
   // the phrase a member uses; 'cgm', 'libre' and 'dexcom' are the words the
