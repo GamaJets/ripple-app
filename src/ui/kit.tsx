@@ -727,7 +727,9 @@ export function ListRow({ icon, title, note, meta, trailing, onPress, tone }: {
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={[title, note, meta].filter(Boolean).join('. ')}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: 6 }}>
       {isTone(tone) ? <IconPlate icon={icon} tone={tone} /> : (
-        <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+        // v2 ListRow (plan §6): a 42pt rounded-square plate on surface2 with
+        // the 1px line, in place of the round grey disc.
+        <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: t.surface2, boxShadow: '0 0 0 1px rgba(128,140,150,0.16)', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={20} color={tone || t.brand} />
         </View>
       )}
