@@ -12,6 +12,7 @@ import { USE_SUPABASE } from '../lib/config';
 // Plain module, no hook and no context: this component renders after a crash
 // and a class cannot call a hook anyway. See src/ui/crashQueue.ts.
 import { queueCrash } from './crashQueue';
+import { captureToSentry } from '../lib/sentry';
 
 let APP_VERSION = 'unknown';
 try { APP_VERSION = require('expo-constants').default?.expoConfig?.version ?? 'unknown'; } catch { /* not available */ }
@@ -27,6 +28,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, _info: unknown) {
+    captureToSentry(error, 'render');
     // Lightweight crash log → Supabase `app_errors` (owner reviews). No Sentry
     // native SDK needed, so this ships over-the-air. Best-effort; never throws.
     if (!USE_SUPABASE) return;

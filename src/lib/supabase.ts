@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { observedFetch } from './reachability';
 import { shareGetUser } from './whoAmI';
+import { setSentryUser } from './sentry';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const anon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -72,7 +73,8 @@ supabase.auth.getUser = whoAmI.getUser as typeof supabase.auth.getUser;
 // server-side with no client event. Registered here rather than in a provider
 // because a held identity that outlives a sign-out is the one failure of this
 // wrapper that would matter, and it must not depend on a screen being mounted.
-supabase.auth.onAuthStateChange(() => { whoAmI.forget(); });
+// Sentry carries the opaque user id only (a no-op without a DSN).
+supabase.auth.onAuthStateChange((_e, session) => { whoAmI.forget(); setSentryUser(session?.user?.id ?? null); });
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 // Thin wrappers so screens don't import the Supabase client directly.
