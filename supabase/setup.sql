@@ -76019,6 +76019,124 @@ grant  execute on function public.finish_coach_session(uuid,uuid,uuid,jsonb,inte
 revoke execute on function public.scan_targets_changed(uuid,integer,integer,integer,integer,text,boolean) from public, anon;
 grant  execute on function public.scan_targets_changed(uuid,integer,integer,integer,integer,text,boolean) to authenticated;
 
+-- ▶ index-foreign-keys.sql
+
+-- 3490 · Cover every foreign key the performance advisor reports unindexed.
+--
+-- Supabase lint 0001 (unindexed_foreign_keys), 105 findings on 16 Oct 2026. An FK
+-- without an index makes every delete/update of the referenced row scan the
+-- referencing table, and every join on it a seq scan. Purely ADDITIVE: no table,
+-- column, policy or existing index is touched. All tables are small today (the
+-- largest is exercises, ~1.8 MB), so a plain CREATE INDEX takes milliseconds;
+-- IF NOT EXISTS keeps the part re-runnable. Index names are <table>_<cols>_fkx,
+-- shortened with a hash where Postgres's 63-byte limit would cut them.
+
+create index if not exists abuse_reports_message_id_fkx on public.abuse_reports (message_id);
+create index if not exists abuse_reports_thread_id_fkx on public.abuse_reports (thread_id);
+create index if not exists assigned_program_history_coach_id_fkx on public.assigned_program_history (coach_id);
+create index if not exists challenges_created_by_fkx on public.challenges (created_by);
+create index if not exists charges_waived_by_fkx on public.charges (waived_by);
+create index if not exists check_in_answers_question_id_fkx on public.check_in_answers (question_id);
+create index if not exists class_bookings_cancelled_by_fkx on public.class_bookings (cancelled_by);
+create index if not exists client_disputes_client_id_fkx on public.client_disputes (client_id);
+create index if not exists client_disputes_purchase_id_fkx on public.client_disputes (purchase_id);
+create index if not exists client_disputes_renewal_id_fkx on public.client_disputes (renewal_id);
+create index if not exists client_nudges_client_id_fkx on public.client_nudges (client_id);
+create index if not exists client_subscriptions_package_id_fkx on public.client_subscriptions (package_id);
+create index if not exists coach_ad_code_spend_code_id_fkx on public.coach_ad_code_spend (code_id);
+create index if not exists coach_ad_code_spend_trainer_id_fkx on public.coach_ad_code_spend (trainer_id);
+create index if not exists coach_ad_unmatched_trainer_id_fkx on public.coach_ad_unmatched (trainer_id);
+create index if not exists coach_credentials_verified_by_fkx on public.coach_credentials (verified_by);
+create index if not exists coach_lead_notes_coach_id_fkx on public.coach_lead_notes (coach_id);
+create index if not exists coach_leads_joined_user_fkx on public.coach_leads (joined_user);
+create index if not exists coach_overdue_notices_client_id_fkx on public.coach_overdue_notices (client_id);
+create index if not exists coach_receipts_client_id_fkx on public.coach_receipts (client_id);
+create index if not exists coach_reviews_tenant_id_fkx on public.coach_reviews (tenant_id);
+create index if not exists coaching_relationships_end_reason_by_fkx on public.coaching_relationships (end_reason_by);
+create index if not exists coaching_relationships_ended_by_fkx on public.coaching_relationships (ended_by);
+create index if not exists community_blocks_blocked_id_fkx on public.community_blocks (blocked_id);
+create index if not exists community_comments_hidden_by_fkx on public.community_comments (hidden_by);
+create index if not exists community_hides_post_id_fkx on public.community_hides (post_id);
+create index if not exists community_posts_hidden_by_fkx on public.community_posts (hidden_by);
+create index if not exists community_reports_resolved_by_fkx on public.community_reports (resolved_by);
+create index if not exists deletion_log_actioned_by_fkx on public.deletion_log (actioned_by);
+create index if not exists exercises_created_by_fkx on public.exercises (created_by);
+create index if not exists feedback_resolved_by_fkx on public.feedback (resolved_by);
+create index if not exists feedback_tenant_id_fkx on public.feedback (tenant_id);
+create index if not exists feedback_user_id_fkx on public.feedback (user_id);
+create index if not exists gym_agreement_revocations_recorded_by_fkx on public.gym_agreement_revocations (recorded_by);
+create index if not exists gym_agreement_signatures_member_id_fkx on public.gym_agreement_signatures (member_id);
+create index if not exists gym_agreement_signatures_signed_by_fkx on public.gym_agreement_signatures (signed_by);
+create index if not exists gym_agreement_signatures_witnessed_by_fkx on public.gym_agreement_signatures (witnessed_by);
+create index if not exists gym_agreements_created_by_fkx on public.gym_agreements (created_by);
+create index if not exists gym_broadcast_sends_sent_by_fkx on public.gym_broadcast_sends (sent_by);
+create index if not exists gym_class_pay_created_by_fkx on public.gym_class_pay (created_by);
+create index if not exists gym_class_pay_trainer_id_fkx on public.gym_class_pay (trainer_id);
+create index if not exists gym_classes_register_taken_by_fkx on public.gym_classes (register_taken_by);
+create index if not exists gym_costs_recorded_by_fkx on public.gym_costs (recorded_by);
+create index if not exists gym_document_reads_read_by_fkx on public.gym_document_reads (read_by);
+create index if not exists gym_documents_equipment_id_fkx on public.gym_documents (equipment_id);
+create index if not exists gym_documents_member_id_fkx on public.gym_documents (member_id);
+create index if not exists gym_documents_uploaded_by_fkx on public.gym_documents (uploaded_by);
+create index if not exists gym_equipment_log_document_id_fkx on public.gym_equipment_log (document_id);
+create index if not exists gym_equipment_log_recorded_by_fkx on public.gym_equipment_log (recorded_by);
+create index if not exists gym_events_actor_id_fkx on public.gym_events (actor_id);
+create index if not exists gym_events_subject_id_fkx on public.gym_events (subject_id);
+create index if not exists gym_export_runs_member_id_fkx on public.gym_export_runs (member_id);
+create index if not exists gym_export_runs_taken_by_fkx on public.gym_export_runs (taken_by);
+create index if not exists gym_import_runs_created_by_fkx on public.gym_import_runs (created_by);
+create index if not exists gym_invoice_chases_created_by_fkx on public.gym_invoice_chases (created_by);
+create index if not exists gym_invoices_membership_id_fkx on public.gym_invoices (membership_id);
+create index if not exists gym_member_notes_member_id_fkx on public.gym_member_notes (member_id);
+create index if not exists gym_member_notes_written_by_fkx on public.gym_member_notes (written_by);
+create index if not exists gym_member_records_updated_by_fkx on public.gym_member_records (updated_by);
+create index if not exists gym_month_closes_closed_by_fkx on public.gym_month_closes (closed_by);
+create index if not exists gym_month_closes_reopened_by_fkx on public.gym_month_closes (reopened_by);
+create index if not exists gym_orders_membership_id_fkx on public.gym_orders (membership_id);
+create index if not exists gym_orders_pass_id_fkx on public.gym_orders (pass_id);
+create index if not exists gym_orders_pass_type_id_fkx on public.gym_orders (pass_type_id);
+create index if not exists gym_orders_plan_id_fkx on public.gym_orders (plan_id);
+create index if not exists gym_orders_supersedes_membership_id_fkx on public.gym_orders (supersedes_membership_id);
+create index if not exists gym_pass_redemptions_class_id_fkx on public.gym_pass_redemptions (class_id);
+create index if not exists gym_pass_redemptions_redeemed_by_fkx on public.gym_pass_redemptions (redeemed_by);
+create index if not exists gym_passes_host_member_id_fkx on public.gym_passes (host_member_id);
+create index if not exists gym_passes_pass_type_id_fkx on public.gym_passes (pass_type_id);
+create index if not exists gym_payments_membership_id_fkx on public.gym_payments (membership_id);
+create index if not exists gym_payments_recorded_by_fkx on public.gym_payments (recorded_by);
+create index if not exists gym_reconcile_marks_marked_by_fkx on public.gym_reconcile_marks (marked_by);
+create index if not exists gym_tax_filings_created_by_fkx on public.gym_tax_filings (created_by);
+create index if not exists gym_trainer_pay_trainer_id_fkx on public.gym_trainer_pay (trainer_id);
+create index if not exists gym_trainer_pay_updated_by_fkx on public.gym_trainer_pay (updated_by);
+create index if not exists gym_visits_class_id_fkx on public.gym_visits (class_id);
+create index if not exists gym_visits_pass_id_fkx on public.gym_visits (pass_id);
+create index if not exists marketplace_listings_template_id_fkx on public.marketplace_listings (template_id);
+create index if not exists member_interventions_by_id_fkx on public.member_interventions (by_id);
+create index if not exists member_invites_accepted_by_fkx on public.member_invites (accepted_by);
+create index if not exists member_invites_invited_by_fkx on public.member_invites (invited_by);
+create index if not exists member_invites_plan_id_fkx on public.member_invites (plan_id);
+create index if not exists memberships_plan_id_fkx on public.memberships (plan_id);
+create index if not exists payroll_adjustments_created_by_fkx on public.payroll_adjustments (created_by);
+create index if not exists payroll_adjustments_trainer_id_fkx on public.payroll_adjustments (trainer_id);
+create index if not exists payroll_settlements_reversed_by_fkx on public.payroll_settlements (reversed_by);
+create index if not exists payroll_settlements_settled_by_fkx on public.payroll_settlements (settled_by);
+create index if not exists program_injury_acknowledgements_trainer_id_fkx on public.program_injury_acknowledgements (trainer_id);
+create index if not exists session_approvals_client_id_fkx on public.session_approvals (client_id);
+create index if not exists session_cancellations_cancelled_by_fkx on public.session_cancellations (cancelled_by);
+create index if not exists session_cancellations_session_id_fkx on public.session_cancellations (session_id);
+create index if not exists session_cancellations_tenant_id_fkx on public.session_cancellations (tenant_id);
+create index if not exists session_requests_answered_by_fkx on public.session_requests (answered_by);
+create index if not exists session_requests_session_id_fkx on public.session_requests (session_id);
+create index if not exists session_series_ended_by_fkx on public.session_series (ended_by);
+create index if not exists session_series_skips_created_by_fkx on public.session_series_skips (created_by);
+create index if not exists sessions_outcome_by_fkx on public.sessions (outcome_by);
+create index if not exists share_card_objects_trainer_id_fkx on public.share_card_objects (trainer_id);
+create index if not exists staff_grants_actor_id_fkx on public.staff_grants (actor_id);
+create index if not exists staff_grants_revoked_by_fkx on public.staff_grants (revoked_by);
+create index if not exists staff_grants_subject_id_fkx on public.staff_grants (subject_id);
+create index if not exists thread_blocks_blocker_id_fkx on public.thread_blocks (blocker_id);
+create index if not exists workouts_amended_by_fkx on public.workouts (amended_by);
+create index if not exists workouts_logged_by_fkx on public.workouts (logged_by);
+
 -- ▶ 3470b-the-two-routes-part-3470-writes.sql
 
 -- ═══════════════════════════════════════════════════════════════════════════
