@@ -16,7 +16,8 @@ import { useNow } from './today';
 import { isWhole, type LoadStatus } from './loadStatus';
 import { useWearables } from './wearables';
 import { useMovementName } from './catalogueTranslations';
-import { importSources, useImportedIds, isLogged, readRecent, type RecentRead } from './watchImport';
+import { importSources, useImportedIds, isLogged, readRecent, withHr, type RecentRead } from './watchImport';
+import { Alert } from 'react-native';
 import { startOfWeek } from '../lib/weekStart';
 import { weeklyVolume } from '../lib/weeklyVolume';
 import { tonnageNote } from '../lib/bodyweightSets';
@@ -169,12 +170,13 @@ const WATCH_LOOKBACK_DAYS = 14;
 
 export function WatchImportRow() {
   const router = useRouter();
-  const { log, status } = useWorkoutLog();
+  const { log, status, logWorkouts } = useWorkoutLog();
   const { states } = useWearables();
-  const { ids } = useImportedIds();
+  const { ids, mark } = useImportedIds();
   const sources = importSources(states);
   const sourceKey = sources.map((s) => s.meta.id).join(',');
   const [read, setRead] = useState<RecentRead | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!sourceKey) { setRead(null); return; }
     let live = true;
@@ -184,17 +186,36 @@ export function WatchImportRow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceKey]);
   if (!read || read.reach !== 'whole' || !isWhole(status)) return null;
-  const missing = read.samples.filter((sm) => !isLogged(sm, ids, log)).length;
+  const fresh = read.samples.filter((sm) => !isLogged(sm, ids, log));
+  const missing = fresh.length;
   if (missing === 0) return null;
   const from = sources.length === 1 ? sources[0].meta.name : 'your devices';
-  const go = () => router.push('/(client)/devices');
+  // Import HERE, from the read already in hand. The button used to open Watch
+  // & Devices, which shows the connections and an empty list until "Find my
+  // workouts" is tapped again, so tapping Import imported nothing. A stored
+  // write marks the ids (shared app-wide, see useImportedIds), which drops the
+  // card; a queued write leaves it to the log match, as Devices does.
+  const importAll = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const out = await logWorkouts(await Promise.all(fresh.map(withHr)));
+      if (out === 'stored') mark(fresh.map((sm) => sm.id));
+      else if (out === 'refused') Alert.alert('Import Workouts', 'Your log rejected these workouts, so nothing was imported. Your watch still has them.');
+      else Alert.alert('Import Workouts', 'No connection right now. The workouts are saved on this phone and go up on their own next time you have signal.');
+    } catch {
+      Alert.alert('Import Workouts', 'Could not import these workouts. Try again, or open Watch & Devices.');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Section>
       <AttentionRow icon="heart"
         name={`${num(missing)} ${missing === 1 ? 'Workout' : 'Workouts'} on Your Watch Not in Your Log`}
         reason={`Found on ${from} in the last ${WATCH_LOOKBACK_DAYS} days.`}
-        action={{ label: 'Import', onPress: go }}
-        onPress={go} />
+        action={{ label: busy ? 'Importing…' : 'Import', onPress: () => { void importAll(); } }}
+        onPress={() => router.push('/(client)/devices')} />
     </Section>
   );
 }
