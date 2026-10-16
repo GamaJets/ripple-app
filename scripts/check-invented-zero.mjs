@@ -242,7 +242,8 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/lib', 'studio-web/com
  */
 const KNOWN = new Map([
   ['app/(client)/onboarding.tsx', { count: 1, fix: '[annotate] a unit conversion for a prefilled box, and the ternary in front of it has already ruled the null out. Mark it `zero-ok:` saying the `== null` arm is the unknown.' }],
-  ['app/(client)/workouts.tsx', { count: 8, fix: '[annotate] draft set rows the member is typing, plus two display conversions guarded by a `== null` arm. A blank rep box is not an unreported count. Mark them `zero-ok:` naming the box.' }],
+  ['app/(client)/workouts.tsx', { count: 4, fix: '[annotate] draft set rows the member is typing, plus two display conversions guarded by a `== null` arm. A blank rep box is not an unreported count. Mark them `zero-ok:` naming the box.' }],
+  ['src/ui/WorkoutLogger.tsx', { count: 4, fix: '[annotate] the same draft set rows, moved here with the logger out of app/(client)/workouts.tsx. A blank rep box is not an unreported count. Mark them `zero-ok:` naming the box.' }],
   // app/(trainer)/calendar.tsx — CLOSED by annotation, and the entry's [fix]
   // reading was wrong. `withdrawn` is not a count of other people read off a
   // row: it is `get diagnostics … row_count` from the DELETE inside `block_time`
