@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/todayInbox.ts",
+    "src/lib/todayInbox.test.ts",
     "src/lib/mealSwaps.ts",
     "src/lib/mealSwaps.test.ts",
     "src/lib/cancelPolicy.ts",
