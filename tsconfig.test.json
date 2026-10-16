@@ -28,6 +28,7 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/sentry.test.ts",
     "src/lib/todayInbox.ts",
     "src/lib/todayInbox.test.ts",
     "src/lib/mealSwaps.ts",

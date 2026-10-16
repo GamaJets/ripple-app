@@ -141,6 +141,8 @@ const SKIP = new Set(['node_modules', '.git', '.expo', 'dist', 'build', '.next',
  * feature at all.
  */
 const UNSET = new Map([
+  ['EXPO_PUBLIC_SENTRY_DSN',
+    'Crash monitoring, deliberately off until the owner creates a Sentry project (2026-10-16). src/lib/sentry.ts never initialises the SDK without it, captures nothing and offers nothing in the UI, so an unset DSN is the correct, silent, pre-Sentry app. Set it in the production profiles (or as an EAS environment variable) together with SENTRY_ORG / SENTRY_PROJECT / SENTRY_AUTH_TOKEN for source maps; this entry then fails as stale and is deleted.'],
   ['EXPO_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID',
     'The defect this gate was written for, now held deliberately. The Google Cloud project, consent screen, Calendar API and iOS client all exist (2026-09-04), but the redirect is a custom URL scheme — native config, so a new binary — and the consent screen sits in Testing, capped at 100 users with 7-day tokens, until Google verifies the sensitive scope. app/(trainer)/calendar.tsx now renders the row only when CALENDAR_SYNC_CONFIGURED, so the app says nothing rather than promising an update. Setting this brings the row back with no other change.'],
   ['EXPO_PUBLIC_GOOGLE_CALENDAR_REDIRECT',

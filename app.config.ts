@@ -115,6 +115,22 @@ function withSplash(plugins: NonNullable<ExpoConfig['plugins']>, image: string |
     : entry));
 }
 
+/**
+ * Sentry's config plugin, ONLY when a Sentry org and project are named.
+ *
+ * The plugin adds the native build steps that upload source maps and debug
+ * symbols, and those need SENTRY_AUTH_TOKEN (an EAS secret). Without the org
+ * and project there is nowhere to upload to, so the plugin is left out and the
+ * build is exactly what it was; the SDK itself stays a no-op at runtime until
+ * EXPO_PUBLIC_SENTRY_DSN is set (src/lib/sentry.ts).
+ */
+function withSentryPlugin(plugins: NonNullable<ExpoConfig['plugins']>): NonNullable<ExpoConfig['plugins']> {
+  const organization = process.env.SENTRY_ORG;
+  const project = process.env.SENTRY_PROJECT;
+  if (!organization || !project) return plugins;
+  return [...plugins, ['@sentry/react-native/expo', { organization, project, url: process.env.SENTRY_URL || 'https://sentry.io/' }]];
+}
+
 function ownerPlugins(plugins: NonNullable<ExpoConfig['plugins']>): NonNullable<ExpoConfig['plugins']> {
   const off = (name: string, opts: Record<string, unknown>) =>
     [name, opts] as unknown as NonNullable<ExpoConfig['plugins']>[number];
@@ -167,7 +183,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: id.name,
     scheme: id.scheme,
     icon: id.icon,
-    plugins: withSplash(config.plugins ?? [], id.splash),
+    plugins: withSentryPlugin(withSplash(config.plugins ?? [], id.splash)),
     ios: {
       ...(config.ios ?? {}),
       bundleIdentifier: id.bundle,
@@ -239,7 +255,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           // when its option is false — the same mechanism that took the
           // Reminders keys out, so it is proven on this project rather than
           // assumed.
-          plugins: ownerPlugins(withSplash(config.plugins ?? [], id.splash)),
+          plugins: ownerPlugins(withSentryPlugin(withSplash(config.plugins ?? [], id.splash))),
         }
       : null),
     android: {

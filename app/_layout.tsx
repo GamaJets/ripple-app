@@ -1,6 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { LogBox } from 'react-native';
 import { useEffect } from 'react';
+import { initSentry, withSentry } from '../src/lib/sentry';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 // One weight per import, not the package index: the index `require`s every
@@ -211,7 +212,10 @@ function LockedApp() {
   );
 }
 
-export default function RootLayout() {
+// Crash monitoring: a no-op unless EXPO_PUBLIC_SENTRY_DSN is set (src/lib/sentry.ts).
+initSentry();
+
+function RootLayout() {
   useApplyUpdateOnLaunch();
 
   // ── First paint waits for the type, and never for longer than the load ────
@@ -415,3 +419,5 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+export default withSentry(RootLayout);

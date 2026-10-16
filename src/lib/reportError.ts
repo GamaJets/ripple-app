@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import { queueCrash } from '../ui/crashQueue';
+import { captureToSentry } from './sentry';
 
 let APP_VERSION = 'unknown';
 try { APP_VERSION = require('expo-constants').default?.expoConfig?.version ?? 'unknown'; } catch { /* not available */ }
@@ -38,6 +39,8 @@ function describe(err: unknown): string {
  * @param extra   optional key/values appended to the message for triage.
  */
 export function reportError(context: string, err: unknown, extra?: Record<string, unknown>): void {
+  // Sentry first, and independent of Supabase: a no-op without a DSN.
+  captureToSentry(err, context, extra);
   try {
     if (!USE_SUPABASE) return;
     if (sentThisSession >= SESSION_CAP) return;
