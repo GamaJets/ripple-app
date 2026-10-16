@@ -776,7 +776,7 @@ export default function Broadcast() {
             {saved.rows.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(saved.status)}</Text>
             ) : orderTemplates(saved.rows).map((tpl, i) => (
-              <Pressable key={tpl.id ?? tpl.title} onPress={() => useSaved(tpl.body)}
+              <Pressable key={tpl.id ?? tpl.title} onPress={() => useSaved(tpl.body)} // eslint-disable-line react-hooks/rules-of-hooks -- not a hook: a plain handler that drops the template into the composer
                 accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>

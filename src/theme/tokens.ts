@@ -212,14 +212,17 @@ const repple: Theme = theme(
   true,
   { night: '#0b1d19', night2: '#14302a', nightInk: '#ffffff', nightInk2: '#cbd5e1', nightInk3: '#86efac', brandBright: '#22c55e', brandDeep: '#052e16', brandSoft: '#dcfce7' },
 );
-// The mockups' dark mode: near-black with the same green, where the bright
-// fill is readable under dark ink (8.2:1) and so is what the board draws. The
-// hero is the light scheme's night2 — a green-black a clear step LIGHTER than
-// the ground and the cards, so it still leads the screen.
+// ── Repple Dark (DEFAULT, redesign v2, 15 Oct 2026) ─────────────────────────
+// REDESIGN-PLAN §6: dark-first, layered near-black surfaces told apart by a
+// step in lightness and a 1px line rather than a shadow, one luminous accent.
+// The plan's ink3 #6E7A76 is 4.06:1 on surface3, so it is walked up (hue and
+// saturation held) to #818d89, the first step clearing 4.5 on all four grounds
+// — the method "ink3, the quiet one" above describes. The hero (night) is a
+// green-black a step lighter than surface1, so it still leads the screen.
 const reppleDark: Theme = theme(
-  { bg: '#0b0f0e', surface: '#141a18', surface2: '#1b2320', surface3: '#252e2a', ink: '#f1f5f3', ink2: '#b8c4bf', ink3: '#93a09b', ring: 'rgba(255,255,255,0.10)', brand: '#22c55e', brandInk: '#111310', ...darkSem },
+  { bg: '#07090a', surface: '#0e1213', surface2: '#151b1c', surface3: '#1d2526', ink: '#f2f6f4', ink2: '#a3afab', ink3: '#818d89', ring: 'rgba(255,255,255,0.07)', brand: '#2ee27a', brandInk: '#03180b', ...darkSem, crit: '#ff6b6e' },
   false,
-  { night: '#14302a', night2: '#1d443b', nightInk: '#ffffff', nightInk2: '#cbd5e1', nightInk3: '#86efac' },
+  { night: '#0f1f18', night2: '#173026', nightInk: '#ffffff', nightInk2: '#cbd5e1', nightInk3: '#86efac' },
 );
 
 const midnight: Theme = theme({ bg: '#0a0f1e', surface: '#111a30', surface2: '#16223c', surface3: '#1e2b47', ink: '#eaf0ff', ink2: '#b9c6e0', ink3: '#8692ab', ring: 'rgba(255,255,255,0.08)', brand: '#5b9dff', brandInk: '#04122e', ...darkSem }, false);
@@ -272,7 +275,7 @@ export const PALETTES: PaletteMeta[] = [
 ];
 export const paletteByKey = (k: string): Theme => (metaByKey(k)).theme;
 export const metaByKey = (k: string): PaletteMeta => PALETTES.find((p) => p.key === k) ?? PALETTES[0];
-export const DEFAULT_PALETTE = 'repple';
+export const DEFAULT_PALETTE = 'repple-dark';
 
 /**
  * The palette to draw when the phone is in `scheme` and the member chose `key`.
@@ -364,4 +367,39 @@ export function brandInkFor(hex: string): string {
 export function withAccent(t: Theme, accent: string): Theme {
   const branded = { ...t, brand: accent, brandInk: brandInkFor(accent), nightInk3: t.nightInk2 };
   return { ...branded, ...accentTokens(branded) };
+}
+
+
+// ── Per-app accent on the shared neutral base (REDESIGN-PLAN §6) ────────────
+// All three apps share every neutral token; only the accent set changes per
+// build: client green, Coach purple (#665FE8 family), Studio gold. Applied on
+// the two Repple palettes only — a member who chose Sunset chose Sunset — and
+// under a gym's own colour, which still wins (`withAccent`). Every value is
+// measured: the dark accents clear 4.5:1 on all four dark grounds and their ink
+// clears 4.5:1 on them; the light fills carry a white label at 4.5:1 or better.
+// a11y.test.ts asserts it.
+export type AccentVariant = 'client' | 'trainer' | 'owner';
+export const VARIANT_ACCENTS: Record<AccentVariant, { dark: { brand: string; brandInk: string; glow: string }; light: { brand: string; brandInk: string; bright: string } }> = {
+  client: { dark: { brand: '#2ee27a', brandInk: '#03180b', glow: '#86efac' }, light: { brand: '#15803d', brandInk: '#ffffff', bright: '#22c55e' } },
+  trainer: { dark: { brand: '#8b85ff', brandInk: '#0b0a24', glow: '#c4c1ff' }, light: { brand: '#5b52e0', brandInk: '#ffffff', bright: '#8b85ff' } },
+  owner: { dark: { brand: '#f5a623', brandInk: '#1a0f00', glow: '#ffd08a' }, light: { brand: '#b45309', brandInk: '#ffffff', bright: '#f5a623' } },
+};
+/** Palettes the per-app accent is drawn over. */
+export const VARIANT_ACCENT_PALETTES = ['repple', 'repple-dark'] as const;
+
+/**
+ * `t` (a Repple palette) in this build's accent. The client build is returned
+ * unchanged — its palette already carries the green. In Studio the amber warn
+ * collides with the gold accent, so warn becomes orange there (plan §6).
+ */
+export function withVariantAccent(t: Theme, variant: AccentVariant, light: boolean): Theme {
+  if (variant === 'client') return t;
+  const v = VARIANT_ACCENTS[variant];
+  const warn = variant === 'owner' ? (light ? '#c2410c' : '#fb923c') : t.warn;
+  if (light) {
+    const x = { ...t, brand: v.light.brand, brandInk: v.light.brandInk, warn };
+    return { ...x, ...accentTokens(x), brandBright: v.light.bright, brandDeep: '#ffffff' === v.light.brandInk ? x.night : v.light.brandInk, nightInk3: v.light.bright };
+  }
+  const x = { ...t, brand: v.dark.brand, brandInk: v.dark.brandInk, nightInk3: v.dark.glow, warn };
+  return { ...x, ...accentTokens(x) };
 }

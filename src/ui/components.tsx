@@ -5,7 +5,7 @@ import { ReactNode, createContext, useCallback, useContext, useMemo, useRef, use
 import { View, Text, Pressable, TextInput, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  paletteByKey, paletteForScheme, highContrast, withAccent,
+  paletteByKey, paletteForScheme, highContrast, withAccent, withVariantAccent, metaByKey, VARIANT_ACCENT_PALETTES,
   DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta,
 } from '../theme/tokens';
 import { Icon } from './Icon';
@@ -13,6 +13,7 @@ import { passwordRules } from '../lib/passwordRules';
 import { passwordNeedsSpoken } from '../lib/passwordNeeds';
 import { hitSlopFor } from '../lib/a11y';
 import { reportError } from '../lib/reportError';
+import { VARIANT } from '../lib/variant';
 
 interface ThemeControls {
   /** The palette the member CHOSE. Not necessarily the one on screen — see
@@ -130,13 +131,12 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const shownPalette = follow ? paletteForScheme(palette, scheme) : palette;
   const base = paletteByKey(shownPalette);
 
-  // The three apps were each drawn in their own colour here, on the default
-  // palette only. The approved board draws the family in one green, which is
-  // now the default palette's own brand, so there is nothing to override: the
-  // palette carries it, and its `brandInk` was measured against it in
-  // tokens.ts rather than recomputed here. A white-label accent still wins
-  // below, exactly as before.
-  const withVariant: Theme = base;
+  // Each app draws in its own accent on the shared neutral base (REDESIGN-PLAN
+  // §6, decided 15 Oct 2026): client green, Coach purple, Studio gold — on the
+  // two Repple palettes only. A white-label accent still wins below.
+  const withVariant: Theme = (VARIANT_ACCENT_PALETTES as readonly string[]).includes(shownPalette)
+    ? withVariantAccent(base, VARIANT, metaByKey(shownPalette).light)
+    : base;
 
   const branded: Theme = accent ? withAccent(withVariant, accent) : withVariant;
   // ── Why the theme and the four setters are held still ─────────────────────

@@ -762,7 +762,7 @@ export default function CoachChat() {
             {templates.rows.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(templates.status)}</Text>
             ) : orderTemplates(templates.rows).map((tpl, i) => (
-              <Pressable key={tpl.id ?? tpl.title} onPress={() => useTemplate(tpl.body)}
+              <Pressable key={tpl.id ?? tpl.title} onPress={() => useTemplate(tpl.body)} // eslint-disable-line react-hooks/rules-of-hooks -- not a hook: a plain handler that drops the template into the composer
                 accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
                 <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>

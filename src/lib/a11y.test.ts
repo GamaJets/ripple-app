@@ -16,7 +16,7 @@ import {
   contrastRatio, hitSlopFor, isLargeText, luminance, meetsMark, meetsTarget,
   meetsText, readableInkOn, rgb, switchLabel,
 } from './a11y';
-import { PALETTES, DATA_HUES, brandInkFor, highContrast, metaByKey, paletteForScheme, withAccent, type Theme } from '../theme/tokens';
+import { PALETTES, DATA_HUES, brandInkFor, highContrast, metaByKey, paletteForScheme, withAccent, withVariantAccent, VARIANT_ACCENTS, type Theme } from '../theme/tokens';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -388,3 +388,20 @@ eq(switchLabel('Hydration nudges', false), 'Hydration nudges, off', 'an off swit
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`a11y: ok (${PALETTES.length} palettes × ${GROUNDS.length} grounds measured)`);
+
+
+// ── per-app accents over the Repple palettes (REDESIGN-PLAN §6) ──
+{
+const grounds = (t: Theme) => [t.bg, t.surface, t.surface2, t.surface3];
+for (const v of ['client', 'trainer', 'owner'] as const) {
+  for (const key of ['repple', 'repple-dark'] as const) {
+    const meta = metaByKey(key);
+    const t = withVariantAccent(meta.theme, v, meta.light);
+    ok((contrastRatio(t.brandInk, t.brand) ?? 0) >= 4.5, `${v}/${key}: label on accent clears 4.5:1`);
+    for (const g of grounds(t)) ok((contrastRatio(t.brand, g) ?? 0) >= (meta.light ? 3 : 4.5), `${v}/${key}: accent on ${g} clears its bar`);
+    ok((contrastRatio(t.brandBright, t.night) ?? 0) >= 3, `${v}/${key}: hero accent clears 3:1 on night`);
+    ok((contrastRatio(t.warn, t.bg) ?? 0) >= 3, `${v}/${key}: warn still a visible mark`);
+  }
+}
+ok(withVariantAccent(metaByKey('repple-dark').theme, 'owner', false).warn !== VARIANT_ACCENTS.owner.dark.brand, 'Studio warn is not its accent');
+}

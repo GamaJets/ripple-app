@@ -66,29 +66,26 @@ export const VARIANT_TILE: Record<AppVariant, string> = {
 };
 
 /**
- * The accent this build's interface is drawn in.
+ * The accent this build's interface is drawn in, as its light-scheme fill.
  *
- * One green for the whole family, as the approved board draws it. It used
- * to be a hue per app — teal, indigo, amber, the same three the website's
- * --client / --coach / --studio carried — and the board's reviewers chose
- * one mark for the three products instead; what tells the apps apart on a
- * screen is the wordmark's COACH / STUDIO line and the icon plate. This is
- * the same value as the default palette's `brand` in src/theme/tokens.ts,
- * and src/ui/components.tsx no longer overrides the palette with it; it is
- * kept here because it is the value the build's icon plates are held to.
+ * One hue per app again (REDESIGN-PLAN §6, the user's decision of 15 Oct
+ * 2026, reversing the board-era shared green): client green, Coach purple from
+ * the #665FE8 family, Studio gold. Each is in its own logo mark's hue
+ * (`VARIANT_MARK`), which coverage.test.ts holds. The dark-scheme luminous
+ * values and the inks are `VARIANT_ACCENTS` in src/theme/tokens.ts, applied by
+ * src/ui/components.tsx over the two Repple palettes.
  */
 export const VARIANT_ACCENT: Record<AppVariant, string> = {
   client: '#15803d',
-  trainer: '#15803d',
-  owner: '#15803d',
+  trainer: '#5b52e0',
+  owner: '#b45309',
 };
 
 /**
  * The colour of the wordmark's three bars, per app: green for the member app,
  * purple for Coach, gold for Studio. The owner's choice on 22 Sep 2026, so each
  * app keeps the same R≡PPLE mark in its own colour; the same values are drawn
- * into assets/repple-icon-*.svg. Only the MARK changes: the interface stays on
- * the one shared accent, and a gym that sets its own brand colour has its
+ * into assets/repple-icon-*.svg. The interface accent is `VARIANT_ACCENT`, in the same hue, and a gym that sets its own brand colour has its
  * colour in the bars instead (src/ui/BrandMark.tsx `useMarkSignal`).
  */
 export const VARIANT_MARK: Record<AppVariant, string> = {
