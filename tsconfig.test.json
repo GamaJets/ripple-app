@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/studioAnalytics.ts",
+    "src/lib/studioAnalytics.test.ts",
     "src/lib/sentry.test.ts",
     "src/lib/todayInbox.ts",
     "src/lib/todayInbox.test.ts",

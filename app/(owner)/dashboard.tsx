@@ -775,6 +775,8 @@ export default function OwnerOverview() {
                 anything it explained. */}
             <ListRow icon="calendar" title="Classes & Payroll" note="Attendance, fill rates & trainer pay per check-in"
               onPress={() => router.push('/(owner)/class-analytics')} />
+            <ListRow icon="chart" title="Studio Analytics" note="Members, retention, sessions per coach, revenue & InBody"
+              onPress={() => router.push('/(owner)/analytics')} />
           </View>
         </Section>
         {/* ── the shape of the platform ──────────────────────────────────── */}
