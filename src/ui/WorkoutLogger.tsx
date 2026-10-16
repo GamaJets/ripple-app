@@ -31,7 +31,7 @@ import { watchReach, zonesNote, liveHrNote, type WatchReach } from '../lib/watch
 // device-global, and a session restored under the wrong member is finished
 // under the wrong member's id — see the header of that file.
 import { DraftGate, gateForKey, gateHydrated, guidedDraftKey, mayPersist } from '../lib/sessionScope';
-import { tapLight } from './haptics';
+import { tapLight, notifySuccess } from './haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../lib/restTimer';
 // Supersets and set methods. Both are pure and both are read POSITIONALLY here
 // — `badges` returns one entry per exercise in the order it was handed them, so
@@ -1892,6 +1892,10 @@ export function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf,
       setSessionPrs((l) => [...l.filter((x) => !x.startsWith(`${name} `)), `${name} ${fig(liftLabel(wkg, unit))} ${unit}`]);
       prAt.current = done.length;
       setConfetti(true);
+      // The success haptic REDESIGN-PLAN §6 asks of a PR, beside the banner and
+      // the confetti. Here, in the set's own handler and not in an updater, so
+      // it fires once per record (see the note on haptics in updaters above).
+      notifySuccess();
       // The coach is told from INSIDE this branch, and that placement is the
       // whole design. Every guard above — the whole history was read, not a
       // bodyweight set, not a hold, this session's own sets cannot establish a
