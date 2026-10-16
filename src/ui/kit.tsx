@@ -791,6 +791,10 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
         // greys involved — so this is the same 2× hairline the sheet's own tick
         // uses for an untapped set.
         ...(disabled ? { borderWidth: hairline * 2, borderColor: t.ring } : null),
+        // v2: the screen's primary action carries the accent's glow (plan §6,
+        // "primary CTA 0 8px 28px accent@35%"). Only the wide, untoned form —
+        // one per screen — so the glow stays the rare thing it is meant to be.
+        ...(wide && !disabled && !tone ? { boxShadow: `0 8px 28px ${t.brand}59` } : null),
         paddingVertical: sp.sm, paddingHorizontal: sp.lg,
         alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
       }}>
@@ -2065,6 +2069,7 @@ export function CtaBright({ label, onPress, disabled, a11yLabel, tone }: {
         alignSelf: 'stretch', minHeight: grown(56), borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
         alignItems: 'center', justifyContent: 'center',
         backgroundColor: disabled ? t.night2 : fill,
+        ...(disabled ? null : { boxShadow: `0 8px 28px ${fill}59` }),
         // Off, and still a button: the same argument as Cta's disabled edge.
         ...(disabled ? { borderWidth: hairline * 2, borderColor: t.nightInk2 } : null),
       }}>
@@ -2118,7 +2123,13 @@ export function HeroCard({ eyebrow, title, meta, ring, cta, children, onPress }:
   );
   const spoken = [eyebrow, title, meta].filter(Boolean).join(', ');
   return (
-    <View style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+    <View style={{
+      backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero,
+      // v2 hero: an accent radial tint from the top corner and a 1px accent
+      // line (plan §6 HeroCard), drawn by RN itself on the new architecture.
+      experimental_backgroundImage: `radial-gradient(circle at 90% 0%, ${t.brandBright}38 0%, transparent 65%)`,
+      borderWidth: 1, borderColor: `${t.brandBright}40`,
+    }}>
       <View style={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.md }}>
         {onPress ? (
           <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken} style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>{words}</Pressable>

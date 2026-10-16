@@ -1,8 +1,7 @@
 // ── The tab bar ──────────────────────────────────────────────────────────────
-// One bar for all three apps, as the approved mockups draw it: a white capsule
-// floating over the ground with a soft shadow, the CURRENT tab a night-green
-// capsule holding a bright icon and the tab's name, every other tab a quiet
-// icon. app/(client), app/(trainer) and app/(owner) hand this to expo-router's
+// One bar for all three apps, as the v2 mockups draw it (REDESIGN-PLAN §6): a
+// glass capsule floating over the ground, every tab an outline icon over its
+// name, the CURRENT tab in the app's accent with a soft glow. app/(client), app/(trainer) and app/(owner) hand this to expo-router's
 // <Tabs tabBar=…> and configure nothing else about the bar.
 //
 // ── It floats, and nothing sits under it ────────────────────────────────────
@@ -31,9 +30,8 @@
 //   · The `tabPress` event is emitted and may be prevented, as the stock bar
 //     does, so a screen's listener keeps working.
 //   · Roles and state: a `tablist` of `tab`s, `selected` said on each. The
-//     quiet tabs show no name, so their name is their accessibility label —
-//     colour and a capsule are the visual channel for "selected", and neither
-//     reaches a screen reader.
+//     accessibility label carries the name; colour and glow are the visual
+//     channel for "selected", and neither reaches a screen reader.
 //   · The bar grows with the reader's text up to 1.3x (LARGE_TYPE_SCALE) and
 //     no further, as the system's own tab bar does. At the accessibility sizes
 //     it grew a 125pt circle whose name spilled out of it (seen 21 Sep 2026 on
@@ -90,7 +88,9 @@ export function FloatingTabBar({ state, descriptors, navigation, partOf }: TabBa
     }}>
       <View accessibilityRole="tablist" style={{
         flexDirection: 'row', alignItems: 'center', gap: 2, padding: 7,
-        backgroundColor: t.surface, borderRadius: 32, ...elevation.float,
+        // v2 (REDESIGN-PLAN §6): a glass bar — the card colour at 88% so the
+        // content scrolling past reads through it — on a 26pt radius.
+        backgroundColor: `${t.surface}e0`, borderRadius: 26, ...elevation.float,
       }}>
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
@@ -111,20 +111,17 @@ export function FloatingTabBar({ state, descriptors, navigation, partOf }: TabBa
               accessibilityLabel={options.tabBarAccessibilityLabel ?? name}
               accessibilityState={{ selected: focused }}
               style={{
-                // 1.9 to 1: the capsule is wide enough for its name and the
-                // quiet tabs share what is left, as the mockups divide it.
-                flexGrow: focused ? 1.9 : 1, flexBasis: 0, minWidth: 0,
-                height: PILL, borderRadius: PILL / 2,
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: focused ? 8 : 0,
-                backgroundColor: focused ? t.night : 'transparent',
+                // v2: four or five equal tabs, each an outline icon over its
+                // name; the current one in the accent with a soft glow (plan
+                // §6 "active tab icon drop-shadow accent@60%").
+                flex: 1, minWidth: 0, minHeight: PILL, borderRadius: 18,
+                alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 4,
               }}>
-              {/* Duotone, the owner's pick (option C): every icon a soft fill under
-                  its line, green throughout; the current one bright on night. */}
-              {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.brand, size: focused ? 22 : 24 })}
-              {focused ? (
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={CAP}
-                  style={{ ...ty.tab, ...HERO_FIT, color: t.nightInk, flexShrink: 1 }}>{name}</Text>
-              ) : null}
+              <View style={focused ? { boxShadow: `0 0 14px ${t.brand}66`, borderRadius: 14 } : null}>
+                {options.tabBarIcon?.({ focused, color: focused ? t.brand : t.ink3, size: 22 })}
+              </View>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={CAP}
+                style={{ ...ty.tab, ...HERO_FIT, fontSize: 11, color: focused ? t.brandText : t.ink3 }}>{name}</Text>
             </Pressable>
           );
         })}
