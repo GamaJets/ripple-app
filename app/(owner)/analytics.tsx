@@ -99,9 +99,9 @@ export default function StudioAnalyticsScreen() {
                 <Text style={{ ...ty.body, color: t.ink2 }}>No payments recorded in this window.</Text>
               ) : d.revenue.map((r) => (
                 <View key={r.currency} style={{ marginBottom: sp.md }}>
-                  <Text style={{ ...ty.title, ...numeric, color: t.ink }}>{money(r.cents, r.currency === '?' ? null : r.currency) ?? `${num(r.cents / 100)} (currency not stated)`}</Text>
+                  <Text style={{ ...ty.title, ...numeric, color: t.ink }}>{money(r.cents, r.currency === '?' ? null : r.currency) ?? 'Payments with no currency stated'}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                    {r.months.map((m) => `${m.month}: ${money(m.cents, r.currency === '?' ? null : r.currency) ?? num(m.cents / 100)}`).join(' · ')}
+                    {r.months.map((m) => `${m.month}: ${money(m.cents, r.currency === '?' ? null : r.currency) ?? 'amount, currency not stated'}`).join(' · ')}
                   </Text>
                 </View>
               ))}

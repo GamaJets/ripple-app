@@ -26,6 +26,7 @@ export interface StudioAnalytics {
 }
 
 import { deltaSign } from './deltaLabel';
+import { num1 } from './format';
 
 const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
 const nn = (v: unknown): number | null => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
@@ -69,5 +70,5 @@ export function parseStudioAnalytics(raw: unknown): StudioAnalytics | null {
 /** "+1.2" / "−0.8" / "0.0" through deltaSign, so zero carries no sign. Null stays null. */
 export function signed(v: number | null, digits = 1): string | null {
   if (v == null) return null;
-  return `${deltaSign(v, digits)}${Math.abs(v).toFixed(digits)}`;
+  return `${deltaSign(v, digits)}${num1(Math.abs(v))}`;
 }
