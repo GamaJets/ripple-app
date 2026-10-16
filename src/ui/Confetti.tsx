@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, useWindowDimensions, View, Easing, AccessibilityInfo } from 'react-native';
 
-const COLORS = ['#2dd4bf', '#f59e0b', '#e06767', '#a78bfa', '#34d399', '#60a5fa', '#f472b6'];
+const COLORS = ['#2ee27a', '#f59e0b', '#e06767', '#a78bfa', '#34d399', '#60a5fa', '#f472b6'];
 
 export function Confetti({ show, onDone, count = 44 }: { show: boolean; onDone?: () => void; count?: number }) {
   const { width, height } = useWindowDimensions();

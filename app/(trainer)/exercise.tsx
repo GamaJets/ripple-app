@@ -256,7 +256,7 @@ export default function TrainerExercise() {
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (
           <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
-            <ActivityIndicator />
+            <ActivityIndicator color={t.ink3} />
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
           </View>
         ) : status === 'error' ? (
