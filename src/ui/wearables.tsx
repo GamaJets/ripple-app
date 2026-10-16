@@ -91,6 +91,9 @@ interface Value {
 
 const Ctx = createContext<Value | null>(null);
 
+/** Thrown inside the restore to skip the server read when signed out. */
+const SKIP_SERVER = Symbol('skip-server');
+
 export function WearablesProvider({ children }: { children: ReactNode }) {
   const [states, setStates] = useState<Record<string, ConnectionState>>({});
   const [metrics, setMetrics] = useState<Record<string, DailyMetrics | null>>({});
@@ -262,6 +265,11 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
         // server, which is the better answer anyway.
       }
       try {
+        // Signed out (the coach app at /welcome, a sign-out mid-launch) the
+        // RPC is not granted to anon and fails with 42501. That was REPPLE-4:
+        // not a failure, just nobody to ask about. Local memory stands.
+        const { data: sess } = await supabase.auth.getSession(); // auth-error-ok: no session and an unreadable one both mean "do not ask the server", local memory stands
+        if (!sess?.session) throw SKIP_SERVER;
         const { data, error } = await supabase.rpc('my_wearable_providers');
         if (error) {
           // Not a reason to forget what the handset remembers. Reported rather
@@ -278,7 +286,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
           try { await AsyncStorage.setItem(STORE_KEY, JSON.stringify([...ids])); } catch { /* cache only */ }
         }
       } catch (e) {
-        reportError('wearables.restore.rpc', e);
+        if (e !== SKIP_SERVER) reportError('wearables.restore.rpc', e);
       }
       for (const id of ids) {
         const p = providerById(id as ProviderId);

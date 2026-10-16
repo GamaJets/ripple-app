@@ -4,6 +4,7 @@
 // (url-polyfill not needed on RN 0.81 / SDK 54 — URL is built in)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import { AppState } from 'react-native';
 import { observedFetch } from './reachability';
 import { shareGetUser } from './whoAmI';
 import { setSentryUser } from './sentry';
@@ -78,6 +79,15 @@ supabase.auth.onAuthStateChange((_e, session) => { whoAmI.forget(); setSentryUse
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 // Thin wrappers so screens don't import the Supabase client directly.
+// Refresh tokens only while the app is in the foreground. iOS cancels the
+// in-flight refresh when the app is suspended, which surfaced as REPPLE-5
+// (AuthRetryableFetchError: cancelled). The Supabase React Native pattern:
+// start on active, stop otherwise; startAutoRefresh refreshes at once if due.
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') void supabase.auth.startAutoRefresh();
+  else void supabase.auth.stopAutoRefresh();
+});
+
 export type Role = 'owner' | 'trainer' | 'client';
 
 export async function signIn(email: string, password: string) {
