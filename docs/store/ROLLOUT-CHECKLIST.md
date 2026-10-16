@@ -22,7 +22,7 @@ Nothing here is done automatically. Every store step is the owner's call.
 - [ ] Crash-free over at least 24h of internal testing (Sentry, or Play vitals and TestFlight crashes).
 
 ## Store listing
-- [ ] Copy from `docs/store/{client,coach,studio}.md` pasted into App Store Connect and Play Console. Check the limits (name 30, subtitle 30, keywords 100, short description 80).
+- [ ] Copy from `docs/store/client.md`, `docs/store/coach.md` and `docs/store/studio.md` pasted into App Store Connect and Play Console. Check the limits (name 30, subtitle 30, keywords 100, short description 80).
 - [ ] Screenshots from `scripts/store-screenshots.sh <app>` (6.9" and 6.5" iPhone, Play phone; iPad only if shipped on iPad).
 - [ ] Privacy: App Privacy (iOS) and Data safety (Play) match `docs/LAUNCH-CHECKLIST.md`. Health data comes from HealthKit or Health Connect and is never used for ads.
 - [ ] Review notes give App Review a demo account for each app (coach and Studio need data to show).
