@@ -109,7 +109,8 @@ import { forgetPushConsent } from '../lib/pushConsent';
 import { forgetRestSoundConsent } from '../lib/restTimer';
 import { savedFromStored } from '../lib/reminderPlan';
 import { REMINDERS_KEY } from './reminderSync';
-import { cancelReminders, pushAvailable } from './pushNotifications';
+import { cancelReminders, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
+import { supabase } from '../lib/supabase';
 import { revokePushToken } from './settings';
 import { reportError } from '../lib/reportError';
 
@@ -129,6 +130,18 @@ const sweeps = makeSweepLog();
  *  never for a decision taken elsewhere. */
 export const sweepHistory = (): readonly SweepRecord[] => sweeps.all();
 
+/** True only when the server says none of this handset's tokens is left. */
+async function releaseWithoutSession(): Promise<boolean> {
+  try {
+    const tokens = await handsetPushTokens();
+    if (!tokens.length) return true;
+    const { data, error } = await supabase.rpc('release_handset_push_tokens', { p_tokens: tokens.slice(0, 4) });
+    if (error || typeof data !== 'number') return false;
+    if (data === 0) { await forgetRegisteredToken(); return true; }
+    return false;
+  } catch { return false; } // no-error-ok: the disposition below reports it
+}
+
 /**
  * The push half. Only ever attempted where there is a session to attempt it
  * under, and the answer is carried rather than discarded.
@@ -139,7 +152,11 @@ async function sweepPushToken(cause: SweepCause, uid: string | null): Promise<Pu
     // a session cannot distinguish "the row is gone" from "I cannot see it", so
     // attempting one would produce a confident wrong answer instead of an
     // honest missing one.
-    return pushDisposition({ cause, priorRevoked: sweeps.pushProvenGoneFor(uid) });
+    const d = pushDisposition({ cause, priorRevoked: sweeps.pushProvenGoneFor(uid) });
+    if (d !== 'no-session') return d;
+    // No session to delete under, so by token through the definer path (part
+    // 3580). Proven by the count it returns, never by silence.
+    return (await releaseWithoutSession()) ? 'revoked' : d;
   }
   let proven: boolean | null = null;
   try {
@@ -205,8 +222,11 @@ export async function clearPersonalDeviceState(
     // Written down rather than left to be inferred from silence. This is the
     // half the remote path cannot do, and the report is the only place it is
     // said while anybody can still act on it.
+    // 'no-session' is expected (the session ended elsewhere and the definer
+    // path could not be reached, usually offline) and the settings reconciler
+    // retries, so it is a warning, not an error.
     reportError('signOut.pushTokenStillRegistered', new Error(pushLine(push)), {
-      cause: opts.cause, disposition: push,
+      cause: opts.cause, disposition: push, ...(push === 'no-session' ? { level: 'warning' } : {}),
     });
   }
 

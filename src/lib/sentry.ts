@@ -58,6 +58,7 @@ export function initSentry(): void {
       tracesSampleRate: 0.1,
       enableAutoSessionTracking: true,
       attachStacktrace: true,
+      beforeSend: (event) => (isTransientAuthFetch(event) ? null : event),
     });
     Sentry.setTag('app_variant', VARIANT);
     started = true;
@@ -76,8 +77,10 @@ export function captureToSentry(err: unknown, context?: string, extra?: Record<s
     S.withScope((scope) => {
       if (context) scope.setTag('context', context);
       if (extra) scope.setExtras(extra);
+      const level = extra?.level === 'warning' ? 'warning' : 'error';
+      scope.setLevel(level);
       if (err instanceof Error) S.captureException(err);
-      else S.captureMessage(context ? `[${context}] ${String(err)}` : String(err), 'error');
+      else S.captureMessage(context ? `[${context}] ${describeThrown(err)}` : describeThrown(err), level);
     });
   } catch { /* never throws */ }
 }
@@ -91,4 +94,38 @@ export function setSentryUser(id: string | null): void {
 /** Wrap the root component when Sentry is on; the component itself when off. */
 export function withSentry(C: React.ComponentType<Record<string, unknown>>): React.ComponentType<Record<string, unknown>> {
   return started && Sentry ? Sentry.wrap(C) : C;
+}
+
+/**
+ * A token refresh the OS cut off (app backgrounded, network dropped) — not an
+ * auth failure. supabase-js raises these as AuthRetryableFetchError and
+ * retries them itself; the session is kept. REPPLE-5 was one.
+ *
+ * Only that error type, and only with a network-shaped message. A real auth
+ * failure (bad refresh token, revoked session) is AuthApiError /
+ * AuthSessionMissingError and still reaches Sentry, as does a retryable error
+ * whose message says something else (a 5xx body, say).
+ */
+const TRANSIENT_FETCH = /cancel+ed|fetch failed|network request failed|network ?error|aborted|timed? ?out|offline|connection (was )?lost/i;
+export function isTransientAuthFetch(event: { exception?: { values?: { type?: string; value?: string }[] } }): boolean {
+  const values = event.exception?.values ?? [];
+  return values.length > 0 && values.some((v) => v.type === 'AuthRetryableFetchError' && TRANSIENT_FETCH.test(v.value ?? ''));
+}
+
+/**
+ * A thrown value that is not an Error, in words. PostgrestError and AuthError
+ * shapes arrive as plain objects, which String() turns into "[object Object]"
+ * (REPPLE-4). Message, code, details and hint are what triage needs.
+ */
+export function describeThrown(err: unknown): string {
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const parts = ['message', 'code', 'details', 'hint', 'status']
+      .filter((k) => o[k] != null && o[k] !== '')
+      .map((k) => (k === 'message' ? String(o[k]) : `${k}=${String(o[k])}`));
+    if (parts.length) return parts.join(' ').slice(0, 500);
+    try { return JSON.stringify(err).slice(0, 500); } catch { /* fall through */ }
+  }
+  return String(err);
 }
