@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/watchSync.ts",
+    "src/lib/watchSync.test.ts",
     "src/lib/sentry.test.ts",
     "src/lib/todayInbox.ts",
     "src/lib/todayInbox.test.ts",
