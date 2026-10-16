@@ -76137,6 +76137,276 @@ create index if not exists thread_blocks_blocker_id_fkx on public.thread_blocks 
 create index if not exists workouts_amended_by_fkx on public.workouts (amended_by);
 create index if not exists workouts_logged_by_fkx on public.workouts (logged_by);
 
+-- ▶ a-streak-about-to-break-said-by-something-awake.sql
+
+-- A streak about to break, said by something that is awake.
+--
+-- The handset already arms a "Keep your streak alive" local notification
+-- (src/lib/motivationNudge.ts, streak-risk), but a local notification only
+-- reaches somebody who opened the app that day. Part 3450 closed the same gap
+-- for the quiet week; this is the streak half, on the same machinery:
+--
+--   · claim_notice_pass (part 1890): only at the intended local hour, at most
+--     one claim per member per UTC day, race-safe between ticks.
+--   · a notifications row on '/(client)/consistency', which
+--     notification_channel already maps to 'training'. So part 900's
+--     dispatcher pushes it, send-push applies the member's Training switch
+--     (Notifications settings) and quiet hours, and nothing new can bypass them.
+--
+-- ── what it says, and when it refuses ─────────────────────────────────────
+--
+-- A member whose run of consecutive training days, in their own day, ends
+-- YESTERDAY and is at least STREAK_WORTH_PROTECTING (2) long, and who has not
+-- logged anything today. Same words as the handset.
+--
+-- Not spam:
+--   · once a day at most (the claim);
+--   · never more than three times in any seven days, so somebody who always
+--     trains late is not told every evening;
+--   · never on a day a quiet-week note already went (the two cannot both be
+--     true, but the check is cheap and explicit);
+--   · the count is re-read inside the loop, so a session logged in the seconds
+--     since the claim is honoured.
+--
+-- Additive only: one new function and one cron job. No table, column or
+-- policy changes.
+
+create or replace function public.member_streak_through_yesterday(p_user uuid)
+returns integer
+language plpgsql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_tz    text := coalesce(public.notice_local_tz(p_user), 'UTC');
+  v_today date := (now() at time zone v_tz)::date;
+  v_n     int  := 0;
+begin
+  -- Anything today means the streak is already safe; the caller checks that
+  -- separately, so here a run is counted back from yesterday.
+  loop
+    exit when v_n >= 366;
+    exit when not exists (
+      select 1 from public.workouts w
+       where w.user_id = p_user
+         and w.performed_at >= ((v_today - (v_n + 1))::timestamp at time zone v_tz)
+         and w.performed_at <  ((v_today - v_n)::timestamp at time zone v_tz));
+    v_n := v_n + 1;
+  end loop;
+  return v_n;
+end $fn$;
+
+revoke all on function public.member_streak_through_yesterday(uuid) from public, anon, authenticated;
+
+create or replace function public.run_streak_risk_nudges()
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_due    uuid[];
+  v_sent   int := 0;
+  v_streak int;
+  v_tz     text;
+  r        record;
+begin
+  -- Candidates: trained yesterday-ish (within 48h) but not in the last few
+  -- hours. The exact local-day test is below; this only keeps the claim small.
+  select public.claim_notice_pass(
+           'streak-risk',
+           coalesce(array_agg(c.id), '{}'::uuid[]),
+           15)
+    into v_due
+    from public.clients c
+   where exists (select 1 from public.workouts w
+                  where w.user_id = c.id and w.performed_at > now() - interval '48 hours');
+
+  for r in select unnest(coalesce(v_due, '{}'::uuid[])) as id loop
+    v_tz := coalesce(public.notice_local_tz(r.id), 'UTC');
+
+    -- Already trained today, in their own day: nothing at risk.
+    if exists (
+      select 1 from public.workouts w
+       where w.user_id = r.id
+         and w.performed_at >= (((now() at time zone v_tz)::date)::timestamp at time zone v_tz)
+    ) then
+      continue;
+    end if;
+
+    v_streak := public.member_streak_through_yesterday(r.id);
+    if v_streak < 2 then
+      continue;
+    end if;
+
+    -- At most three in any seven days.
+    if (select count(*) from public.notifications n
+         where n.user_id = r.id
+           and n.title = 'Keep your streak alive'
+           and n.created_at > now() - interval '7 days') >= 3 then
+      continue;
+    end if;
+
+    -- Not on top of a quiet-week note today.
+    if exists (select 1 from public.notifications n
+                where n.user_id = r.id
+                  and n.route = '/(client)/consistency'
+                  and n.created_at > now() - interval '20 hours') then
+      continue;
+    end if;
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.id,
+      'Keep your streak alive',
+      'One session today keeps your ' || v_streak || '-day streak going.',
+      'train',
+      '/(client)/consistency');
+
+    v_sent := v_sent + 1;
+  end loop;
+
+  return v_sent;
+end $fn$;
+
+revoke all on function public.run_streak_risk_nudges() from public, anon, authenticated;
+
+comment on function public.run_streak_risk_nudges() is
+  'Writes one "Keep your streak alive" notification per member whose run of consecutive training days ends yesterday (at least 2 days), who has logged nothing today in their own zone, for whom it is the intended local hour, at most three times in seven days. The push, the Training switch and quiet hours are part 900''s dispatcher and send-push; this writes a row and nothing else.';
+
+-- Hourly at :58, clear of every other pass (part 3450 uses :55).
+select cron.unschedule('streak-risk-nudges')
+ where exists (select 1 from cron.job where jobname = 'streak-risk-nudges');
+
+select cron.schedule('streak-risk-nudges', '58 * * * *', $cron$select public.run_streak_risk_nudges();$cron$);
+
+-- ▶ studio-analytics-for-the-owner.sql
+
+-- Studio analytics for the gym owner: one secure RPC, aggregates only.
+--
+-- Additive only: a new SECURITY DEFINER function. No table, column or policy
+-- changes. The gym is resolved from auth.uid() exactly the way
+-- owner_site_figures (part 2614) does it, and is_owner_of() is re-checked, so
+-- an owner can only ever read a gym they own. Nothing returned names a
+-- member; coach names are returned because the owner already sees their own
+-- rota.
+--
+-- Small groups are withheld: the InBody aggregates need at least 3 members
+-- with two scans, otherwise the "average change" would be one person's body.
+
+create or replace function public.owner_studio_analytics(
+  p_tenant uuid default null,
+  p_days   integer default 90
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_t     uuid;
+  v_days  int := least(greatest(coalesce(p_days, 90), 7), 365);
+  v_since timestamptz := now() - make_interval(days => v_days);
+  v_out   jsonb;
+begin
+  select m.tenant_id into v_t
+    from (
+      select p.tenant_id from public.profiles p
+       where p.id = auth.uid() and p.role = 'owner' and p.tenant_id is not null
+      union
+      select os.tenant_id from public.owner_sites os where os.user_id = auth.uid()
+    ) m
+   where p_tenant is null or m.tenant_id = p_tenant
+   limit 1;
+
+  if v_t is null or not public.is_owner_of(v_t) then
+    return null;
+  end if;
+
+  with
+  ms as (select * from public.memberships where tenant_id = v_t),
+  base_then as (
+    -- Memberships that were live at the start of the window.
+    select member_id from ms
+     where started_on <= (now() - make_interval(days => v_days))::date
+       and (ends_on is null or ends_on >= (now() - make_interval(days => v_days))::date)
+  ),
+  members as (select id from public.clients where tenant_id = v_t),
+  sess as (
+    select s.trainer_id, count(*)::int as n
+      from public.sessions s
+     where s.tenant_id = v_t and s.status = 'booked'
+       and s.starts_at >= v_since and s.starts_at < now()
+     group by s.trainer_id
+  ),
+  pays as (
+    select coalesce(nullif(btrim(gp.currency), ''), '?') as cur,
+           to_char(date_trunc('month', coalesce(gp.taken_at, gp.created_at)), 'YYYY-MM') as month,
+           sum(gp.amount_cents)::bigint as cents
+      from public.gym_payments gp
+     where gp.tenant_id = v_t and coalesce(gp.taken_at, gp.created_at) >= v_since
+     group by 1, 2
+  ),
+  ib as (
+    select sc.client_id,
+           (array_agg(sc.body_fat_pct order by sc.taken_at) filter (where sc.body_fat_pct is not null)) as bf,
+           (array_agg(sc.skeletal_muscle_kg order by sc.taken_at) filter (where sc.skeletal_muscle_kg is not null)) as smm,
+           (array_agg(sc.weight_kg order by sc.taken_at) filter (where sc.weight_kg is not null)) as wt,
+           count(*) as n
+      from public.scans sc
+     where sc.client_id in (select id from members)
+       and sc.source ilike 'inbody%'
+     group by sc.client_id
+  ),
+  ib2 as (
+    select bf[array_length(bf,1)] - bf[1] as d_bf,
+           smm[array_length(smm,1)] - smm[1] as d_smm,
+           wt[array_length(wt,1)] - wt[1] as d_wt
+      from ib where n >= 2
+  )
+  select jsonb_build_object(
+    'tenant_id', v_t,
+    'days', v_days,
+    'active_memberships', (select count(*) from ms where status = 'active'),
+    'members', (select count(*) from members),
+    'training_members', (select count(distinct w.user_id) from public.workouts w
+                          where w.user_id in (select id from members)
+                            and w.performed_at >= now() - interval '30 days'),
+    'retention', jsonb_build_object(
+      'base', (select count(distinct member_id) from base_then),
+      'retained', (select count(distinct b.member_id) from base_then b
+                    join ms on ms.member_id = b.member_id and ms.status = 'active')),
+    'sessions_per_coach', coalesce((
+      select jsonb_agg(jsonb_build_object('trainer_id', s.trainer_id,
+               'name', coalesce(p.full_name, 'Coach'), 'sessions', s.n) order by s.n desc)
+        from sess s left join public.profiles p on p.id = s.trainer_id), '[]'::jsonb),
+    'revenue', coalesce((
+      select jsonb_agg(jsonb_build_object('currency', cur, 'month', month, 'cents', cents) order by month, cur)
+        from pays), '[]'::jsonb),
+    'inbody', jsonb_build_object(
+      'scanned_members', (select count(*) from ib),
+      'repeat_members', (select count(*) from ib2),
+      'avg_body_fat_change', case when (select count(d_bf) from ib2) >= 3
+                               then round((select avg(d_bf) from ib2)::numeric, 1) end,
+      'avg_muscle_change_kg', case when (select count(d_smm) from ib2) >= 3
+                                then round((select avg(d_smm) from ib2)::numeric, 1) end,
+      'avg_weight_change_kg', case when (select count(d_wt) from ib2) >= 3
+                                then round((select avg(d_wt) from ib2)::numeric, 1) end,
+      'min_group', 3)
+  ) into v_out;
+
+  return v_out;
+end $fn$;
+
+revoke all on function public.owner_studio_analytics(uuid, integer) from public, anon;
+grant  execute on function public.owner_studio_analytics(uuid, integer) to authenticated;
+
+comment on function public.owner_studio_analytics(uuid, integer) is
+  'Studio analytics for the calling owner''s own gym (resolved from auth.uid(), re-checked with is_owner_of): active memberships, members training in the last 30 days, retention of memberships live at the window start, booked sessions per coach, gym_payments per currency per month, and InBody aggregates withheld below 3 members. Aggregates only; no member is named. Null for anyone who owns no gym.';
+
 -- ▶ 3470b-the-two-routes-part-3470-writes.sql
 
 -- ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,23 @@
+# Store screenshots: coach. Run with scripts/store-screenshots.sh, not directly.
+# Needs a signed-in demo account (STORE_EMAIL / STORE_PASSWORD) with realistic data.
+appId: com.washateria.repple.coach
+env:
+  OUT: ${OUT}
+---
+- launchApp
+- runFlow: ../login.yaml
+- openLink: repplecoach:///(trainer)/dashboard
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/01-dashboard
+- openLink: repplecoach:///(trainer)/builder
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/02-builder
+- openLink: repplecoach:///(trainer)/calendar
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/03-calendar
+- openLink: repplecoach:///(trainer)/client
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/04-client
+- openLink: repplecoach:///(trainer)/checkins
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/05-checkins
