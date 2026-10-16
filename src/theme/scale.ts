@@ -33,14 +33,16 @@ export const sp = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, huge: 48 } as
 // 16 and 16, down from 22 and 24. The approved board sets its screens tight:
 // a 16pt gutter, sections as cards with 16pt inside them, and the gap between
 // two cards carried by the cards rather than by air and a hairline.
-export const layout = { gutter: 16, section: sp.lg } as const;
+// v2 (REDESIGN-PLAN §6): a 20pt gutter.
+export const layout = { gutter: 20, section: sp.lg } as const;
 
 /** Radius — five steps, down from 25+. */
 // `lg` is the card and `xl` the hero card, as the approved mockups draw them:
 // 18 on every white card, 24 on the night hero. `md` stays the button's 16 and
 // `sm` the 10 of a segment or a small tile, so nothing that already named a
 // step changes shape under it.
-export const radius = { sm: 10, md: 16, lg: 18, xl: 24, pill: 999 } as const;
+// v2: cards are 24 (plan §6 "24 (cards)"); the hero shares it.
+export const radius = { sm: 10, md: 16, lg: 24, xl: 24, pill: 999 } as const;
 
 /** Hairline: divides. One value, used everywhere a rule is drawn. */
 export const hairline = StyleSheet.hairlineWidth;
@@ -70,8 +72,11 @@ export const elevation = {
    *   hero   the night hero card, tinted with the night colour so the shadow
    *          reads as the card's own and not as a grey smudge under green
    */
-  card: { boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 6px 20px rgba(16,24,40,0.06)' },
-  float: { boxShadow: '0 2px 4px rgba(16,24,40,0.06), 0 12px 32px rgba(16,24,40,0.14)' },
+  // v2: no drop shadow on cards — a 1px line drawn as a zero-blur spread, in a
+  // neutral that reads as rgba(255,255,255,.07) on the dark grounds and as
+  // rgba(15,23,42,.08) on the light ones, so one static token serves both.
+  card: { boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' },
+  float: { boxShadow: '0 0 0 1px rgba(128,140,150,0.18), 0 20px 40px rgba(0,0,0,0.35)' },
   hero: { boxShadow: '0 12px 28px rgba(11,29,25,0.28)' },
   e1: {
     shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 2,
