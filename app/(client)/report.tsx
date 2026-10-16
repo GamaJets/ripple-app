@@ -19,6 +19,7 @@
 // down three kilograms. Weight, muscle and the waist measurement now come out
 // in the unit the account reads in. Body fat does not: it is a percentage, and
 // a percentage does not have a unit system.
+import { WeeklySummary } from '../../src/ui/WeeklySummary';
 import { View, Text, ScrollView } from 'react-native';
 import { num, num1, fmtDay } from '../../src/lib/format';
 import { startOfWeek } from '../../src/lib/weekStart';
@@ -596,6 +597,7 @@ export default function WeeklyReport() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <PageHead title="Weekly Report" subtitle={c.name ? `${c.name.split(' ')[0]} · ${range}` : range} />
+        <WeeklySummary unit={wu} />
 
         {milestone ? (
           <View style={{ marginTop: sp.lg }}>
