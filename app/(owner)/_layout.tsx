@@ -97,6 +97,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="financials" options={{ href: null, title: 'Financial Checks' }} />
       <Tabs.Screen name="promotions" options={{ href: null, title: 'Promotions' }} />
       <Tabs.Screen name="class-analytics" options={{ href: null, title: 'Classes & Payroll' }} />
+      <Tabs.Screen name="analytics" options={{ href: null, title: 'Studio Analytics' }} />
       <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="orders" options={{ href: null, title: 'Online Orders' }} />
       <Tabs.Screen name="community" options={{ href: null, title: 'Community' }} />
