@@ -2397,11 +2397,14 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
           minHeight: grown(40), paddingHorizontal: scroll ? sp.lg : sp.xs,
           alignItems: 'center', justifyContent: 'center',
           borderRadius: radius.sm,
-          backgroundColor: on ? t.ink : 'transparent',
+          // v2 (plan §6 Segmented): the selected segment is a raised surface3
+          // thumb with ink, not an ink-filled block.
+          backgroundColor: on ? t.surface3 : 'transparent',
+          ...(on ? { boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' } : null),
           opacity: o.disabled ? 0.5 : 1,
         }}>
         <Text numberOfLines={1} adjustsFontSizeToFit={!scroll} minimumFontScale={0.85}
-          style={{ ...ty.label, ...numeric, ...font('600'), ...(scroll ? null : HERO_FIT), color: on ? t.surface : t.ink2, textAlign: 'center' }}>
+          style={{ ...ty.label, ...numeric, ...font('600'), ...(scroll ? null : HERO_FIT), color: on ? t.ink : t.ink2, textAlign: 'center' }}>
           {o.label}
         </Text>
       </Pressable>
@@ -2411,7 +2414,8 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
   // between, with 10pt-radius segments — the mockups' bar. surface3 rather
   // than surface2 because the bar sits on the ground as often as on a card,
   // and surface2 is two points of grey from the ground.
-  const bar: ViewStyle = { backgroundColor: t.surface3, borderRadius: 13, padding: 4, gap: 4 };
+  // v2: the track is the card surface with a 1px line; the thumb is surface3.
+  const bar: ViewStyle = { backgroundColor: t.surface, borderRadius: 14, padding: 4, gap: 4, boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' };
   return scroll ? (
     <View style={[bar, style]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist"
