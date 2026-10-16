@@ -129,7 +129,16 @@ export interface ThreadMessage extends Message {
   local: { uri: string; kind: AttachmentKind } | null;
   /** In flight. Not delivered, not failed. */
   sending: boolean;
+  /** A workout or form check this message points at (part 3550), or null. */
+  ref: MessageRef | null;
 }
+
+/** What a message may point at. Drawn from the named row, never copied. */
+export interface MessageRef { kind: 'workout' | 'form_clip'; id: string }
+
+const readRef = (r: any): MessageRef | null =>
+  (r?.ref_kind === 'workout' || r?.ref_kind === 'form_clip') && typeof r?.ref_id === 'string'
+    ? { kind: r.ref_kind, id: r.ref_id } : null;
 
 const rowToMsg = (r: any): ThreadMessage => ({
   id: String(r.id), clientId: r.client_id, sender: r.sender, body: r.body, createdAt: r.created_at,
@@ -138,6 +147,7 @@ const rowToMsg = (r: any): ThreadMessage => ({
   attachment: readAttachment(r, String(r.client_id ?? '')),
   local: null,
   sending: false,
+  ref: readRef(r),
 });
 
 /* ── picking, preparing and storing one attachment ───────────────────────── */
@@ -887,8 +897,9 @@ export function useThread(clientId: string | null, role: ChatRole) {
    * exists claiming a photograph that does not. And a row refused after a
    * successful upload takes the object back out with it.
    */
-  const send = async (body: string, attachment?: PendingAttachment | null): Promise<SendResult> => {
-    const b = (body || '').trim();
+  const send = async (body: string, attachment?: PendingAttachment | null, ref?: MessageRef | null): Promise<SendResult> => {
+    const r0 = ref ?? null;
+    const b = (body || '').trim() || (r0 ? (r0.kind === 'workout' ? 'Shared a workout' : 'Shared a form check') : '');
     const att = attachment ?? null;
     if (!hasSomethingToSend(b, !!att)) return { ok: false, reason: null };
     const localId = 'local-' + Date.now();
@@ -897,6 +908,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       attachment: { state: 'none' },
       local: att ? { uri: att.uri, kind: att.kind } : null,
       sending: true,
+      ref: r0,
     };
     setMessages((p) => [...p, optimistic]);
     if (!USE_SUPABASE || !tid.current) {
@@ -939,6 +951,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
         client_id: tid.current, sender: role, body: b,
         attachment_path: stored?.path ?? null, attachment_kind: stored?.kind ?? null,
         attachment_name: stored?.name ?? null,
+        ref_kind: r0?.kind ?? null, ref_id: r0?.id ?? null,
       }).select().single();
       if (error || !data) {
         // The file is up and nothing points at it. Take it back out rather than
@@ -1127,7 +1140,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       extra.push({
         id: item.id, clientId: threadId, sender: q.sender, body: q.body, createdAt: item.at,
         // A queued message never carries one — see `keepForLater`.
-        attachment: { state: 'none' }, local: null, sending: false,
+        attachment: { state: 'none' }, local: null, ref: null, sending: false,
       });
     }
     if (!extra.length) return messages;

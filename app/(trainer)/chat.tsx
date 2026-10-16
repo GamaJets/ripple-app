@@ -31,6 +31,7 @@
 // The bubble keeps sending, not-sent and unreadable apart for the reason the
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
+import { MessageRefCard } from '../../src/ui/MessageRefCard';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
@@ -631,6 +632,7 @@ export default function CoachChat() {
                     <Attachment m={m} />
                   </View>
                 ) : null}
+                {m.ref ? <MessageRefCard msgRef={m.ref} role="coach" clientId={m.clientId} mine={mine} /> : null}
                 {/* A clip needs no caption, and an empty bubble under one is a
                     thing the sender did not say. */}
                 {m.body ? (
