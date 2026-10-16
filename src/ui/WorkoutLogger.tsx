@@ -19,7 +19,7 @@ import { useToday } from './today';
 // from the gym floor. See src/lib/lastTime.ts.
 import { lastTime } from '../lib/lastTime';
 import { BRAND } from '../lib/brands';
-import { num } from '../lib/format';
+import { num, fmtDay } from '../lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState, StatusBar } from 'react-native';
 import { GuardedImage } from './GuardedImage';
 import { SessionSteps } from './SessionSteps';
@@ -66,6 +66,7 @@ import { scheduleRestOverAlert, cancelReminders } from './pushNotifications';
 import { Icon } from './Icon';
 import { SharePostButton } from './SharePost';
 import { workoutPost, cardioPost } from '../lib/postCard';
+import { topMovements } from '../lib/workoutShare';
 import { useBrand } from './brand';
 import { Rule, Section, SectionHead, SyncBadge, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, TonedChip, HeroRing, CtaBright } from './kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../theme/scale';
@@ -2498,6 +2499,11 @@ export function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf,
                 minutes: finalElapsed >= 60 ? Math.round(finalElapsed / 60) : null,
                 volume: volumeKnown && volume > 0 ? `${volumeHeadline(volume, unit)!.figure.toLocaleString()} ${unit === 'kg' ? 't' : 'lb'}` : null,
                 prs: sessionPrs, brand: appName,
+                date: fmtDay(new Date().toISOString()),
+                top: topMovements(results.map((r, i) => ({
+                  name: exercises[i] ? nameOf(exercises[i]) : '',
+                  sets: r.filter((st) => !st.timed).map((st) => [st.reps, st.bw ? null : st.kg] as const),
+                }))),
               })} />
             </View>
           ) : null}
