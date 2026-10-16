@@ -82,6 +82,7 @@ export function DemoVideo({ uri, label }: { uri: string; label: string }) {
       </View>
     );
   }
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- HAS_NATIVE_VIDEO is a module constant, fixed for the life of the install, so the hook count never changes between renders; calling the hook without the native module would crash.
   const player = useVideoPlayer(uri, (p) => { p.loop = true; p.muted = true; p.play(); });
   return (
     <VideoView

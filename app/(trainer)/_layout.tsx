@@ -50,6 +50,15 @@ export default function TrainerLayout() {
   // today so the gate below is effectively static, but a hook index that
   // depends on a conditional is a silent corruption the day it stops being.
   const { user, authed, loading } = useAuth();
+  // Every hook runs BEFORE either early return below (rules of hooks, now held
+  // by `npm run lint`). These two had drifted back under the returns, so a
+  // coach whose session resolved mid-mount changed the hook count between two
+  // renders — React's "Rendered more hooks than during the previous render".
+  const t = useTheme();
+  // What this coach missed while they were away, filtered to the coach app —
+  // they are not told about client-only changes. Keyed on the account, so a
+  // coach who has just made one is shown nothing at all.
+  const whatsNew = useWhatsNew(user?.id ?? null);
 
   if (!groupAllowed('trainer')) return <Redirect href="/" />;
 
@@ -57,11 +66,6 @@ export default function TrainerLayout() {
   // resolving bounces a signed-in coach to welcome on every cold start.
   if (!loading && !authed) return <Redirect href="/" />;
 
-  const t = useTheme();
-  // What this coach missed while they were away, filtered to the coach app —
-  // they are not told about client-only changes. Keyed on the account, so a
-  // coach who has just made one is shown nothing at all.
-  const whatsNew = useWhatsNew(user?.id ?? null);
   return (
     <>
       <Tabs
