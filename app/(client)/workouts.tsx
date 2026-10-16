@@ -37,7 +37,7 @@ import {
 } from '../../src/lib/sessionScope';
 import { startLiveActivity, endLiveActivity } from '../../modules/workout-activity';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { tapLight } from '../../src/ui/haptics';
+import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 // Supersets and set methods. Both are pure and both are read POSITIONALLY here
 // — `badges` returns one entry per exercise in the order it was handed them, so
@@ -5489,6 +5489,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       setSessionPrs((l) => [...l.filter((x) => !x.startsWith(`${name} `)), `${name} ${fig(liftLabel(wkg, unit))} ${unit}`]);
       prAt.current = done.length;
       setConfetti(true);
+      // The success haptic REDESIGN-PLAN §6 asks of a PR, beside the banner and
+      // the confetti. Here, in the set's own handler and not in an updater, so
+      // it fires once per record (see the note on haptics in updaters above).
+      notifySuccess();
       // The coach is told from INSIDE this branch, and that placement is the
       // whole design. Every guard above — the whole history was read, not a
       // bodyweight set, not a hold, this session's own sets cannot establish a
