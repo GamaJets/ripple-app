@@ -49,7 +49,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 import { isWhole } from '../ui/loadStatus';
 
 /** The four questions, in the order they are asked. */
-export type SetupStep = 'coaching' | 'goal' | 'body' | 'injuries';
+export type SetupStep = 'coaching' | 'connect' | 'goal' | 'experience' | 'schedule' | 'body' | 'injuries';
 
 export interface SetupQuestion {
   id: SetupStep;
@@ -78,12 +78,35 @@ export const SETUP_QUESTIONS: readonly SetupQuestion[] = [
     breaks: 'the app assumes you have a coach and offers you check-ins nobody reads',
   },
   {
+    id: 'connect',
+    // A member who said they have a coach but is not linked to one is a member
+    // whose check-ins, messages and programs go nowhere. The code their coach
+    // gave them is spent here, through the same join_by_code the Trainers
+    // screen uses, rather than leaving them to find that screen. Asked only
+    // when no coach is linked yet, and passed over for anyone training solo.
+    breaks: 'your check-ins, messages and program have no coach to reach',
+  },
+  {
     id: 'goal',
     // buildProgram(goal, bodyFat) picks the whole training split from this, and
     // macrosFor() splits the calories by it. The default is 'muscle', so a
     // member who came to lose fat is handed a push/pull/legs plan and a
     // muscle-building macro split without being asked.
     breaks: 'your plan and your macros are built for building muscle whatever you came for',
+  },
+  {
+    id: 'experience',
+    // Stored as the intake's training history (src/lib/intake.ts, `years`),
+    // which a coach reads before writing the first block. Without it a coach
+    // starts a beginner on a program written for somebody with five years.
+    breaks: 'your coach and your plan have to guess how long you have been training',
+  },
+  {
+    id: 'schedule',
+    // The intake's availability: days a week, where, and with what. The
+    // weekly plan is sized by days and the exercise swaps follow the kit, so
+    // a member training at home with dumbbells is not handed a barbell day.
+    breaks: 'your week is sized for days you may not have and kit you may not own',
   },
   {
     id: 'body',
@@ -116,6 +139,10 @@ export interface SetupKnown {
    * they type is likelier to be wrong than the one that was measured.
    */
   weighed: boolean;
+  /** The intake already says how long they have trained. */
+  experienced?: boolean;
+  /** The intake already says how many days a week they can train. */
+  scheduled?: boolean;
 }
 
 /**
@@ -132,7 +159,9 @@ export interface SetupKnown {
 export function questionsToAsk(known: SetupKnown): SetupStep[] {
   return SETUP_QUESTIONS
     .filter((q) => {
-      if (q.id === 'coaching') return !known.coachingAgreed;
+      if (q.id === 'coaching' || q.id === 'connect') return !known.coachingAgreed;
+      if (q.id === 'experience') return !known.experienced;
+      if (q.id === 'schedule') return !known.scheduled;
       if (q.id === 'body') return !known.weighed;
       return true;
     })

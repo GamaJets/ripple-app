@@ -34,9 +34,9 @@ const same = (a: unknown, b: unknown, msg: string) => ok(JSON.stringify(a) === J
 // Four. Not a number to grow casually: this is the whole of what a new member
 // is asked before the app works, and every addition is a step somebody has to
 // tap through before they have seen a single screen.
-eq(SETUP_QUESTIONS.length, 4, 'setup asks four questions');
-same(SETUP_QUESTIONS.map((q) => q.id), ['coaching', 'goal', 'body', 'injuries'],
-  'the four, in the order they are put');
+eq(SETUP_QUESTIONS.length, 7, 'setup asks seven questions');
+same(SETUP_QUESTIONS.map((q) => q.id), ['coaching', 'connect', 'goal', 'experience', 'schedule', 'body', 'injuries'],
+  'the seven, in the order they are put');
 
 // The rule the file's header states, checked rather than trusted. A question
 // with no sentence saying what breaks is a question nobody has justified, and
@@ -55,22 +55,24 @@ eq(new Set(SETUP_QUESTIONS.map((q) => q.id)).size, SETUP_QUESTIONS.length, 'the 
 
 // The cold start: nobody has invited them, nothing has measured them.
 same(questionsToAsk({ coachingAgreed: false, weighed: false }),
-  ['coaching', 'goal', 'body', 'injuries'], 'a brand-new account is asked all four');
+  ['coaching', 'connect', 'goal', 'experience', 'schedule', 'body', 'injuries'], 'a brand-new account is asked everything');
 
 // A coach invited them and both sides agreed the mode. Asking again would hand
 // one party a control over a two-party fact — and it is the same control the
 // dashboard's accept button has already used.
 same(questionsToAsk({ coachingAgreed: true, weighed: false }),
-  ['goal', 'body', 'injuries'], 'a linked account is not asked how it is coached');
+  ['goal', 'experience', 'schedule', 'body', 'injuries'], 'a linked account is not asked how it is coached, nor for a code');
 
 // They stood on an InBody scan on the way in. The app is holding a measured
 // weight; asking them to type one can only make it worse.
 same(questionsToAsk({ coachingAgreed: false, weighed: true }),
-  ['coaching', 'goal', 'injuries'], 'a measured account is not asked for its weight');
+  ['coaching', 'connect', 'goal', 'experience', 'schedule', 'injuries'], 'a measured account is not asked for its weight');
 
 // Both: two questions, and neither was answerable from anything held.
 same(questionsToAsk({ coachingAgreed: true, weighed: true }),
-  ['goal', 'injuries'], 'a coached, measured account is asked twice');
+  ['goal', 'experience', 'schedule', 'injuries'], 'a coached, measured account skips three');
+same(questionsToAsk({ coachingAgreed: true, weighed: true, experienced: true, scheduled: true }),
+  ['goal', 'injuries'], 'an account whose intake is filled in is asked twice');
 
 // Never empty, whatever is known. Nothing in the app can supply a goal (it has
 // a default, which is a guess) or an injury (only a person knows), so setup

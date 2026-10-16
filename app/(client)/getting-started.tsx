@@ -51,7 +51,7 @@ import { useWearables } from '../../src/ui/wearables';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
-import { ONBOARD_KEY } from './onboarding';
+import { readSetupDone } from '../../src/ui/setupDone';
 import { GUIDE_SEEN_KEY } from '../guide';
 import { FORWARD_ICON } from '../../src/ui/direction';
 
@@ -118,8 +118,8 @@ export default function GettingStarted() {
     let gone = false;
     (async () => {
       try {
-        const [a, b] = await Promise.all([AsyncStorage.getItem(ONBOARD_KEY), AsyncStorage.getItem(GUIDE_SEEN_KEY)]);
-        if (!gone) { setSetupDone(!!a); setGuideSeen(!!b); }
+        const [a, b] = await Promise.all([readSetupDone(), AsyncStorage.getItem(GUIDE_SEEN_KEY)]);
+        if (!gone) { setSetupDone(a); setGuideSeen(!!b); }
       } catch { if (!gone) { setSetupDone(null); setGuideSeen(null); } }
     })();
     return () => { gone = true; };
