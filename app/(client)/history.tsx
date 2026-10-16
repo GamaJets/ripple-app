@@ -79,6 +79,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { RecentSessions } from '../../src/ui/RecentSessions';
 import { previewLiftingImport, liftingImportNote, type LiftingImportPreview } from '../../src/lib/liftingImport';
 import { pickDocument } from '../../src/ui/nativeModules';
 import { useSettings } from '../../src/ui/settings';
@@ -904,6 +905,9 @@ export default function History() {
         </View>
       ))}
     </Section>
+
+    {/* ── the latest sessions, each shareable as a card ─────────────────── */}
+    <RecentSessions log={log} unit={wu} weightSeries={weightSeries} />
 
     {/* ── what you have actually trained ─────────────────────────────────── */}
     <MuscleSection log={log} unit={wu} weightSeries={weightSeries} />

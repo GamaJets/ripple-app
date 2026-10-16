@@ -54,19 +54,32 @@ const no = (why: string): PostBuild => ({ ok: false, why });
 
 /* ── member ─────────────────────────────────────────────────────────────── */
 
-export function workoutPost(i: { focus: string; sets: number; minutes: number | null; volume: string | null; prs: string[]; brand: string }): PostBuild {
+export function workoutPost(i: {
+  focus: string; sets: number; minutes: number | null; volume: string | null; prs: string[]; brand: string;
+  /** Already formatted in the member's locale, e.g. "Fri 16 Oct". */
+  date?: string | null;
+  /** The session's main movements, as named in the catalogue (RepDB), biggest first. */
+  top?: readonly string[];
+}): PostBuild {
   if (!(i.sets > 0)) return no('No sets were logged, so there is no workout to share.');
   const focus = clean(i.focus) || 'Workout';
+  const date = clean(i.date);
+  const prLines = i.prs.length > 2
+    ? [`${i.prs.length} New Bests`, ...i.prs.slice(0, 1).map((p) => `New Best · ${p}`)]
+    : i.prs.map((p) => `New Best · ${p}`);
+  const head = [
+    i.minutes != null && i.minutes > 0 ? `${i.minutes} Minutes` : null,
+    // numbers-ok: volume arrives already formatted by the caller, in the member's locale and unit.
+    i.volume ? `Volume ${i.volume}` : null,
+    ...prLines,
+  ].filter((x): x is string => !!x);
+  const room = Math.max(0, MAX_LINES - head.length);
+  const top = (i.top ?? []).map(clean).filter(Boolean).slice(0, Math.min(3, room));
   return post({
-    kicker: 'Workout Complete',
+    kicker: date ? `Workout Complete · ${date}` : 'Workout Complete',
     headline: `${focus} Done.`,
     big: { value: String(i.sets), unit: i.sets === 1 ? 'Set' : 'Sets' },
-    lines: [
-      i.minutes != null && i.minutes > 0 ? `${i.minutes} Minutes` : null,
-      // numbers-ok: volume arrives already formatted by the caller, in the member's locale and unit.
-      i.volume ? `Volume ${i.volume}` : null,
-      ...i.prs.slice(0, 3).map((p) => `New Best · ${p}`),
-    ],
+    lines: [...head, ...top.map((n, k) => `${k + 1}. ${n}`)],
     footer: i.brand,
     caption: `${focus} done: ${i.sets} ${i.sets === 1 ? 'set' : 'sets'}${i.prs.length ? `, ${i.prs.length} new ${i.prs.length === 1 ? 'best' : 'bests'}` : ''}. Training with ${clean(i.brand)}.`,
     filename: `${focus}-workout`,
