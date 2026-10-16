@@ -11,7 +11,7 @@
 // demoIsShippable() in src/lib/exerciseMedia.ts, asked by the screen, because
 // the answer depends on the licence recorded against the row and on whether the
 // build is a release.
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { View, Text, Image, ActivityIndicator, Animated, Easing, AccessibilityInfo, StyleSheet } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
@@ -283,7 +283,7 @@ export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
  * client library, the coach's builder and the coach's picker cannot drift into
  * three slightly different squares.
  */
-export function ExerciseThumb({ uri, t, size = 52 }: { uri: string | null; t: Theme; size?: number }) {
+function ExerciseThumbImpl({ uri, t, size = 52 }: { uri: string | null; t: Theme; size?: number }) {
   return (
     <View style={{ width: size, height: size, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
       {uri
@@ -292,3 +292,7 @@ export function ExerciseThumb({ uri, t, size = 52 }: { uri: string | null; t: Th
     </View>
   );
 }
+
+/** Memoised: a list row's thumbnail re-renders only when its picture, the
+ *  theme (held still by AppThemeProvider) or its size changes. */
+export const ExerciseThumb = memo(ExerciseThumbImpl);
