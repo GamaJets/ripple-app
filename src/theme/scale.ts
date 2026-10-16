@@ -268,13 +268,16 @@ export function fallBackToSystemFace(): void {
  * other.
  */
 export const type = {
-  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.5, lineHeight: 48 }),
-  display: step('display', '700', { fontSize: 30, letterSpacing: -0.7, lineHeight: 35 }),
-  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.4, lineHeight: 30 }),
+  // v2 type (REDESIGN-PLAN §6): display steps tracked tighter — hero −0.04em,
+  // display/title −0.035em, head −0.01em, eyebrow +0.14em. Sizes unchanged so
+  // no layout moves; only the optical tracking does.
+  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.76, lineHeight: 48 }),
+  display: step('display', '700', { fontSize: 30, letterSpacing: -1.05, lineHeight: 35 }),
+  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.84, lineHeight: 30 }),
   section: step('display', '700', { fontSize: 20, letterSpacing: -0.3, lineHeight: 26 }),
   page:    step('display', '600', { fontSize: 19, letterSpacing: -0.2, lineHeight: 25 }),
   button:  step('text', '700', { fontSize: 18, letterSpacing: 0,    lineHeight: 24 }),
-  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.1, lineHeight: 23 }),
+  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.17, lineHeight: 23 }),
   body:    step('text', '400', { fontSize: 16, letterSpacing: 0,    lineHeight: 23 }),
   label:   step('text', '400', { fontSize: 15, letterSpacing: 0,    lineHeight: 21 }),
   caption: step('text', '400', { fontSize: 14, letterSpacing: 0,    lineHeight: 19 }),
@@ -288,7 +291,7 @@ export const type = {
   // The one tracked-capitals step, and it lives on the night hero card only:
   // "TODAY · WEEK 1 OF 12". The caller types the capitals — nothing here
   // transforms case, for the reason `micro` gives.
-  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.4,  lineHeight: 16 }),
+  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.68, lineHeight: 16 }),
 } satisfies Record<string, TextStyle>;
 
 /** Values read as data, not prose: semibold + tabular figures. */
@@ -297,5 +300,5 @@ export const numeric = { fontVariant: ['tabular-nums'] } as const satisfies Text
 /** A metric value at an arbitrary size, on the scale's terms: Sora, bold,
  *  tabular. Every figure in the app is drawn through this or `type.hero`. */
 export function value(size: number): TextStyle {
-  return { fontSize: size, ...font('700', 'display'), letterSpacing: size >= 30 ? -1.2 : -0.5, ...numeric };
+  return { fontSize: size, ...font('700', 'display'), letterSpacing: -0.04 * size, ...numeric };
 }
