@@ -10,7 +10,7 @@ import { MuscleBody } from './MuscleBody';
 import { layerNames } from './muscleArt';
 import { sp, radius, font, type as ty } from '../theme/scale';
 import {
-  scanSummary, trendSeries, segmentalOf, segmentOfLayer, compareScans, signed,
+  scanSummary, trendSeries, segmentalOf, segmentOfLayer, compareScans, signed, recompOf, RECOMP_LINE,
   type ProgressScan, type Verdict, type DeltaCell, type ProgressDef,
 } from '../lib/inbodyProgress';
 import { weightIn, type WeightUnit } from '../lib/units';
@@ -36,6 +36,7 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
   const sum = useMemo(() => scanSummary(scans, goal), [scans, goal]);
   const trends = useMemo(() => trendSeries(scans), [scans]);
   const seg = useMemo(() => segmentalOf(scans), [scans]);
+  const recomp = useMemo(() => recompOf(scans), [scans]);
   const newestFirst = useMemo(() => [...scans].sort((a, b) => (a.takenAt < b.takenAt ? 1 : -1)), [scans]);
 
   // Body map: each segment's layers lit by its lean share.
@@ -100,6 +101,19 @@ export function InBodyProgress({ scans, goal, unit, who, status, onUpload }: {
           {sum.previous ? `Against ${dayLabel(sum.previous.takenAt)}` : 'One scan so far: changes appear after the next one.'}
           {sum.first ? ` and the first scan, ${dayLabel(sum.first.takenAt)}` : ''}. Green is progress, red is the wrong way.
         </Text>
+        {recomp ? (
+          <View accessible style={{ padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.sm }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Since {dayLabel(recomp.from)}</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: 2 }}>
+              {recomp.fatKg != null ? `Fat ${signed(weightIn(recomp.fatKg, unit) ?? recomp.fatKg, 1)} ${unit}` : 'Fat not comparable'}
+              {' · '}
+              {recomp.muscleKg != null ? `Muscle ${signed(weightIn(recomp.muscleKg, unit) ?? recomp.muscleKg, 1)} ${unit}` : 'Muscle not comparable'}
+            </Text>
+            {recomp.kind === 'recomp' || recomp.kind === 'leaner' || recomp.kind === 'muscle'
+              ? <Flag tone={t.good} style={{ marginTop: sp.xs }}>{RECOMP_LINE[recomp.kind]}</Flag>
+              : <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{RECOMP_LINE[recomp.kind]}</Text>}
+          </View>
+        ) : null}
         {sum.rows.map((r) => (
           <View key={r.def.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderTopWidth: 1, borderTopColor: t.ring }}>
             <View style={{ flex: 1.6 }}>
