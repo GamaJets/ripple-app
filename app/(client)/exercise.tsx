@@ -59,7 +59,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, Notice, Ghost, PageHead, Flag, fig, TonedChip, IconPlate, HeroRing, CtaBright, Spark, ChartShell, Expandable } from '../../src/ui/kit';
+import { Section, SectionHead, Notice, Ghost, PageHead, Flag, fig, TonedChip, IconPlate, HeroRing, CtaBright, Spark, ChartShell, Expandable, Segmented } from '../../src/ui/kit';
+import { deltaLabel } from '../../src/lib/deltaLabel';
+import { useToday } from '../../src/ui/today';
+import { progressSeries, PROGRESS_RANGES, type ProgressMetric, type ProgressRange } from '../../src/lib/exerciseProgress';
 import { sp, layout, radius, elevation, font, type as ty, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { ExerciseMuscles, groupTone } from '../../src/ui/ExerciseMuscles';
@@ -288,6 +291,17 @@ export default function ExerciseScreen() {
       top: top?.bestSet ?? null,
     };
   }, [log, name, weightSeries, wu]);
+  /* ── progress: metric × time range ──────────────────────────────────────
+     Heaviest load, estimated 1RM (Epley, via exerciseOutings) or volume, over
+     a window the member picks. Arithmetic in src/lib/exerciseProgress.ts. */
+  const [metric, setMetric] = useState<ProgressMetric>('e1rm');
+  const [range, setRange] = useState<ProgressRange>('3m');
+  const todayDay = useToday();
+  const progress = useMemo(() => {
+    const outings = exerciseOutings(log, name, weightSeries);
+    const conv = (kg: number) => (metric === 'e1rm' ? est1RMIn(kg, wu) : liftIn(kg, wu)) ?? kg;
+    return progressSeries(outings, metric, range, new Date(`${todayDay}T12:00:00`), conv);
+  }, [log, name, weightSeries, wu, metric, range, todayDay]);
   const [saving, setSaving] = useState(false);
 
   // The identity a set is written under: the catalogue's spelling once the
@@ -1314,11 +1328,23 @@ export default function ExerciseScreen() {
                 loaded day is a sentence, not a line. */}
             {isWhole(logStatus) && summary ? (
               <Section>
-                <SectionHead title="Best Set Over Time" note={`Est. 1RM · ${wu}`} />
-                <ChartShell status={logStatus} points={bestSeries.points}
-                  emptyLine="No set of this with a load on the bar is on record yet, so there is no best set to chart."
-                  onePointLine="One day with a loaded set so far. The line appears from the second.">
-                  <Spark area data={bestSeries.data} labels={bestSeries.labels} unit={wu} />
+                <SectionHead title="Progress" note={metric === 'e1rm' ? `Est. 1RM · ${wu}` : metric === 'best' ? `Heaviest set · ${wu}` : `Volume · ${wu}`} />
+                <Segmented value={metric} onChange={setMetric} options={[
+                  { key: 'e1rm', label: 'Est. 1RM', a11yLabel: 'Estimated one rep max' },
+                  { key: 'best', label: 'Best Set' },
+                  { key: 'volume', label: 'Volume' },
+                ]} />
+                <Segmented style={{ marginTop: sp.sm, marginBottom: sp.md }} value={range} onChange={setRange}
+                  options={PROGRESS_RANGES.map((r) => ({ key: r.key, label: r.label, a11yLabel: r.a11y }))} />
+                <ChartShell status={logStatus} points={progress.points}
+                  emptyLine={range === 'all' ? 'No set of this with a load on the bar is on record yet, so there is nothing to chart.' : 'Nothing with a load on the bar in this range. Try a longer one.'}
+                  onePointLine="One day with a loaded set in this range. The line appears from the second.">
+                  <Spark area data={progress.data} labels={progress.labels} unit={wu} />
+                  {progress.change != null ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                      {`${deltaLabel(progress.change, { unit: wu, decimals: 1, since: null })} over this range · peak ${plain(progress.peak ?? 0, 1)} ${wu}`}
+                    </Text>
+                  ) : null}
                   {bestSeries.top ? (
                     <View style={{ marginTop: sp.md }}>
                       <TonedChip icon="trophy" label={`Best ${bestSetLabel({ reps: bestSeries.top.reps }, liftLabel(bestSeries.top.loadKg, wu), null)}`} />
