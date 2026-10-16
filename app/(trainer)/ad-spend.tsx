@@ -164,6 +164,7 @@ export default function TrainerAdSpend() {
 
   const takeSynced = async (codeId: string | null, label: string) => {
     setBusy(`use:${codeId ?? 'default'}`);
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- not a hook: a plain async write named for "use the synced spend" (src/ui/adSpend.ts).
     const r = await useSyncedSpend(codeId);
     setBusy(null);
     if (!r.ok) Alert.alert(`${label} Is Unchanged`, r.reason);

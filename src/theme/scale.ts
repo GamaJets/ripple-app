@@ -33,14 +33,16 @@ export const sp = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, huge: 48 } as
 // 16 and 16, down from 22 and 24. The approved board sets its screens tight:
 // a 16pt gutter, sections as cards with 16pt inside them, and the gap between
 // two cards carried by the cards rather than by air and a hairline.
-export const layout = { gutter: 16, section: sp.lg } as const;
+// v2 (REDESIGN-PLAN §6): a 20pt gutter.
+export const layout = { gutter: 20, section: sp.lg } as const;
 
 /** Radius — five steps, down from 25+. */
 // `lg` is the card and `xl` the hero card, as the approved mockups draw them:
 // 18 on every white card, 24 on the night hero. `md` stays the button's 16 and
 // `sm` the 10 of a segment or a small tile, so nothing that already named a
 // step changes shape under it.
-export const radius = { sm: 10, md: 16, lg: 18, xl: 24, pill: 999 } as const;
+// v2: cards are 24 (plan §6 "24 (cards)"); the hero shares it.
+export const radius = { sm: 10, md: 16, lg: 24, xl: 24, pill: 999 } as const;
 
 /** Hairline: divides. One value, used everywhere a rule is drawn. */
 export const hairline = StyleSheet.hairlineWidth;
@@ -70,8 +72,11 @@ export const elevation = {
    *   hero   the night hero card, tinted with the night colour so the shadow
    *          reads as the card's own and not as a grey smudge under green
    */
-  card: { boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 6px 20px rgba(16,24,40,0.06)' },
-  float: { boxShadow: '0 2px 4px rgba(16,24,40,0.06), 0 12px 32px rgba(16,24,40,0.14)' },
+  // v2: no drop shadow on cards — a 1px line drawn as a zero-blur spread, in a
+  // neutral that reads as rgba(255,255,255,.07) on the dark grounds and as
+  // rgba(15,23,42,.08) on the light ones, so one static token serves both.
+  card: { boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' },
+  float: { boxShadow: '0 0 0 1px rgba(128,140,150,0.18), 0 20px 40px rgba(0,0,0,0.35)' },
   hero: { boxShadow: '0 12px 28px rgba(11,29,25,0.28)' },
   e1: {
     shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 2,
@@ -263,13 +268,16 @@ export function fallBackToSystemFace(): void {
  * other.
  */
 export const type = {
-  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.5, lineHeight: 48 }),
-  display: step('display', '700', { fontSize: 30, letterSpacing: -0.7, lineHeight: 35 }),
-  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.4, lineHeight: 30 }),
+  // v2 type (REDESIGN-PLAN §6): display steps tracked tighter — hero −0.04em,
+  // display/title −0.035em, head −0.01em, eyebrow +0.14em. Sizes unchanged so
+  // no layout moves; only the optical tracking does.
+  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.76, lineHeight: 48 }),
+  display: step('display', '700', { fontSize: 30, letterSpacing: -1.05, lineHeight: 35 }),
+  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.84, lineHeight: 30 }),
   section: step('display', '700', { fontSize: 20, letterSpacing: -0.3, lineHeight: 26 }),
   page:    step('display', '600', { fontSize: 19, letterSpacing: -0.2, lineHeight: 25 }),
   button:  step('text', '700', { fontSize: 18, letterSpacing: 0,    lineHeight: 24 }),
-  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.1, lineHeight: 23 }),
+  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.17, lineHeight: 23 }),
   body:    step('text', '400', { fontSize: 16, letterSpacing: 0,    lineHeight: 23 }),
   label:   step('text', '400', { fontSize: 15, letterSpacing: 0,    lineHeight: 21 }),
   caption: step('text', '400', { fontSize: 14, letterSpacing: 0,    lineHeight: 19 }),
@@ -283,7 +291,7 @@ export const type = {
   // The one tracked-capitals step, and it lives on the night hero card only:
   // "TODAY · WEEK 1 OF 12". The caller types the capitals — nothing here
   // transforms case, for the reason `micro` gives.
-  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.4,  lineHeight: 16 }),
+  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.68, lineHeight: 16 }),
 } satisfies Record<string, TextStyle>;
 
 /** Values read as data, not prose: semibold + tabular figures. */
@@ -292,5 +300,5 @@ export const numeric = { fontVariant: ['tabular-nums'] } as const satisfies Text
 /** A metric value at an arbitrary size, on the scale's terms: Sora, bold,
  *  tabular. Every figure in the app is drawn through this or `type.hero`. */
 export function value(size: number): TextStyle {
-  return { fontSize: size, ...font('700', 'display'), letterSpacing: size >= 30 ? -1.2 : -0.5, ...numeric };
+  return { fontSize: size, ...font('700', 'display'), letterSpacing: -0.04 * size, ...numeric };
 }

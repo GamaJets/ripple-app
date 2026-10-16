@@ -727,7 +727,9 @@ export function ListRow({ icon, title, note, meta, trailing, onPress, tone }: {
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={[title, note, meta].filter(Boolean).join('. ')}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: 6 }}>
       {isTone(tone) ? <IconPlate icon={icon} tone={tone} /> : (
-        <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+        // v2 ListRow (plan §6): a 42pt rounded-square plate on surface2 with
+        // the 1px line, in place of the round grey disc.
+        <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: t.surface2, boxShadow: '0 0 0 1px rgba(128,140,150,0.16)', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={20} color={tone || t.brand} />
         </View>
       )}
@@ -791,6 +793,10 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
         // greys involved — so this is the same 2× hairline the sheet's own tick
         // uses for an untapped set.
         ...(disabled ? { borderWidth: hairline * 2, borderColor: t.ring } : null),
+        // v2: the screen's primary action carries the accent's glow (plan §6,
+        // "primary CTA 0 8px 28px accent@35%"). Only the wide, untoned form —
+        // one per screen — so the glow stays the rare thing it is meant to be.
+        ...(wide && !disabled && !tone ? { boxShadow: `0 8px 28px ${t.brand}59` } : null),
         paddingVertical: sp.sm, paddingHorizontal: sp.lg,
         alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
       }}>
@@ -2065,6 +2071,7 @@ export function CtaBright({ label, onPress, disabled, a11yLabel, tone }: {
         alignSelf: 'stretch', minHeight: grown(56), borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
         alignItems: 'center', justifyContent: 'center',
         backgroundColor: disabled ? t.night2 : fill,
+        ...(disabled ? null : { boxShadow: `0 8px 28px ${fill}59` }),
         // Off, and still a button: the same argument as Cta's disabled edge.
         ...(disabled ? { borderWidth: hairline * 2, borderColor: t.nightInk2 } : null),
       }}>
@@ -2118,7 +2125,13 @@ export function HeroCard({ eyebrow, title, meta, ring, cta, children, onPress }:
   );
   const spoken = [eyebrow, title, meta].filter(Boolean).join(', ');
   return (
-    <View style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+    <View style={{
+      backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero,
+      // v2 hero: an accent radial tint from the top corner and a 1px accent
+      // line (plan §6 HeroCard), drawn by RN itself on the new architecture.
+      experimental_backgroundImage: `radial-gradient(circle at 90% 0%, ${t.brandBright}38 0%, transparent 65%)`,
+      borderWidth: 1, borderColor: `${t.brandBright}40`,
+    }}>
       <View style={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.md }}>
         {onPress ? (
           <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken} style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>{words}</Pressable>
@@ -2386,11 +2399,14 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
           minHeight: grown(40), paddingHorizontal: scroll ? sp.lg : sp.xs,
           alignItems: 'center', justifyContent: 'center',
           borderRadius: radius.sm,
-          backgroundColor: on ? t.ink : 'transparent',
+          // v2 (plan §6 Segmented): the selected segment is a raised surface3
+          // thumb with ink, not an ink-filled block.
+          backgroundColor: on ? t.surface3 : 'transparent',
+          ...(on ? { boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' } : null),
           opacity: o.disabled ? 0.5 : 1,
         }}>
         <Text numberOfLines={1} adjustsFontSizeToFit={!scroll} minimumFontScale={0.85}
-          style={{ ...ty.label, ...numeric, ...font('600'), ...(scroll ? null : HERO_FIT), color: on ? t.surface : t.ink2, textAlign: 'center' }}>
+          style={{ ...ty.label, ...numeric, ...font('600'), ...(scroll ? null : HERO_FIT), color: on ? t.ink : t.ink2, textAlign: 'center' }}>
           {o.label}
         </Text>
       </Pressable>
@@ -2400,7 +2416,8 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
   // between, with 10pt-radius segments — the mockups' bar. surface3 rather
   // than surface2 because the bar sits on the ground as often as on a card,
   // and surface2 is two points of grey from the ground.
-  const bar: ViewStyle = { backgroundColor: t.surface3, borderRadius: 13, padding: 4, gap: 4 };
+  // v2: the track is the card surface with a 1px line; the thumb is surface3.
+  const bar: ViewStyle = { backgroundColor: t.surface, borderRadius: 14, padding: 4, gap: 4, boxShadow: '0 0 0 1px rgba(128,140,150,0.16)' };
   return scroll ? (
     <View style={[bar, style]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist"

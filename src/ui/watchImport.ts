@@ -107,32 +107,65 @@ export async function withHr(sm: WorkoutSample): Promise<WorkoutEntry> {
   return e;
 }
 
-/** The set of sample ids already pulled in, remembered across launches. */
-export function useImportedIds() {
-  const [ids, setIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    (async () => {
+/**
+ * The set of sample ids already pulled in, remembered across launches.
+ *
+ * ONE set for the whole app, not one per screen. It used to be a useState per
+ * caller, read from storage once on mount, so the Today card's copy never saw
+ * a mark made on Watch & Devices and kept offering workouts that had already
+ * been imported.
+ */
+let sharedIds: Set<string> = new Set();
+let loaded: Promise<void> | null = null;
+const listeners = new Set<(s: Set<string>) => void>();
+const emit = () => listeners.forEach((l) => l(sharedIds));
+function loadIds(): Promise<void> {
+  if (!loaded) {
+    loaded = (async () => {
       try {
         const raw = await AsyncStorage.getItem(IMPORTED_KEY);
-        if (raw) setIds(new Set(JSON.parse(raw)));
+        if (raw) { sharedIds = new Set([...sharedIds, ...(JSON.parse(raw) as string[])]); emit(); }
       } catch { /* ignore */ }
     })();
+  }
+  return loaded;
+}
+export function markImportedIds(add: string[]) {
+  if (!add.length) return;
+  sharedIds = new Set([...sharedIds, ...add]);
+  AsyncStorage.setItem(IMPORTED_KEY, JSON.stringify([...sharedIds])).catch(() => {});
+  emit();
+}
+export function useImportedIds() {
+  const [ids, setIds] = useState<Set<string>>(sharedIds);
+  useEffect(() => {
+    listeners.add(setIds);
+    setIds(sharedIds);
+    void loadIds();
+    return () => { listeners.delete(setIds); };
   }, []);
-  const mark = useCallback((add: string[]) => {
-    setIds((prev) => {
-      const next = new Set(prev);
-      add.forEach((i) => next.add(i));
-      AsyncStorage.setItem(IMPORTED_KEY, JSON.stringify([...next])).catch(() => {});
-      return next;
-    });
-  }, []);
+  const mark = useCallback((add: string[]) => markImportedIds(add), []);
   return { ids, mark };
 }
 
-/** A sample counts as logged once its id is remembered, or an entry already sits
- *  at the same instant under the same name. */
+/**
+ * A sample counts as logged once its id is remembered, or an entry already sits
+ * at the same instant under the same name.
+ *
+ * The instant is compared as a TIME, not as a string. The entry is written with
+ * the sample's own ISO string ("…T07:00:00.000Z"), but the log read back from
+ * the server spells the same instant the way Postgres does ("…T07:00:00+00:00"),
+ * so the string test never matched and an imported workout was still "not in
+ * your log" on the next read.
+ */
+const sameInstant = (a: string, b: string) => {
+  if (a === b) return true;
+  const x = Date.parse(a), y = Date.parse(b);
+  return Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 1000;
+};
+const sameName = (a: string, b: string) => (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
 export const isLogged = (sm: WorkoutSample, ids: Set<string>, log: WorkoutEntry[]) =>
-  ids.has(sm.id) || log.some((l) => l.t === sm.start && l.exercise === sm.activity);
+  ids.has(sm.id) || log.some((l) => sameInstant(l.t, sm.start) && sameName(l.exercise, sm.activity));
 
 /**
  * How ONE provider's read went. Three facts, never two.

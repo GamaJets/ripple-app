@@ -45,7 +45,7 @@
 // sentence. And a movement whose every named muscle is undrawable gets the
 // words and the caption and NO body, because an unlit body under "Muscles
 // Worked" is a picture of nothing pretending to be a picture of something.
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from './components';
 import { Flag, type Tone } from './kit';
@@ -119,7 +119,7 @@ function litOn(intensity: Readonly<Record<string, number>>, side: BodySide): num
   return n;
 }
 
-export function ExerciseMuscles({ primary, secondary, status, compact = false, style }: {
+function ExerciseMusclesImpl({ primary, secondary, status, compact = false, style }: {
   /** The catalogue's own names — 'gluteus maximus', never `gluteus_maximus`. */
   primary: readonly string[];
   secondary: readonly string[];
@@ -284,3 +284,13 @@ export function ExerciseMuscles({ primary, secondary, status, compact = false, s
     </View>
   );
 }
+
+/**
+ * Memoised, because this is the most expensive thing on a list row: two SVG
+ * figures with up to 76 muscle layers. The exercise libraries, the builder's
+ * picker and the logger draw one per row, and without this every keystroke in
+ * a search box re-drew every figure on screen. The props are the row's own
+ * arrays (stable while the list is) and two primitives, so a shallow compare
+ * is exact.
+ */
+export const ExerciseMuscles = memo(ExerciseMusclesImpl);
