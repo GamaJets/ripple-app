@@ -35,6 +35,7 @@
 // It says when a figure came from a photograph. A photo estimate is this app's
 // reading of a picture rather than a label somebody scanned, and a coach about
 // to tell somebody they are 300 kcal over should know which it was.
+import { MealPhotoFeed } from '../../src/ui/MealPhotoFeed';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -202,6 +203,8 @@ export default function ClientFood() {
             </Section>
           </>
         )}
+        {/* ── what they photographed, and a place to say something (part 3560) ── */}
+        <MealPhotoFeed clientId={clientId} role="coach" />
       </ScrollView>
     </SafeAreaView>
   );
