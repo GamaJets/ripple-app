@@ -89,6 +89,7 @@ import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
 import { inboxAge } from '../../src/lib/notifyInbox';
 import { inboxTabs, inBucket, type InboxBucket } from '../../src/lib/todayInbox';
 import { FormCheckInbox } from '../../src/ui/FormCheckInbox';
+import { QuietClientsInbox } from '../../src/ui/QuietClientsInbox';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
@@ -2697,6 +2698,9 @@ export default function TrainerClients() {
 
         {/* ── form checks waiting on an answer (part 3520) ─────────────────── */}
         <FormCheckInbox coachId={coachId} />
+
+        {/* ── clients with no workout in 3+ days (part 3530) ─────────────── */}
+        <QuietClientsInbox coachId={coachId} />
 
         {/* ── needs attention ───────────────────────────────────────────────
             The operating question for this tab, asked before setup, billing
