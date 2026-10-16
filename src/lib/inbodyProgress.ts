@@ -194,3 +194,58 @@ export function signed(delta: number, decimals: number): string {
   if (f == null || f === 0) return '0';
   return deltaSign(f, decimals) + (deltaMagnitude(f, decimals) ?? '0');
 }
+
+// ── what the scans add up to ───────────────────────────────────────────────
+//
+// The one sentence a member actually asks of a run of scans: did I lose fat,
+// gain muscle, or both? First scan against latest, fat mass taken from the
+// printout when it was read, otherwise weight × body-fat % (both off the same
+// scan, never mixed across two). Changes inside the scale's own noise
+// (RECOMP_NOISE_KG) are "held", not progress and not loss.
+export const RECOMP_NOISE_KG = 0.3;
+export type RecompKind = 'recomp' | 'leaner' | 'muscle' | 'held' | 'gained-fat' | 'lost-muscle' | 'mixed';
+export interface Recomp {
+  kind: RecompKind;
+  from: string; to: string;
+  fatKg: number | null;      // signed change, kg
+  muscleKg: number | null;   // signed change, kg
+}
+
+function fatMassOf(s: ProgressScan): number | null {
+  const direct = num(s.metrics?.fatMassKg);
+  if (direct != null) return direct;
+  return s.weightKg != null && s.bodyFatPct != null ? (s.weightKg * s.bodyFatPct) / 100 : null;
+}
+
+/** Null below two scans, or when neither fat nor muscle can be compared. */
+export function recompOf(scans: readonly ProgressScan[]): Recomp | null {
+  const asc = oldestFirst(scans);
+  if (asc.length < 2) return null;
+  const a = asc[0], b = asc[asc.length - 1];
+  const fa = fatMassOf(a), fb = fatMassOf(b);
+  const ma = num(a.skeletalMuscleKg), mb = num(b.skeletalMuscleKg);
+  const fatKg = fa != null && fb != null ? +(fb - fa).toFixed(1) : null;
+  const muscleKg = ma != null && mb != null ? +(mb - ma).toFixed(1) : null;
+  if (fatKg == null && muscleKg == null) return null;
+  const dir = (v: number | null): -1 | 0 | 1 | null => (v == null ? null : Math.abs(v) < RECOMP_NOISE_KG ? 0 : v > 0 ? 1 : -1);
+  const f = dir(fatKg), m = dir(muscleKg);
+  const kind: RecompKind =
+    f === -1 && m === 1 ? 'recomp'
+    : f === -1 && (m === 0 || m == null) ? 'leaner'
+    : m === 1 && (f === 0 || f == null) ? 'muscle'
+    : f === 1 && m === -1 ? 'mixed'
+    : f === 1 ? 'gained-fat'
+    : m === -1 ? 'lost-muscle'
+    : 'held';
+  return { kind, from: a.takenAt, to: b.takenAt, fatKg, muscleKg };
+}
+
+export const RECOMP_LINE: Record<RecompKind, string> = {
+  recomp: 'Less fat and more muscle: that is body recomposition.',
+  leaner: 'Fat is down with muscle held.',
+  muscle: 'Muscle is up with fat held.',
+  held: 'Fat and muscle are both within a scan’s normal variation.',
+  'gained-fat': 'Fat mass is up.',
+  'lost-muscle': 'Skeletal muscle is down.',
+  mixed: 'Fat is up and muscle is down.',
+};

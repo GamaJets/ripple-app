@@ -1,4 +1,4 @@
-import { verdictOf, scanSummary, trendSeries, segmentalOf, segmentOfLayer, compareScans, signed, type ProgressScan } from './inbodyProgress';
+import { verdictOf, scanSummary, trendSeries, segmentalOf, segmentOfLayer, compareScans, signed, recompOf, type ProgressScan } from './inbodyProgress';
 
 const errors: string[] = [];
 const eq = (a: unknown, b: unknown, m: string) => { if (JSON.stringify(a) !== JSON.stringify(b)) errors.push(`${m} — got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
@@ -65,6 +65,19 @@ eq([fm.delta, fm.verdict], [-3.1, 'good'], 'fat mass compare');
 eq(c.rows.filter((r) => r.label === 'Fat Mass').length, 1, 'no duplicate rows');
 
 eq(signed(-0.9, 1), '−0.9', 'minus sign'); eq(signed(1, 0), '+1', 'plus'); eq(signed(0.01, 1), '0', 'zero');
+
+// ── recompOf ──
+{
+  const sc = (takenAt: string, w: number, bf: number, smm: number): ProgressScan => ({ takenAt, weightKg: w, bodyFatPct: bf, skeletalMuscleKg: smm });
+  eq(recompOf([sc('2026-01-01', 80, 25, 33)]), null, 'one scan says nothing');
+  const r = recompOf([sc('2026-03-01', 79, 22, 34.5), sc('2026-01-01', 80, 25, 33)])!;
+  eq(r.kind, 'recomp', 'fat down and muscle up is recomposition');
+  eq(r.fatKg, -2.6, 'fat mass from weight × body fat'); eq(r.muscleKg, 1.5, 'muscle change');
+  eq(recompOf([sc('2026-01-01', 80, 25, 33), sc('2026-02-01', 80, 25.2, 33.1)])!.kind, 'held', 'scale noise is held');
+  eq(recompOf([sc('2026-01-01', 80, 25, 33), { takenAt: '2026-02-01', weightKg: null, bodyFatPct: null, skeletalMuscleKg: 34 }])!.kind, 'muscle', 'muscle alone when fat is unknown');
+  eq(recompOf([{ takenAt: '2026-01-01', weightKg: 80, bodyFatPct: null, skeletalMuscleKg: null }, { takenAt: '2026-02-01', weightKg: 79, bodyFatPct: null, skeletalMuscleKg: null }]), null, 'nothing comparable is null, not "held"');
+  eq(recompOf([sc('2026-01-01', 80, 20, 33), sc('2026-02-01', 82, 23, 32)])!.kind, 'mixed', 'fat up and muscle down');
+}
 
 if (errors.length) { console.error(errors.join('\n')); throw new Error(`inbodyProgress: ${errors.length} failed`); }
 console.log('inbodyProgress: all passed');
