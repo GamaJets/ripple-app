@@ -105,6 +105,9 @@ import {
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
 import { VoiceNoteBubble, FileBubble } from '../../src/ui/AttachmentBubbles';
+import { MessageRefCard, recentRefOptions } from '../../src/ui/MessageRefCard';
+import type { MessageRef } from '../../src/ui/messaging';
+import { supabase as refDb } from '../../src/lib/supabase';
 import { useVoiceNote } from '../../src/ui/voiceNote';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
@@ -258,6 +261,19 @@ export default function Messages() {
   const pull = usePullToRefresh(useCallback(() => { reload(); safety.reload(); }, [reload, safety.reload]));
   const [text, setText] = useState('');
   const [pending, setPending] = useState<PendingAttachment | null>(null);
+  const [pendingRef, setPendingRef] = useState<{ ref: MessageRef; label: string } | null>(null);
+  /* Part 3550: point at one of your own workouts or form checks. */
+  const pickRef = async (kind: MessageRef['kind']) => {
+    const { data: auth, error: authErr } = await refDb.auth.getUser();
+    if (authErr || !auth?.user?.id) { Alert.alert('Not Signed In', 'We could not confirm who you are, so there is nothing to share yet.'); return; }
+    const opts = await recentRefOptions(kind, auth.user.id);
+    if (opts === null) { Alert.alert('Could Not Load', 'Your recent items could not be read just now. Try again in a moment.'); return; }
+    if (!opts.length) { Alert.alert('Nothing to Share', kind === 'workout' ? 'You have no logged workouts yet.' : 'You have no form checks yet. Film a set from an exercise screen.'); return; }
+    Alert.alert(kind === 'workout' ? 'Share a Workout' : 'Share a Form Check', 'Your coach will see it in this conversation.', [
+      ...opts.map((o) => ({ text: o.label, onPress: () => setPendingRef(o) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
   const [busy, setBusy] = useState(false);
   // Which message is being reported, or null for the conversation as a whole.
   // `open` is separate from the id because reporting the conversation is a
@@ -420,6 +436,8 @@ export default function Messages() {
       { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
       { text: 'Send a File', onPress: () => { attach('document'); } },
       ...(voice.available ? [{ text: 'Record a Voice Note', onPress: () => { void onRecord(); } }] : []),
+      { text: 'Share a Workout', onPress: () => { void pickRef('workout'); } },
+      { text: 'Share a Form Check', onPress: () => { void pickRef('form_clip'); } },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -552,11 +570,12 @@ export default function Messages() {
 
   const onSend = async () => {
     if (busy) return;
-    if (!text.trim() && !pending) return;
+    if (!text.trim() && !pending && !pendingRef) return;
     const body = text;
     const att = pending;
-    setText(''); setPending(null); setBusy(true);
-    const res = await send(body, att);
+    const ref = pendingRef?.ref ?? null;
+    setText(''); setPending(null); setPendingRef(null); setBusy(true);
+    const res = await send(body, att, ref);
     setBusy(false);
     // Three outcomes, not two. A message held on this phone because there is no
     // signal is not a message that failed: the words are safe, they are marked
@@ -832,6 +851,7 @@ export default function Messages() {
                     <Attachment m={m} />
                   </View>
                 ) : null}
+                {m.ref ? <MessageRefCard msgRef={m.ref} role="client" clientId={m.clientId} mine={mine} /> : null}
                 {/* A photo needs no caption, and an empty bubble under one is a
                     thing the sender did not say. */}
                 {m.body ? (
@@ -905,6 +925,12 @@ export default function Messages() {
         </ScrollView>
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
+        {pendingRef ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink, flex: 1 }} numberOfLines={1}>{`Sharing: ${pendingRef.label}`}</Text>
+            <Ghost label="Remove" onPress={() => setPendingRef(null)} />
+          </View>
+        ) : null}
         {pending ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingTop: sp.md }}>
             {pending.kind === 'image'
