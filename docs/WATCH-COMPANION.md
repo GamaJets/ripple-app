@@ -57,6 +57,7 @@ None of this can go over the air: a watch app and a native module are binaries.
 ## Steps to ship it
 
 1. Have the bundle id and profile created (decision 1 above).
+<!-- path-ok: watch-bridge is the module this plan proposes; it does not exist yet -->
 2. Add `modules/watch-bridge` (iOS WCSession) and call it from
    `src/ui/WorkoutLogger.tsx`'s `SessionRunner`. Send state on every set or
    exercise change, and handle `set-done` by calling the existing log-a-set
