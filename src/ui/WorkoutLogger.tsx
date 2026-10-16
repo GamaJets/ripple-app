@@ -75,6 +75,8 @@ import { type ProgramExercise } from '../lib/programs';
 import { useWearables } from './wearables';
 import type { WorkoutEntry } from '../lib/mockData';
 import { suggestForExercise, priorBest1RM } from '../lib/progression';
+import { priorTopLoad } from '../lib/sessionRecords';
+import { PrFlash } from './PrFlash';
 import { announcePersonalBest } from '../lib/prNotifyStore';
 import { est1RM } from '../lib/streaks';
 import { bodyweightAtKg, bodyweightSetLabel, type BodyweightHistory } from '../lib/bodyweightSets';
@@ -1888,8 +1890,21 @@ export function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf,
       ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)),
       0,
     );
-    if (historyWhole && newE1 > 0 && newE1 > priorBest) {
-      setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`);
+    // The second record a lifter counts: the heaviest weight ever on the bar
+    // for this movement, even at fewer reps than the best estimated 1RM. Same
+    // guards — whole history, loaded, repped — and it only counts against a
+    // movement that HAS an earlier loaded set (see src/lib/sessionRecords.ts),
+    // so the first set of a new exercise stays the e1RM rule's call alone.
+    const priorTop = Math.max(
+      historyWhole ? priorTopLoad(log, name) : 0,
+      ...done.map((s) => (s.kg && s.reps && !s.bw && !s.timed ? s.kg : 0)),
+      0,
+    );
+    const e1Record = newE1 > 0 && newE1 > priorBest;
+    const loadRecord = newE1 > 0 && priorTop > 0 && wkg > priorTop;
+    if (historyWhole && (e1Record || loadRecord)) {
+      const recordSet = `${liftLabel(wkg, unit) ?? `${plain(wkg)} kg`} × ${r}`;
+      setPrMsg(e1Record ? `New PR on ${name}! ${recordSet}` : `Heaviest Ever on ${name}! ${recordSet}`);
       setSessionPrs((l) => [...l.filter((x) => !x.startsWith(`${name} `)), `${name} ${fig(liftLabel(wkg, unit))} ${unit}`]);
       prAt.current = done.length;
       setConfetti(true);
@@ -2948,7 +2963,9 @@ export function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf,
 
   const prBlock = prMsg ? (
     <View style={{ marginTop: sp.xl }}>
-      <Notice tone={t.s3} kicker="Personal Record" title={prMsg} />
+      <PrFlash key={prMsg}>
+        <Notice tone={t.s3} kicker="Personal Record" title={prMsg} />
+      </PrFlash>
     </View>
   ) : null;
 

@@ -115,9 +115,6 @@ const KNOWN = new Map([
     'The two per-kilogram target lines, both inside `m ?`. liftingMacros() returns null unless ' +
     'the client has both a bodyweight and a body-fat reading, so lean mass and bodyweight are ' +
     'numbers wherever these render.' }],
-  ['src/ui/WorkoutLogger.tsx', { count: 1, why:
-    'The new-PR message (moved here with the logger). `wkg` is the weight just logged on the set that beat the record, and ' +
-    'the branch requires an estimated 1RM greater than zero, so there is a load to name.' }],
   ['app/(trainer)/analytics.tsx', { count: 2, why:
     'Both inside `gymCur ?` arms with the amount already proved non-null, so `priced()` has ' +
     'both halves it needs. The unguarded sibling of these two — the revenue-target line, where ' +

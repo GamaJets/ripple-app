@@ -10,7 +10,8 @@ import { sessionsOf, type LoggedSession } from '../lib/clientTraining';
 import { workoutPost, type PostBuild } from '../lib/postCard';
 import { topMovements } from '../lib/workoutShare';
 import { fmtDay } from '../lib/format';
-import { volumeHeadline, type WeightUnit } from '../lib/units';
+import { volumeHeadline, liftLabel, type WeightUnit } from '../lib/units';
+import { sessionRecords } from '../lib/sessionRecords';
 import type { WorkoutEntry } from '../lib/mockData';
 import type { BodyweightHistory } from '../lib/bodyweightSets';
 
@@ -34,10 +35,10 @@ export function sessionPost(s: LoggedSession, unit: WeightUnit, brand: string, p
   });
 }
 
-export function RecentSessions({ log, unit, weightSeries, prsFor }: {
+export function RecentSessions({ log, unit, weightSeries, whole = true }: {
   log: readonly WorkoutEntry[]; unit: WeightUnit; weightSeries?: BodyweightHistory;
-  /** Records set in a session, by its `at`; empty when not known. */
-  prsFor?: (s: LoggedSession) => string[];
+  /** False when the log is not known whole: a record needs everything before it. */
+  whole?: boolean;
 }) {
   const { appName } = useBrand();
   const [build, setBuild] = useState<PostBuild | null>(null);
@@ -50,12 +51,12 @@ export function RecentSessions({ log, unit, weightSeries, prsFor }: {
     <Section>
       <SectionHead title="Recent Sessions" note="Tap to Share" />
       {sessions.map((s) => {
-        const prs = prsFor ? prsFor(s) : [];
+        const prs = whole ? sessionRecords(log, s.at).map((r) => `${r.exercise} ${liftLabel(r.kg, unit) ?? ''}`.trim()) : [];
         const vol = volumeText(s.volumeKg, unit);
         return (
           <ListRow key={s.at} icon={prs.length ? 'trophy' : 'share'}
             title={s.day ? fmtDay(s.at) : 'Undated session'}
-            note={topMovements(s.entries.map((e) => ({ name: e.exercise, sets: (e.sets ?? []).map((x) => [x[0], x[1]] as const) })), 3).join(' · ')}
+            note={prs.length ? `PR · ${prs.slice(0, 2).join(' · ')}` : topMovements(s.entries.map((e) => ({ name: e.exercise, sets: (e.sets ?? []).map((x) => [x[0], x[1]] as const) })), 3).join(' · ')}
             meta={[`${s.sets} ${s.sets === 1 ? 'set' : 'sets'}`, vol, prs.length ? `${prs.length} PR${prs.length === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}
             onPress={() => setBuild(sessionPost(s, unit, appName, prs))} />
         );
