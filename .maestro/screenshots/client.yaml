@@ -1,0 +1,23 @@
+# Store screenshots: client. Run with scripts/store-screenshots.sh, not directly.
+# Needs a signed-in demo account (STORE_EMAIL / STORE_PASSWORD) with realistic data.
+appId: com.washateria.repple
+env:
+  OUT: ${OUT}
+---
+- launchApp
+- runFlow: ../login.yaml
+- openLink: repple:///(client)/dashboard
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/01-dashboard
+- openLink: repple:///(client)/workouts
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/02-workouts
+- openLink: repple:///(client)/nutrition
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/03-nutrition
+- openLink: repple:///(client)/scans
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/04-scans
+- openLink: repple:///(client)/my-coach
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/05-my-coach

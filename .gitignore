@@ -73,3 +73,4 @@ src/**/*.js.map
 app/**/*.js.map
 
 $S/
+store-screenshots/

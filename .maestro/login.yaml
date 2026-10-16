@@ -1,0 +1,18 @@
+# Signs the demo account in if the welcome screen is showing; no-op otherwise.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: "Sign In"
+    commands:
+      - tapOn: "Sign In"
+      - tapOn: "Email"
+      - inputText: ${STORE_EMAIL}
+      - tapOn: "Password"
+      - inputText: ${STORE_PASSWORD}
+      - hideKeyboard
+      - tapOn:
+          text: "Sign In"
+          index: -1
+      - waitForAnimationToEnd:
+          timeout: 15000
