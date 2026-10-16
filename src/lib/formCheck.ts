@@ -74,7 +74,7 @@ export function isOwnClipPath(uid: string | null | undefined, path: string | nul
  */
 export const MEMBER_CONSENT_NOTE =
   'This clip goes to your coach and to nobody else: not your gym, not reception, not another coach. '
-  + 'If you change coach or stop coaching, the old one loses it the same day. You can delete it yourself at any time, and deleting it is final.';
+  + 'If you change coach or stop coaching, the old one loses it the same day. You can delete it yourself at any time, and deleting it is final. It is deleted automatically after 30 days either way.';
 
 /** Why a clip cannot be attached. Each wants a different next action. */
 export type ClipRefusal = 'no-coach' | 'too-long' | 'too-big' | 'no-set' | null;
@@ -177,4 +177,50 @@ export function replyLine(reply: string | null | undefined, whenLabel: string | 
   const body = replyText(reply);
   if (!body) return null;
   return whenLabel ? `Your coach answered ${whenLabel}.` : 'Your coach answered.';
+}
+
+// ── how long a clip lives, and where in it an answer points ───────────────
+//
+// supabase/parts/3520: a clip and its row are deleted FORM_CLIP_DAYS after it
+// was sent, by `expire_form_clips()` on the hour. Said to the member when they
+// send one, because "kept for a month" is part of what they are agreeing to.
+export const FORM_CLIP_DAYS = 30;
+
+/** The sentence under a sent clip. Days are whole and never negative. */
+export function clipExpiryLine(createdAt: string, now: number = Date.now()): string {
+  const t = Date.parse(createdAt);
+  if (!Number.isFinite(t)) return `Deleted automatically ${FORM_CLIP_DAYS} days after you sent it.`;
+  const left = Math.max(0, Math.ceil((t + FORM_CLIP_DAYS * 86_400_000 - now) / 86_400_000));
+  if (left <= 1) return 'Deleted automatically within a day.';
+  return `Deleted automatically in ${left} days.`;
+}
+
+/** The longest moment an answer may point at: ten minutes, as part 3520 checks. */
+export const MAX_STAMP_MS = 600_000;
+
+/**
+ * What a coach typed in "At" as milliseconds into the clip.
+ * "12" and "0:12" are twelve seconds; "1:05" is sixty-five. Empty is `null`
+ * (the answer is about the whole set). Anything else is `'invalid'`, which
+ * the screen refuses rather than guessing at.
+ */
+export function parseClipStamp(raw: string | null | undefined): number | null | 'invalid' {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const m = /^(?:(\d{1,2}):)?(\d{1,3})$/.exec(s);
+  if (!m) return 'invalid';
+  const mins = m[1] ? Number(m[1]) : 0;
+  const secs = Number(m[2]);
+  if (m[1] && secs > 59) return 'invalid';
+  const ms = (mins * 60 + secs) * 1000;
+  return ms > MAX_STAMP_MS ? 'invalid' : ms;
+}
+
+/** "0:12" for 12 000 ms. Null in, null out. */
+export function clipStampLabel(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
 }

@@ -88,6 +88,7 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
 import { inboxAge } from '../../src/lib/notifyInbox';
 import { inboxTabs, inBucket, type InboxBucket } from '../../src/lib/todayInbox';
+import { FormCheckInbox } from '../../src/ui/FormCheckInbox';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
@@ -2693,6 +2694,9 @@ export default function TrainerClients() {
             of them would ever be seen. They are below the queue and not over
             it because the review is explicit that money does not outrank an
             overdue coaching action. */}
+
+        {/* ── form checks waiting on an answer (part 3520) ─────────────────── */}
+        <FormCheckInbox coachId={coachId} />
 
         {/* ── needs attention ───────────────────────────────────────────────
             The operating question for this tab, asked before setup, billing

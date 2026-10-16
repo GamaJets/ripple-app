@@ -91,7 +91,7 @@ import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 import { pickFormClip, sendFormClip, fetchFormClip, deleteFormClip, type FormClip } from '../../src/ui/formClips';
-import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine, replyLine } from '../../src/lib/formCheck';
+import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine, replyLine, clipStampLabel, clipExpiryLine } from '../../src/lib/formCheck';
 import { useSettings } from '../../src/ui/settings';
 import { exerciseIndex, exerciseOutings } from '../../src/lib/exerciseHistory';
 import { bestSetLabel } from '../../src/lib/bestSet';
@@ -941,11 +941,17 @@ export default function ExerciseScreen() {
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>
                 {replyLine(clipSent.coachReply, clipSent.coachRepliedAt ? fmtRelativeDay(clipSent.coachRepliedAt) : null) ?? 'Your coach answered.'}
               </Text>
-              <View accessible accessibilityLabel={`Your coach answered: ${clipSent.coachReply}`}
+              <View accessible accessibilityLabel={`Your coach answered${clipStampLabel(clipSent.coachReplyAtMs) ? `, at ${clipStampLabel(clipSent.coachReplyAtMs)} in your clip` : ''}: ${clipSent.coachReply}`}
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+                {clipStampLabel(clipSent.coachReplyAtMs) ? (
+                  <Text style={{ ...ty.caption, ...font('600'), color: t.ink2 }}>At {clipStampLabel(clipSent.coachReplyAtMs)} in your clip</Text>
+                ) : null}
                 <Text style={{ ...ty.body, color: t.ink }}>{clipSent.coachReply}</Text>
               </View>
             </View>
+          ) : null}
+          {clipSent ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{clipExpiryLine(clipSent.createdAt)}</Text>
           ) : null}
           {clipSent ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
