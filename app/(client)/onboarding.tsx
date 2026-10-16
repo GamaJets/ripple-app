@@ -53,7 +53,7 @@
 // first thing a new American member ever types is recorded against a unit
 // nobody asked them about.
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Animated, AccessibilityInfo, Easing } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -73,8 +73,16 @@ import {
 } from '../../src/lib/firstRun';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
+import { useMyIntake } from '../../src/ui/intake';
+import { emptyIntake, TRAINING_YEARS, TRAINING_PLACES, type TrainingYears, type TrainingPlace } from '../../src/lib/intake';
+import { joinByCode } from '../../src/ui/joinCode';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { reportError } from '../../src/lib/reportError';
+import type { CoachedMode } from '../../src/lib/types';
 
-export const ONBOARD_KEY = 'repple.onboarded';
+export { ONBOARD_KEY } from '../../src/ui/setupDone';
+import { ONBOARD_KEY } from '../../src/ui/setupDone';
 /** Where setup got to, on this device. See the header. */
 export const SETUP_AT_KEY = 'repple.setup.at';
 
@@ -174,10 +182,71 @@ export default function Onboarding() {
   // coached, measured member all four questions and then pull two of them out
   // from under their thumb a moment later.
   const [steps, setSteps] = useState<SetupStep[] | null>(null);
+  // The intake holds experience and schedule (src/lib/intake.ts). Latched on
+  // its read too, for the same reason as clientData above: a filled-in intake
+  // must not have its questions asked and then withdrawn mid-tap. A failed
+  // intake read asks them — the answers are then saved over nothing.
+  const my = useMyIntake();
   useEffect(() => {
-    if (steps != null || c.status === 'loading') return;
-    setSteps(questionsToAsk({ coachingAgreed: c.coachLinked === true, weighed: c.weightKg != null }));
-  }, [steps, c.status, c.coachLinked, c.weightKg]);
+    if (steps != null || c.status === 'loading' || my.status === 'loading') return;
+    setSteps(questionsToAsk({
+      coachingAgreed: c.coachLinked === true, weighed: c.weightKg != null,
+      experienced: my.intake?.history.years != null,
+      scheduled: my.intake?.availability.daysPerWeek != null,
+    }));
+  }, [steps, c.status, c.coachLinked, c.weightKg, my.status, my.intake]);
+
+  // ── experience, schedule, coach code ────────────────────────────────────
+  const [years, setYears] = useState<TrainingYears | null>(null);
+  const [days, setDays] = useState<number | null>(null);
+  const [place, setPlace] = useState<TrainingPlace | null>(null);
+  const [equipment, setEquipment] = useState('');
+  const [code, setCode] = useState('');
+  const [joinSaid, setJoinSaid] = useState<{ ok: boolean; line: string } | null>(null);
+  const [joining, setJoining] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    void peekJoinCode().then((p) => { if (!gone && p) setCode((cur) => cur || p); }).catch(() => {});
+    return () => { gone = true; };
+  }, []);
+  const connect = async () => {
+    if (joining || !code.trim()) return;
+    setJoining(true);
+    const mode: CoachedMode = cmode === 'solo' ? 'online' : cmode;
+    const r = await joinByCode(code, mode);
+    setJoining(false);
+    setJoinSaid(r.ok
+      ? { ok: true, line: r.already ? `You've already asked ${r.trainerName}. They'll accept you from their side.` : `Request sent to ${r.trainerName}. You're linked as soon as they accept.` }
+      : { ok: false, line: r.reason });
+  };
+  /** Experience and schedule go into the member's own intake document. */
+  const saveIntake = () => {
+    if (!my.mayEdit || my.status === 'error') return;
+    const base = my.intake ?? emptyIntake(new Date().toISOString());
+    const next = {
+      ...base,
+      updatedAt: new Date().toISOString(),
+      history: { ...base.history, years: years ?? base.history.years },
+      availability: {
+        ...base.availability,
+        daysPerWeek: days ?? base.availability.daysPerWeek,
+        place: place ?? base.availability.place,
+        equipment: equipment.trim() ? equipment.trim().slice(0, 300) : base.availability.equipment,
+      },
+    };
+    void my.save(next).then((ok) => { if (!ok) reportError('onboarding.intake', new Error('intake save refused')); });
+  };
+
+  // ── the step, arriving ──────────────────────────────────────────────────
+  // A short fade-and-rise on each new card; none at all under Reduce Motion.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    AccessibilityInfo.isReduceMotionEnabled().then((r) => { if (!gone) setReduceMotion(r); }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (r) => setReduceMotion(r));
+    return () => { gone = true; sub.remove(); };
+  }, []);
+  const enter = useRef(new Animated.Value(1)).current;
 
   // ── Where it reopens ──────────────────────────────────────────────────────
   const [step, setStep] = useState(0);
@@ -332,6 +401,7 @@ export default function Onboarding() {
    */
   const commit = (id: SetupStep) => {
     if (id === 'coaching') c.setCoachingMode(cmode);
+    if ((id === 'experience' && years != null) || (id === 'schedule' && (days != null || place != null || equipment.trim()))) saveIntake();
     if (id === 'goal') c.setGoal(goal);
     if (id === 'body') {
       // Judge the figure the client actually typed against a bound on the same
@@ -365,6 +435,11 @@ export default function Onboarding() {
   /** Setup is over. Mark it, forget the position, and go somewhere useful. */
   const leave = async (mode: CoachingMode) => {
     try { await AsyncStorage.setItem(ONBOARD_KEY, '1'); } catch { /* ignore */ }
+    // On the account as well (part 3570), so a new phone does not offer a
+    // finished setup again. Best effort: the local mark above already stands.
+    if (USE_SUPABASE) {
+      try { const { error } = await supabase.rpc('mark_onboarded'); if (error) reportError('onboarding.mark', error); } catch (e) { reportError('onboarding.mark', e); }
+    }
     try { await AsyncStorage.removeItem(SETUP_AT_KEY); } catch { /* ignore */ }
     // A code is waiting when this account was created off the back of a coach's
     // invite link: app/join.tsx stored it before sending them to sign up, and
@@ -456,6 +531,46 @@ export default function Onboarding() {
         {MODES.map((m) => chip(m, { on: cmode === m, label: COACHING_MODE_LABEL[m], sub: COACHING_MODE_NOTE[m], onPress: () => setCmode(m) }))}
       </View>
     ),
+    connect: (
+      <View>
+        <Text style={{ ...ty.title, color: t.ink }}>Connect to Your Coach</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>
+          Enter the code your coach gave you, or open their invite link. No code yet? Skip this; you can find your coach under Me at any time.
+        </Text>
+        <Field label="Coach Code" a11y="Coach code">
+          <TextInput value={code} onChangeText={(v) => { setCode(v); setJoinSaid(null); }} autoCapitalize="characters" autoCorrect={false}
+            style={{ ...inp, letterSpacing: 2 }} />
+        </Field>
+        <View style={{ marginTop: sp.lg }}>
+          <Cta label={joining ? 'Connecting…' : 'Connect'} onPress={() => { void connect(); }} wide />
+        </View>
+        {joinSaid ? (
+          <Text style={{ ...ty.label, color: joinSaid.ok ? t.ink : t.ink2, marginTop: sp.md }}>{joinSaid.line}</Text>
+        ) : null}
+      </View>
+    ),
+    experience: (
+      <View>
+        <Text style={{ ...ty.title, color: t.ink }}>How Long Have You Trained?</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Sets the starting point, so week one is challenging rather than crushing.</Text>
+        {TRAINING_YEARS.map((y) => chip(y.id, { on: years === y.id, label: y.label, onPress: () => setYears(y.id) }))}
+      </View>
+    ),
+    schedule: (
+      <View>
+        <Text style={{ ...ty.title, color: t.ink }}>Your Training Week</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>How many days you can train, and where.</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Days a Week</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
+          {[1, 2, 3, 4, 5, 6, 7].map((d) => pill(`d${d}`, { on: days === d, label: String(d), onPress: () => setDays(d) }))}
+        </View>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Where</Text>
+        {TRAINING_PLACES.map((pl) => chip(pl.id, { on: place === pl.id, label: pl.label, onPress: () => setPlace(pl.id) }))}
+        <Field label="Equipment" hint="optional" a11y="Equipment you have" style={{ marginTop: sp.md }}>
+          <TextInput value={equipment} onChangeText={setEquipment} placeholder="e.g. dumbbells to 20 kg, a bench" placeholderTextColor={t.ink3} maxLength={300} style={inp} />
+        </Field>
+      </View>
+    ),
     goal: (
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>What Are You After?</Text>
@@ -465,8 +580,11 @@ export default function Onboarding() {
     ),
     body: (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Your Stats</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank; you can add it later.</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>Your Baseline</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.md }}>Used to set your calorie and macro targets, and the point your progress is measured from. Leave anything you don't know blank; you can add it later.</Text>
+        <View style={{ alignSelf: 'flex-start', marginBottom: prefilled ? sp.md : sp.xl }}>
+          <Ghost label="Import an InBody Scan" onPress={() => { commit('body'); router.push('/(client)/inbody'); }} />
+        </View>
         {/* Said out loud when the boxes arrive with numbers already in them.
             A field that fills itself and does not say why reads as the app
             guessing, and the whole reason these were blank for a while is that
@@ -565,8 +683,18 @@ export default function Onboarding() {
   // wizard is worse than a frame of the background: see the latch above.
   if (steps == null || !restored) return <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} />;
 
-  const id = steps[step];
-  const last = step === steps.length - 1;
+  const go = (n: number) => {
+    setStep(n);
+    if (reduceMotion) return;
+    enter.setValue(0);
+    Animated.timing(enter, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  };
+
+  // Somebody training solo is not asked for a coach's code.
+  const shown = steps.filter((x) => !(x === 'connect' && cmode === 'solo'));
+  const at = Math.min(step, shown.length - 1);
+  const id = shown[at];
+  const last = at === shown.length - 1;
   const q = SETUP_QUESTIONS.find((x) => x.id === id);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
@@ -588,14 +716,16 @@ export default function Onboarding() {
       <View style={{ flex: 1, paddingBottom: lift }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
         <View style={{ flexDirection: 'row', gap: 5, flex: 1 }}>
-          {steps.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= step ? t.brand : t.surface3 }} />)}
+          {shown.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= at ? t.brand : t.surface3 }} />)}
         </View>
         {/* On every card, not only the first. */}
         <Ghost label="Skip" onPress={skip} />
       </View>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xl + footerH }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {step + 1} of {steps.length}</Text>
-        {CARDS[id]}
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {at + 1} of {shown.length}</Text>
+        <Animated.View style={reduceMotion ? undefined : { opacity: enter, transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }}>
+          {CARDS[id]}
+        </Animated.View>
         {/* The reason this question is being asked, in the same words the
             module justifies it with. A setup that says what each answer is FOR
             is shorter to read than one of the same length that does not. */}
@@ -605,9 +735,9 @@ export default function Onboarding() {
       </ScrollView>
       <View ref={footerRef} onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
         style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingBottom: sp.lg }}>
-        {step > 0 ? <Ghost label="Back" onPress={() => { commit(id); setStep(step - 1); }} /> : null}
+        {at > 0 ? <Ghost label="Back" onPress={() => { commit(id); go(at - 1); }} /> : null}
         <View style={{ flex: 1 }}>
-          <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => { if (last) { void finish(); } else { commit(id); setStep(step + 1); } }} wide />
+          <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => { if (last) { void finish(); } else { commit(id); go(at + 1); } }} wide />
         </View>
       </View>
       </View>

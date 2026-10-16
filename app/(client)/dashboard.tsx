@@ -55,7 +55,7 @@ import { useHabits } from '../../src/ui/habits';
 import { readinessMadeOf } from '../../src/lib/readiness';
 import { useReadiness } from '../../src/ui/readiness';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ONBOARD_KEY } from './onboarding';
+import { readSetupDone } from '../../src/ui/setupDone';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
@@ -150,8 +150,8 @@ export default function Home() {
     let gone = false;
     (async () => {
       try {
-        const [a, b] = await Promise.all([AsyncStorage.getItem(ONBOARD_KEY), AsyncStorage.getItem(GUIDE_SEEN_KEY)]);
-        if (!gone) { setSetupDone(!!a); setGuideSeen(!!b); }
+        const [a, b] = await Promise.all([readSetupDone(), AsyncStorage.getItem(GUIDE_SEEN_KEY)]);
+        if (!gone) { setSetupDone(a); setGuideSeen(!!b); }
       } catch { if (!gone) { setSetupDone(null); setGuideSeen(null); } }
     })();
     return () => { gone = true; };
