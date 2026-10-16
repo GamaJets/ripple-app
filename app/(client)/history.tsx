@@ -907,7 +907,7 @@ export default function History() {
     </Section>
 
     {/* ── the latest sessions, each shareable as a card ─────────────────── */}
-    <RecentSessions log={log} unit={wu} weightSeries={weightSeries} />
+    <RecentSessions log={log} unit={wu} weightSeries={weightSeries} whole={load.state === 'ready' && !load.partialBefore} />
 
     {/* ── what you have actually trained ─────────────────────────────────── */}
     <MuscleSection log={log} unit={wu} weightSeries={weightSeries} />
