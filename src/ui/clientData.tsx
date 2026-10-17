@@ -302,6 +302,12 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [sbUid, setSbUid] = useState<string | null>(null);
   const [nameSynced, setNameSynced] = useState(false);
+  // Whether this account has a `clients` row at all, as the last read that
+  // landed said. Coaches and owners never do (provision_profile gives them a
+  // trainers row), so the whole-row push below must not aim an UPDATE at
+  // `clients` for them: it matched nothing and was reported as a failed save
+  // on every coach profile edit (Sentry REPPLE-2). Null until a read lands.
+  const hasClientRowRef = useRef<boolean | null>(null);
   const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // What the rest of the app is told, which is the above with an ending on it.
@@ -556,6 +562,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // profile read it believed had failed. A row that is genuinely absent
         // now comes back as null with no error, which is the true answer.
         if (!cOut.ok) { reportError('clientData.hydrate.clients', cOut.error); failed = true; }
+        else if (!cancelled) hasClientRowRef.current = c != null;
         if (!cancelled && !cFailed && c) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
@@ -764,6 +771,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         //
         // `count: 'exact'` makes the row count the answer instead.
         try {
+          // No clients row (a coach or owner): only the profile half is theirs.
+          const writeClients = hasClientRowRef.current !== false;
           const [{ error: pErr, count: pCount }, { error: cErr, count: cCount }] = await Promise.all([
             // `avatar` is a URL other accounts fetch, or nothing. It used to be
             // whatever the picker handed back, which on a phone is a path inside
@@ -773,7 +782,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
             // where a photo becomes a URL now; this is the second lock on the
             // door, and it also clears the device paths already stored.
             supabase.from('profiles').update({ full_name: name, avatar: isDeviceAvatar(photo) ? null : photo }, { count: 'exact' }).eq('id', sbUid),
-            supabase.from('clients').update({
+            !writeClients ? Promise.resolve({ error: null, count: null }) : supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,
               // The column's own letters (part 01: 'f' | 'm'); null is the
