@@ -58,10 +58,10 @@
 // defect — but it is no longer made in silence: their row says nobody has ever
 // asked them, the sheet says it above the list, and the alert the coach
 // confirms names them.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { DateSheet } from '../../src/ui/DateSheet';
@@ -170,6 +170,21 @@ export default function Templates() {
   const assignGuard = guardOverwrite(programStatus, 'the programs these clients are currently on');
 
   const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setStartsOn(''); setAssignTpl(tpl); };
+  // Arriving from the read-only program view's Assign button: open the sheet
+  // on that template, once per tap (`at`).
+  const params = useLocalSearchParams();
+  const askedAssign = useRef<string | null>(null);
+  useEffect(() => {
+    const id = typeof params.assign === 'string' ? params.assign : null;
+    const ask = id ? `${id}:${typeof params.at === 'string' ? params.at : ''}` : null;
+    if (!id || askedAssign.current === ask) return;
+    const tpl = templates.find((x) => x.id === id);
+    if (tpl) { askedAssign.current = ask; openAssign(tpl); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.assign, params.at, templates]);
+  /** Opening a program is looking at it: the read-only view, no prompts. */
+  const openView = (tpl: ProgramTemplate) =>
+    router.push({ pathname: '/(trainer)/program', params: { templateId: tpl.id } } as any);
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
 
   // ── What this screen actually knows about one person's injuries ──────────
@@ -488,7 +503,8 @@ export default function Templates() {
                 {/* A starter is the platform's and a saved one is the coach's;
                     the plate says which before the caption does. */}
                 <IconPlate icon="grid" tone={isStarter(tpl.id) ? 'amber' : 'brand'} />
-                <View style={{ flex: 1, minWidth: 0 }}>
+                <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => openView(tpl)} accessibilityRole="button"
+                  accessibilityLabel={`View ${tpl.name}`} accessibilityHint="Opens the program read-only">
                   <Text style={{ ...ty.head, color: t.ink }}>{tpl.name}</Text>
                   {/* The week as pips, each day in its type's colour — the
                       shape of the program without opening it. Drawn off the
@@ -518,7 +534,7 @@ export default function Templates() {
                       ) : null}
                     </View>
                   ) : null}
-                </View>
+                </Pressable>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                 {/* Two quiet controls, named for what each one WRITES. Assign
@@ -529,6 +545,7 @@ export default function Templates() {
                     there changes this template unless the coach saves over
                     its name. The sheet Assign opens carries the one green
                     button that actually sends. */}
+                <Ghost label="View" icon="eye" a11yLabel={`View ${tpl.name}`} onPress={() => openView(tpl)} />
                 <Ghost label="Assign to Clients" a11yLabel={`Assign ${tpl.name} to clients`} onPress={() => openAssign(tpl)} />
                 <Ghost label="Open in Builder" a11yLabel={`Open ${tpl.name} in the builder`} onPress={() => openInBuilder(tpl)} />
                 <View style={{ flex: 1 }} />

@@ -101,6 +101,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="my-progress" options={{ href: null, title: 'My Progress' }} />
         <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
         <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
+        <Tabs.Screen name="program" options={{ href: null, title: 'Program' }} />
         <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />
         <Tabs.Screen name="checkins" options={{ href: null, title: 'Check-Ins' }} />
         <Tabs.Screen name="client-food" options={{ href: null, title: 'What They Logged' }} />
