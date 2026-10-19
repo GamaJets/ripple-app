@@ -30,6 +30,7 @@
   "files": [
     "src/lib/sessionRecords.ts",
     "src/lib/sessionRecords.test.ts",
+    "src/lib/sessionPick.test.ts",
     "src/lib/workoutShare.ts",
     "src/lib/workoutShare.test.ts",
     "src/lib/exerciseProgress.ts",

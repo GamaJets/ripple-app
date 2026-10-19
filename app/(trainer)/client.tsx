@@ -92,7 +92,9 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, QuickRow, Cta, Ghost, Notice, Flag, fig, PageHead, Ring, TonedChip, IconPlate, Expandable, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, QuickRow, Cta, Ghost, Notice, Flag, fig, PageHead, Ring, TonedChip, IconPlate, Expandable, Segmented, type Segment, type Tone } from '../../src/ui/kit';
+import { useProgramHistory } from '../../src/ui/programHistory';
+import { historyBoard } from '../../src/lib/programHistory';
 import Svg, { Polygon, Polyline } from 'react-native-svg';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, value as sora, grown, fontScale } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -119,7 +121,7 @@ import { useNow, useToday } from '../../src/ui/today';
 import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
 import { releaseLine, releaseVerdict, releaseOutstanding, RELEASE_PRIVACY_NOTE } from '../../src/lib/clientRelease';
 import { WAIVER_VERSION } from '../../src/lib/waiver';
-import { fmtDay, num1 } from '../../src/lib/format';
+import { fmtDay, num, num1 } from '../../src/lib/format';
 import { worstStatus, isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useInvites } from '../../src/ui/invites';
 import { useScrollPad } from '../../src/ui/keyboardPad';
@@ -163,7 +165,7 @@ import {
   COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode,
 } from '../../src/lib/types';
 import {
-  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programLine,
+  lastSeenLine, goalsLine, weekLine, photosLine, listLine,
   attention, noAccountNote, unaskedNote,
 } from '../../src/lib/clientBrief';
 import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
@@ -316,6 +318,14 @@ function TrendFigure({ t, label, shown, note, trend, tone }: {
     </View>
   );
 }
+
+type RecordTab = 'record' | 'checkins' | 'money' | 'admin';
+const RECORD_TABS: readonly Segment<RecordTab>[] = [
+  { key: 'record', label: 'Record', a11yLabel: 'Their record: body, InBody, training, meals, photos' },
+  { key: 'checkins', label: 'Check-Ins', a11yLabel: 'Attendance and check-ins' },
+  { key: 'money', label: 'Money', a11yLabel: 'Payments and session credits' },
+  { key: 'admin', label: 'Admin', a11yLabel: 'Intake, paperwork, documents and how you coach them' },
+];
 
 export default function ClientScreen() {
   const t = useTheme();
@@ -658,6 +668,19 @@ export default function ClientScreen() {
   // which `assigned_programs_coach_rw` will not show this one. `undefined`
   // through `planConflict` claims no conflict on an unknown.
   const program = id ? ap.getProgram(id) : null;
+  // Their programs, current first, for the section at the top of the page.
+  // Earlier blocks come from program_history (part 176); a hand-added client
+  // has no account and is asked for nothing.
+  const progHistory = useProgramHistory(queryable ? id : null);
+  const progBoard = useMemo(
+    () => historyBoard(progHistory.rows, progHistory.status, program, id ? (ap.startsOn[id] ?? null) : null, ap.status),
+    [progHistory.rows, progHistory.status, program, id, ap.startsOn, ap.status],
+  );
+  /** Opening a program is looking at it: the read-only view, never the builder. */
+  const openCurrentProgram = () => { if (id) router.push({ pathname: '/(trainer)/program', params: { clientId: id, name: fullName } } as any); };
+  const openEarlierProgram = (historyId: string) => { if (id) router.push({ pathname: '/(trainer)/program', params: { clientId: id, name: fullName, historyId } } as any); };
+  /** A blank builder for this client (`fresh`), not their current block loaded in. */
+  const buildNew = () => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient', fresh: '1', at: String(Date.now()) } } as any); };
   const focusOn = useCallback<ScheduledFocus>(
     (weekday) => (program ? scheduledFocus(program.days, weekday) : undefined),
     [program],
@@ -1721,6 +1744,15 @@ export default function ClientScreen() {
   // rather than scrolling to the top and looking as though it had worked.
   const scroller = useRef<ScrollView>(null);
   const [checkInY, setCheckInY] = useState<number | null>(null);
+  // Which of the four lower tabs is open. The check-in review is in one of
+  // them, so the Check-in shortcuts open that tab and then scroll once it has
+  // laid out.
+  const [tab, setTab] = useState<RecordTab>('record');
+  const scrollToCheckIn = useRef(false);
+  const goCheckIn = () => {
+    if (tab === 'checkins' && checkInY != null) { scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); return; }
+    scrollToCheckIn.current = true; setTab('checkins');
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -1767,6 +1799,44 @@ export default function ClientScreen() {
             </Text>
           </View>
         </View>
+
+        {/* ── their programs, first ─────────────────────────────────────────
+            Coach feedback: tapping a client should show what they are on,
+            straight away, with the way to build them the next one beside it.
+            Each row opens the program read-only (app/(trainer)/program.tsx);
+            nothing here edits or assigns on a tap. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Programs" note={progBoard.entries.length ? `${num(progBoard.entries.length)}` : undefined} />
+            {ap.status === 'loading' ? (
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Reading what {who} is on…</Text>
+            ) : ap.status === 'error' ? (
+              <Flag tone={t.warn}>What {who} is on could not be read. That is not the same as no program.</Flag>
+            ) : !program ? (
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{who} is not on a coach-assigned program yet.</Text>
+            ) : null}
+            {progBoard.entries.slice(0, 4).map((e) => (
+              <ListRow key={e.key} icon="grid" tone={e.current ? 'brand' : 'neutral'}
+                title={e.title}
+                note={`${e.current ? 'Current' : 'Earlier'} · ${num(e.weeks)} week${e.weeks === 1 ? '' : 's'} · ${num(e.program.days.length)} day${e.program.days.length === 1 ? '' : 's'}`}
+                onPress={() => (e.current ? openCurrentProgram() : openEarlierProgram(e.key))} />
+            ))}
+            {program && !progBoard.entries.some((e) => e.current) ? (
+              <ListRow icon="grid" tone="brand" title={program.title || 'Untitled Program'} note="Current" onPress={openCurrentProgram} />
+            ) : null}
+            {progBoard.entries.length > 4 ? (
+              <ListRow icon="calendar" title="All Earlier Programs" note={`${num(progBoard.entries.length - 4)} more in Training`} onPress={go('/(trainer)/client-training')} />
+            ) : null}
+            {client?.injuries && client.injuries.length ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                {client.injuries.length === 1 ? 'One injury is' : `${num(client.injuries.length)} injuries are`} disclosed. Read {client.injuries.length === 1 ? 'it' : 'them'} further down before you change a program.
+              </Flag>
+            ) : null}
+            <View style={{ marginTop: sp.md }}>
+              <Cta label={`Build New Program for ${who}`} wide onPress={buildNew} />
+            </View>
+          </Section>
+        ) : null}
 
         {/* ── how they are doing, as a picture ────────────────────────────
             The approved profile's infographic card: the adherence ring beside
@@ -1981,8 +2051,8 @@ export default function ClientScreen() {
             <QuickRow items={[
               { icon: 'chat', label: client && client.unread != null && client.unread > 0 ? `Message · ${client.unread}` : 'Message', onPress: go('/(trainer)/chat') },
               { icon: 'train', label: 'Log Session', onPress: go('/(trainer)/log-session') },
-              { icon: 'grid', label: 'Program', onPress: () => { router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); } },
-              { icon: 'check', label: 'Check-in', onPress: () => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); } },
+              { icon: 'grid', label: 'Program', onPress: openCurrentProgram },
+              { icon: 'check', label: 'Check-in', onPress: goCheckIn },
             ]} />
             {/* Said under the row rather than lost with the row it came from:
                 a checked-in client is the moment logging is for. */}
@@ -2004,18 +2074,9 @@ export default function ClientScreen() {
             note. */}
         {id ? (
           <Section>
-            <SectionHead title="Current Plan and Goal" />
-            {/* The builder is the Programs TAB, so unlike every other row on
-                this screen it does not arrive with a way back to this record.
-                It is the only destination here handed an origin; the rest are
-                their own screens and carry their own Back. */}
-            <ListRow icon="grid" title={program ? 'Their Program' : `Build ${who} a Program`}
-              note={programLine(ap.status, program?.title ?? null, program?.days.length ?? null, who)
-                + (client?.injuries && client.injuries.length
-                  ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed. They are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
-                  : '')}
-              tone={ap.status === 'error' ? t.warn : 'brand'}
-              onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
+            <SectionHead title="Goal" />
+            {/* The program row that was here is the Programs section at the
+                top of the page now, with the injuries line beside it. */}
             <ListRow icon="target" title="What They're Working Toward"
               note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
               tone={goalStatus === 'error' ? t.warn : 'blue'}
@@ -2195,6 +2256,14 @@ export default function ClientScreen() {
         ) : null}
 
 
+        {/* ── everything else, in four tabs ────────────────────────────────
+            Coach feedback: the record was one long page, and the program a
+            coach came for was under a dozen sections. The programs are first
+            now (above), and what was below Next Session is the same blocks,
+            unchanged, behind four tabs so the page opens short. Nothing was
+            removed. */}
+        <Segmented style={{ marginTop: sp.xl }} options={RECORD_TABS} value={tab} onChange={setTab} />
+        {tab === 'record' ? (<>
         {/* ── the ways in, each saying whether there is anything in there ─── */}
         <Section>
           <SectionHead title="Their Record" />
@@ -2334,7 +2403,7 @@ export default function ClientScreen() {
           {id ? (
             <ListRow icon="check" title="Check-Ins" tone="brand"
               note={unasked ? undefined : latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined}
-              onPress={() => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); }} />
+              onPress={goCheckIn} />
           ) : null}
           {id ? (
             <ListRow icon="message" title="Messages" tone="purple"
@@ -2495,6 +2564,8 @@ export default function ClientScreen() {
         ) : null}
 
 
+        </>) : null}
+        {tab === 'checkins' ? (<>
         {/* ── whether they have actually been coming in ────────────────────
             The two numbers a coach opens an attendance record to find, and
             until now the only coach-side reader of that record was a separate
@@ -2629,7 +2700,11 @@ export default function ClientScreen() {
             this app's summary of them. */}
         {/* The wrapper is only there to be measured: the Check-in action at
             the top of the page scrolls to it. */}
-        <View onLayout={(e) => setCheckInY(e.nativeEvent.layout.y)}>
+        <View onLayout={(e) => {
+          const y = e.nativeEvent.layout.y;
+          setCheckInY(y);
+          if (scrollToCheckIn.current) { scrollToCheckIn.current = false; scroller.current?.scrollTo({ y: Math.max(0, y - sp.lg), animated: true }); }
+        }}>
         <Section>
           {/* Board page 12, read the coach's way: the head says which
               check-in this is and how old it is; the answers follow in the
@@ -2672,6 +2747,8 @@ export default function ClientScreen() {
         </View>
 
 
+        </>) : null}
+        {tab === 'money' ? (<>
         {/* ── what they have paid you ──────────────────────────────────────
             R1. The number the decision on this screen turns on, and it was on
             no coach-side screen about a named person: sales lived on Payments,
@@ -2889,6 +2966,8 @@ export default function ClientScreen() {
         </Section>
 
 
+        </>) : null}
+        {tab === 'admin' ? (<>
         {/* ── what they told you before you started ────────────────────────
             Directly under the injuries and above everything about how they are
             going, for the same reason the injuries sit there: this is the
@@ -3189,6 +3268,7 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
+        </>) : null}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           Notes, feedback, tags and meal-plan targets are behind Notes and Coaching Tools, under
           Their Record. Everything else here is read-only: a goal, a planned day and a tick are the

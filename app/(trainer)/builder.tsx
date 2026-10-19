@@ -486,6 +486,14 @@ export default function Builder() {
    * name is chosen.
    */
   const [clientId, setClientId] = useState((params.clientId as string) || '');
+  // The builder is a tab and stays mounted, so `useState` above reads the
+  // param once. A later explicit push for a client (a client's program view,
+  // Assign to <name>) must still pick that client. Keyed on `at` as well, so
+  // the same client twice is two requests.
+  useEffect(() => {
+    const c = params.clientId;
+    if (typeof c === 'string' && c) setClientId(c);
+  }, [params.clientId, params.at]);
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   /**
@@ -1161,7 +1169,33 @@ export default function Builder() {
     if (!autoGoal) { clearBuilder(); return; }
     loadFrom(buildProgram(autoGoal, 25), clientId);
   };
+  // "Build New Program for <name>" on the client page: a blank week for that
+  // client rather than their current one loaded in. Consumed by the seed below
+  // when the client is still being picked, or at once when they already are.
+  // Never over unsaved work without asking — the same words as every other door.
+  const freshFor = useRef<string | null>(null);
+  const startFresh = () => {
+    freshFor.current = null;
+    const land = () => { clearBuilder(); setSeededFor(clientId || null); };
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `A new, empty program replaces ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Start New', style: 'destructive', onPress: land },
+      ],
+    );
+  };
   useEffect(() => {
+    const c = typeof params.clientId === 'string' ? params.clientId : '';
+    if (params.fresh !== '1' || !c) return;
+    freshFor.current = c;
+    if (clientId === c && programStatus !== 'loading') startFresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.fresh, params.at]);
+  useEffect(() => {
+    if (seed.action === 'seed' && freshFor.current && freshFor.current === clientId) { freshFor.current = null; clearBuilder(); setSeededFor(clientId); return; }
     if (seed.action === 'seed') loadTheirProgram();
     else if (seed.action === 'clear') clearBuilder();
     // 'hold' is the whole point and does nothing: what is in the builder is the
